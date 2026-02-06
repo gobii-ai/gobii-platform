@@ -5,6 +5,7 @@ import os
 import secrets
 import time
 import uuid
+import base64
 from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -44,6 +45,9 @@ from api.models import (
     FileHandlerLLMTier,
     FileHandlerModelEndpoint,
     FileHandlerTierEndpoint,
+    ImageGenerationLLMTier,
+    ImageGenerationModelEndpoint,
+    ImageGenerationTierEndpoint,
     IntelligenceTier,
     LLMProvider,
     MCPServerConfig,
@@ -547,6 +551,123 @@ def _run_embedding_test(endpoint: EmbeddingsModelEndpoint) -> dict[str, Any]:
     }
 
 
+def _extract_generated_image_url(response: Any) -> str | None:
+    choices = getattr(response, "choices", None)
+    if choices is None and isinstance(response, dict):
+        choices = response.get("choices")
+    if not choices:
+        return None
+
+    first = choices[0]
+    message = getattr(first, "message", None)
+    if message is None and isinstance(first, dict):
+        message = first.get("message")
+    if message is None:
+        return None
+
+    images = getattr(message, "images", None)
+    if images is None and isinstance(message, dict):
+        images = message.get("images")
+    if isinstance(images, list):
+        for image_entry in images:
+            image_url = getattr(image_entry, "image_url", None)
+            if image_url is None and isinstance(image_entry, dict):
+                image_url = image_entry.get("image_url")
+
+            candidate = None
+            if isinstance(image_url, str):
+                candidate = image_url.strip()
+            elif isinstance(image_url, dict):
+                candidate = str(image_url.get("url") or "").strip()
+            elif image_url is not None:
+                candidate = str(getattr(image_url, "url", "")).strip()
+
+            if candidate:
+                return candidate
+
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = str(part.get("type") or "").lower()
+            if part_type in {"image_url", "image", "output_image"}:
+                image_url = part.get("image_url")
+                if isinstance(image_url, dict):
+                    candidate = str(image_url.get("url") or "").strip()
+                    if candidate:
+                        return candidate
+                candidate = str(part.get("url") or "").strip()
+                if candidate:
+                    return candidate
+
+    return None
+
+
+def _run_image_generation_test(endpoint: ImageGenerationModelEndpoint) -> dict[str, Any]:
+    if not endpoint.enabled:
+        raise ValueError("Endpoint is disabled")
+    provider = endpoint.provider
+    if provider and not provider.enabled:
+        raise ValueError("Provider is disabled")
+
+    raw_model = (endpoint.litellm_model or "").strip()
+    api_base = (endpoint.api_base or "").strip() or None
+    model = normalize_model_name(provider, raw_model, api_base=api_base)
+    if not model:
+        raise ValueError("Endpoint does not specify a model identifier")
+
+    api_key = _resolve_provider_api_key(provider)
+    if not api_key and api_base:
+        api_key = "sk-noauth"
+    if not api_key:
+        raise ValueError("Configure an API key or environment variable for this provider before testing")
+
+    params: dict[str, Any] = {
+        "api_key": api_key,
+        "timeout": 30,
+        "max_tokens": 64,
+    }
+    if api_base:
+        params["api_base"] = api_base
+    _apply_provider_overrides(provider, params)
+
+    started = time.monotonic()
+    response = run_completion(
+        model=model,
+        messages=[{"role": "user", "content": "Generate a tiny red square icon."}],
+        params=params,
+        drop_params=True,
+        modalities=["image", "text"],
+        image_config={"aspect_ratio": "1:1"},
+    )
+    latency_ms = int((time.monotonic() - started) * 1000)
+    preview = _extract_completion_preview(response)
+    image_url = _extract_generated_image_url(response)
+    if not image_url:
+        raise ValueError("No generated image was returned by the endpoint")
+
+    image_bytes: int | None = None
+    if image_url.startswith("data:") and "," in image_url:
+        header, payload = image_url.split(",", 1)
+        if ";base64" in header.lower():
+            try:
+                image_bytes = len(base64.b64decode(payload, validate=True))
+            except (ValueError, TypeError):
+                image_bytes = None
+
+    return {
+        "message": "Image generated successfully.",
+        "model": model,
+        "provider": provider.display_name if provider else "Unlinked",
+        "preview": preview,
+        "latency_ms": latency_ms,
+        "image_bytes": image_bytes,
+    }
+
+
 def _resolve_mcp_server_config(request: HttpRequest, config_id: str) -> MCPServerConfig:
     """Resolve an MCP server configuration the user is allowed to manage."""
     config = get_object_or_404(MCPServerConfig, pk=config_id)
@@ -798,6 +919,154 @@ def _next_embedding_order() -> int:
 def _next_file_handler_order() -> int:
     last = FileHandlerLLMTier.objects.order_by("-order").first()
     return (last.order if last else 0) + 1
+
+
+def _next_image_generation_order() -> int:
+    last = ImageGenerationLLMTier.objects.order_by("-order").first()
+    return (last.order if last else 0) + 1
+
+
+def _create_aux_llm_endpoint_from_payload(
+    payload: dict[str, Any],
+    *,
+    endpoint_model,
+    include_supports_vision: bool = False,
+    include_supports_image_to_image: bool = False,
+) -> tuple[Any | None, HttpResponseBadRequest | None]:
+    """Create an embeddings/file-handler style endpoint from request payload."""
+    key = (payload.get("key") or "").strip()
+    model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+    if not key or not model:
+        return None, HttpResponseBadRequest("key and model are required")
+    if endpoint_model.objects.filter(key=key).exists():
+        return None, HttpResponseBadRequest("Endpoint key already exists")
+
+    provider = None
+    provider_id = payload.get("provider_id")
+    if provider_id:
+        provider = get_object_or_404(LLMProvider, pk=provider_id)
+
+    create_kwargs = {
+        "key": key,
+        "provider": provider,
+        "litellm_model": model,
+        "api_base": (payload.get("api_base") or "").strip(),
+        "low_latency": _coerce_bool(payload.get("low_latency", False)),
+        "enabled": _coerce_bool(payload.get("enabled", True)),
+    }
+    if include_supports_vision:
+        create_kwargs["supports_vision"] = _coerce_bool(payload.get("supports_vision", False))
+    if include_supports_image_to_image:
+        create_kwargs["supports_image_to_image"] = _coerce_bool(payload.get("supports_image_to_image", False))
+
+    endpoint = endpoint_model.objects.create(**create_kwargs)
+    return endpoint, None
+
+
+def _update_aux_llm_endpoint_from_payload(
+    endpoint,
+    payload: dict[str, Any],
+    *,
+    include_supports_vision: bool = False,
+    include_supports_image_to_image: bool = False,
+) -> HttpResponseBadRequest | None:
+    """Update an embeddings/file-handler style endpoint from request payload."""
+    if "model" in payload or "litellm_model" in payload:
+        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+        if model:
+            endpoint.litellm_model = model
+
+    if "api_base" in payload:
+        endpoint.api_base = (payload.get("api_base") or "").strip()
+    if include_supports_vision and "supports_vision" in payload:
+        endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+    if include_supports_image_to_image and "supports_image_to_image" in payload:
+        endpoint.supports_image_to_image = _coerce_bool(payload.get("supports_image_to_image"))
+    if "low_latency" in payload:
+        endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
+    if "enabled" in payload:
+        endpoint.enabled = _coerce_bool(payload.get("enabled"))
+    if "provider_id" in payload:
+        provider_id = payload.get("provider_id")
+        if provider_id:
+            endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
+        else:
+            endpoint.provider = None
+    endpoint.save()
+    return None
+
+
+def _delete_endpoint_with_tier_guard(endpoint) -> HttpResponseBadRequest | None:
+    if endpoint.in_tiers.exists():
+        return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
+    endpoint.delete()
+    return None
+
+
+def _create_aux_tier_from_payload(
+    payload: dict[str, Any],
+    *,
+    tier_model,
+    next_order_fn,
+):
+    description = (payload.get("description") or "").strip()
+    order = next_order_fn()
+    return tier_model.objects.create(order=order, description=description)
+
+
+def _update_aux_tier_from_payload(
+    tier,
+    payload: dict[str, Any],
+    *,
+    queryset,
+) -> HttpResponseBadRequest | None:
+    if "description" in payload:
+        tier.description = (payload.get("description") or "").strip()
+    if "move" in payload:
+        direction = (payload.get("move") or "").lower()
+        if direction not in {"up", "down"}:
+            return HttpResponseBadRequest("direction must be 'up' or 'down'")
+        changed = _swap_orders(queryset, tier, direction)
+        if not changed:
+            return HttpResponseBadRequest("Unable to move tier in that direction")
+    tier.save()
+    return None
+
+
+def _create_aux_tier_endpoint_from_payload(
+    payload: dict[str, Any],
+    *,
+    tier,
+    endpoint_model,
+    tier_endpoint_model,
+) -> tuple[Any | None, HttpResponseBadRequest | None]:
+    endpoint = get_object_or_404(endpoint_model, pk=payload.get("endpoint_id"))
+    if tier.tier_endpoints.filter(endpoint=endpoint).exists():
+        return None, HttpResponseBadRequest("Endpoint already exists in tier")
+    try:
+        weight = float(payload.get("weight", 1))
+    except (TypeError, ValueError):
+        return None, HttpResponseBadRequest("weight must be numeric")
+    if weight <= 0:
+        return None, HttpResponseBadRequest("weight must be greater than zero")
+    tier_endpoint = tier_endpoint_model.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+    return tier_endpoint, None
+
+
+def _update_weighted_tier_endpoint_from_payload(
+    tier_endpoint,
+    payload: dict[str, Any],
+) -> HttpResponseBadRequest | None:
+    if "weight" in payload:
+        try:
+            weight = float(payload.get("weight"))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+        tier_endpoint.weight = weight
+    tier_endpoint.save()
+    return None
 
 
 def _swap_orders(queryset, item, direction: str) -> bool:
@@ -2642,6 +2911,7 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
             or provider.browser_endpoints.exists()
             or provider.embedding_endpoints.exists()
             or provider.file_handler_endpoints.exists()
+            or provider.image_generation_endpoints.exists()
         )
         if has_dependents:
             return HttpResponseBadRequest("Provider cannot be deleted while endpoints exist")
@@ -2694,6 +2964,9 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
                     base_attr="api_base",
                     default_max_tokens=128,
                 )
+            elif kind == "image_generation":
+                endpoint = get_object_or_404(ImageGenerationModelEndpoint, pk=endpoint_id)
+                result = _run_image_generation_test(endpoint)
             else:
                 return HttpResponseBadRequest("Invalid endpoint kind")
         except ValueError as exc:
@@ -3151,27 +3424,12 @@ class EmbeddingEndpointListCreateAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        key = (payload.get("key") or "").strip()
-        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
-        if not key or not model:
-            return HttpResponseBadRequest("key and model are required")
-        if EmbeddingsModelEndpoint.objects.filter(key=key).exists():
-            return HttpResponseBadRequest("Endpoint key already exists")
-
-        provider_id = payload.get("provider_id")
-        provider = None
-        if provider_id:
-            provider = get_object_or_404(LLMProvider, pk=provider_id)
-
-        endpoint = EmbeddingsModelEndpoint.objects.create(
-            key=key,
-            provider=provider,
-            litellm_model=model,
-            api_base=(payload.get("api_base") or "").strip(),
-            low_latency=_coerce_bool(payload.get("low_latency", False)),
-            enabled=_coerce_bool(payload.get("enabled", True)),
+        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
+            payload,
+            endpoint_model=EmbeddingsModelEndpoint,
         )
+        if error_response:
+            return error_response
         return _json_ok(endpoint_id=str(endpoint.id))
 
 
@@ -3184,31 +3442,16 @@ class EmbeddingEndpointDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        if "model" in payload or "litellm_model" in payload:
-            model = (payload.get("model") or payload.get("litellm_model") or "").strip()
-            if model:
-                endpoint.litellm_model = model
-        if "api_base" in payload:
-            endpoint.api_base = (payload.get("api_base") or "").strip()
-        if "low_latency" in payload:
-            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
-        if "enabled" in payload:
-            endpoint.enabled = _coerce_bool(payload.get("enabled"))
-        if "provider_id" in payload:
-            provider_id = payload.get("provider_id")
-            if provider_id:
-                endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
-            else:
-                endpoint.provider = None
-        endpoint.save()
+        error_response = _update_aux_llm_endpoint_from_payload(endpoint, payload)
+        if error_response:
+            return error_response
         return _json_ok(endpoint_id=str(endpoint.id))
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
         endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
-        if endpoint.in_tiers.exists():
-            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
-        endpoint.delete()
+        error_response = _delete_endpoint_with_tier_guard(endpoint)
+        if error_response:
+            return error_response
         return _json_ok()
 
 
@@ -3338,10 +3581,11 @@ class EmbeddingTierListCreateAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        description = (payload.get("description") or "").strip()
-        order = _next_embedding_order()
-        tier = EmbeddingsLLMTier.objects.create(order=order, description=description)
+        tier = _create_aux_tier_from_payload(
+            payload,
+            tier_model=EmbeddingsLLMTier,
+            next_order_fn=_next_embedding_order,
+        )
         return _json_ok(tier_id=str(tier.id))
 
 
@@ -3354,17 +3598,13 @@ class EmbeddingTierDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        if "description" in payload:
-            tier.description = (payload.get("description") or "").strip()
-        if "move" in payload:
-            direction = (payload.get("move") or "").lower()
-            if direction not in {"up", "down"}:
-                return HttpResponseBadRequest("direction must be 'up' or 'down'")
-            changed = _swap_orders(EmbeddingsLLMTier.objects.all(), tier, direction)
-            if not changed:
-                return HttpResponseBadRequest("Unable to move tier in that direction")
-        tier.save()
+        error_response = _update_aux_tier_from_payload(
+            tier,
+            payload,
+            queryset=EmbeddingsLLMTier.objects.all(),
+        )
+        if error_response:
+            return error_response
         return _json_ok(tier_id=str(tier.id))
 
     def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
@@ -3382,17 +3622,14 @@ class EmbeddingTierEndpointListCreateAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=payload.get("endpoint_id"))
-        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
-            return HttpResponseBadRequest("Endpoint already exists in tier")
-        try:
-            weight = float(payload.get("weight", 1))
-        except (TypeError, ValueError):
-            return HttpResponseBadRequest("weight must be numeric")
-        if weight <= 0:
-            return HttpResponseBadRequest("weight must be greater than zero")
-        te = EmbeddingsTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        te, error_response = _create_aux_tier_endpoint_from_payload(
+            payload,
+            tier=tier,
+            endpoint_model=EmbeddingsModelEndpoint,
+            tier_endpoint_model=EmbeddingsTierEndpoint,
+        )
+        if error_response:
+            return error_response
         return _json_ok(tier_endpoint_id=str(te.id))
 
 
@@ -3405,15 +3642,9 @@ class EmbeddingTierEndpointDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-        if "weight" in payload:
-            try:
-                weight = float(payload.get("weight"))
-            except (TypeError, ValueError):
-                return HttpResponseBadRequest("weight must be numeric")
-            if weight <= 0:
-                return HttpResponseBadRequest("weight must be greater than zero")
-            tier_endpoint.weight = weight
-        tier_endpoint.save()
+        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
+        if error_response:
+            return error_response
         return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
 
     def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
@@ -3430,28 +3661,13 @@ class FileHandlerEndpointListCreateAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        key = (payload.get("key") or "").strip()
-        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
-        if not key or not model:
-            return HttpResponseBadRequest("key and model are required")
-        if FileHandlerModelEndpoint.objects.filter(key=key).exists():
-            return HttpResponseBadRequest("Endpoint key already exists")
-
-        provider_id = payload.get("provider_id")
-        provider = None
-        if provider_id:
-            provider = get_object_or_404(LLMProvider, pk=provider_id)
-
-        endpoint = FileHandlerModelEndpoint.objects.create(
-            key=key,
-            provider=provider,
-            litellm_model=model,
-            api_base=(payload.get("api_base") or "").strip(),
-            supports_vision=_coerce_bool(payload.get("supports_vision", False)),
-            low_latency=_coerce_bool(payload.get("low_latency", False)),
-            enabled=_coerce_bool(payload.get("enabled", True)),
+        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
+            payload,
+            endpoint_model=FileHandlerModelEndpoint,
+            include_supports_vision=True,
         )
+        if error_response:
+            return error_response
         return _json_ok(endpoint_id=str(endpoint.id))
 
 
@@ -3464,33 +3680,20 @@ class FileHandlerEndpointDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        if "model" in payload or "litellm_model" in payload:
-            model = (payload.get("model") or payload.get("litellm_model") or "").strip()
-            if model:
-                endpoint.litellm_model = model
-        if "api_base" in payload:
-            endpoint.api_base = (payload.get("api_base") or "").strip()
-        if "supports_vision" in payload:
-            endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
-        if "low_latency" in payload:
-            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
-        if "enabled" in payload:
-            endpoint.enabled = _coerce_bool(payload.get("enabled"))
-        if "provider_id" in payload:
-            provider_id = payload.get("provider_id")
-            if provider_id:
-                endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
-            else:
-                endpoint.provider = None
-        endpoint.save()
+        error_response = _update_aux_llm_endpoint_from_payload(
+            endpoint,
+            payload,
+            include_supports_vision=True,
+        )
+        if error_response:
+            return error_response
         return _json_ok(endpoint_id=str(endpoint.id))
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
         endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
-        if endpoint.in_tiers.exists():
-            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
-        endpoint.delete()
+        error_response = _delete_endpoint_with_tier_guard(endpoint)
+        if error_response:
+            return error_response
         return _json_ok()
 
 
@@ -3502,10 +3705,11 @@ class FileHandlerTierListCreateAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        description = (payload.get("description") or "").strip()
-        order = _next_file_handler_order()
-        tier = FileHandlerLLMTier.objects.create(order=order, description=description)
+        tier = _create_aux_tier_from_payload(
+            payload,
+            tier_model=FileHandlerLLMTier,
+            next_order_fn=_next_file_handler_order,
+        )
         return _json_ok(tier_id=str(tier.id))
 
 
@@ -3518,17 +3722,13 @@ class FileHandlerTierDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        if "description" in payload:
-            tier.description = (payload.get("description") or "").strip()
-        if "move" in payload:
-            direction = (payload.get("move") or "").lower()
-            if direction not in {"up", "down"}:
-                return HttpResponseBadRequest("direction must be 'up' or 'down'")
-            changed = _swap_orders(FileHandlerLLMTier.objects.all(), tier, direction)
-            if not changed:
-                return HttpResponseBadRequest("Unable to move tier in that direction")
-        tier.save()
+        error_response = _update_aux_tier_from_payload(
+            tier,
+            payload,
+            queryset=FileHandlerLLMTier.objects.all(),
+        )
+        if error_response:
+            return error_response
         return _json_ok(tier_id=str(tier.id))
 
     def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
@@ -3546,17 +3746,14 @@ class FileHandlerTierEndpointListCreateAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-
-        endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=payload.get("endpoint_id"))
-        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
-            return HttpResponseBadRequest("Endpoint already exists in tier")
-        try:
-            weight = float(payload.get("weight", 1))
-        except (TypeError, ValueError):
-            return HttpResponseBadRequest("weight must be numeric")
-        if weight <= 0:
-            return HttpResponseBadRequest("weight must be greater than zero")
-        te = FileHandlerTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        te, error_response = _create_aux_tier_endpoint_from_payload(
+            payload,
+            tier=tier,
+            endpoint_model=FileHandlerModelEndpoint,
+            tier_endpoint_model=FileHandlerTierEndpoint,
+        )
+        if error_response:
+            return error_response
         return _json_ok(tier_endpoint_id=str(te.id))
 
 
@@ -3569,19 +3766,137 @@ class FileHandlerTierEndpointDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-        if "weight" in payload:
-            try:
-                weight = float(payload.get("weight"))
-            except (TypeError, ValueError):
-                return HttpResponseBadRequest("weight must be numeric")
-            if weight <= 0:
-                return HttpResponseBadRequest("weight must be greater than zero")
-            tier_endpoint.weight = weight
-        tier_endpoint.save()
+        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
+        if error_response:
+            return error_response
         return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
 
     def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
         tier_endpoint = get_object_or_404(FileHandlerTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        return _json_ok()
+
+
+class ImageGenerationEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
+            payload,
+            endpoint_model=ImageGenerationModelEndpoint,
+            include_supports_image_to_image=True,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class ImageGenerationEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(ImageGenerationModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_aux_llm_endpoint_from_payload(
+            endpoint,
+            payload,
+            include_supports_image_to_image=True,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(ImageGenerationModelEndpoint, pk=endpoint_id)
+        error_response = _delete_endpoint_with_tier_guard(endpoint)
+        if error_response:
+            return error_response
+        return _json_ok()
+
+
+class ImageGenerationTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        tier = _create_aux_tier_from_payload(
+            payload,
+            tier_model=ImageGenerationLLMTier,
+            next_order_fn=_next_image_generation_order,
+        )
+        return _json_ok(tier_id=str(tier.id))
+
+
+class ImageGenerationTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(ImageGenerationLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_aux_tier_from_payload(
+            tier,
+            payload,
+            queryset=ImageGenerationLLMTier.objects.all(),
+        )
+        if error_response:
+            return error_response
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(ImageGenerationLLMTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class ImageGenerationTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(ImageGenerationLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        te, error_response = _create_aux_tier_endpoint_from_payload(
+            payload,
+            tier=tier,
+            endpoint_model=ImageGenerationModelEndpoint,
+            tier_endpoint_model=ImageGenerationTierEndpoint,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class ImageGenerationTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(ImageGenerationTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
+        if error_response:
+            return error_response
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(ImageGenerationTierEndpoint, pk=tier_endpoint_id)
         tier_endpoint.delete()
         return _json_ok()
 

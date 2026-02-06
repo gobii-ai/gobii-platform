@@ -18,13 +18,14 @@ export type ProviderEndpoint = {
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
   supports_vision?: boolean
+  supports_image_to_image?: boolean
   browser_base_url?: string
   max_output_tokens?: number | null
   max_input_tokens?: number | null
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null
-  type: 'persistent' | 'browser' | 'embedding' | 'file_handler'
+  type: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation'
   low_latency?: boolean
   enabled: boolean
   provider_id: string
@@ -109,11 +110,19 @@ export type FileHandlerTier = {
   endpoints: TierEndpoint[]
 }
 
+export type ImageGenerationTier = {
+  id: string
+  order: number
+  description: string
+  endpoints: TierEndpoint[]
+}
+
 export type EndpointChoices = {
   persistent_endpoints: ProviderEndpoint[]
   browser_endpoints: ProviderEndpoint[]
   embedding_endpoints: ProviderEndpoint[]
   file_handler_endpoints: ProviderEndpoint[]
+  image_generation_endpoints: ProviderEndpoint[]
 }
 
 export type LlmOverviewResponse = {
@@ -124,6 +133,7 @@ export type LlmOverviewResponse = {
   browser: BrowserPolicy | null
   embeddings: { tiers: EmbeddingTier[] }
   file_handlers: { tiers: FileHandlerTier[] }
+  image_generations: { tiers: ImageGenerationTier[] }
   choices: EndpointChoices
 }
 
@@ -163,6 +173,7 @@ const endpointPaths = {
   browser: `${base}/browser/endpoints/`,
   embedding: `${base}/embeddings/endpoints/`,
   file_handler: `${base}/file-handlers/endpoints/`,
+  image_generation: `${base}/image-generations/endpoints/`,
 } as const
 
 type EndpointKind = keyof typeof endpointPaths
@@ -288,6 +299,30 @@ export function updateFileHandlerTierEndpoint(tierEndpointId: string, payload: R
 
 export function deleteFileHandlerTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/file-handlers/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createImageGenerationTier(payload: { description?: string }) {
+  return jsonRequest(`${base}/image-generations/tiers/`, withCsrf(payload))
+}
+
+export function updateImageGenerationTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/image-generations/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteImageGenerationTier(tierId: string) {
+  return jsonRequest(`${base}/image-generations/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addImageGenerationTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${base}/image-generations/tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateImageGenerationTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/image-generations/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteImageGenerationTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${base}/image-generations/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
 export type EndpointTestResponse = {

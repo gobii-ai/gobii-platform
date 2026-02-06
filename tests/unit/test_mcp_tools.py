@@ -22,6 +22,10 @@ from api.models import (
     PersistentAgentMCPServer,
     PromptConfig,
     UserBilling,
+    LLMProvider,
+    ImageGenerationModelEndpoint,
+    ImageGenerationLLMTier,
+    ImageGenerationTierEndpoint,
 )
 from api.agent.core.llm_config import AgentLLMTier
 from tests.utils.llm_seed import get_intelligence_tier
@@ -1009,6 +1013,98 @@ class MCPToolFunctionsTests(TestCase):
         user_message = kwargs["messages"][1]["content"]
         self.assertIn("sqlite_batch", user_message)
         self.assertIn("http_request", user_message)
+        self.assertNotIn("create_image", user_message)
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_includes_create_image_when_configured(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        """search_tools should include create_image once image tiers are configured."""
+        provider = LLMProvider.objects.create(
+            key=f"img-provider-{uuid.uuid4().hex[:6]}",
+            display_name="Image Provider",
+            enabled=True,
+        )
+        endpoint = ImageGenerationModelEndpoint.objects.create(
+            key=f"img-endpoint-{uuid.uuid4().hex[:6]}",
+            provider=provider,
+            enabled=True,
+            litellm_model="google/gemini-2.5-flash-image",
+        )
+        tier = ImageGenerationLLMTier.objects.create(order=1, description="Tier 1")
+        ImageGenerationTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=1.0,
+        )
+
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "anything")
+        self.assertEqual(result["status"], "success")
+        mock_run_completion.assert_called_once()
+        _args, kwargs = mock_run_completion.call_args
+        user_message = kwargs["messages"][1]["content"]
+        self.assertIn("create_image", user_message)
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent', return_value=False)
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_catalog_omits_sandbox_only_builtins(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        _mock_sandbox_enabled,
+    ):
+        """search_tools should not advertise sandbox-only builtins when unavailable."""
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "anything")
+        self.assertEqual(result["status"], "success")
+        mock_run_completion.assert_called_once()
+        _args, kwargs = mock_run_completion.call_args
+        user_message = kwargs["messages"][1]["content"]
+        self.assertNotIn("python_exec", user_message)
+        self.assertNotIn("run_command", user_message)
         mock_enable_tools.assert_not_called()
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')

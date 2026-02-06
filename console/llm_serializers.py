@@ -18,6 +18,9 @@ from api.models import (
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
     FileHandlerModelEndpoint,
+    ImageGenerationLLMTier,
+    ImageGenerationTierEndpoint,
+    ImageGenerationModelEndpoint,
     IntelligenceTier,
     LLMProvider,
     LLMRoutingProfile,
@@ -97,6 +100,14 @@ def _serialize_browser_endpoint(endpoint: BrowserModelEndpoint) -> dict[str, Any
 
 
 def _serialize_embedding_endpoint(endpoint: EmbeddingsModelEndpoint) -> dict[str, Any]:
+    return _serialize_aux_endpoint(endpoint, endpoint_type="embedding")
+
+
+def _serialize_aux_endpoint(
+    endpoint: EmbeddingsModelEndpoint | FileHandlerModelEndpoint | ImageGenerationModelEndpoint,
+    *,
+    endpoint_type: str,
+) -> dict[str, Any]:
     label = f"{endpoint.provider.display_name if endpoint.provider else 'Unlinked'} · {endpoint.litellm_model}"
     data = _serialize_endpoint_common(endpoint, label=label)
     data.update(
@@ -105,26 +116,51 @@ def _serialize_embedding_endpoint(endpoint: EmbeddingsModelEndpoint) -> dict[str
             "model": endpoint.litellm_model,
             "api_base": endpoint.api_base,
             "provider_id": str(endpoint.provider_id) if endpoint.provider_id else None,
-            "type": "embedding",
+            "type": endpoint_type,
         }
     )
+    if endpoint_type == "file_handler":
+        data["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
+    if endpoint_type == "image_generation":
+        data["supports_image_to_image"] = bool(getattr(endpoint, "supports_image_to_image", False))
     return data
 
 
 def _serialize_file_handler_endpoint(endpoint: FileHandlerModelEndpoint) -> dict[str, Any]:
-    label = f"{endpoint.provider.display_name if endpoint.provider else 'Unlinked'} · {endpoint.litellm_model}"
-    data = _serialize_endpoint_common(endpoint, label=label)
-    data.update(
-        {
-            "key": endpoint.key,
-            "model": endpoint.litellm_model,
-            "api_base": endpoint.api_base,
-            "supports_vision": endpoint.supports_vision,
-            "provider_id": str(endpoint.provider_id) if endpoint.provider_id else None,
-            "type": "file_handler",
-        }
-    )
-    return data
+    return _serialize_aux_endpoint(endpoint, endpoint_type="file_handler")
+
+
+def _serialize_image_generation_endpoint(endpoint: ImageGenerationModelEndpoint) -> dict[str, Any]:
+    return _serialize_aux_endpoint(endpoint, endpoint_type="image_generation")
+
+
+def _serialize_weighted_endpoint_reference(endpoint, tier_endpoint) -> dict[str, Any]:
+    provider_name = endpoint.provider.display_name if endpoint.provider else "Unlinked"
+    return {
+        "id": str(tier_endpoint.id),
+        "endpoint_id": str(endpoint.id),
+        "label": f"{provider_name} · {endpoint.litellm_model}",
+        "weight": float(tier_endpoint.weight),
+        "endpoint_key": endpoint.key,
+    }
+
+
+def _serialize_weighted_tier_payload(tiers) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for tier in tiers:
+        tier_endpoints = [
+            _serialize_weighted_endpoint_reference(tier_endpoint.endpoint, tier_endpoint)
+            for tier_endpoint in tier.tier_endpoints.all()
+        ]
+        payload.append(
+            {
+                "id": str(tier.id),
+                "order": tier.order,
+                "description": tier.description,
+                "endpoints": tier_endpoints,
+            }
+        )
+    return payload
 
 
 def build_llm_overview() -> dict[str, Any]:
@@ -136,6 +172,7 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("browser_endpoints", queryset=BrowserModelEndpoint.objects.select_related("provider")),
             Prefetch("embedding_endpoints", queryset=EmbeddingsModelEndpoint.objects.select_related("provider")),
             Prefetch("file_handler_endpoints", queryset=FileHandlerModelEndpoint.objects.select_related("provider")),
+            Prefetch("image_generation_endpoints", queryset=ImageGenerationModelEndpoint.objects.select_related("provider")),
         )
     )
 
@@ -144,6 +181,7 @@ def build_llm_overview() -> dict[str, Any]:
     browser_choices: list[dict[str, Any]] = []
     embedding_choices: list[dict[str, Any]] = []
     file_handler_choices: list[dict[str, Any]] = []
+    image_generation_choices: list[dict[str, Any]] = []
 
     for provider in providers:
         persistent_endpoints = [
@@ -162,11 +200,16 @@ def build_llm_overview() -> dict[str, Any]:
             _serialize_file_handler_endpoint(endpoint)
             for endpoint in provider.file_handler_endpoints.all()
         ]
+        image_generation_endpoints = [
+            _serialize_image_generation_endpoint(endpoint)
+            for endpoint in provider.image_generation_endpoints.all()
+        ]
 
         persistent_choices.extend(persistent_endpoints)
         browser_choices.extend(browser_endpoints)
         embedding_choices.extend(embedding_endpoints)
         file_handler_choices.extend(file_handler_endpoints)
+        image_generation_choices.extend(image_generation_endpoints)
 
         provider_payload.append(
             {
@@ -180,7 +223,13 @@ def build_llm_overview() -> dict[str, Any]:
                 "vertex_project": provider.vertex_project,
                 "vertex_location": provider.vertex_location,
                 "status": _provider_key_status(provider),
-                "endpoints": persistent_endpoints + browser_endpoints + embedding_endpoints + file_handler_endpoints,
+                "endpoints": (
+                    persistent_endpoints
+                    + browser_endpoints
+                    + embedding_endpoints
+                    + file_handler_endpoints
+                    + image_generation_endpoints
+                ),
             }
         )
 
@@ -311,65 +360,29 @@ def build_llm_overview() -> dict[str, Any]:
             "tiers": tiers_payload,
         }
 
-    embedding_payload: list[dict[str, Any]] = []
     embedding_tiers = EmbeddingsLLMTier.objects.prefetch_related(
         Prefetch(
             "tier_endpoints",
             queryset=EmbeddingsTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
         )
     ).order_by("order")
-    for tier in embedding_tiers:
-        tier_endpoints = []
-        for te in tier.tier_endpoints.all():
-            endpoint = te.endpoint
-            label_provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
-            tier_endpoints.append(
-                {
-                    "id": str(te.id),
-                    "endpoint_id": str(endpoint.id),
-                    "label": f"{label_provider} · {endpoint.litellm_model}",
-                    "weight": float(te.weight),
-                    "endpoint_key": endpoint.key,
-                }
-            )
-        embedding_payload.append(
-            {
-                "id": str(tier.id),
-                "order": tier.order,
-                "description": tier.description,
-                "endpoints": tier_endpoints,
-            }
-        )
+    embedding_payload = _serialize_weighted_tier_payload(embedding_tiers)
 
-    file_handler_payload: list[dict[str, Any]] = []
     file_handler_tiers = FileHandlerLLMTier.objects.prefetch_related(
         Prefetch(
             "tier_endpoints",
             queryset=FileHandlerTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
         )
     ).order_by("order")
-    for tier in file_handler_tiers:
-        tier_endpoints = []
-        for te in tier.tier_endpoints.all():
-            endpoint = te.endpoint
-            label_provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
-            tier_endpoints.append(
-                {
-                    "id": str(te.id),
-                    "endpoint_id": str(endpoint.id),
-                    "label": f"{label_provider} · {endpoint.litellm_model}",
-                    "weight": float(te.weight),
-                    "endpoint_key": endpoint.key,
-                }
-            )
-        file_handler_payload.append(
-            {
-                "id": str(tier.id),
-                "order": tier.order,
-                "description": tier.description,
-                "endpoints": tier_endpoints,
-            }
+    file_handler_payload = _serialize_weighted_tier_payload(file_handler_tiers)
+
+    image_generation_tiers = ImageGenerationLLMTier.objects.prefetch_related(
+        Prefetch(
+            "tier_endpoints",
+            queryset=ImageGenerationTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
         )
+    ).order_by("order")
+    image_generation_payload = _serialize_weighted_tier_payload(image_generation_tiers)
 
     stats = {
         "active_providers": LLMProvider.objects.filter(enabled=True).count(),
@@ -395,11 +408,13 @@ def build_llm_overview() -> dict[str, Any]:
         "browser": browser_payload,
         "embeddings": {"tiers": embedding_payload},
         "file_handlers": {"tiers": file_handler_payload},
+        "image_generations": {"tiers": image_generation_payload},
         "choices": {
             "persistent_endpoints": persistent_choices,
             "browser_endpoints": browser_choices,
             "embedding_endpoints": embedding_choices,
             "file_handler_endpoints": file_handler_choices,
+            "image_generation_endpoints": image_generation_choices,
         },
     }
 
@@ -503,25 +518,7 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
         })
 
     # Embeddings config: tiers -> endpoints
-    embedding_tiers: list[dict[str, Any]] = []
-    for tier in profile.embeddings_tiers.all():
-        tier_endpoints = []
-        for te in tier.tier_endpoints.all():
-            endpoint = te.endpoint
-            label_provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
-            tier_endpoints.append({
-                "id": str(te.id),
-                "endpoint_id": str(endpoint.id),
-                "label": f"{label_provider} · {endpoint.litellm_model}",
-                "weight": float(te.weight),
-                "endpoint_key": endpoint.key,
-            })
-        embedding_tiers.append({
-            "id": str(tier.id),
-            "order": tier.order,
-            "description": tier.description,
-            "endpoints": tier_endpoints,
-        })
+    embedding_tiers = _serialize_weighted_tier_payload(profile.embeddings_tiers.all())
 
     # Eval judge endpoint info
     eval_judge_endpoint = None

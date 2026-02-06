@@ -30,6 +30,11 @@ from .create_file import get_create_file_tool, execute_create_file
 from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .create_chart import get_create_chart_tool, execute_create_chart
+from .create_image import (
+    get_create_image_tool,
+    execute_create_image,
+    is_image_generation_available_for_agent,
+)
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .autotool_heuristics import find_matching_tools
@@ -81,6 +86,7 @@ CREATE_FILE_TOOL_NAME = "create_file"
 CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
+CREATE_IMAGE_TOOL_NAME = "create_image"
 PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
@@ -107,6 +113,7 @@ SKIP_AUTO_SUBSTITUTION_TOOL_NAMES = {
     "send_sms",
     "send_chat_message",
     "read_file",
+    "create_image",
 }
 
 
@@ -129,6 +136,9 @@ BUILTIN_TOOL_REGISTRY = {
     SQLITE_TOOL_NAME: {
         "definition": get_sqlite_batch_tool,
         "executor": execute_sqlite_batch,
+        # Keep sqlite availability centralized so search/discovery and runtime
+        # execution expose the same builtins.
+        "is_available": is_sqlite_enabled_for_agent,
     },
     HTTP_REQUEST_TOOL_NAME: {
         "definition": get_http_request_tool,
@@ -159,6 +169,11 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_create_chart,
         "sandboxed": True,
     },
+    CREATE_IMAGE_TOOL_NAME: {
+        "definition": get_create_image_tool,
+        "executor": execute_create_image,
+        "is_available": is_image_generation_available_for_agent,
+    },
     PYTHON_EXEC_TOOL_NAME: {
         "definition": get_python_exec_tool,
         "sandboxed": True,
@@ -170,6 +185,81 @@ BUILTIN_TOOL_REGISTRY = {
         "sandbox_only": True,
     },
 }
+
+
+def _is_builtin_tool_available(
+    tool_name: str,
+    agent: Optional[PersistentAgent],
+) -> bool:
+    """Return whether a builtin tool should be exposed for this agent."""
+    entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+    if not entry:
+        return False
+
+    if entry.get("sandbox_only"):
+        if agent is None or not sandbox_compute_enabled_for_agent(agent):
+            return False
+
+    availability_check = entry.get("is_available")
+    if callable(availability_check):
+        try:
+            return bool(availability_check(agent))
+        except Exception:
+            logger.exception("Builtin availability check failed for %s", tool_name)
+            return False
+
+    return True
+
+
+def _build_builtin_tool_definition(
+    tool_name: str,
+    registry_entry: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build and validate a builtin tool definition."""
+    try:
+        tool_def = registry_entry["definition"]()
+    except Exception:
+        logger.exception("Failed to build builtin tool definition for %s", tool_name)
+        return None
+
+    if not isinstance(tool_def, dict):
+        logger.warning("Builtin tool %s returned non-dict definition", tool_name)
+        return None
+    return tool_def
+
+
+def _build_builtin_catalog_entry(
+    tool_name: str,
+    registry_entry: Dict[str, Any],
+) -> Optional["ToolCatalogEntry"]:
+    """Build a catalog entry for a builtin tool."""
+    tool_def = _build_builtin_tool_definition(tool_name, registry_entry)
+    if not tool_def:
+        return None
+    function_block = tool_def.get("function") if isinstance(tool_def, dict) else {}
+    return ToolCatalogEntry(
+        provider="builtin",
+        full_name=tool_name,
+        description=function_block.get("description", ""),
+        parameters=function_block.get("parameters", {}),
+        tool_server="builtin",
+        tool_name=tool_name,
+        server_config_id=None,
+    )
+
+
+def get_available_builtin_tool_entries(
+    agent: Optional[PersistentAgent],
+) -> Dict[str, "ToolCatalogEntry"]:
+    """Return builtin tool catalog entries available to the provided agent."""
+    catalog: Dict[str, ToolCatalogEntry] = {}
+    for name, registry_entry in BUILTIN_TOOL_REGISTRY.items():
+        if not _is_builtin_tool_available(name, agent):
+            continue
+        entry = _build_builtin_catalog_entry(name, registry_entry)
+        if entry:
+            catalog[name] = entry
+    return catalog
 
 
 @dataclass
@@ -243,24 +333,7 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
             server_config_id=info.config_id,
         )
 
-    for name, info in BUILTIN_TOOL_REGISTRY.items():
-        if info.get("sandbox_only") and not sandbox_compute_enabled_for_agent(agent):
-            continue
-        try:
-            tool_def = info["definition"]()
-        except Exception:
-            logger.exception("Failed to build builtin tool definition for %s", name)
-            continue
-        function_block = tool_def.get("function") if isinstance(tool_def, dict) else {}
-        catalog[name] = ToolCatalogEntry(
-            provider="builtin",
-            full_name=name,
-            description=function_block.get("description", ""),
-            parameters=function_block.get("parameters", {}),
-            tool_server="builtin",
-            tool_name=name,
-            server_config_id=None,
-        )
+    catalog.update(get_available_builtin_tool_entries(agent))
 
     return catalog
 
@@ -641,23 +714,14 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         if isinstance(entry, dict)
     }
 
-    # Check sqlite eligibility once for filtering
-    sqlite_eligible = is_sqlite_enabled_for_agent(agent)
-
     for row in enabled_builtin_rows:
-        # Skip sqlite_batch if agent is not eligible (even if previously enabled)
-        if row.tool_full_name == SQLITE_TOOL_NAME and not sqlite_eligible:
-            continue
-
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
         if not registry_entry:
             continue
-        if registry_entry.get("sandbox_only") and not sandbox_compute_enabled_for_agent(agent):
+        if not _is_builtin_tool_available(row.tool_full_name, agent):
             continue
-        try:
-            tool_def = registry_entry["definition"]()
-        except Exception:
-            logger.exception("Failed to build enabled builtin tool definition for %s", row.tool_full_name)
+        tool_def = _build_builtin_tool_definition(row.tool_full_name, registry_entry)
+        if not tool_def:
             continue
         tool_name = (
             tool_def.get("function", {}).get("name")

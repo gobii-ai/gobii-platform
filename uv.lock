@@ -1513,7 +1513,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/e1/71/fbd2f1ad9695c92ad
 
 [[package]]
 name = "gobii-platform"
-version = "0.5.2"
+version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp-retry" },
