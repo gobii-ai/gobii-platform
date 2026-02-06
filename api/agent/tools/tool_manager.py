@@ -113,6 +113,7 @@ SKIP_AUTO_SUBSTITUTION_TOOL_NAMES = {
     "send_sms",
     "send_chat_message",
     "read_file",
+    "create_image",
 }
 
 

@@ -931,6 +931,7 @@ def _create_aux_llm_endpoint_from_payload(
     *,
     endpoint_model,
     include_supports_vision: bool = False,
+    include_supports_image_to_image: bool = False,
 ) -> tuple[Any | None, HttpResponseBadRequest | None]:
     """Create an embeddings/file-handler style endpoint from request payload."""
     key = (payload.get("key") or "").strip()
@@ -955,6 +956,8 @@ def _create_aux_llm_endpoint_from_payload(
     }
     if include_supports_vision:
         create_kwargs["supports_vision"] = _coerce_bool(payload.get("supports_vision", False))
+    if include_supports_image_to_image:
+        create_kwargs["supports_image_to_image"] = _coerce_bool(payload.get("supports_image_to_image", False))
 
     endpoint = endpoint_model.objects.create(**create_kwargs)
     return endpoint, None
@@ -965,6 +968,7 @@ def _update_aux_llm_endpoint_from_payload(
     payload: dict[str, Any],
     *,
     include_supports_vision: bool = False,
+    include_supports_image_to_image: bool = False,
 ) -> HttpResponseBadRequest | None:
     """Update an embeddings/file-handler style endpoint from request payload."""
     if "model" in payload or "litellm_model" in payload:
@@ -976,6 +980,8 @@ def _update_aux_llm_endpoint_from_payload(
         endpoint.api_base = (payload.get("api_base") or "").strip()
     if include_supports_vision and "supports_vision" in payload:
         endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+    if include_supports_image_to_image and "supports_image_to_image" in payload:
+        endpoint.supports_image_to_image = _coerce_bool(payload.get("supports_image_to_image"))
     if "low_latency" in payload:
         endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
     if "enabled" in payload:
@@ -3782,6 +3788,7 @@ class ImageGenerationEndpointListCreateAPIView(SystemAdminAPIView):
         endpoint, error_response = _create_aux_llm_endpoint_from_payload(
             payload,
             endpoint_model=ImageGenerationModelEndpoint,
+            include_supports_image_to_image=True,
         )
         if error_response:
             return error_response
@@ -3797,7 +3804,11 @@ class ImageGenerationEndpointDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
-        error_response = _update_aux_llm_endpoint_from_payload(endpoint, payload)
+        error_response = _update_aux_llm_endpoint_from_payload(
+            endpoint,
+            payload,
+            include_supports_image_to_image=True,
+        )
         if error_response:
             return error_response
         return _json_ok(endpoint_id=str(endpoint.id))

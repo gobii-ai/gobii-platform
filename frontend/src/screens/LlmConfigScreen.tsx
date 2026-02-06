@@ -179,6 +179,7 @@ type ProviderEndpointCard = {
   temperature?: number | null
   supports_temperature?: boolean
   supports_vision?: boolean
+  supports_image_to_image?: boolean
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
   supports_reasoning?: boolean
@@ -363,6 +364,7 @@ type EndpointFormValues = {
   supportsToolChoice?: boolean
   useParallelToolCalls?: boolean
   supportsVision?: boolean
+  supportsImageToImage?: boolean
   supportsReasoning?: boolean
   reasoningEffort?: string | null
   openrouterPreset?: string
@@ -675,6 +677,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       temperature: endpoint.temperature_override ?? null,
       supports_temperature: endpoint.supports_temperature ?? true,
       supports_vision: endpoint.supports_vision,
+      supports_image_to_image: endpoint.supports_image_to_image,
       supports_tool_choice: endpoint.supports_tool_choice,
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
       supports_reasoning: endpoint.supports_reasoning,
@@ -1542,6 +1545,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [maxTokens, setMaxTokens] = useState(endpoint.max_output_tokens?.toString() ?? '')
   const [maxInputTokens, setMaxInputTokens] = useState(endpoint.max_input_tokens?.toString() ?? '')
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
+  const [supportsImageToImage, setSupportsImageToImage] = useState(Boolean(endpoint.supports_image_to_image))
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
   const [supportsReasoning, setSupportsReasoning] = useState(Boolean(endpoint.supports_reasoning))
@@ -1561,6 +1565,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       supportsToolChoice: supportsToolChoice,
       useParallelToolCalls: parallelTools,
       supportsVision: supportsVision,
+      supportsImageToImage,
       supportsReasoning,
       reasoningEffort,
       openrouterPreset,
@@ -1628,6 +1633,17 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Vision
+          </label>
+        )}
+        {isImageGeneration && (
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={supportsImageToImage}
+              onChange={(event) => setSupportsImageToImage(event.target.checked)}
+              className="rounded border-slate-300 text-blue-600 shadow-sm"
+            />
+            Supports image-to-image
           </label>
         )}
         {!isBrowser && isToolingEndpoint && (
@@ -1701,6 +1717,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [maxTokens, setMaxTokens] = useState('')
   const [maxInputTokens, setMaxInputTokens] = useState('')
   const [supportsVision, setSupportsVision] = useState(false)
+  const [supportsImageToImage, setSupportsImageToImage] = useState(false)
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
@@ -1732,6 +1749,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         max_input_tokens: maxInputTokens,
         supportsTemperature,
         supportsVision,
+        supportsImageToImage,
         supportsToolChoice: supportsTools,
         useParallelToolCalls: parallelTools,
         temperature,
@@ -1810,6 +1828,17 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
                 Vision
+              </label>
+            )}
+            {type === 'image_generation' && (
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={supportsImageToImage}
+                  onChange={(event) => setSupportsImageToImage(event.target.checked)}
+                  className="rounded border-slate-300 text-blue-600 shadow-sm"
+                />
+                Supports image-to-image
               </label>
             )}
             {type === 'persistent' && (
@@ -2681,6 +2710,7 @@ export function LlmConfigScreen() {
       payload.model = values.model
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
+      payload.supports_image_to_image = values.supportsImageToImage ?? false
       payload.enabled = true
     } else {
       payload.model = values.model
@@ -2738,6 +2768,9 @@ export function LlmConfigScreen() {
     }
     if (kind !== 'image_generation' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
     if (kind !== 'image_generation' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
+    if (kind === 'image_generation' && values.supportsImageToImage !== undefined) {
+      payload.supports_image_to_image = values.supportsImageToImage
+    }
     if (kind === 'persistent' && values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (kind === 'persistent' && values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
     if (values.lowLatency !== undefined) payload.low_latency = values.lowLatency

@@ -55,7 +55,7 @@ class FileExportToolTests(TestCase):
             browser_use_agent=cls.browser_agent,
         )
 
-    def _seed_image_generation_tier(self):
+    def _seed_image_generation_tier(self, *, supports_image_to_image: bool = False):
         provider = LLMProvider.objects.create(
             key="img-provider",
             display_name="Image Provider",
@@ -67,6 +67,7 @@ class FileExportToolTests(TestCase):
             enabled=True,
             litellm_model="gemini-2.5-flash-image",
             api_base="https://example.com/v1",
+            supports_image_to_image=supports_image_to_image,
         )
         tier = ImageGenerationLLMTier.objects.create(order=1, description="Tier 1")
         ImageGenerationTierEndpoint.objects.create(
@@ -232,6 +233,82 @@ class FileExportToolTests(TestCase):
         self.assertEqual(node.mime_type, "image/png")
         with node.content.open("rb") as handle:
             self.assertEqual(handle.read(), png_bytes)
+
+    @patch("api.agent.tools.create_image.run_completion")
+    def test_create_image_with_source_images_requires_supported_endpoint(self, mock_run_completion):
+        self._seed_image_generation_tier(supports_image_to_image=False)
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00",
+            extension=".png",
+            mime_type="image/png",
+            path="/Inbox/source.png",
+            overwrite=True,
+        )
+        self.assertEqual(write_result["status"], "ok")
+
+        result = execute_create_image(
+            self.agent,
+            {
+                "prompt": "Turn this into a neon version",
+                "file_path": "/exports/neon.png",
+                "source_images": ["/Inbox/source.png"],
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("does not support image-to-image", result["message"])
+        mock_run_completion.assert_not_called()
+
+    @patch("api.agent.tools.create_image.run_completion")
+    def test_create_image_passes_source_images_for_image_to_image(self, mock_run_completion):
+        self._seed_image_generation_tier(supports_image_to_image=True)
+        source_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00"
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source_bytes,
+            extension=".png",
+            mime_type="image/png",
+            path="/Inbox/source.png",
+            overwrite=True,
+        )
+        self.assertEqual(write_result["status"], "ok")
+
+        output_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x01"
+        output_data_uri = "data:image/png;base64," + base64.b64encode(output_bytes).decode("ascii")
+        mock_run_completion.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "images": [
+                            {
+                                "image_url": {
+                                    "url": output_data_uri,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        result = execute_create_image(
+            self.agent,
+            {
+                "prompt": "Restyle this image in cyberpunk lighting",
+                "file_path": "/exports/styled.png",
+                "source_images": ["$[/Inbox/source.png]"],
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["source_image_count"], 1)
+        kwargs = mock_run_completion.call_args.kwargs
+        message_content = kwargs["messages"][0]["content"]
+        self.assertIsInstance(message_content, list)
+        self.assertEqual(message_content[0]["type"], "text")
+        self.assertEqual(message_content[1]["type"], "image_url")
+        self.assertTrue(message_content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
 
     def test_create_pdf_blocks_external_assets(self):
         result = execute_create_pdf(

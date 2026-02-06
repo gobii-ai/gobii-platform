@@ -51,6 +51,7 @@ from ...models import (
     PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentPromptArchive,
+    PersistentAgentEnabledTool,
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentStepSnapshot,
@@ -93,7 +94,11 @@ from ..tools.sqlite_state import (
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
 )
-from ..tools.tool_manager import ensure_default_tools_enabled, get_enabled_tool_definitions
+from ..tools.tool_manager import (
+    CREATE_IMAGE_TOOL_NAME,
+    ensure_default_tools_enabled,
+    get_enabled_tool_definitions,
+)
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
 from .tool_results import (
@@ -3499,6 +3504,30 @@ def _get_system_instruction(
         f"{stop_continue_examples}"
     )
 
+    image_generation_skill = ""
+    if agent is not None:
+        try:
+            image_tool_enabled = PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name=CREATE_IMAGE_TOOL_NAME,
+            ).exists()
+        except DatabaseError:
+            image_tool_enabled = False
+            logger.debug("Failed checking create_image enablement for agent %s", agent.id, exc_info=True)
+
+        if image_tool_enabled:
+            image_generation_skill = (
+                "```\n"
+                "# Image generation playbook (only when create_image is enabled)\n"
+                "new_asset_from_scratch → create_image(prompt='...', file_path='...')\n"
+                "preserve_subject_or_logo_or_text → create_image(prompt='...', source_images=['$[/path.png]'], file_path='...')\n"
+                "style_transfer_or_edit_existing_image → use source_images with create_image\n"
+                "just want a different art direction (no preservation needed) → refine prompt, no source_images\n"
+                "if fidelity matters (same person/product/layout) → source_images is required\n"
+                "source_images must be filespace paths: $[/...] or /...\n"
+                "```\n\n"
+            )
+
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
@@ -3915,6 +3944,7 @@ def _get_system_instruction(
         "create_csv can take raw CSV or query='SELECT ...' to export from SQLite. \n"
         "CSV export: create_csv(file_path='/exports/your-file.csv'); add to message as an attachment.\n"
         "```\n\n"
+        f"{image_generation_skill}"
 
         "```\n"
         "# Whitespace (critical for rendering)\n"

@@ -2899,6 +2899,10 @@ class ImageGenerationModelEndpoint(models.Model):
         blank=True,
         help_text="Optional OpenAI-compatible base URL for proxy endpoints.",
     )
+    supports_image_to_image = models.BooleanField(
+        default=False,
+        help_text="Indicates this endpoint can accept source image inputs for image-to-image edits.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

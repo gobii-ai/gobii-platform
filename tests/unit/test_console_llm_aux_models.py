@@ -173,16 +173,20 @@ class ConsoleLlmAuxModelApiTests(TestCase):
                 "provider_id": str(self.provider.id),
                 "key": "img-gen-model",
                 "model": "google/gemini-2.5-flash-image",
+                "supports_image_to_image": True,
             },
         )
         self.assertEqual(create_resp.status_code, 200, create_resp.content)
         endpoint_id = create_resp.json()["endpoint_id"]
+        endpoint = ImageGenerationModelEndpoint.objects.get(id=endpoint_id)
+        self.assertTrue(endpoint.supports_image_to_image)
 
         patch_resp = self._json_patch(
             "console_llm_image_generation_endpoint_detail",
             {
                 "model": "black-forest-labs/flux.2-pro",
                 "low_latency": True,
+                "supports_image_to_image": False,
                 "provider_id": None,
             },
             endpoint_id,
@@ -191,6 +195,7 @@ class ConsoleLlmAuxModelApiTests(TestCase):
         endpoint = ImageGenerationModelEndpoint.objects.get(id=endpoint_id)
         self.assertEqual(endpoint.litellm_model, "black-forest-labs/flux.2-pro")
         self.assertTrue(endpoint.low_latency)
+        self.assertFalse(endpoint.supports_image_to_image)
         self.assertIsNone(endpoint.provider_id)
 
         tier_resp = self._json_post("console_llm_image_generation_tiers", {"description": "Tier IMG"})

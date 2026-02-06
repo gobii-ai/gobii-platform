@@ -18,6 +18,7 @@ export type ProviderEndpoint = {
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
   supports_vision?: boolean
+  supports_image_to_image?: boolean
   browser_base_url?: string
   max_output_tokens?: number | null
   max_input_tokens?: number | null

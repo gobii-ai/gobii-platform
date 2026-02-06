@@ -22,6 +22,7 @@ class ImageGenerationLLMConfig:
     params: Dict[str, Any]
     endpoint_key: str
     supports_image_config: bool
+    supports_image_to_image: bool
 
 
 def _resolve_provider_api_key(provider) -> Optional[str]:
@@ -116,10 +117,10 @@ def get_image_generation_llm_configs(limit: int = 5) -> list[ImageGenerationLLMC
                     params=params,
                     endpoint_key=getattr(endpoint, "key", ""),
                     supports_image_config=_supports_image_config(model_name, getattr(provider, "key", None)),
+                    supports_image_to_image=bool(getattr(endpoint, "supports_image_to_image", False)),
                 )
             )
             if len(configs) >= limit:
                 return configs
 
     return configs
-

@@ -121,6 +121,8 @@ def _serialize_aux_endpoint(
     )
     if endpoint_type == "file_handler":
         data["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
+    if endpoint_type == "image_generation":
+        data["supports_image_to_image"] = bool(getattr(endpoint, "supports_image_to_image", False))
     return data
 
 

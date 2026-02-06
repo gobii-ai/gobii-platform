@@ -109,6 +109,11 @@ def _fallback_builtin_selection(
             "create image",
             "make image",
             "render image",
+            "edit image",
+            "modify image",
+            "transform image",
+            "image to image",
+            "style transfer",
             "illustration",
             "illustrate",
             "create logo",
@@ -286,6 +291,8 @@ def _search_with_llm(
     if CREATE_IMAGE_TOOL_NAME in available_names:
         image_generation_rules = (
             f"- If the user asks to generate or design a NEW image asset, include `{CREATE_IMAGE_TOOL_NAME}`.\n"
+            f"- If the user asks to edit, transform, restyle, or preserve details from an existing image, include `{CREATE_IMAGE_TOOL_NAME}`.\n"
+            f"- For edit/transform requests, plan to pass `source_images` so the model can preserve identity, logos, text, or layout.\n"
             f"- Do not include `{CREATE_IMAGE_TOOL_NAME}` for image analysis, OCR, or extracting information from existing images.\n"
         )
 
