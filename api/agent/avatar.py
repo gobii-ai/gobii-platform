@@ -82,7 +82,9 @@ def maybe_schedule_agent_avatar(
         if agent.visual_description_requested_hash == charter_hash:
             return False
 
-        updated = PersistentAgent.objects.filter(id=agent.id).update(
+        updated = PersistentAgent.objects.filter(id=agent.id).exclude(
+            visual_description_requested_hash=charter_hash,
+        ).update(
             visual_description_requested_hash=charter_hash,
         )
         if not updated:
@@ -121,7 +123,9 @@ def maybe_schedule_agent_avatar(
     if not image_generation_ready:
         return False
 
-    updated = PersistentAgent.objects.filter(id=agent.id).update(
+    updated = PersistentAgent.objects.filter(id=agent.id).exclude(
+        avatar_requested_hash=charter_hash,
+    ).update(
         avatar_requested_hash=charter_hash,
     )
     if not updated:

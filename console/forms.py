@@ -369,15 +369,17 @@ class PersistentAgentCharterForm(forms.Form):
             'style': 'height:auto;overflow:hidden;'
         }),
         label='',
-        required=True,
+        required=False,
         help_text='Describe what you want your persistent agent to do'
     )
-    
+
     def clean_charter(self):
-        charter = self.cleaned_data['charter'].strip()
-        if not charter:
-            raise forms.ValidationError("Please describe what you want your agent to do.")
-        return charter
+        return (self.cleaned_data.get('charter') or '').strip()
+
+    DEFAULT_CHARTER = (
+        "Have a friendly conversation with the user to understand what they need help with, "
+        "then adapt to assist them."
+    )
 
 
 class PersistentAgentContactForm(forms.Form):

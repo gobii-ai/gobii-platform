@@ -247,6 +247,7 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
         pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
         payload = {
             "charter": request.session.get("agent_charter"),
+            "charter_override": request.session.get("agent_charter_override"),
             "preferred_llm_tier": request.session.get("agent_preferred_llm_tier"),
             "onboarding_target": onboarding_target if pending_onboarding else None,
             "requires_plan_selection": bool(pending_onboarding and requires_plan_selection),
@@ -1728,6 +1729,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "avatar_url": agent.get_avatar_url(),
                 "display_color_hex": agent.get_display_color(),
                 "is_active": bool(agent.is_active),
+                "mini_description": agent.mini_description or "",
                 "short_description": agent.short_description or "",
                 "is_org_owned": agent.organization_id is not None,
                 "is_collaborator": agent.id in collaborators_by_agent_id,
@@ -1778,6 +1780,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         if not initial_message:
             return JsonResponse({"error": "Message is required"}, status=400)
         preferred_llm_tier_key = (body.get("preferred_llm_tier") or "").strip() or None
+        charter_override = (body.get("charter_override") or "").strip() or None
 
         contact_email = (request.user.email or "").strip()
 
@@ -1791,7 +1794,10 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
                 preferred_contact_method="web",
                 web_enabled=True,
                 preferred_llm_tier_key=preferred_llm_tier_key,
+                charter_override=charter_override,
             )
+        except PermissionDenied:
+            return JsonResponse({"error": "Invalid context override."}, status=403)
         except ValidationError as exc:
             error_messages = []
             if hasattr(exc, "message_dict"):

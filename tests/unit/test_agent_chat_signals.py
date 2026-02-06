@@ -107,4 +107,23 @@ class AgentChatSignalTests(TestCase):
         payload = profile_event.get("payload", {})
         self.assertEqual(payload.get("agent_id"), str(self.agent.id))
         self.assertEqual(payload.get("agent_name"), self.agent.name)
+        self.assertEqual(payload.get("mini_description"), "")
+        self.assertEqual(payload.get("short_description"), "")
         self.assertIn("/console/agents/", payload.get("agent_avatar_url", ""))
+
+    @tag("batch_agent_chat")
+    def test_description_update_emits_agent_profile_event(self):
+        self.agent.mini_description = "Outbound sales assistant"
+        self.agent.short_description = "Finds qualified leads and drafts personalized outreach."
+        with self.captureOnCommitCallbacks(execute=True):
+            self.agent.save(update_fields=["mini_description", "short_description"])
+
+        profile_event = self._receive_with_timeout()
+        self.assertEqual(profile_event.get("type"), "agent_profile_event")
+        payload = profile_event.get("payload", {})
+        self.assertEqual(payload.get("agent_id"), str(self.agent.id))
+        self.assertEqual(payload.get("mini_description"), "Outbound sales assistant")
+        self.assertEqual(
+            payload.get("short_description"),
+            "Finds qualified leads and drafts personalized outreach.",
+        )

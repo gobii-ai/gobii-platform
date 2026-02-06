@@ -117,6 +117,7 @@ from api.models import (
 from console.mixins import ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
+from pages.context_processors import invalidate_account_info_cache
 
 from .context_helpers import build_console_context
 from .org_billing_helpers import build_org_billing_overview
@@ -2455,6 +2456,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
             if preferred_llm_tier_key:
                 request.session.pop("agent_preferred_llm_tier", None)
                 request.session.modified = True
+            invalidate_account_info_cache(request.user.id)
             return redirect('agent_welcome', pk=result.agent.id)
         except ValidationError as exc:
             error_messages = []
@@ -2524,6 +2526,7 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
                 sms_enabled=False,
                 preferred_contact_method='email',
                 preferred_llm_tier_key=request.session.get("agent_preferred_llm_tier"),
+                charter_override=request.session.get('agent_charter_override'),
             )
         except ValidationError as exc:
             error_messages = []
@@ -2552,6 +2555,7 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
         # Default return_to to agents list so closing the chat doesn't redirect back
         # to this view (which would fail since agent_charter was consumed)
         return_to = request.GET.get("return_to") or session_return_to or reverse("agents")
+        invalidate_account_info_cache(request.user.id)
         app_url = build_immersive_chat_url(
             request,
             result.agent.id,
@@ -5448,6 +5452,7 @@ class AgentDeleteView(LoginRequiredMixin, View):
                     source=AnalyticsSource.WEB,
                     properties=props.copy(),
                 ))
+            invalidate_account_info_cache(request.user.id)
 
             response = HttpResponse(status=200)
             response['HX-Redirect'] = reverse('agents')

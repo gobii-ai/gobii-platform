@@ -125,6 +125,15 @@ class ConsoleContextTests(TestCase):
         self.assertIn(self.agentless_task.id, ids)
         self.assertNotIn(self.org_task.id, ids)
 
+    def test_switch_context_invalid_org_override_format_returns_403(self):
+        resp = self.client.get(
+            reverse("switch_context"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID="not-a-uuid",
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json().get("error"), "Invalid context override.")
+
     def test_tasks_view_org_requires_membership_and_shows_org_tasks(self):
         # As owner (member) — should see org tasks
         self._set_org_context()

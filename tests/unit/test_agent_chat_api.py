@@ -169,6 +169,18 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
 
     @tag("batch_agent_chat")
+    def test_quick_create_invalid_org_override_returns_context_error(self):
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": "Create from immersive app"}),
+            content_type="application/json",
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID="not-a-uuid",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json().get("error"), "Invalid context override.")
+
+    @tag("batch_agent_chat")
     def test_timeline_endpoint_returns_expected_events(self):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)

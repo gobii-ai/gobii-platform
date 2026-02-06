@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from api.agent.avatar import maybe_schedule_agent_avatar
 from api.agent.short_description import compute_charter_hash
@@ -10,7 +10,8 @@ from api.agent.tasks.agent_avatar import (
     generate_agent_avatar_task,
     generate_agent_visual_description_task,
 )
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import BrowserUseAgent, PersistentAgent, SystemSetting
+from api.tasks.avatar_backfill import schedule_agent_avatar_backfill_task
 
 
 @tag("batch_agent_short_description")
@@ -22,14 +23,18 @@ class AgentAvatarGenerationTests(TestCase):
             email="avatar-owner@example.com",
             password="pass",
         )
-        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Avatar Browser")
 
     def _create_agent(self, charter: str = "Run technical recruiting workflows") -> PersistentAgent:
+        sequence = PersistentAgent.objects.count() + 1
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name=f"Avatar Browser {sequence}",
+        )
         return PersistentAgent.objects.create(
             user=self.user,
-            name="Avatar Agent",
+            name=f"Avatar Agent {sequence}",
             charter=charter,
-            browser_use_agent=self.browser_agent,
+            browser_use_agent=browser_agent,
         )
 
     def test_maybe_schedule_agent_avatar_enqueues_visual_description(self):
@@ -126,3 +131,80 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertFalse(agent.avatar)
         self.assertEqual(agent.avatar_requested_hash, "")
         mocked_image_generation.assert_not_called()
+
+    def test_maybe_schedule_agent_avatar_does_not_duplicate_visual_request_when_db_is_pending(self):
+        agent = self._create_agent()
+        charter_hash = compute_charter_hash(agent.charter)
+        PersistentAgent.objects.filter(id=agent.id).update(
+            visual_description_requested_hash=charter_hash,
+        )
+
+        with patch(
+            "api.agent.tasks.agent_avatar.generate_agent_visual_description_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+
+    @patch("api.tasks.avatar_backfill.is_image_generation_configured", return_value=True)
+    def test_schedule_agent_avatar_backfill_task_limits_and_advances_cursor(self, _mock_image_ready):
+        agents = [
+            self._create_agent("Charter one"),
+            self._create_agent("Charter two"),
+            self._create_agent("Charter three"),
+        ]
+        ordered_ids = list(
+            PersistentAgent.objects.filter(id__in=[agent.id for agent in agents])
+            .order_by("id")
+            .values_list("id", flat=True)
+        )
+
+        with patch(
+            "api.tasks.avatar_backfill.maybe_schedule_agent_avatar",
+            return_value=True,
+        ) as mocked_schedule:
+            first = schedule_agent_avatar_backfill_task(batch_size=2, scan_limit=2)
+
+        self.assertEqual(first, 2)
+        first_call_ids = [call.args[0].id for call in mocked_schedule.call_args_list]
+        self.assertEqual(first_call_ids, ordered_ids[:2])
+
+        cursor_after_first = SystemSetting.objects.get(key="AGENT_AVATAR_BACKFILL_CURSOR")
+        self.assertEqual(cursor_after_first.value_text, str(ordered_ids[1]))
+
+        with patch(
+            "api.tasks.avatar_backfill.maybe_schedule_agent_avatar",
+            return_value=True,
+        ) as mocked_schedule:
+            second = schedule_agent_avatar_backfill_task(batch_size=2, scan_limit=2)
+
+        self.assertEqual(second, 1)
+        second_call_ids = [call.args[0].id for call in mocked_schedule.call_args_list]
+        self.assertEqual(second_call_ids, [ordered_ids[2]])
+
+    @override_settings(AGENT_AVATAR_BACKFILL_ENABLED=False)
+    @patch("api.tasks.avatar_backfill.maybe_schedule_agent_avatar")
+    def test_schedule_agent_avatar_backfill_task_skips_when_disabled(self, mocked_schedule):
+        self._create_agent("Charter one")
+
+        scheduled = schedule_agent_avatar_backfill_task(batch_size=5, scan_limit=5)
+
+        self.assertEqual(scheduled, 0)
+        mocked_schedule.assert_not_called()
+
+    @patch("api.tasks.avatar_backfill.is_image_generation_configured", return_value=True)
+    @patch("api.tasks.avatar_backfill.maybe_schedule_agent_avatar")
+    def test_schedule_agent_avatar_backfill_task_skips_pending_agents(
+        self,
+        mocked_schedule,
+        _mock_image_ready,
+    ):
+        pending_agent = self._create_agent("Pending charter")
+        pending_agent.avatar_requested_hash = "pending"
+        pending_agent.save(update_fields=["avatar_requested_hash"])
+
+        scheduled = schedule_agent_avatar_backfill_task(batch_size=5, scan_limit=5)
+
+        self.assertEqual(scheduled, 0)
+        mocked_schedule.assert_not_called()

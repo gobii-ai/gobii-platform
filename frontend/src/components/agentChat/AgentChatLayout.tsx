@@ -37,6 +37,8 @@ type TaskQuotaInfo = {
   used_pct: number
 }
 
+const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
+
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentId?: string | null
   agentColorHex?: string | null
@@ -225,7 +227,12 @@ export function AgentChatLayout({
   onOpenTaskPacks,
   spawnIntentLoading = false,
 }: AgentChatLayoutProps) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') {
+      return true
+    }
+    return window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX
+  })
   const {
     currentPlan: subscriptionPlan,
     isUpgradeModalOpen,
@@ -500,7 +507,7 @@ export function AgentChatLayout({
   return (
     <>
       <ChatSidebar
-        defaultCollapsed={true}
+        defaultCollapsed={sidebarCollapsed}
         onToggle={handleSidebarToggle}
         agents={agentRoster}
         activeAgentId={activeAgentId}

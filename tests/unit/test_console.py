@@ -10,6 +10,7 @@ from django.utils import timezone
 from django.test import TestCase, Client, tag, override_settings
 from django.contrib.messages import get_messages
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.urls import reverse
 from unittest.mock import patch
@@ -234,6 +235,39 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
         self.assertFalse(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
+
+    @tag("batch_console_agents")
+    def test_delete_persistent_agent_invalidates_account_info_cache(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+        from pages.context_processors import _account_info_cache_key
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Cache Invalidating Browser Agent',
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Cache Invalidating Agent',
+            charter='Cache test',
+            browser_use_agent=browser_agent,
+        )
+
+        cache_key = _account_info_cache_key(self.user.id)
+        cache.set(
+            cache_key,
+            {
+                "data": {"account": {"usage": {"agents_in_use": 1, "agents_available": 0}}},
+                "refreshed_at": timezone.now().timestamp(),
+            },
+            timeout=600,
+        )
+        self.assertIsNotNone(cache.get(cache_key))
+
+        url = reverse('agent_delete', kwargs={'pk': persistent_agent.id})
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(cache.get(cache_key))
 
     @patch("console.views.AgentService.has_agents_available", return_value=True)
     @tag("batch_console_agents")

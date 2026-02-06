@@ -92,6 +92,34 @@ function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRo
   return insertRosterEntry(roster, entry)
 }
 
+type AgentRosterQueryData = {
+  context: ConsoleContext
+  agents: AgentRosterEntry[]
+  llmIntelligence?: unknown
+}
+
+function isAgentRosterQueryData(value: unknown): value is AgentRosterQueryData {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  const data = value as { context?: unknown; agents?: unknown }
+  if (!Array.isArray(data.agents)) {
+    return false
+  }
+  if (!data.context || typeof data.context !== 'object') {
+    return false
+  }
+  const context = data.context as { type?: unknown; id?: unknown }
+  return typeof context.type === 'string' && typeof context.id === 'string'
+}
+
+function sameConsoleContext(left: ConsoleContext | null | undefined, right: ConsoleContext | null | undefined): boolean {
+  if (!left || !right) {
+    return false
+  }
+  return left.type === right.type && left.id === right.id
+}
+
 type ConnectionIndicator = {
   status: ConnectionStatusTone
   label: string
@@ -303,13 +331,13 @@ export function AgentChatPage({
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey } | null>(null)
+  const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey; charterOverride?: string | null } | null>(null)
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const [resolvedContext, setResolvedContext] = useState<ConsoleContext | null>(null)
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: true })
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
       if (onContextSwitch) {
         onContextSwitch(context)
         return
@@ -409,7 +437,9 @@ export function AgentChatPage({
       const hasName = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_name')
       const hasColor = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_color_hex')
       const hasAvatar = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_avatar_url')
-      if (!hasName && !hasColor && !hasAvatar) {
+      const hasShortDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'short_description')
+      const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
+      if (!hasName && !hasColor && !hasAvatar && !hasShortDescription && !hasMiniDescription) {
         return
       }
 
@@ -449,6 +479,20 @@ export function AgentChatPage({
               const nextAvatar = typeof rawPayload.agent_avatar_url === 'string' ? rawPayload.agent_avatar_url : null
               if (nextAvatar !== next.avatarUrl) {
                 next.avatarUrl = nextAvatar
+                changed = true
+              }
+            }
+            if (hasShortDescription) {
+              const nextDescription = typeof rawPayload.short_description === 'string' ? rawPayload.short_description : ''
+              if (nextDescription !== next.shortDescription) {
+                next.shortDescription = nextDescription
+                changed = true
+              }
+            }
+            if (hasMiniDescription) {
+              const nextMiniDescription = typeof rawPayload.mini_description === 'string' ? rawPayload.mini_description : ''
+              if (nextMiniDescription !== next.miniDescription) {
+                next.miniDescription = nextMiniDescription
                 changed = true
               }
             }
@@ -1098,6 +1142,7 @@ export function AgentChatPage({
       avatarUrl: resolvedAvatarUrl,
       displayColorHex: resolvedAgentColorHex ?? null,
       isActive: true,
+      miniDescription: '',
       shortDescription: '',
       isOrgOwned: false,
     }
@@ -1248,12 +1293,22 @@ export function AgentChatPage({
   }, [ensureAuthenticated, onboardingTarget, requiresTrialPlanSelection, upgradeModalSource])
 
   const createNewAgent = useCallback(
-    async (body: string, tier: IntelligenceTierKey) => {
+    async (body: string, tier: IntelligenceTierKey, charterOverride?: string | null) => {
       setCreateAgentError(null)
       try {
-        const result = await createAgent(body, tier)
+        const result = await createAgent(body, tier, charterOverride)
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
+        const createdAgentEntry: AgentRosterEntry = {
+          id: result.agent_id,
+          name: createdAgentName,
+          avatarUrl: null,
+          displayColorHex: null,
+          isActive: true,
+          miniDescription: '',
+          shortDescription: '',
+          email: createdAgentEmail,
+        }
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
           agentName: createdAgentName,
@@ -1261,16 +1316,24 @@ export function AgentChatPage({
         if (createdAgentEmail) {
           setPendingAgentEmails((current) => ({ ...current, [result.agent_id]: createdAgentEmail }))
         }
-        queryClient.setQueryData<AgentRosterEntry[]>(['agent-roster'], (current) =>
-          mergeRosterEntry(current, {
-            id: result.agent_id,
-            name: createdAgentName,
-            avatarUrl: null,
-            displayColorHex: null,
-            isActive: true,
-            shortDescription: '',
-            email: createdAgentEmail,
-          }),
+        queryClient.setQueriesData<AgentRosterQueryData>(
+          { queryKey: ['agent-roster'] },
+          (current) => {
+            if (!isAgentRosterQueryData(current)) {
+              return current
+            }
+            if (effectiveContext && !sameConsoleContext(current.context, effectiveContext)) {
+              return current
+            }
+            const nextAgents = mergeRosterEntry(current.agents, createdAgentEntry)
+            if (nextAgents === current.agents) {
+              return current
+            }
+            return {
+              ...current,
+              agents: nextAgents,
+            }
+          },
         )
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
         onAgentCreated?.(result.agent_id)
@@ -1292,7 +1355,7 @@ export function AgentChatPage({
         console.error('Failed to create agent:', err)
       }
     },
-    [onAgentCreated, queryClient, setPendingAgentEmails],
+    [effectiveContext, onAgentCreated, queryClient, setPendingAgentEmails],
   )
 
   const handleIntelligenceChange = useCallback(
@@ -1627,10 +1690,10 @@ export function AgentChatPage({
       setDraftIntelligenceTier(tierToUse)
     }
     closeGate()
-    void createNewAgent(pending.body, tierToUse)
+    void createNewAgent(pending.body, tierToUse, pending.charterOverride)
   }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
 
-  const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
+  const handleSend = useCallback(async (body: string, attachments: File[] = [], charterOverride?: string | null) => {
     if (!activeAgentId && !isNewAgent) {
       return
     }
@@ -1683,7 +1746,7 @@ export function AgentChatPage({
           burnRatePerDay,
           currentPlan,
         })
-        pendingCreateRef.current = { body, attachments, tier: selectedTier }
+        pendingCreateRef.current = { body, attachments, tier: selectedTier, charterOverride }
         setIntelligenceGate({
           reason: gateReason,
           selectedTier,
@@ -1694,7 +1757,7 @@ export function AgentChatPage({
         })
         return
       }
-      await createNewAgent(body, selectedTier)
+      await createNewAgent(body, selectedTier, charterOverride)
       return
     }
     await sendMessage(body, attachments)
@@ -1771,7 +1834,7 @@ export function AgentChatPage({
     }
 
     spawnIntentAutoSubmittedRef.current = true
-    const sendPromise = handleSend(spawnIntent.charter)
+    const sendPromise = handleSend(spawnIntent.charter, [], spawnIntent.charter_override)
     sendPromise.finally(() => setSpawnIntentStatus('done'))
   }, [
     contextReady,

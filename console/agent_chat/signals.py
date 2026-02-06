@@ -68,6 +68,8 @@ def emit_agent_profile_update(agent: PersistentAgent) -> None:
         "agent_name": agent.name or "Agent",
         "agent_color_hex": agent.get_display_color(),
         "agent_avatar_url": agent.get_avatar_url(),
+        "mini_description": agent.mini_description or "",
+        "short_description": agent.short_description or "",
         "timestamp": timezone.now().isoformat(),
     }
     _send(_group_name(agent.id), "agent_profile_event", payload)
@@ -224,7 +226,14 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
 
 @receiver(post_save, sender=PersistentAgent)
 def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: bool, **kwargs):
-    tracked_fields = {"name", "avatar", "agent_color", "agent_color_id"}
+    tracked_fields = {
+        "name",
+        "avatar",
+        "agent_color",
+        "agent_color_id",
+        "mini_description",
+        "short_description",
+    }
     update_fields = kwargs.get("update_fields")
     if not created and update_fields is not None:
         changed_fields = {str(field) for field in update_fields}
@@ -235,7 +244,7 @@ def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: b
         refreshed = (
             PersistentAgent.objects
             .filter(id=instance.id)
-            .only("id", "name", "avatar", "agent_color_id")
+            .only("id", "name", "avatar", "agent_color_id", "mini_description", "short_description")
             .first()
         )
         if refreshed is None:

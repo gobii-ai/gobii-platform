@@ -4076,12 +4076,11 @@
 
 .chat-sidebar-agent-desc {
   font-size: 0.6875rem;
-  font-weight: 400;
+  font-weight: 600;
   color: #64748b;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   overflow: hidden;
 }
 
@@ -4839,12 +4838,11 @@
 
 .agent-drawer-item-desc {
   font-size: 0.8125rem;
-  font-weight: 400;
+  font-weight: 600;
   color: #64748b;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   overflow: hidden;
 }
 

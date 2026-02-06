@@ -92,10 +92,12 @@ def create_persistent_agent_from_charter(
     preferred_contact_method: str,
     web_enabled: bool = False,
     preferred_llm_tier_key: str | None = None,
+    charter_override: str | None = None,
 ) -> AgentCreationResult:
     initial_message = (initial_message or "").strip()
     if not initial_message:
         raise ValidationError("Please start by describing what your agent should do.")
+    charter_text = (charter_override or initial_message).strip()
 
     preferred_contact_method = (preferred_contact_method or "email").strip().lower()
     contact_email = (contact_email or "").strip()
@@ -170,7 +172,7 @@ def create_persistent_agent_from_charter(
                 user=request.user,
                 organization=organization,
                 template_code=template_code,
-                charter=initial_message,
+                charter=charter_text,
                 preferred_llm_tier=preferred_llm_tier,
             )
         except PersistentAgentProvisioningError as exc:
@@ -355,7 +357,7 @@ def create_persistent_agent_from_charter(
 
         transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
 
-        for key in ("agent_charter", "agent_charter_source", PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY):
+        for key in ("agent_charter", "agent_charter_source", "agent_charter_override", PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY):
             if key in request.session:
                 del request.session[key]
         clear_trial_onboarding_intent(request)

@@ -4,6 +4,8 @@ All Celery Beat schedules live here.
 • Dynamic tasks: single nightly job that syncs all DecodoIPBlocks.
 """
 
+from datetime import timedelta
+
 from celery.schedules import crontab
 from redbeat import RedBeatSchedulerEntry
 from celery import current_app as celery_app
@@ -82,6 +84,13 @@ def add_dynamic_schedules():
         "schedule": crontab(hour="*", minute = 21), # 21 minutes after every hour
         "args": [],
     }
+
+    if settings.AGENT_AVATAR_BACKFILL_ENABLED and settings.AGENT_AVATAR_BACKFILL_INTERVAL_MINUTES > 0:
+        beat_schedule["agent-avatar-backfill"] = {
+            "task": "api.tasks.schedule_agent_avatar_backfill",
+            "schedule": timedelta(minutes=settings.AGENT_AVATAR_BACKFILL_INTERVAL_MINUTES),
+            "args": [],
+        }
 
     # Refresh homepage pretrained cache to keep landing page fast
     beat_schedule["homepage-pretrained-cache-refresh"] = {
