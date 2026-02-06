@@ -75,6 +75,7 @@ from ..short_description import (
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
 )
+from ..avatar import maybe_schedule_agent_avatar
 from ..tags import maybe_schedule_agent_tags
 from tasks.services import TaskCreditService
 from util.tool_costs import (
@@ -2603,6 +2604,13 @@ def _process_agent_events_locked(
         except Exception:
             logger.exception(
                 "Failed to evaluate tag scheduling for agent %s",
+                persistent_agent_id,
+            )
+        try:
+            maybe_schedule_agent_avatar(agent, routing_profile_id=routing_profile_id)
+        except Exception:
+            logger.exception(
+                "Failed to evaluate avatar scheduling for agent %s",
                 persistent_agent_id,
             )
 

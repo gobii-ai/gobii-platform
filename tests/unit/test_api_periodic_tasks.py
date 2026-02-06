@@ -39,6 +39,13 @@ class PeriodicTasksTest(TestCase):
         self.assertEqual(beat_schedule["prune-threshold-sent-monthly"]["task"], "prune_usage_threshold_sent")
         self.assertEqual(beat_schedule["prune-threshold-sent-monthly"]["args"], [])
 
+        self.assertIn("agent-avatar-backfill", beat_schedule)
+        self.assertEqual(
+            beat_schedule["agent-avatar-backfill"]["task"],
+            "api.tasks.schedule_agent_avatar_backfill",
+        )
+        self.assertEqual(beat_schedule["agent-avatar-backfill"]["args"], [])
+
         # Should also add homepage cache refresh
         self.assertIn("homepage-pretrained-cache-refresh", beat_schedule)
         self.assertEqual(

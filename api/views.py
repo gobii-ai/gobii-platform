@@ -57,6 +57,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.core.schedule_parser import ScheduleParser
 from agents.services import PretrainedWorkerTemplateService
+from pages.context_processors import invalidate_account_info_cache
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 
@@ -753,6 +754,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         agent = serializer.save()
+        invalidate_account_info_cache(self.request.user.id)
         self._track_agent_event(
             agent,
             AnalyticsEvent.PERSISTENT_AGENT_CREATED,
@@ -773,6 +775,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         agent.life_state = PersistentAgent.LifeState.EXPIRED
         agent.schedule = None
         agent.save(update_fields=['is_active', 'life_state', 'schedule'])
+        invalidate_account_info_cache(request.user.id)
         self._track_agent_event(
             agent,
             AnalyticsEvent.PERSISTENT_AGENT_DELETED,

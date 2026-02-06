@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from django.contrib.auth.models import AbstractBaseUser
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 
 from api.models import OrganizationMembership
 from console.context_overrides import get_context_override
@@ -40,11 +40,14 @@ _ALLOWED_MANAGE_ROLES = {
 def _get_active_membership(user: AbstractBaseUser, org_id: str | None) -> Optional[OrganizationMembership]:
     if not org_id:
         return None
-    return OrganizationMembership.objects.select_related("org").filter(
-        user=user,
-        org_id=org_id,
-        status=OrganizationMembership.OrgStatus.ACTIVE,
-    ).first()
+    try:
+        return OrganizationMembership.objects.select_related("org").filter(
+            user=user,
+            org_id=org_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).first()
+    except (ValidationError, ValueError, TypeError):
+        return None
 
 
 def resolve_console_context(

@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from celery import shared_task
+from django.db import DatabaseError
 
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
@@ -125,6 +126,30 @@ def generate_agent_short_description_task(
         short_description_charter_hash=current_hash,
         short_description_requested_hash="",
     )
+    try:
+        from console.agent_chat.signals import emit_agent_profile_update
+    except ImportError:
+        logger.debug(
+            "Agent profile realtime module unavailable while updating short description for agent %s",
+            agent.id,
+            exc_info=True,
+        )
+    else:
+        try:
+            refreshed = (
+                PersistentAgent.objects.filter(id=agent.id)
+                .only("id", "name", "avatar", "agent_color_id", "mini_description", "short_description")
+                .first()
+            )
+        except DatabaseError:
+            logger.debug(
+                "Failed to reload agent %s for realtime profile update after short description generation",
+                agent.id,
+                exc_info=True,
+            )
+        else:
+            if refreshed is not None:
+                emit_agent_profile_update(refreshed)
     logger.info(
         "Persisted short description for agent %s (length=%s)", agent.id, len(prepared)
     )

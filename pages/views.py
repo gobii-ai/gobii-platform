@@ -531,7 +531,13 @@ class HomeAgentSpawnView(TemplateView):
             # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
             request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
             # Store charter in session for later use
-            request.session['agent_charter'] = form.cleaned_data['charter']
+            user_charter = form.cleaned_data['charter']
+            if user_charter:
+                request.session['agent_charter'] = user_charter
+            else:
+                # Empty input — use a general-purpose charter and a simple greeting
+                request.session['agent_charter'] = "Hello"
+                request.session['agent_charter_override'] = PersistentAgentCharterForm.DEFAULT_CHARTER
             request.session['agent_charter_source'] = 'user'
             preferred_llm_tier = (request.POST.get("preferred_llm_tier") or "").strip()
             if preferred_llm_tier:
@@ -545,7 +551,7 @@ class HomeAgentSpawnView(TemplateView):
                     event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
                     source=AnalyticsSource.WEB,
                     properties={
-                        'charter': form.cleaned_data['charter'],
+                        'charter': request.session['agent_charter'],
                         'source_page': 'home',
                     }
                 )

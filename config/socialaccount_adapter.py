@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 # Session keys to preserve during social auth flow
 OAUTH_CHARTER_SESSION_KEYS = (
     "agent_charter",
+    "agent_charter_override",
     PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
     "agent_charter_source",
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,

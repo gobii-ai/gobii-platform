@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 
 type AgentAvatarBadgeProps = {
   name: string
@@ -9,6 +9,8 @@ type AgentAvatarBadgeProps = {
   style?: CSSProperties
   fallbackStyle?: CSSProperties
 }
+
+const AVATAR_FADE_MS = 260
 
 export function AgentAvatarBadge({
   name,
@@ -24,17 +26,55 @@ export function AgentAvatarBadge({
   const firstInitial = nameParts[0]?.charAt(0).toUpperCase() || 'A'
   const lastInitial = nameParts.length > 1 ? nameParts[nameParts.length - 1]?.charAt(0).toUpperCase() || '' : ''
   const initials = `${firstInitial}${lastInitial}`.trim()
-  const hasAvatar = Boolean(avatarUrl)
+  const normalizedAvatarUrl = (avatarUrl || '').trim() || null
+  const hasAvatar = Boolean(normalizedAvatarUrl)
+  const [avatarReady, setAvatarReady] = useState(false)
+
+  useEffect(() => {
+    setAvatarReady(false)
+  }, [normalizedAvatarUrl])
+
+  const containerStyle: CSSProperties = {
+    position: 'relative',
+    overflow: 'hidden',
+    ...style,
+  }
+
+  const fallbackStyleWithFade: CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: hasAvatar ? (avatarReady ? 0 : 1) : 1,
+    transition: `opacity ${AVATAR_FADE_MS}ms ease`,
+    ...fallbackStyle,
+  }
+
+  const imageStyle: CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    opacity: hasAvatar && avatarReady ? 1 : 0,
+    transition: `opacity ${AVATAR_FADE_MS}ms ease`,
+  }
 
   return (
-    <div className={className} style={style}>
+    <div className={className} style={containerStyle}>
+      <span className={textClassName} style={fallbackStyleWithFade}>
+        {initials || 'A'}
+      </span>
       {hasAvatar ? (
-        <img src={avatarUrl ?? undefined} alt={`${trimmedName} avatar`} className={imageClassName} />
-      ) : (
-        <span className={textClassName} style={fallbackStyle}>
-          {initials || 'A'}
-        </span>
-      )}
+        <img
+          src={normalizedAvatarUrl ?? undefined}
+          alt={`${trimmedName} avatar`}
+          className={imageClassName}
+          style={imageStyle}
+          onLoad={() => setAvatarReady(true)}
+          onError={() => setAvatarReady(false)}
+        />
+      ) : null}
     </div>
   )
 }

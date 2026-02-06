@@ -149,6 +149,9 @@ export function AgentListItem({
     ? ({ '--agent-accent': accentColor } as CSSProperties)
     : undefined
   const showMeta = variant === 'drawer' || !collapsed
+  const miniDescription = (agent.miniDescription || '').trim()
+  const longDescription = (agent.shortDescription || '').trim()
+  const hoverDescription = longDescription && longDescription !== miniDescription ? longDescription : undefined
 
   return (
     <button
@@ -173,8 +176,10 @@ export function AgentListItem({
       {showMeta ? (
         <span className={styles.metaClass}>
           <span className={styles.nameClass}>{agent.name || 'Agent'}</span>
-          {agent.shortDescription ? (
-            <span className={styles.descClass}>{agent.shortDescription}</span>
+          {miniDescription ? (
+            <span className={styles.descClass} title={hoverDescription}>
+              {miniDescription}
+            </span>
           ) : !agent.isActive ? (
             <span className={styles.stateClass}>Paused</span>
           ) : null}

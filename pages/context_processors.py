@@ -48,6 +48,14 @@ def _account_info_cache_lock_key(user_id: object) -> str:
     return f"{_account_info_cache_key(user_id)}:refresh_lock"
 
 
+def invalidate_account_info_cache(user_id: object) -> None:
+    """Drop cached account usage payload for a user so next request recomputes it."""
+    if user_id in (None, ""):
+        return
+    cache.delete(_account_info_cache_key(user_id))
+    cache.delete(_account_info_cache_lock_key(user_id))
+
+
 def sha256_hex(value: str | None) -> str:
     """
     Lower-case, trim, encode UTF-8, then return hex digest.

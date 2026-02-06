@@ -59,13 +59,18 @@ class AgentShortDescriptionTests(TestCase):
         agent.short_description_requested_hash = charter_hash
         agent.save(update_fields=["short_description_requested_hash"])
 
-        with patch("api.agent.tasks.short_description._generate_via_llm", return_value="Summarise company ops"):
+        with patch("api.agent.tasks.short_description._generate_via_llm", return_value="Summarise company ops"), patch(
+            "console.agent_chat.signals.emit_agent_profile_update"
+        ) as mocked_emit:
             generate_agent_short_description_task.run(str(agent.id), charter_hash)
 
         agent.refresh_from_db()
         self.assertEqual(agent.short_description, "Summarise company ops")
         self.assertEqual(agent.short_description_charter_hash, charter_hash)
         self.assertEqual(agent.short_description_requested_hash, "")
+        mocked_emit.assert_called_once()
+        emitted_agent = mocked_emit.call_args.args[0]
+        self.assertEqual(str(emitted_agent.id), str(agent.id))
 
     def test_generate_short_description_skips_when_charter_changed(self) -> None:
         agent = self._create_agent()
@@ -110,13 +115,18 @@ class AgentShortDescriptionTests(TestCase):
         agent.mini_description_requested_hash = charter_hash
         agent.save(update_fields=["mini_description_requested_hash"])
 
-        with patch("api.agent.tasks.mini_description._generate_via_llm", return_value="Sales leads generator"):
+        with patch("api.agent.tasks.mini_description._generate_via_llm", return_value="Sales leads generator"), patch(
+            "console.agent_chat.signals.emit_agent_profile_update"
+        ) as mocked_emit:
             generate_agent_mini_description_task.run(str(agent.id), charter_hash)
 
         agent.refresh_from_db()
         self.assertEqual(agent.mini_description, "Sales leads generator")
         self.assertEqual(agent.mini_description_charter_hash, charter_hash)
         self.assertEqual(agent.mini_description_requested_hash, "")
+        mocked_emit.assert_called_once()
+        emitted_agent = mocked_emit.call_args.args[0]
+        self.assertEqual(str(emitted_agent.id), str(agent.id))
 
     def test_generate_mini_description_skips_when_charter_changed(self) -> None:
         agent = self._create_agent()

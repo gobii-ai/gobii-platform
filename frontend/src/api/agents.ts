@@ -22,6 +22,7 @@ type AgentRosterPayload = {
     avatar_url: string | null
     display_color_hex: string | null
     is_active: boolean
+    mini_description: string
     short_description: string
     is_org_owned: boolean
     is_collaborator: boolean
@@ -44,6 +45,7 @@ export async function fetchAgentRoster(
     avatarUrl: agent.avatar_url,
     displayColorHex: agent.display_color_hex,
     isActive: agent.is_active,
+    miniDescription: agent.mini_description,
     shortDescription: agent.short_description,
     isOrgOwned: agent.is_org_owned,
     isCollaborator: agent.is_collaborator,
@@ -64,11 +66,15 @@ export function updateAgent(agentId: string, payload: UpdateAgentPayload): Promi
   })
 }
 
-export async function createAgent(message: string, preferredLlmTier?: string): Promise<CreateAgentResponse> {
+export async function createAgent(message: string, preferredLlmTier?: string, charterOverride?: string | null): Promise<CreateAgentResponse> {
+  const payload: Record<string, string | undefined> = { message, preferred_llm_tier: preferredLlmTier }
+  if (charterOverride) {
+    payload.charter_override = charterOverride
+  }
   return jsonFetch<CreateAgentResponse>('/console/api/agents/create/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, preferred_llm_tier: preferredLlmTier }),
+    body: JSON.stringify(payload),
   })
 }
 

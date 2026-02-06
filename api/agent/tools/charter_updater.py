@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Any
 
 from ...models import PersistentAgent
+from ..avatar import maybe_schedule_agent_avatar
 from ..short_description import (
     maybe_schedule_mini_description,
     maybe_schedule_short_description,
@@ -75,6 +76,7 @@ def execute_update_charter(agent: PersistentAgent, params: Dict[str, Any]) -> Di
         maybe_schedule_short_description(agent, routing_profile_id=routing_profile_id)
         maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)
         maybe_schedule_agent_tags(agent, routing_profile_id=routing_profile_id)
+        maybe_schedule_agent_avatar(agent, routing_profile_id=routing_profile_id)
         return {
             "status": "ok",
             "message": "Charter updated successfully.",

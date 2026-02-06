@@ -90,3 +90,25 @@ class AgentChatAccessTests(TestCase):
         self.assertIn(str(self.org_agent.id), roster_ids)
         self.assertIn(str(self.org_agent_two.id), roster_ids)
         self.assertNotIn(str(self.personal_agent.id), roster_ids)
+
+    def test_roster_includes_mini_and_short_descriptions(self):
+        self.org_agent.mini_description = "Revenue pipeline assistant"
+        self.org_agent.short_description = "Qualifies inbound leads and drafts handoff-ready summaries."
+        self.org_agent.save(update_fields=["mini_description", "short_description"])
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        matching_entry = next(
+            entry for entry in payload.get("agents", []) if entry.get("id") == str(self.org_agent.id)
+        )
+        self.assertEqual(matching_entry.get("mini_description"), "Revenue pipeline assistant")
+        self.assertEqual(
+            matching_entry.get("short_description"),
+            "Qualifies inbound leads and drafts handoff-ready summaries.",
+        )
