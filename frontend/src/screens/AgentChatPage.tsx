@@ -1577,14 +1577,14 @@ export function AgentChatPage({
     if (spawnIntent.onboarding_target !== 'api_keys') {
       return
     }
-    if (spawnIntent.charter?.trim()) {
-      return
-    }
     window.location.assign('/console/api-keys/')
   }, [isNewAgent, spawnFlow, spawnIntent, spawnIntentStatus])
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow || requiresTrialPlanSelection || !spawnIntent?.charter?.trim()) {
+      return
+    }
+    if (spawnIntent.onboarding_target === 'api_keys') {
       return
     }
     if (!contextReady || rosterQuery.isLoading) {
