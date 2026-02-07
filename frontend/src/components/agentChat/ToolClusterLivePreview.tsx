@@ -1012,7 +1012,6 @@ export function ToolClusterLivePreview({
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
             const previewImageUrl = visual.previewImageUrl
             const isVisualActivity = item.activity.kind === 'chart' || item.activity.kind === 'image'
-            const visualFallbackLabel = item.activity.label
             const visualFallbackAlt = item.activity.kind === 'image' ? 'Generated image' : 'Chart'
 
             // Collect all visual entries with images for grid rendering.
