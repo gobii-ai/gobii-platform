@@ -110,8 +110,8 @@ export function ResponseSkeleton({ startTime, hidden }: ResponseSkeletonProps) {
         <svg viewBox="0 0 44 44" className="throbber-svg" aria-hidden="true">
           <defs>
             <linearGradient id="throbber-grad" gradientUnits="userSpaceOnUse" x1="0" y1="44" x2="44" y2="0">
-              <stop offset="0%" stopColor="#10b981" />
-              <stop offset="100%" stopColor="#06b6d4" />
+              <stop offset="0%" stopColor="#8b5cf6" />
+              <stop offset="100%" stopColor="#7c3aed" />
             </linearGradient>
           </defs>
 

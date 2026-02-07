@@ -721,10 +721,9 @@ export function AgentChatLayout({
           {spawnIntentLoading ? (
             <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
               <div className="flex flex-col items-center gap-3 text-center">
-                <Loader2 className="app-loading__spinner" aria-hidden="true" />
+                <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Preparing your agent…</p>
-                  <p className="text-xs text-slate-500">Checking plan access and usage.</p>
                 </div>
               </div>
             </div>

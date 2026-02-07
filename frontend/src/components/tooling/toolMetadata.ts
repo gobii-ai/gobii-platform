@@ -35,7 +35,7 @@ import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooli
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
 import type { DetailKind } from '../agentChat/toolDetails'
 import { AgentConfigUpdateDetail } from '../agentChat/toolDetails'
-import { parseAgentConfigUpdates } from './agentConfigSql'
+import { expandSqlStatements, parseAgentConfigUpdates } from './agentConfigSql'
 import { extractBrightDataArray, extractBrightDataResultCount, extractBrightDataSearchQuery } from './brightdata'
 
 const COMMUNICATION_TOOL_NAMES = [
@@ -213,12 +213,16 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         rawQueries = parameters.operations
       }
 
-      const statements = rawQueries.map(String)
+      const statements = expandSqlStatements(rawQueries.map(String))
+      const agentConfigUpdate = parseAgentConfigUpdates(statements)
 
       // Detect kanban-only SQL batches and transform them into a nice display
       // instead of showing raw SQL (the KanbanEventCard handles the detailed view)
-      const isKanbanOnlyBatch = statements.length > 0 && statements.every((stmt) => {
+      const isKanbanOnlyBatch = !agentConfigUpdate && statements.length > 0 && statements.every((stmt) => {
         const normalized = stmt.trim().toUpperCase()
+        if (normalized.includes('__AGENT_CONFIG')) {
+          return false
+        }
         // Match statements that operate on __kanban_cards table
         return (
           normalized.includes('__KANBAN_CARDS') ||
@@ -232,7 +236,6 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         return { skip: true }
       }
 
-      const agentConfigUpdate = parseAgentConfigUpdates(statements)
       if (agentConfigUpdate) {
         const {
           updatesCharter,
@@ -306,7 +309,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       }
 
       return {
-        caption: rawQueries.length ? `${rawQueries.length} statement${rawQueries.length === 1 ? '' : 's'}` : 'SQL batch',
+        caption: statements.length ? `${statements.length} statement${statements.length === 1 ? '' : 's'}` : 'SQL batch',
         sqlStatements: statements,
       }
     },

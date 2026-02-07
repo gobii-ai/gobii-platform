@@ -375,6 +375,7 @@ export function AgentChatPage({
   persistContextSession = true,
   onContextSwitch,
 }: AgentChatPageProps) {
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const {
     data: quickSettingsPayload,
     isLoading: quickSettingsLoading,
@@ -382,13 +383,13 @@ export function AgentChatPage({
     refetch: refetchQuickSettings,
     updateQuickSettings,
     updating: quickSettingsUpdating,
-  } = useAgentQuickSettings(agentId)
+  } = useAgentQuickSettings(activeAgentId)
   const {
     data: addonsPayload,
     refetch: refetchAddons,
     updateAddons,
     updating: addonsUpdating,
-  } = useAgentAddons(agentId)
+  } = useAgentAddons(activeAgentId)
   const queryClient = useQueryClient()
   const {
     currentPlan,
@@ -430,7 +431,6 @@ export function AgentChatPage({
     persistSession: persistContextSession,
   })
 
-  const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
@@ -587,10 +587,11 @@ export function AgentChatPage({
   })
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
+  const rosterQueryAgentId = resolvedContext ? undefined : (agentId ?? undefined)
   const rosterQuery = useAgentRoster({
     enabled: true,
     contextKey: rosterContextKey,
-    forAgentId: agentId ?? undefined,
+    forAgentId: rosterQueryAgentId,
   })
 
   useEffect(() => {
@@ -1014,10 +1015,12 @@ export function AgentChatPage({
     [activeAgentId, rosterAgents],
   )
   const isStoreSynced = storeAgentId === activeAgentId
-  const resolvedAgentName = (isStoreSynced ? storedAgentName : activeRosterMeta?.name) ?? agentName ?? null
-  const resolvedAvatarUrl = (isStoreSynced ? storedAgentAvatarUrl : activeRosterMeta?.avatarUrl) ?? agentAvatarUrl ?? null
-  const resolvedAgentColorHex =
-    (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
+  const storeAgentName = isStoreSynced ? storedAgentName : null
+  const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null
+  const storeAgentColor = isStoreSynced ? agentColorHex : null
+  const resolvedAgentName = storeAgentName ?? activeRosterMeta?.name ?? agentName ?? null
+  const resolvedAvatarUrl = storeResolvedAvatarUrl ?? activeRosterMeta?.avatarUrl ?? agentAvatarUrl ?? null
+  const resolvedAgentColorHex = storeAgentColor ?? activeRosterMeta?.displayColorHex ?? agentColor ?? null
   const pendingAgentEmail = activeAgentId ? pendingAgentEmails[activeAgentId] ?? null : null
   const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
   const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
@@ -1308,7 +1311,9 @@ export function AgentChatPage({
       const nextPath = buildAgentChatPath(window.location.pathname, agent.id)
       const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
       window.history.pushState({ agentId: agent.id }, '', nextUrl)
-      window.dispatchEvent(new PopStateEvent('popstate'))
+      if (window.location.pathname.startsWith('/app')) {
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      }
     },
     [activeAgentId],
   )
@@ -1917,7 +1922,7 @@ export function AgentChatPage({
   const topLevelError = error || (sessionStatus === 'error' ? sessionError : null)
 
   return (
-    <div className="agent-chat-page">
+    <div className="agent-chat-page" data-processing={isProcessing ? 'true' : 'false'}>
       {topLevelError ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{topLevelError}</div>
       ) : null}

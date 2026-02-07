@@ -11,6 +11,7 @@ export function useAgentRoster(options?: { enabled?: boolean; contextKey?: strin
     queryFn: () => fetchAgentRoster({ forAgentId }),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    placeholderData: (previousData) => previousData,
     enabled,
   })
 }

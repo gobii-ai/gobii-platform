@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 
 type AgentAvatarBadgeProps = {
   name: string
@@ -29,10 +29,21 @@ export function AgentAvatarBadge({
   const normalizedAvatarUrl = (avatarUrl || '').trim() || null
   const hasAvatar = Boolean(normalizedAvatarUrl)
   const [avatarReady, setAvatarReady] = useState(false)
+  const imageRef = useRef<HTMLImageElement | null>(null)
 
   useEffect(() => {
     setAvatarReady(false)
   }, [normalizedAvatarUrl])
+
+  useEffect(() => {
+    if (!hasAvatar) {
+      return
+    }
+    const image = imageRef.current
+    if (image && image.complete && image.naturalWidth > 0) {
+      setAvatarReady(true)
+    }
+  }, [hasAvatar, normalizedAvatarUrl])
 
   const containerStyle: CSSProperties = {
     position: 'relative',
@@ -67,6 +78,7 @@ export function AgentAvatarBadge({
       </span>
       {hasAvatar ? (
         <img
+          ref={imageRef}
           src={normalizedAvatarUrl ?? undefined}
           alt={`${trimmedName} avatar`}
           className={imageClassName}

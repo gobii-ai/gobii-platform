@@ -35,7 +35,12 @@ export const ChatSidebar = memo(function ChatSidebar({
   contextSwitcher,
 }: ChatSidebarProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
-  const [isMobile, setIsMobile] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+    return window.innerWidth < 768
+  })
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -57,6 +62,10 @@ export const ChatSidebar = memo(function ChatSidebar({
       setSearchQuery('')
     }
   }, [drawerOpen])
+
+  useEffect(() => {
+    setCollapsed((current) => (current === defaultCollapsed ? current : defaultCollapsed))
+  }, [defaultCollapsed])
 
   // Detect mobile breakpoint
   useEffect(() => {
