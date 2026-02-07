@@ -5007,7 +5007,6 @@
   display: block;
   width: 100%;
   height: 100%;
-  overflow: visible;
 }
 
 /* ---- rings ---- */
@@ -5076,7 +5075,7 @@
   width: 6px;
   height: 6px;
   margin: -3px 0 0 -3px;
-  background: #fff;
+  background: rgba(167, 139, 250, 0.85);
   border-radius: 50%;
   animation: coreBreathe 3s ease-in-out infinite;
   will-change: transform, box-shadow, background;
@@ -5085,25 +5084,25 @@
 @keyframes coreBreathe {
   0% {
     transform: scale(1);
-    background: rgba(255, 255, 255, 0.92);
+    background: rgba(167, 139, 250, 0.85);
     box-shadow:
-      0 0 3px 1px rgba(237, 233, 254, 0.95),
-      0 0 7px 2px rgba(196, 181, 253, 0.8),
+      0 0 3px 1px rgba(196, 181, 253, 0.95),
+      0 0 7px 2px rgba(167, 139, 250, 0.8),
       0 0 14px 4px rgba(139, 92, 246, 0.35),
       0 0 22px 6px rgba(124, 58, 237, 0.1);
   }
   35% {
     transform: scale(1.5);
-    background: #fff;
+    background: rgba(139, 92, 246, 0.9);
     box-shadow:
-      0 0 4px 2px rgba(237, 233, 254, 1),
-      0 0 10px 3px rgba(196, 181, 253, 0.9),
+      0 0 4px 2px rgba(196, 181, 253, 1),
+      0 0 10px 3px rgba(167, 139, 250, 0.9),
       0 0 18px 5px rgba(139, 92, 246, 0.5),
       0 0 28px 8px rgba(124, 58, 237, 0.15);
   }
   65% {
     transform: scale(1.2);
-    background: rgba(237, 233, 254, 0.9);
+    background: rgba(196, 181, 253, 0.9);
     box-shadow:
       0 0 3px 1px rgba(196, 181, 253, 0.9),
       0 0 8px 3px rgba(167, 139, 250, 0.65),
@@ -5112,10 +5111,10 @@
   }
   100% {
     transform: scale(1);
-    background: rgba(255, 255, 255, 0.92);
+    background: rgba(167, 139, 250, 0.85);
     box-shadow:
-      0 0 3px 1px rgba(237, 233, 254, 0.95),
-      0 0 7px 2px rgba(196, 181, 253, 0.8),
+      0 0 3px 1px rgba(196, 181, 253, 0.95),
+      0 0 7px 2px rgba(167, 139, 250, 0.8),
       0 0 14px 4px rgba(139, 92, 246, 0.35),
       0 0 22px 6px rgba(124, 58, 237, 0.1);
   }
@@ -5135,7 +5134,7 @@
   .throbber-outer { animation: none; }
   .throbber-core {
     animation: none;
-    background: rgba(255, 255, 255, 0.92);
+    background: rgba(167, 139, 250, 0.85);
     box-shadow:
       0 0 3px 1px rgba(237, 233, 254, 0.95),
       0 0 7px 2px rgba(196, 181, 253, 0.8),
