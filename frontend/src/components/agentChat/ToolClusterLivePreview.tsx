@@ -38,6 +38,12 @@ type EntryVisual = {
   searchItems: SearchPreviewItem[]
   searchTotal: number | null
   enabledToolInfos: FriendlyToolInfo[]
+  scrapeTargets: ScrapeTargetItem[]
+}
+
+type ScrapeTargetItem = {
+  url: string
+  host: string
 }
 
 type LinkedInProfileVisual = {
@@ -57,6 +63,7 @@ type SearchPreviewItem = {
 const MAX_DETAIL_LENGTH = 88
 const MAX_PREVIEW_ENTRIES = 3
 const MAX_SEARCH_PREVIEW_ITEMS = 8
+const MAX_SCRAPE_TARGETS = 15
 const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
 
 function clampText(value: string, maxLength: number = MAX_DETAIL_LENGTH): string {
@@ -611,8 +618,42 @@ function extractSearchPreviewItems(value: unknown): { items: SearchPreviewItem[]
   }
 }
 
+function extractScrapeTargets(entry: ToolEntryDisplay): ScrapeTargetItem[] {
+  const params = entry.parameters
+  if (!params) return []
+
+  const rawUrls: string[] = []
+
+  if (Array.isArray(params.urls)) {
+    for (const u of params.urls) {
+      if (typeof u === 'string' && u.trim()) rawUrls.push(u.trim())
+    }
+  }
+
+  for (const key of ['url', 'start_url', 'target_url']) {
+    const value = params[key]
+    if (typeof value === 'string' && value.trim()) {
+      rawUrls.push(value.trim())
+    }
+  }
+
+  if (!rawUrls.length) return []
+
+  const seen = new Set<string>()
+  const items: ScrapeTargetItem[] = []
+  for (const raw of rawUrls) {
+    const host = parseHostFromText(raw)
+    if (!host || seen.has(raw)) continue
+    seen.add(raw)
+    items.push({ url: raw, host })
+    if (items.length >= MAX_SCRAPE_TARGETS) break
+  }
+  return items
+}
+
 function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor): EntryVisual {
   const toolName = (entry.toolName ?? '').toLowerCase()
+  const scrapeTargets = activity.kind === 'linkedin' ? [] : extractScrapeTargets(entry)
 
   if (TOOL_SEARCH_TOOL_NAMES.has(toolName)) {
     const outcome = parseToolSearchResult(entry.result)
@@ -625,7 +666,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     const enabledPreview = outcome.enabledTools.slice(0, 3).map(toFriendlyToolName).join(', ')
     const snippet = enabledPreview ? clampText(`Enabled: ${enabledPreview}`, 96) : null
     const enabledToolInfos = outcome.enabledTools.map(getFriendlyToolInfo)
-    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos }
+    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos, scrapeTargets: [] }
   }
 
   if (activity.kind === 'search') {
@@ -640,6 +681,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: searchPreview.items,
       searchTotal: effectiveTotal,
       enabledToolInfos: [],
+      scrapeTargets: [],
     }
   }
 
@@ -652,6 +694,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: [],
       searchTotal: null,
       enabledToolInfos: [],
+      scrapeTargets,
     }
   }
 
@@ -664,6 +707,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: [],
       searchTotal: null,
       enabledToolInfos: [],
+      scrapeTargets: [],
     }
   }
 
@@ -675,6 +719,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     searchItems: [],
     searchTotal: null,
     enabledToolInfos: [],
+    scrapeTargets,
   }
 }
 
@@ -998,7 +1043,7 @@ export function ToolClusterLivePreview({
                     <span className="tool-cluster-live-preview__entry-label">
                       {linkedInProfile ? linkedInProfile.displayName : item.activity.label}
                     </span>
-                    {visual.badge && !visual.enabledToolInfos.length && !searchItems.length ? (
+                    {visual.badge && !visual.enabledToolInfos.length && !searchItems.length && !visual.scrapeTargets.length ? (
                       <>
                         <span className="tool-cluster-live-preview__entry-separator" aria-hidden="true">·</span>
                         <span className="tool-cluster-live-preview__entry-count">{visual.badge}</span>
@@ -1019,7 +1064,7 @@ export function ToolClusterLivePreview({
                           ? `${item.activity.label} · ${linkedInProfile.subtitle}`
                           : item.activity.label}
                       </motion.span>
-                    ) : detailText && !visual.enabledToolInfos.length && !searchItems.length ? (
+                    ) : detailText && !visual.enabledToolInfos.length && !searchItems.length && !visual.scrapeTargets.length ? (
                       <motion.span
                         key={`${entry.id}-detail-${detailText}`}
                         className="tool-cluster-live-preview__entry-caption"
@@ -1058,6 +1103,42 @@ export function ToolClusterLivePreview({
                           </motion.div>
                         )
                       })}
+                    </div>
+                  ) : visual.scrapeTargets.length ? (
+                    <div className="tool-cluster-live-preview__scrape-targets">
+                      {visual.scrapeTargets.map((target, targetIndex) => (
+                        <motion.a
+                          key={target.url}
+                          href={target.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="tool-cluster-live-preview__scrape-target"
+                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 8, scale: 0.94 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                          transition={{
+                            duration: 0.28,
+                            ease: [0.22, 1, 0.36, 1],
+                            delay: reduceMotion ? 0 : isHighlighted
+                              ? 0.12 + targetIndex * 0.2
+                              : targetIndex * 0.015,
+                          }}
+                          onPointerDown={(event) => event.stopPropagation()}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => event.stopPropagation()}
+                        >
+                          <span className="tool-cluster-live-preview__scrape-target-favicon-wrap">
+                            <img
+                              src={buildFaviconUrl(target.host)}
+                              alt=""
+                              loading="lazy"
+                              referrerPolicy="no-referrer"
+                              className="tool-cluster-live-preview__scrape-target-favicon"
+                            />
+                          </span>
+                          <span className="tool-cluster-live-preview__scrape-target-host">{target.host}</span>
+                        </motion.a>
+                      ))}
                     </div>
                   ) : visual.snippet && visual.snippet !== detailText && searchItems.length === 0 ? (
                     <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
