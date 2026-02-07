@@ -437,8 +437,8 @@ export function AgentChatLayout({
   // Un-suppress the static thinking entry once streaming completes so it appears in its chronological position
   const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
   const showStreamingSlot = hasStreamingContent && isStreaming
-  // Show streaming thinking card at the bottom until content starts arriving
-  const showStreamingThinking = Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
+  // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
+  const showStreamingThinking = isStreaming && Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
