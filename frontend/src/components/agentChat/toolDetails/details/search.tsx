@@ -2,6 +2,7 @@ import { ExternalLink, Globe, Database, Code } from 'lucide-react'
 
 import type { ToolDetailProps } from '../../tooling/types'
 import { parseToolSearchResult } from '../../tooling/searchUtils'
+import { toFriendlyToolName } from '../../../tooling/toolMetadata'
 import { KeyValueList, Section } from '../shared'
 import { isNonEmptyString } from '../utils'
 
@@ -160,7 +161,7 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
                 {calloutLists.map((group) => (
                   <div key={group.label} className="tool-search-callout-list-group">
                     <span className="tool-search-callout-list-label">{group.label}</span>
-                    <span className="tool-search-callout-list-items">{group.items.join(', ')}</span>
+                    <span className="tool-search-callout-list-items">{group.items.map(toFriendlyToolName).join(', ')}</span>
                   </div>
                 ))}
               </div>
@@ -175,7 +176,7 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
             {toolSuggestions.map((tool, idx) => (
               <li key={`${tool.name}-${idx}`} className="tool-search-suggestion-card">
                 <div className="tool-search-suggestion-header">
-                  <span className="tool-search-suggestion-name">{tool.name}</span>
+                  <span className="tool-search-suggestion-name">{toFriendlyToolName(tool.name)}</span>
                   {tool.source ? <span className="tool-search-suggestion-source">{tool.source}</span> : null}
                 </div>
                 {tool.description ? <p className="tool-search-suggestion-description">{tool.description}</p> : null}
@@ -235,7 +236,7 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
         <Section key={group.title} title={group.title}>
           <ul className="tool-search-list">
             {group.items.map((item, idx) => (
-              <li key={`${group.title}-${item}-${idx}`}>{item}</li>
+              <li key={`${group.title}-${item}-${idx}`}>{toFriendlyToolName(item)}</li>
             ))}
           </ul>
         </Section>

@@ -824,7 +824,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'mcp_brightdata_web_data_linkedin_person_profile',
     aliases: ['web_data_linkedin_person_profile'],
-    label: 'LinkedIn profile',
+    label: 'LinkedIn Profile',
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
@@ -841,14 +841,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         'name',
       ])
       return {
-        caption: caption ?? entry.caption ?? 'LinkedIn profile',
+        caption: caption ?? entry.caption ?? 'LinkedIn Profile',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_linkedin_company_profile',
     aliases: ['web_data_linkedin_company_profile'],
-    label: 'LinkedIn company',
+    label: 'LinkedIn Company',
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
@@ -864,14 +864,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         'name',
       ])
       return {
-        caption: caption ?? entry.caption ?? 'LinkedIn company',
+        caption: caption ?? entry.caption ?? 'LinkedIn Company',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_linkedin_job_listings',
     aliases: ['web_data_linkedin_job_listings'],
-    label: 'LinkedIn jobs',
+    label: 'LinkedIn Jobs',
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
@@ -896,14 +896,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const caption = query || fallback
 
       return {
-        caption: caption ? truncate(caption, 56) : entry.caption ?? 'LinkedIn jobs',
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'LinkedIn Jobs',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_linkedin_posts',
     aliases: ['web_data_linkedin_posts'],
-    label: 'LinkedIn posts',
+    label: 'LinkedIn Posts',
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
@@ -925,14 +925,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         'url',
       ]) || title || author || url
       return {
-        caption: caption ?? entry.caption ?? 'LinkedIn posts',
+        caption: caption ?? entry.caption ?? 'LinkedIn Posts',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_linkedin_people_search',
     aliases: ['web_data_linkedin_people_search'],
-    label: 'LinkedIn search',
+    label: 'LinkedIn Search',
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
@@ -951,7 +951,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         'location',
       ])
       return {
-        caption: caption ?? entry.caption ?? 'LinkedIn search',
+        caption: caption ?? entry.caption ?? 'LinkedIn Search',
       }
     },
   },
@@ -975,7 +975,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'mcp_brightdata_web_data_reuter_news',
     aliases: ['web_data_reuter_news'],
-    label: 'Reuters news',
+    label: 'Reuters News',
     icon: Globe,
     iconBgClass: 'bg-blue-100',
     iconColorClass: 'text-blue-700',
@@ -988,14 +988,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const url = coerceString(first?.['url']) || coerceString(parameters?.['url'])
       const caption = headline || keyword || url
       return {
-        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reuters news',
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reuters News',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_reddit_posts',
     aliases: ['web_data_reddit_posts'],
-    label: 'Reddit posts',
+    label: 'Reddit Posts',
     icon: MessageSquareText,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-700',
@@ -1009,14 +1009,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const url = coerceString(first?.['url']) || coerceString(parameters?.['url'])
       const caption = title || community || author || url
       return {
-        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reddit posts',
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reddit Posts',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_zillow_properties_listing',
     aliases: ['web_data_zillow_properties_listing'],
-    label: 'Zillow listing',
+    label: 'Zillow Listing',
     icon: Home,
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-700',
@@ -1038,14 +1038,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const baseCaption = location || url
       const combined = baseCaption && priceCaption ? `${baseCaption} • ${priceCaption}` : baseCaption ?? priceCaption
       return {
-        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Zillow listing',
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Zillow Listing',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_crunchbase_company',
     aliases: ['web_data_crunchbase_company'],
-    label: 'Crunchbase company',
+    label: 'Crunchbase Company',
     icon: Database,
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-700',
@@ -1053,14 +1053,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     derive(entry, parameters) {
       const caption = pickFirstParameter(parameters, ['company', 'company_id', 'name', 'organization', 'slug', 'url'])
       return {
-        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Crunchbase company',
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Crunchbase Company',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_amazon_product',
     aliases: ['web_data_amazon_product'],
-    label: 'Amazon product',
+    label: 'Amazon Product',
     icon: ShoppingBag,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-700',
@@ -1068,14 +1068,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     derive(entry, parameters) {
       const caption = pickFirstParameter(parameters, ['title', 'asin', 'url', 'product', 'name'])
       return {
-        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Amazon product',
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Amazon Product',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_amazon_product_search',
     aliases: ['web_data_amazon_product_search'],
-    label: 'Amazon search',
+    label: 'Amazon Search',
     icon: ShoppingBag,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-700',
@@ -1094,14 +1094,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const caption = query || name
       const combined = caption && countLabel ? `${caption} • ${countLabel}` : caption ?? countLabel
       return {
-        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon search',
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon Search',
       }
     },
   },
   {
     name: 'mcp_brightdata_web_data_amazon_product_reviews',
     aliases: ['web_data_amazon_product_reviews'],
-    label: 'Amazon reviews',
+    label: 'Amazon Reviews',
     icon: ShoppingBag,
     iconBgClass: 'bg-orange-100',
     iconColorClass: 'text-orange-700',
@@ -1122,7 +1122,57 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const caption = productName || urlCaption
       const combined = caption && ratingSummary ? `${caption} • ${ratingSummary}` : caption ?? ratingSummary
       return {
-        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon reviews',
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon Reviews',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_extract',
+    aliases: ['extract'],
+    label: 'Data Extract',
+    icon: ScanText,
+    iconBgClass: 'bg-fuchsia-100',
+    iconColorClass: 'text-fuchsia-600',
+    detailKind: 'brightDataSnapshot',
+    derive(entry, parameters) {
+      const url =
+        coerceString(parameters?.['url']) ||
+        coerceString(parameters?.['start_url']) ||
+        null
+      const caption = url ? truncate(url, 64) : null
+      return {
+        caption: caption ?? entry.caption ?? 'Data extract',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_scrape_batch',
+    aliases: ['scrape_batch'],
+    label: 'Batch Scrape',
+    icon: ScanText,
+    iconBgClass: 'bg-fuchsia-100',
+    iconColorClass: 'text-fuchsia-600',
+    detailKind: 'brightDataSnapshot',
+    derive(entry, parameters) {
+      const urls = Array.isArray(parameters?.['urls']) ? parameters.urls as unknown[] : []
+      const caption = urls.length ? `${urls.length} page${urls.length === 1 ? '' : 's'}` : null
+      return {
+        caption: caption ?? entry.caption ?? 'Batch scrape',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_zoominfo_company_profile',
+    aliases: ['web_data_zoominfo_company_profile'],
+    label: 'ZoomInfo Company',
+    icon: Database,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'default',
+    derive(entry, parameters) {
+      const caption = pickFirstParameter(parameters, ['company', 'name', 'url'])
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'ZoomInfo Company',
       }
     },
   },
@@ -1207,6 +1257,91 @@ const TOOL_METADATA_MAP: Map<string, ToolMetadataConfig> = (() => {
 export function getSharedToolMetadata(toolName: string | null | undefined): ToolMetadataConfig {
   const normalized = (toolName ?? '').toLowerCase()
   return TOOL_METADATA_MAP.get(normalized) ?? DEFAULT_TOOL_METADATA
+}
+
+const KNOWN_SERVER_PREFIXES = ['brightdata_', 'bright_data_']
+const KNOWN_CATEGORY_PREFIXES = ['web_data_', 'scraping_browser_']
+
+const BRAND_CASING: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  zoominfo: 'ZoomInfo',
+  crunchbase: 'Crunchbase',
+  youtube: 'YouTube',
+  tiktok: 'TikTok',
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  github: 'GitHub',
+  reddit: 'Reddit',
+  amazon: 'Amazon',
+  walmart: 'Walmart',
+  zillow: 'Zillow',
+  ebay: 'eBay',
+  bestbuy: 'Best Buy',
+  homedepot: 'Home Depot',
+  api: 'API',
+  csv: 'CSV',
+  pdf: 'PDF',
+  html: 'HTML',
+  url: 'URL',
+  sql: 'SQL',
+}
+
+function titleCase(slug: string): string {
+  return slug
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((word) => BRAND_CASING[word.toLowerCase()] ?? word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ')
+}
+
+export function toFriendlyToolName(rawName: string): string {
+  const config = TOOL_METADATA_MAP.get(rawName.toLowerCase())
+  if (config && config !== DEFAULT_TOOL_METADATA) {
+    return config.label
+  }
+
+  let slug = rawName
+  if (slug.startsWith('mcp_')) {
+    slug = slug.slice(4)
+  }
+  for (const prefix of KNOWN_SERVER_PREFIXES) {
+    if (slug.startsWith(prefix)) {
+      slug = slug.slice(prefix.length)
+      break
+    }
+  }
+  for (const prefix of KNOWN_CATEGORY_PREFIXES) {
+    if (slug.startsWith(prefix)) {
+      slug = slug.slice(prefix.length)
+      break
+    }
+  }
+  return titleCase(slug)
+}
+
+export type FriendlyToolInfo = {
+  label: string
+  icon: LucideIcon
+  iconBgClass: string
+  iconColorClass: string
+}
+
+export function getFriendlyToolInfo(rawName: string): FriendlyToolInfo {
+  const config = TOOL_METADATA_MAP.get(rawName.toLowerCase())
+  if (config && config !== DEFAULT_TOOL_METADATA) {
+    return {
+      label: config.label,
+      icon: config.icon,
+      iconBgClass: config.iconBgClass,
+      iconColorClass: config.iconColorClass,
+    }
+  }
+  return {
+    label: toFriendlyToolName(rawName),
+    icon: Workflow,
+    iconBgClass: 'bg-slate-100',
+    iconColorClass: 'text-slate-600',
+  }
 }
 
 export function buildToolDescriptorMap(

@@ -2583,6 +2583,65 @@
   line-height: 1.26;
 }
 
+.tool-cluster-live-preview__enabled-tools {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4.8rem, 1fr));
+  gap: 0.35rem;
+  margin-top: 0.28rem;
+  padding: 0.22rem;
+  border-radius: 0.5rem;
+  background: rgba(248, 250, 252, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.tool-cluster-live-preview__enabled-tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.22rem;
+  padding: 0.4rem 0.28rem 0.32rem;
+  border-radius: 0.42rem;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  background: white;
+  cursor: default;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.tool-cluster-live-preview__enabled-tool-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.tool-cluster-live-preview__enabled-tool-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 0.38rem;
+  flex-shrink: 0;
+}
+
+.tool-cluster-live-preview__enabled-tool-card-icon svg {
+  width: 0.92rem;
+  height: 0.92rem;
+}
+
+.tool-cluster-live-preview__enabled-tool-card-label {
+  font-size: 0.56rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  color: rgba(15, 23, 42, 0.78);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-width: 100%;
+  word-break: break-word;
+}
+
 .tool-cluster-live-preview__search-results {
   margin: 0.12rem 0 0;
   padding: 0.18rem 0.22rem;

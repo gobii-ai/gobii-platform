@@ -4,6 +4,7 @@ import { Search } from 'lucide-react'
 
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
+import { toFriendlyToolName, getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
 import { ToolIconSlot } from './ToolIconSlot'
 import { deriveSemanticPreview } from './tooling/clusterPreviewText'
 import { parseToolSearchResult } from './tooling/searchUtils'
@@ -38,6 +39,7 @@ type EntryVisual = {
   linkedInProfile: LinkedInProfileVisual | null
   searchItems: SearchPreviewItem[]
   searchTotal: number | null
+  enabledToolInfos: FriendlyToolInfo[]
 }
 
 type LinkedInProfileVisual = {
@@ -622,9 +624,10 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       : outcome.enabledTools.length
         ? `${outcome.enabledTools.length} enabled`
         : null
-    const enabledPreview = outcome.enabledTools.slice(0, 3).join(', ')
+    const enabledPreview = outcome.enabledTools.slice(0, 3).map(toFriendlyToolName).join(', ')
     const snippet = enabledPreview ? clampText(`Enabled: ${enabledPreview}`, 96) : null
-    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null }
+    const enabledToolInfos = outcome.enabledTools.map(getFriendlyToolInfo)
+    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos }
   }
 
   if (activity.kind === 'search') {
@@ -638,6 +641,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       linkedInProfile: null,
       searchItems: searchPreview.items,
       searchTotal: effectiveTotal,
+      enabledToolInfos: [],
     }
   }
 
@@ -649,6 +653,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       linkedInProfile: null,
       searchItems: [],
       searchTotal: null,
+      enabledToolInfos: [],
     }
   }
 
@@ -660,6 +665,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       linkedInProfile,
       searchItems: [],
       searchTotal: null,
+      enabledToolInfos: [],
     }
   }
 
@@ -670,6 +676,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     linkedInProfile: null,
     searchItems: [],
     searchTotal: null,
+    enabledToolInfos: [],
   }
 }
 
@@ -1030,7 +1037,32 @@ export function ToolClusterLivePreview({
                       </motion.span>
                     ) : null}
                   </AnimatePresence>
-                  {visual.snippet && visual.snippet !== detailText && searchItems.length === 0 ? (
+                  {visual.enabledToolInfos.length ? (
+                    <div className="tool-cluster-live-preview__enabled-tools">
+                      {visual.enabledToolInfos.map((info, cardIndex) => {
+                        const CardIcon = info.icon
+                        return (
+                          <motion.div
+                            key={`card-${cardIndex}-${info.label}`}
+                            className="tool-cluster-live-preview__enabled-tool-card"
+                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6, scale: 0.9 }}
+                            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                            transition={{
+                              duration: 0.26,
+                              ease: 'easeOut',
+                              delay: reduceMotion ? 0 : cardIndex * 0.04,
+                            }}
+                            whileHover={reduceMotion ? undefined : { scale: 1.04, y: -2 }}
+                          >
+                            <span className={`tool-cluster-live-preview__enabled-tool-card-icon ${info.iconBgClass} ${info.iconColorClass}`}>
+                              <CardIcon aria-hidden="true" />
+                            </span>
+                            <span className="tool-cluster-live-preview__enabled-tool-card-label">{info.label}</span>
+                          </motion.div>
+                        )
+                      })}
+                    </div>
+                  ) : visual.snippet && visual.snippet !== detailText && searchItems.length === 0 ? (
                     <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
                   ) : null}
                   {searchItems.length ? (

@@ -1,4 +1,5 @@
 import type { ToolCallEntry } from '../../../types/agentChat'
+import { toFriendlyToolName } from '../../tooling/toolMetadata'
 
 export type NormalizedToolSuggestion = {
   name: string
@@ -217,7 +218,7 @@ export function summarizeToolSearchForCaption(entry: ToolCallEntry, query: strin
     caption = outcome.toolCount === 0 ? 'No tools found' : `${outcome.toolCount} tool${outcome.toolCount === 1 ? '' : 's'} ready`
   }
   if (!caption && outcome.enabledTools.length) {
-    const enabledPreview = outcome.enabledTools.slice(0, 2).join(', ')
+    const enabledPreview = outcome.enabledTools.slice(0, 2).map(toFriendlyToolName).join(', ')
     caption = outcome.enabledTools.length > 1 ? `Enabled ${outcome.enabledTools.length} tools` : `Enabled ${enabledPreview}`
   }
   if (!caption && query) {
