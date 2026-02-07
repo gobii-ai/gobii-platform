@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { ExternalLink, Globe, Search } from 'lucide-react'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
 import { toFriendlyToolName, getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
@@ -964,6 +965,7 @@ export function ToolClusterLivePreview({
                 className="tool-cluster-live-preview__entry"
                 data-active={isHighlighted ? 'true' : 'false'}
                 data-kind={item.activity.kind}
+                data-has-results={searchItems.length > 0 ? 'true' : 'false'}
                 data-new={isNew ? 'true' : 'false'}
                 data-profile-card={linkedInProfile ? 'true' : 'false'}
                 role="button"
@@ -972,9 +974,9 @@ export function ToolClusterLivePreview({
                 animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
                 exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.995 }}
                 transition={{
-                  duration: reduceMotion ? 0.12 : 0.22,
+                  duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
                   ease: 'easeOut',
-                  delay: reduceMotion ? 0 : index * 0.032,
+                  delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                 }}
                 whileHover={reduceMotion ? undefined : { x: 1.5 }}
                 whileTap={reduceMotion ? undefined : { scale: 0.998 }}
@@ -1020,7 +1022,7 @@ export function ToolClusterLivePreview({
                       />
                     ) : null}
                   </motion.span>
-                ) : (
+                ) : !searchItems.length ? (
                   <motion.span
                     className={`tool-cluster-live-preview__entry-icon ${entry.iconBgClass} ${entry.iconColorClass}`}
                     animate={
@@ -1040,159 +1042,198 @@ export function ToolClusterLivePreview({
                   >
                     <ToolIconSlot entry={entry} />
                   </motion.span>
-                )}
-                <span className="tool-cluster-live-preview__entry-main">
-                  <span className="tool-cluster-live-preview__entry-label-row">
-                    <span className="tool-cluster-live-preview__entry-label">
-                      {linkedInProfile ? linkedInProfile.displayName : item.activity.label}
+                ) : null}
+                <span className="tool-cluster-live-preview__entry-header">
+                  <span className="tool-cluster-live-preview__entry-main">
+                    <span className="tool-cluster-live-preview__entry-label-row">
+                      {searchItems.length > 0 ? (
+                        <motion.span
+                          className={`tool-cluster-live-preview__entry-icon tool-cluster-live-preview__entry-icon--inline ${entry.iconBgClass} ${entry.iconColorClass}`}
+                          animate={
+                            reduceMotion || !isHighlighted
+                              ? undefined
+                              : { rotate: [0, -5, 5, 0] }
+                          }
+                          transition={
+                            reduceMotion || !isHighlighted
+                              ? undefined
+                              : { duration: 0.58, repeat: Infinity, ease: 'easeInOut' }
+                          }
+                        >
+                          <ToolIconSlot entry={entry} />
+                        </motion.span>
+                      ) : null}
+                      <span className="tool-cluster-live-preview__entry-label">
+                        {linkedInProfile ? linkedInProfile.displayName : visual.scrapeTargets.length ? 'Browsing' : item.activity.label}
+                      </span>
+                      {visual.scrapeTargets.length ? (
+                        <span className="tool-cluster-live-preview__scrape-inline">
+                          {visual.scrapeTargets.slice(0, 3).map((target, targetIndex) => (
+                            <motion.a
+                              key={target.url}
+                              href={target.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="tool-cluster-live-preview__scrape-inline-link"
+                              initial={reduceMotion ? { opacity: 1 } : { opacity: 0, scale: 0.92 }}
+                              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+                              transition={{
+                                duration: reduceMotion ? 0.08 : isLatestEvent ? 0.24 : 0.08,
+                                ease: [0.22, 1, 0.36, 1],
+                                delay: reduceMotion ? 0 : isLatestEvent ? targetIndex * 0.08 : 0,
+                              }}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onMouseDown={(event) => event.stopPropagation()}
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                            >
+                              <img
+                                src={buildFaviconUrl(target.host)}
+                                alt=""
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="tool-cluster-live-preview__scrape-inline-favicon"
+                              />
+                              <span className="tool-cluster-live-preview__scrape-inline-host">{target.host}</span>
+                              <ExternalLink className="tool-cluster-live-preview__scrape-inline-ext" aria-hidden="true" />
+                            </motion.a>
+                          ))}
+                          {visual.scrapeTargets.length > 3 ? (
+                            <span className="tool-cluster-live-preview__scrape-inline-more">
+                              +{visual.scrapeTargets.length - 3}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : visual.badge && !visual.enabledToolInfos.length ? (
+                        <>
+                          <span className="tool-cluster-live-preview__entry-separator" aria-hidden="true">·</span>
+                          <span className="tool-cluster-live-preview__entry-count">{visual.badge}</span>
+                        </>
+                      ) : null}
                     </span>
-                    {visual.badge && !visual.enabledToolInfos.length && !searchItems.length && !visual.scrapeTargets.length ? (
-                      <>
-                        <span className="tool-cluster-live-preview__entry-separator" aria-hidden="true">·</span>
-                        <span className="tool-cluster-live-preview__entry-count">{visual.badge}</span>
-                      </>
+                    {searchItems.length > 0 && detailText ? (
+                      <motion.span
+                        className="tool-cluster-live-preview__search-query"
+                        initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 4 }}
+                        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                        transition={{
+                          duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
+                          ease: [0.22, 1, 0.36, 1],
+                          delay: reduceMotion ? 0 : isLatestEvent ? 0.06 : 0,
+                        }}
+                      >
+                        <Search className="tool-cluster-live-preview__search-query-icon" aria-hidden="true" />
+                        <span className="tool-cluster-live-preview__search-query-text">{detailText}</span>
+                      </motion.span>
+                    ) : null}
+                    <AnimatePresence initial={false} mode="wait">
+                      {linkedInProfile ? (
+                        <motion.span
+                          key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle ?? item.activity.label}`}
+                          className="tool-cluster-live-preview__entry-caption"
+                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
+                          transition={{ duration: 0.16, ease: 'easeOut' }}
+                        >
+                          {linkedInProfile.subtitle
+                            ? `${item.activity.label} · ${linkedInProfile.subtitle}`
+                            : item.activity.label}
+                        </motion.span>
+                      ) : detailText && !visual.enabledToolInfos.length && !searchItems.length && !visual.scrapeTargets.length ? (
+                        <motion.span
+                          key={`${entry.id}-detail-${detailText}`}
+                          className="tool-cluster-live-preview__entry-caption"
+                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
+                          transition={{ duration: 0.16, ease: 'easeOut' }}
+                        >
+                          {detailText}
+                        </motion.span>
+                      ) : null}
+                    </AnimatePresence>
+                    {visual.enabledToolInfos.length ? (
+                      <div className="tool-cluster-live-preview__enabled-tools">
+                        {visual.enabledToolInfos.map((info, cardIndex) => {
+                          const CardIcon = info.icon
+                          return (
+                            <motion.div
+                              key={`card-${cardIndex}-${info.label}`}
+                              className="tool-cluster-live-preview__enabled-tool-card"
+                              initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.92 }}
+                              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                              transition={{
+                                duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
+                                ease: [0.22, 1, 0.36, 1],
+                                delay: reduceMotion ? 0 : isLatestEvent
+                                  ? 0.1 + cardIndex * 0.12
+                                  : cardIndex * 0.015,
+                              }}
+                              whileHover={reduceMotion ? undefined : { scale: 1.04, y: -2 }}
+                            >
+                              <span className={`tool-cluster-live-preview__enabled-tool-card-icon ${info.iconBgClass} ${info.iconColorClass}`}>
+                                <CardIcon aria-hidden="true" />
+                              </span>
+                              <span className="tool-cluster-live-preview__enabled-tool-card-label">{info.label}</span>
+                            </motion.div>
+                          )
+                        })}
+                      </div>
+                    ) : visual.snippet && visual.snippet !== detailText && searchItems.length === 0 && !visual.scrapeTargets.length ? (
+                      <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
                     ) : null}
                   </span>
-                  <AnimatePresence initial={false} mode="wait">
-                    {linkedInProfile ? (
-                      <motion.span
-                        key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle ?? item.activity.label}`}
-                        className="tool-cluster-live-preview__entry-caption"
-                        initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
+                  {item.relativeTime ? (
+                    <time className="tool-cluster-live-preview__entry-time" dateTime={entry.timestamp ?? undefined}>
+                      {item.relativeTime}
+                    </time>
+                  ) : null}
+                </span>
+                {searchItems.length ? (
+                  <ul className="tool-cluster-live-preview__search-results">
+                    {searchItems.map((searchItem, searchIndex) => (
+                      <motion.li
+                        key={`${entry.id}-search-item-${searchItem.url}`}
+                        className="tool-cluster-live-preview__search-result-row"
+                        initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }}
                         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                        exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
-                        transition={{ duration: 0.16, ease: 'easeOut' }}
+                        transition={{
+                          duration: reduceMotion ? 0.08 : isLatestEvent ? 0.35 : 0.12,
+                          ease: [0.22, 1, 0.36, 1],
+                          delay: reduceMotion ? 0 : isLatestEvent
+                            ? 0.08 + searchIndex * 0.09
+                            : searchIndex * 0.015,
+                        }}
                       >
-                        {linkedInProfile.subtitle
-                          ? `${item.activity.label} · ${linkedInProfile.subtitle}`
-                          : item.activity.label}
-                      </motion.span>
-                    ) : detailText && !visual.enabledToolInfos.length && !searchItems.length && !visual.scrapeTargets.length ? (
-                      <motion.span
-                        key={`${entry.id}-detail-${detailText}`}
-                        className="tool-cluster-live-preview__entry-caption"
-                        initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
-                        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                        exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
-                        transition={{ duration: 0.16, ease: 'easeOut' }}
-                      >
-                        {detailText}
-                      </motion.span>
-                    ) : null}
-                  </AnimatePresence>
-                  {visual.enabledToolInfos.length ? (
-                    <div className="tool-cluster-live-preview__enabled-tools">
-                      {visual.enabledToolInfos.map((info, cardIndex) => {
-                        const CardIcon = info.icon
-                        return (
-                          <motion.div
-                            key={`card-${cardIndex}-${info.label}`}
-                            className="tool-cluster-live-preview__enabled-tool-card"
-                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.92 }}
-                            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-                            transition={{
-                              duration: 0.3,
-                              ease: [0.22, 1, 0.36, 1],
-                              delay: reduceMotion ? 0 : isHighlighted
-                                ? 0.1 + cardIndex * 0.12
-                                : cardIndex * 0.025,
-                            }}
-                            whileHover={reduceMotion ? undefined : { scale: 1.04, y: -2 }}
-                          >
-                            <span className={`tool-cluster-live-preview__enabled-tool-card-icon ${info.iconBgClass} ${info.iconColorClass}`}>
-                              <CardIcon aria-hidden="true" />
-                            </span>
-                            <span className="tool-cluster-live-preview__enabled-tool-card-label">{info.label}</span>
-                          </motion.div>
-                        )
-                      })}
-                    </div>
-                  ) : visual.scrapeTargets.length ? (
-                    <div className="tool-cluster-live-preview__scrape-targets">
-                      {visual.scrapeTargets.map((target, targetIndex) => (
-                        <motion.a
-                          key={target.url}
-                          href={target.url}
+                        <a
+                          href={searchItem.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="tool-cluster-live-preview__scrape-target"
-                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 8, scale: 0.94 }}
-                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-                          transition={{
-                            duration: 0.28,
-                            ease: [0.22, 1, 0.36, 1],
-                            delay: reduceMotion ? 0 : isHighlighted
-                              ? 0.1 + targetIndex * 0.18
-                              : targetIndex * 0.025,
-                          }}
+                          className="tool-cluster-live-preview__search-result-link"
                           onPointerDown={(event) => event.stopPropagation()}
                           onMouseDown={(event) => event.stopPropagation()}
                           onClick={(event) => event.stopPropagation()}
                           onKeyDown={(event) => event.stopPropagation()}
                         >
-                          <span className="tool-cluster-live-preview__scrape-target-favicon-wrap">
+                          <span className="tool-cluster-live-preview__search-result-favicon-wrap">
                             <img
-                              src={buildFaviconUrl(target.host)}
+                              src={buildFaviconUrl(searchItem.host)}
                               alt=""
                               loading="lazy"
                               referrerPolicy="no-referrer"
-                              className="tool-cluster-live-preview__scrape-target-favicon"
+                              className="tool-cluster-live-preview__search-result-favicon"
                             />
                           </span>
-                          <span className="tool-cluster-live-preview__scrape-target-host">{target.host}</span>
-                        </motion.a>
-                      ))}
-                    </div>
-                  ) : visual.snippet && visual.snippet !== detailText && searchItems.length === 0 ? (
-                    <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
-                  ) : null}
-                  {searchItems.length ? (
-                    <ul className="tool-cluster-live-preview__search-results">
-                      {searchItems.map((searchItem, searchIndex) => (
-                        <motion.li
-                          key={`${entry.id}-search-item-${searchItem.url}`}
-                          className="tool-cluster-live-preview__search-result-row"
-                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 10, scale: 0.96 }}
-                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-                          transition={{
-                            duration: 0.26,
-                            ease: [0.22, 1, 0.36, 1],
-                            delay: reduceMotion ? 0 : isHighlighted
-                              ? 0.12 + searchIndex * 0.14
-                              : searchIndex * 0.03,
-                          }}
-                        >
-                          <a
-                            href={searchItem.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="tool-cluster-live-preview__search-result-link"
-                            onPointerDown={(event) => event.stopPropagation()}
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={(event) => event.stopPropagation()}
-                          >
-                            <span className="tool-cluster-live-preview__search-result-favicon-wrap">
-                              <img
-                                src={buildFaviconUrl(searchItem.host)}
-                                alt=""
-                                loading="lazy"
-                                referrerPolicy="no-referrer"
-                                className="tool-cluster-live-preview__search-result-favicon"
-                              />
-                            </span>
-                            <span className="tool-cluster-live-preview__search-result-title">{searchItem.title}</span>
-                            <span className="tool-cluster-live-preview__search-result-host">{searchItem.host}</span>
-                          </a>
-                        </motion.li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </span>
-                {item.relativeTime ? (
-                  <time className="tool-cluster-live-preview__entry-time" dateTime={entry.timestamp ?? undefined}>
-                    {item.relativeTime}
-                  </time>
+                          <span className="tool-cluster-live-preview__search-result-title">{searchItem.title}</span>
+                          <span className="tool-cluster-live-preview__search-result-host">{searchItem.host}</span>
+                          <span className="tool-cluster-live-preview__search-result-external" aria-hidden="true">
+                            <ExternalLink />
+                          </span>
+                        </a>
+                      </motion.li>
+                    ))}
+                  </ul>
                 ) : null}
               </motion.div>
             )
