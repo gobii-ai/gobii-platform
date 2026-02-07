@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ExternalLink, Globe, Search } from 'lucide-react'
+import { ExternalLink, Search } from 'lucide-react'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
 import { toFriendlyToolName, getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
@@ -23,7 +23,7 @@ type PreviewEntry = {
   relativeTime: string | null
 }
 
-type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'kanban' | 'chart' | 'tool'
+type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'kanban' | 'chart' | 'image' | 'tool'
 type PreviewState = 'active' | 'complete'
 
 type ActivityDescriptor = {
@@ -40,7 +40,7 @@ type EntryVisual = {
   searchTotal: number | null
   enabledToolInfos: FriendlyToolInfo[]
   scrapeTargets: ScrapeTargetItem[]
-  chartImageUrl: string | null
+  previewImageUrl: string | null
   pageTitle: string | null
 }
 
@@ -65,6 +65,7 @@ type SearchPreviewItem = {
 
 const MAX_DETAIL_LENGTH = 88
 const MAX_PREVIEW_ENTRIES = 3
+export const TOOL_CLUSTER_PREVIEW_ENTRY_LIMIT = MAX_PREVIEW_ENTRIES
 const MAX_SEARCH_PREVIEW_ITEMS = 8
 const MAX_SCRAPE_TARGETS = 15
 const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
@@ -676,7 +677,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     const enabledPreview = outcome.enabledTools.slice(0, 3).map(toFriendlyToolName).join(', ')
     const snippet = enabledPreview ? clampText(`Enabled: ${enabledPreview}`, 96) : null
     const enabledToolInfos = outcome.enabledTools.map(getFriendlyToolInfo)
-    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos, scrapeTargets: [], chartImageUrl: null, pageTitle: null }
+    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos, scrapeTargets: [], previewImageUrl: null, pageTitle: null }
   }
 
   if (activity.kind === 'search') {
@@ -692,7 +693,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchTotal: effectiveTotal,
       enabledToolInfos: [],
       scrapeTargets: [],
-      chartImageUrl: null,
+      previewImageUrl: null,
       pageTitle: null,
     }
   }
@@ -708,7 +709,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchTotal: null,
       enabledToolInfos: [],
       scrapeTargets,
-      chartImageUrl: null,
+      previewImageUrl: null,
       pageTitle,
     }
   }
@@ -723,13 +724,15 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchTotal: null,
       enabledToolInfos: [],
       scrapeTargets: [],
-      chartImageUrl: null,
+      previewImageUrl: null,
       pageTitle: null,
     }
   }
 
-  if (activity.kind === 'chart') {
-    const chartImageUrl = entry.sourceEntry?.chartImageUrl ?? null
+  if (activity.kind === 'chart' || activity.kind === 'image') {
+    const previewImageUrl = activity.kind === 'chart'
+      ? (entry.sourceEntry?.chartImageUrl ?? null)
+      : (entry.sourceEntry?.createImageUrl ?? null)
     return {
       badge: null,
       snippet: null,
@@ -738,7 +741,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchTotal: null,
       enabledToolInfos: [],
       scrapeTargets: [],
-      chartImageUrl,
+      previewImageUrl,
       pageTitle: null,
     }
   }
@@ -752,7 +755,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     searchTotal: null,
     enabledToolInfos: [],
     scrapeTargets,
-    chartImageUrl: null,
+    previewImageUrl: null,
     pageTitle: null,
   }
 }
@@ -765,6 +768,7 @@ function classifyActivity(entry: ToolEntryDisplay): ActivityKind {
   if (toolName.includes('linkedin') || label.includes('linkedin')) return 'linkedin'
   if (toolName.includes('search') || label.includes('search')) return 'search'
   if (toolName === 'create_chart' || label === 'chart') return 'chart'
+  if (toolName === 'create_image' || label === 'image') return 'image'
   if (
     toolName.includes('scrape_as_markdown') ||
     toolName.includes('scrape_as_html') ||
@@ -845,6 +849,15 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
       kind,
       label: 'Created chart',
       detail: title ? clampText(title, 86) : null,
+    }
+  }
+
+  if (kind === 'image') {
+    const prompt = pickText(entry.parameters?.prompt) ?? pickText(entry.caption) ?? pickText(entry.summary) ?? null
+    return {
+      kind,
+      label: 'Created image',
+      detail: prompt ? clampText(prompt, 86) : null,
     }
   }
 
@@ -983,27 +996,31 @@ export function ToolClusterLivePreview({
             const detailText = item.activity.detail
             const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
-            const chartImageUrl = visual.chartImageUrl
+            const previewImageUrl = visual.previewImageUrl
+            const isVisualActivity = item.activity.kind === 'chart' || item.activity.kind === 'image'
+            const visualFallbackLabel = item.activity.kind === 'image' ? 'Created image' : 'Created chart'
+            const visualFallbackAlt = item.activity.kind === 'image' ? 'Generated image' : 'Chart'
 
-            // Collect all chart entries with images for grid rendering
-            const chartEntries = chartImageUrl
-              ? previewEntries.filter((pe) => pe.visual.chartImageUrl)
+            // Collect all visual entries with images for grid rendering.
+            // Keep chart and image groups separate so each tool kind gets its own grid.
+            const visualEntries = previewImageUrl && isVisualActivity
+              ? previewEntries.filter((pe) => pe.activity.kind === item.activity.kind && pe.visual.previewImageUrl)
               : []
-            const isFirstChartEntry = chartEntries.length > 0 && chartEntries[0].entry.id === entry.id
-            const isSubsequentChartEntry = chartImageUrl && !isFirstChartEntry
+            const isFirstVisualEntry = visualEntries.length > 0 && visualEntries[0].entry.id === entry.id
+            const isSubsequentVisualEntry = previewImageUrl && !isFirstVisualEntry
 
-            // Skip subsequent chart entries — they're rendered in the first chart's grid
-            if (isSubsequentChartEntry) return null
+            // Skip subsequent visual entries — they're rendered in the first grid.
+            if (isSubsequentVisualEntry) return null
 
-            // Render consolidated chart grid
-            if (isFirstChartEntry) {
-              const isSingle = chartEntries.length === 1
+            // Render consolidated visual grid.
+            if (isFirstVisualEntry) {
+              const isSingle = visualEntries.length === 1
               return (
                 <motion.div
-                  key={`chart-grid-${entry.id}`}
+                  key={`${item.activity.kind}-grid-${entry.id}`}
                   layout={!reduceMotion}
                   className="tool-cluster-live-preview__chart-grid"
-                  data-count={Math.min(chartEntries.length, 4)}
+                  data-count={Math.min(visualEntries.length, 4)}
                   initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 5, scale: 0.995 }}
                   animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
                   exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.995 }}
@@ -1013,9 +1030,9 @@ export function ToolClusterLivePreview({
                     delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                   }}
                 >
-                  {chartEntries.map((chartItem, chartIndex) => (
+                  {visualEntries.map((visualItem, visualIndex) => (
                     <motion.button
-                      key={chartItem.entry.id}
+                      key={visualItem.entry.id}
                       type="button"
                       className="tool-cluster-live-preview__chart-thumb"
                       data-single={isSingle ? 'true' : 'false'}
@@ -1024,19 +1041,19 @@ export function ToolClusterLivePreview({
                       transition={{
                         duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.12,
                         ease: [0.22, 1, 0.36, 1],
-                        delay: reduceMotion ? 0 : isLatestEvent ? 0.06 + chartIndex * 0.1 : chartIndex * 0.02,
+                        delay: reduceMotion ? 0 : isLatestEvent ? 0.06 + visualIndex * 0.1 : visualIndex * 0.02,
                       }}
                       whileHover={reduceMotion ? undefined : { scale: 1.02, y: -1 }}
-                      onClick={() => onSelectEntry(chartItem.entry)}
+                      onClick={() => onSelectEntry(visualItem.entry)}
                     >
                       <img
-                        src={chartItem.visual.chartImageUrl!}
-                        alt={chartItem.activity.detail || 'Chart'}
+                        src={visualItem.visual.previewImageUrl!}
+                        alt={visualItem.activity.detail || visualFallbackAlt}
                         loading="lazy"
                         className="tool-cluster-live-preview__chart-thumb-img"
                       />
                       <span className="tool-cluster-live-preview__chart-thumb-caption">
-                        {chartItem.activity.detail || 'Created chart'}
+                        {visualItem.activity.detail || visualFallbackLabel}
                       </span>
                     </motion.button>
                   ))}

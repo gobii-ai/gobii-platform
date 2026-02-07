@@ -3,10 +3,11 @@ import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistr
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import { ToolIconSlot } from './ToolIconSlot'
 import { ToolProviderBadge } from './ToolProviderBadge'
-import { ToolClusterLivePreview } from './ToolClusterLivePreview'
+import { ToolClusterLivePreview, TOOL_CLUSTER_PREVIEW_ENTRY_LIMIT } from './ToolClusterLivePreview'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
+import { compareTimelineCursors } from '../../util/timelineCursor'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
@@ -27,6 +28,35 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
     () => transformed.entries.filter((entry) => !entry.separateFromPreview),
     [transformed.entries],
   )
+  const visiblePreviewEntries = useMemo(
+    () => previewEntries.slice(-TOOL_CLUSTER_PREVIEW_ENTRY_LIMIT),
+    [previewEntries],
+  )
+  const separatedEntryPlacement = useMemo(() => {
+    if (!separatedEntries.length) {
+      return { beforePreview: [] as ToolEntryDisplay[], afterPreview: [] as ToolEntryDisplay[] }
+    }
+
+    const firstVisiblePreviewCursor = visiblePreviewEntries[0]?.cursor
+    if (!firstVisiblePreviewCursor) {
+      return { beforePreview: [] as ToolEntryDisplay[], afterPreview: separatedEntries }
+    }
+
+    const beforePreview: ToolEntryDisplay[] = []
+    const afterPreview: ToolEntryDisplay[] = []
+    for (const entry of separatedEntries) {
+      if (!entry.cursor) {
+        afterPreview.push(entry)
+        continue
+      }
+      if (compareTimelineCursors(entry.cursor, firstVisiblePreviewCursor) <= 0) {
+        beforePreview.push(entry)
+      } else {
+        afterPreview.push(entry)
+      }
+    }
+    return { beforePreview, afterPreview }
+  }, [separatedEntries, visiblePreviewEntries])
   const hasPreviewEntries = previewEntries.length > 0
 
   const [timelineOpen, setTimelineOpen] = useState(false)
@@ -100,6 +130,9 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
       data-earliest={transformed.earliestTimestamp}
     >
       <div className="tool-cluster-shell">
+        {separatedEntryPlacement.beforePreview.length ? (
+          <div className="tool-cluster-separate-list">{separatedEntryPlacement.beforePreview.map(renderSeparatedEntry)}</div>
+        ) : null}
         <div className="tool-cluster-summary">
           {hasPreviewEntries ? (
             <ToolClusterLivePreview
@@ -110,8 +143,8 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
             />
           ) : null}
         </div>
-        {separatedEntries.length ? (
-          <div className="tool-cluster-separate-list">{separatedEntries.map(renderSeparatedEntry)}</div>
+        {separatedEntryPlacement.afterPreview.length ? (
+          <div className="tool-cluster-separate-list">{separatedEntryPlacement.afterPreview.map(renderSeparatedEntry)}</div>
         ) : null}
       </div>
       <ToolClusterTimelineOverlay

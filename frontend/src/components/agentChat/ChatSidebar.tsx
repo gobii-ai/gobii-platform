@@ -188,22 +188,27 @@ export const ChatSidebar = memo(function ChatSidebar({
       data-collapsed={collapsed}
     >
       <div className="chat-sidebar-inner">
-        <div className="chat-sidebar-controls" data-collapsed={collapsed ? 'true' : 'false'}>
-          {contextSwitcher ? (
-            <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
+        <div className="chat-sidebar-header" data-collapsed={collapsed ? 'true' : 'false'}>
+          {!collapsed ? (
+            <img src="/static/images/noBgWhite.png" alt="Gobii" className="chat-sidebar-logo" />
           ) : null}
-          <button
-            type="button"
-            className="chat-sidebar-toggle"
-            onClick={handleToggle}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? (
-              <PanelLeft className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </button>
+          <div className="chat-sidebar-header-actions">
+            {contextSwitcher ? (
+              <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
+            ) : null}
+            <button
+              type="button"
+              className="chat-sidebar-toggle"
+              onClick={handleToggle}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? (
+                <PanelLeft className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="chat-sidebar-section">

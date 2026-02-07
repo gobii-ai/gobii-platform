@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from urllib.parse import parse_qs, urlparse
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
+from django.urls import reverse
 
 from api.models import (
     BrowserUseAgent,
@@ -81,6 +84,40 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(processing.get("type"), "processing_event")
         processing_payload = processing.get("payload", {})
         self.assertIn("active", processing_payload)
+
+    @tag("batch_agent_chat")
+    def test_create_image_tool_call_emits_preview_url(self):
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Create image")
+
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="create_image",
+            tool_params={
+                "prompt": "Product hero shot",
+                "file_path": "/exports/hero.png",
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "file": "$[/exports/hero.png]",
+                }
+            ),
+        )
+
+        timeline = self._receive_with_timeout()
+        self.assertEqual(timeline.get("type"), "timeline_event")
+        payload = timeline.get("payload", {})
+        self.assertEqual(payload.get("kind"), "steps")
+
+        entries = payload.get("entries", [])
+        self.assertTrue(entries)
+        preview_url = entries[0].get("createImageUrl")
+        self.assertIsInstance(preview_url, str)
+
+        parsed = urlparse(preview_url)
+        expected_path = reverse("console_agent_fs_download", kwargs={"agent_id": self.agent.id})
+        self.assertEqual(parsed.path, expected_path)
+        self.assertEqual(parse_qs(parsed.query).get("path"), ["/exports/hero.png"])
 
     @tag("batch_agent_chat")
     def test_completion_emits_thinking_timeline_event(self):

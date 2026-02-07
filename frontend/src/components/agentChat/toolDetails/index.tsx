@@ -17,6 +17,7 @@ import { RequestContactPermissionDetail, SecureCredentialsDetail } from './detai
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
 import { ChartDetail } from './details/chart'
+import { ImageDetail } from './details/image'
 import { KanbanUpdateDetail } from './details/kanban'
 
 export { normalizeStructuredValue } from './normalize'
@@ -53,6 +54,7 @@ export {
   AmazonProductReviewsDetail,
   AmazonProductSearchDetail,
   ChartDetail,
+  ImageDetail,
   KanbanUpdateDetail,
 }
 
@@ -87,6 +89,7 @@ export const TOOL_DETAIL_COMPONENTS = {
   zillowListing: ZillowListingDetail,
   redditPosts: RedditPostsDetail,
   chart: ChartDetail,
+  image: ImageDetail,
   mcpTool: McpToolDetail,
 } satisfies Record<string, ToolDetailComponent>
 

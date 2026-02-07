@@ -1203,8 +1203,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       clearTimeout(state.insightRotationTimer)
     }
 
-    // Record when processing started for minimum display logic
-    set({ insightProcessingStartedAt: Date.now() })
+    // Start each processing cycle unpaused so the tab progress indicator
+    // and rotation always resume after any prior manual pause.
+    set({
+      insightProcessingStartedAt: Date.now(),
+      insightsPaused: false,
+    })
 
     // Fetch insights if not already fetched or stale
     void get().fetchInsights()
@@ -1237,19 +1241,19 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       }
     }
 
-    // Start first rotation after initial delay (only if not paused)
-    if (!state.insightsPaused) {
-      const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
-      set({ insightRotationTimer: timer })
-    }
+    // Start first rotation after initial delay.
+    const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
+    set({ insightRotationTimer: timer })
   },
 
   stopInsightRotation() {
     const timer = get().insightRotationTimer
     if (timer) {
       clearTimeout(timer)
-      set({ insightRotationTimer: null })
     }
+    // Pause is temporary UI state; clear it when work stops so the next cycle
+    // doesn't inherit a stale paused state.
+    set({ insightRotationTimer: null, insightsPaused: false })
   },
 
   dismissInsight(insightId) {

@@ -126,6 +126,8 @@ function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallE
     status: incoming.status ?? base.status,
     cursor: incoming.cursor ?? base.cursor,
     meta: incoming.meta ?? base.meta,
+    chartImageUrl: pickNonEmptyString(incoming.chartImageUrl ?? undefined, base.chartImageUrl ?? undefined),
+    createImageUrl: pickNonEmptyString(incoming.createImageUrl ?? undefined, base.createImageUrl ?? undefined),
   }
 }
 

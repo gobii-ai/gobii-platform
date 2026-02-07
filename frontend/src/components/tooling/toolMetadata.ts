@@ -25,6 +25,7 @@ import {
   ScanText,
   BrainCog,
   BarChart3,
+  Image as ImageIcon,
   type LucideIcon,
 } from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
@@ -491,6 +492,20 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const title = coerceString(parameters?.title)
       const caption = title || (chartType ? `${chartType} chart` : 'Chart')
       return { caption: truncate(caption, 40) }
+    },
+  },
+  {
+    name: 'create_image',
+    label: 'Image',
+    icon: ImageIcon,
+    iconBgClass: 'bg-cyan-100',
+    iconColorClass: 'text-cyan-700',
+    detailKind: 'image',
+    derive(_entry, parameters) {
+      const filePath = coerceString(parameters?.file_path) || coerceString(parameters?.path)
+      const prompt = coerceString(parameters?.prompt)
+      const caption = filePath || prompt || 'Image'
+      return { caption: truncate(caption, 56) }
     },
   },
   {

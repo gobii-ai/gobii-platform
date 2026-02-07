@@ -490,13 +490,53 @@ def _serialize_thinking(env: ThinkingEnvelope) -> dict:
 
 
 _FILE_REF_RE = re.compile(r"^\$\[(.+)\]$")
+_INLINE_IMG_SRC_RE = re.compile(r"<img[^>]+src=['\"]([^'\"]+)['\"]", re.IGNORECASE)
+_MARKDOWN_IMG_RE = re.compile(r"!\[[^\]]*]\(([^)]+)\)")
 
 
-def _extract_chart_image_url(tool_call: PersistentAgentToolCall) -> str | None:
-    """For create_chart calls, resolve the $[/path] file ref to a download URL."""
+def _resolve_tool_image_candidate(
+    tool_call: PersistentAgentToolCall,
+    candidate: str | Mapping[str, object] | None,
+) -> str | None:
+    if isinstance(candidate, Mapping):
+        raw_candidate = candidate.get("url") or candidate.get("image_url")
+        candidate = str(raw_candidate).strip() if raw_candidate is not None else None
+    if not isinstance(candidate, str):
+        return None
+    normalized = candidate.strip()
+    if not normalized:
+        return None
+
+    inline_match = _INLINE_IMG_SRC_RE.search(normalized)
+    if inline_match:
+        normalized = inline_match.group(1).strip()
+    else:
+        markdown_match = _MARKDOWN_IMG_RE.search(normalized)
+        if markdown_match:
+            normalized = markdown_match.group(1).strip()
+
+    match = _FILE_REF_RE.match(normalized)
+    file_path = match.group(1).strip() if match else None
+    if not file_path and normalized.startswith("/"):
+        file_path = normalized
+
+    if file_path:
+        agent_id = tool_call.step.agent_id
+        query = urlencode({"path": file_path})
+        return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
+
+    if normalized.startswith(("http://", "https://", "data:image/")):
+        return normalized
+
+    return None
+
+
+def _extract_tool_image_url(tool_call: PersistentAgentToolCall) -> str | None:
+    """Resolve chart/image tool outputs to an image URL suitable for timeline previews."""
     import json as _json
 
-    if (tool_call.tool_name or "").lower() != "create_chart":
+    tool_name = (tool_call.tool_name or "").lower()
+    if tool_name not in {"create_chart", "create_image"}:
         return None
     if (getattr(tool_call, "status", None) or "complete") != "complete":
         return None
@@ -509,18 +549,15 @@ def _extract_chart_image_url(tool_call: PersistentAgentToolCall) -> str | None:
         return None
     if not isinstance(result, dict) or result.get("status") == "error":
         return None
-    for key in ("file", "chart_url", "image_url", "url"):
-        value = result.get(key)
-        if not isinstance(value, str) or not value.strip():
-            continue
-        match = _FILE_REF_RE.match(value.strip())
-        file_path = match.group(1).strip() if match else None
-        if file_path:
-            agent_id = tool_call.step.agent_id
-            query = urlencode({"path": file_path})
-            return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
-        if value.strip().startswith("http"):
-            return value.strip()
+    if tool_name == "create_chart":
+        candidate_keys = ("file", "chart_url", "image_url", "url", "inline_html", "inline")
+    else:
+        candidate_keys = ("file", "image_url", "url", "inline_html", "inline")
+
+    for key in candidate_keys:
+        resolved = _resolve_tool_image_candidate(tool_call, result.get(key))
+        if resolved:
+            return resolved
     return None
 
 
@@ -542,9 +579,13 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         "result": tool_call.result,
         "status": status,
     }
-    chart_url = _extract_chart_image_url(tool_call)
-    if chart_url:
-        entry["chartImageUrl"] = chart_url
+    preview_image_url = _extract_tool_image_url(tool_call)
+    if preview_image_url:
+        lowered_tool_name = tool_name.lower()
+        if lowered_tool_name == "create_chart":
+            entry["chartImageUrl"] = preview_image_url
+        elif lowered_tool_name == "create_image":
+            entry["createImageUrl"] = preview_image_url
     return entry
 
 

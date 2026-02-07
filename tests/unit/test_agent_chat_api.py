@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
+from django.urls import reverse
 
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
@@ -220,6 +222,46 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+
+    @tag("batch_agent_chat")
+    def test_timeline_includes_create_image_preview_url(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Create hero image",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="create_image",
+            tool_params={
+                "prompt": "Minimal poster art",
+                "file_path": "/exports/generated-image.png",
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "file": "$[/exports/generated-image.png]",
+                }
+            ),
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        entries = [
+            entry
+            for event in payload.get("events", [])
+            if event.get("kind") == "steps"
+            for entry in event.get("entries", [])
+        ]
+        image_entry = next(entry for entry in entries if entry.get("toolName") == "create_image")
+
+        preview_url = image_entry.get("createImageUrl")
+        self.assertIsInstance(preview_url, str)
+        parsed = urlparse(preview_url)
+        expected_path = reverse("console_agent_fs_download", kwargs={"agent_id": self.agent.id})
+        self.assertEqual(parsed.path, expected_path)
+        self.assertEqual(parse_qs(parsed.query).get("path"), ["/exports/generated-image.png"])
 
     @tag("batch_agent_chat")
     def test_timeline_has_no_older_when_under_limit(self):
