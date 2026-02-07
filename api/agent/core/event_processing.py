@@ -317,6 +317,15 @@ def _has_continuation_signal(text: str) -> bool:
     return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
 
 
+def _has_open_kanban_work(agent: PersistentAgent) -> bool:
+    """Return True when kanban still has todo/doing work for the agent."""
+    KanbanCard = apps.get_model("api", "PersistentAgentKanbanCard")
+    return KanbanCard.objects.filter(
+        assigned_agent=agent,
+        status__in=("todo", "doing"),
+    ).exists()
+
+
 def _remove_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
     if not text:
         return text, False
@@ -370,10 +379,17 @@ def _should_imply_continue(
     has_canonical_continuation: bool,
     has_other_tool_calls: bool,
     has_explicit_sleep: bool,
+    has_open_kanban_work: bool = False,
+    has_natural_continuation_signal: bool = False,
 ) -> bool:
     if has_explicit_sleep:
         return False
-    return has_canonical_continuation or has_other_tool_calls
+    if has_canonical_continuation or has_other_tool_calls:
+        return True
+    # Safety valve: if the model language clearly indicates ongoing work and
+    # kanban still has open cards, keep the loop alive even without the
+    # canonical continuation token.
+    return has_open_kanban_work and has_natural_continuation_signal
 
 
 class _CanonicalContinuationStreamFilter:
@@ -3203,11 +3219,26 @@ def _run_agent_loop(
             if message_text and not has_explicit_send:
                 # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                 # This is safer—agent won't keep running unexpectedly.
+                has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
+                has_open_kanban_work = _has_open_kanban_work(agent)
                 implied_will_continue = _should_imply_continue(
                     has_canonical_continuation=has_canonical_continuation,
                     has_other_tool_calls=has_other_tool_calls,
                     has_explicit_sleep=has_explicit_sleep,
+                    has_open_kanban_work=has_open_kanban_work,
+                    has_natural_continuation_signal=has_natural_continuation_signal,
                 )
+                if (
+                    implied_will_continue
+                    and has_open_kanban_work
+                    and has_natural_continuation_signal
+                    and not has_canonical_continuation
+                    and not has_other_tool_calls
+                ):
+                    logger.info(
+                        "Agent %s: implied send continuing due to open kanban work + continuation signal.",
+                        agent.id,
+                    )
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,

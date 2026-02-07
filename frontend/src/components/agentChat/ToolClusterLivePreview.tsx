@@ -733,6 +733,7 @@ function classifyActivity(entry: ToolEntryDisplay): ActivityKind {
   if (
     toolName.includes('scrape_as_markdown') ||
     toolName.includes('scrape_as_html') ||
+    toolName.includes('scrape_batch') ||
     label.includes('web snapshot')
   ) {
     return 'snapshot'
@@ -775,11 +776,13 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
   }
 
   if (kind === 'snapshot') {
+    const urls = entry.parameters?.urls
+    const isBatch = Array.isArray(urls) && urls.length > 1
     const target = clampText(semantic ?? entry.caption ?? entry.summary ?? 'Web page')
     return {
       kind,
-      label: 'Browsing the web',
-      detail: target,
+      label: isBatch ? 'Browsing websites' : 'Browsing the web',
+      detail: isBatch ? null : target,
     }
   }
 
@@ -1119,8 +1122,8 @@ export function ToolClusterLivePreview({
                             duration: 0.28,
                             ease: [0.22, 1, 0.36, 1],
                             delay: reduceMotion ? 0 : isHighlighted
-                              ? 0.12 + targetIndex * 0.2
-                              : targetIndex * 0.015,
+                              ? 0.1 + targetIndex * 0.18
+                              : targetIndex * 0.025,
                           }}
                           onPointerDown={(event) => event.stopPropagation()}
                           onMouseDown={(event) => event.stopPropagation()}

@@ -1,11 +1,6 @@
 import type { KanbanEvent, ThinkingEvent, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
 import { pickHtmlCandidate, sanitizeHtml } from '../util/sanitize'
-
-type ParsedTimelineCursor = {
-  value: number
-  kind: string
-  identifier: string
-}
+import { compareTimelineCursors } from '../util/timelineCursor'
 
 export function normalizeTimelineEvent(event: TimelineEvent): TimelineEvent {
   if (event.kind !== 'message') {
@@ -38,56 +33,6 @@ export function normalizeTimelineEvent(event: TimelineEvent): TimelineEvent {
       bodyHtml: sanitized,
     },
   }
-}
-
-function parseTimelineCursor(raw: string | null | undefined): ParsedTimelineCursor | null {
-  if (!raw) {
-    return null
-  }
-  const parts = raw.split(':')
-  if (parts.length < 3) {
-    return null
-  }
-  const [valuePart, kind, ...identifierParts] = parts
-  const value = Number(valuePart)
-  if (!Number.isFinite(value)) {
-    return null
-  }
-  return {
-    value,
-    kind,
-    identifier: identifierParts.join(':'),
-  }
-}
-
-function compareTimelineCursors(left: string, right: string): number {
-  if (left === right) {
-    return 0
-  }
-  const leftParsed = parseTimelineCursor(left)
-  const rightParsed = parseTimelineCursor(right)
-  if (leftParsed && rightParsed) {
-    if (leftParsed.value !== rightParsed.value) {
-      return leftParsed.value - rightParsed.value
-    }
-    if (leftParsed.kind !== rightParsed.kind) {
-      return leftParsed.kind.localeCompare(rightParsed.kind)
-    }
-    if (leftParsed.kind === 'message') {
-      const leftSeq = Number(leftParsed.identifier)
-      const rightSeq = Number(rightParsed.identifier)
-      if (Number.isFinite(leftSeq) && Number.isFinite(rightSeq) && leftSeq !== rightSeq) {
-        return leftSeq - rightSeq
-      }
-    }
-    return leftParsed.identifier.localeCompare(rightParsed.identifier)
-  }
-  const leftValue = Number(left.split(':', 1)[0])
-  const rightValue = Number(right.split(':', 1)[0])
-  if (Number.isFinite(leftValue) && Number.isFinite(rightValue) && leftValue !== rightValue) {
-    return leftValue - rightValue
-  }
-  return left.localeCompare(right)
 }
 
 function sortTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
@@ -216,10 +161,23 @@ function sortToolEntries(entries: ToolCallEntry[]): ToolCallEntry[] {
   return [...entries].sort(compareToolEntries)
 }
 
-function resolveClusterCursor(entries: ToolCallEntry[], fallback: string, secondaryFallback: string): string {
-  const cursors = entries
+function resolveClusterCursor(
+  entries: ToolCallEntry[],
+  fallback: string,
+  secondaryFallback: string,
+  thinkingEntries: ThinkingEvent[] | undefined,
+  kanbanEntries: KanbanEvent[] | undefined,
+): string {
+  const entryCursors = entries
     .map((entry) => entry.cursor)
     .filter((cursor): cursor is string => Boolean(cursor))
+  const thinkingCursors = (thinkingEntries ?? [])
+    .map((entry) => entry.cursor)
+    .filter((cursor): cursor is string => Boolean(cursor))
+  const kanbanCursors = (kanbanEntries ?? [])
+    .map((entry) => entry.cursor)
+    .filter((cursor): cursor is string => Boolean(cursor))
+  const cursors = [...entryCursors, ...thinkingCursors, ...kanbanCursors]
   if (!cursors.length) {
     return compareTimelineCursors(fallback, secondaryFallback) <= 0 ? fallback : secondaryFallback
   }
@@ -271,7 +229,7 @@ function buildCluster(
   kanbanEntries?: KanbanEvent[] | undefined,
 ): ToolClusterEvent {
   const sortedEntries = sortToolEntries(dedupeToolEntries(entries))
-  const cursor = resolveClusterCursor(sortedEntries, base.cursor, secondaryCursor)
+  const cursor = resolveClusterCursor(sortedEntries, base.cursor, secondaryCursor, thinkingEntries, kanbanEntries)
   const earliestTimestamp =
     pickTimestamp(sortedEntries, 'earliest') ?? pickNonToolTimestamp(thinkingEntries, kanbanEntries, 'earliest')
   const latestTimestamp =
