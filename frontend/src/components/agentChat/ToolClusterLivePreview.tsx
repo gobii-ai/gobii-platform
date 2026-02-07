@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Search } from 'lucide-react'
-
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
 import { toFriendlyToolName, getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
@@ -660,7 +658,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
   if (activity.kind === 'linkedin') {
     const linkedInProfile = deriveLinkedInProfileVisual(entry, activity)
     return {
-      badge: linkedInProfile.statusText ? 'Syncing' : 'Profile',
+      badge: null,
       snippet: null,
       linkedInProfile,
       searchItems: [],
@@ -911,8 +909,6 @@ export function ToolClusterLivePreview({
               item.activity.kind === 'thinking' && isHighlighted && streamingThought ? streamingThought : item.activity.detail
             const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
-            const searchTotal = item.activity.kind === 'search' ? visual.searchTotal : null
-            const searchTruncated = Boolean(searchTotal !== null && searchTotal > searchItems.length)
             return (
               <motion.div
                 key={entry.id}
@@ -1002,29 +998,28 @@ export function ToolClusterLivePreview({
                     <span className="tool-cluster-live-preview__entry-label">
                       {linkedInProfile ? linkedInProfile.displayName : item.activity.label}
                     </span>
-                    {linkedInProfile ? (
-                      <span className="tool-cluster-live-preview__entry-badge tool-cluster-live-preview__entry-badge--action">
-                        {item.activity.label}
-                      </span>
-                    ) : null}
-                    {visual.badge ? <span className="tool-cluster-live-preview__entry-badge">{visual.badge}</span> : null}
-                    {item.activity.kind === 'search' ? (
-                      <Search className="tool-cluster-live-preview__entry-search-icon" aria-hidden="true" />
+                    {visual.badge && !visual.enabledToolInfos.length && !searchItems.length ? (
+                      <>
+                        <span className="tool-cluster-live-preview__entry-separator" aria-hidden="true">·</span>
+                        <span className="tool-cluster-live-preview__entry-count">{visual.badge}</span>
+                      </>
                     ) : null}
                   </span>
                   <AnimatePresence initial={false} mode="wait">
-                    {linkedInProfile?.subtitle ? (
+                    {linkedInProfile ? (
                       <motion.span
-                        key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle}`}
+                        key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle ?? item.activity.label}`}
                         className="tool-cluster-live-preview__entry-caption"
                         initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
                         animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
                         exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
                         transition={{ duration: 0.16, ease: 'easeOut' }}
                       >
-                        {linkedInProfile.subtitle}
+                        {linkedInProfile.subtitle
+                          ? `${item.activity.label} · ${linkedInProfile.subtitle}`
+                          : item.activity.label}
                       </motion.span>
-                    ) : detailText ? (
+                    ) : detailText && !visual.enabledToolInfos.length && !searchItems.length ? (
                       <motion.span
                         key={`${entry.id}-detail-${detailText}`}
                         className="tool-cluster-live-preview__entry-caption"
@@ -1045,12 +1040,14 @@ export function ToolClusterLivePreview({
                           <motion.div
                             key={`card-${cardIndex}-${info.label}`}
                             className="tool-cluster-live-preview__enabled-tool-card"
-                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6, scale: 0.9 }}
+                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.92 }}
                             animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
                             transition={{
-                              duration: 0.26,
-                              ease: 'easeOut',
-                              delay: reduceMotion ? 0 : cardIndex * 0.04,
+                              duration: 0.3,
+                              ease: [0.22, 1, 0.36, 1],
+                              delay: reduceMotion ? 0 : isHighlighted
+                                ? 0.1 + cardIndex * 0.12
+                                : cardIndex * 0.025,
                             }}
                             whileHover={reduceMotion ? undefined : { scale: 1.04, y: -2 }}
                           >
@@ -1066,24 +1063,20 @@ export function ToolClusterLivePreview({
                     <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
                   ) : null}
                   {searchItems.length ? (
-                    <motion.ul
-                      className="tool-cluster-live-preview__search-results"
-                      initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
-                      animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                      transition={{ duration: 0.2, ease: 'easeOut', delay: reduceMotion ? 0 : 0.04 }}
-                    >
-                      {searchTruncated ? (
-                        <li className="tool-cluster-live-preview__search-results-meta">
-                          Showing {searchItems.length} of {searchTotal} results
-                        </li>
-                      ) : null}
+                    <ul className="tool-cluster-live-preview__search-results">
                       {searchItems.map((searchItem, searchIndex) => (
                         <motion.li
                           key={`${entry.id}-search-item-${searchItem.url}`}
                           className="tool-cluster-live-preview__search-result-row"
-                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
-                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                          transition={{ duration: 0.16, ease: 'easeOut', delay: reduceMotion ? 0 : 0.05 + searchIndex * 0.03 }}
+                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 10, scale: 0.96 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                          transition={{
+                            duration: 0.26,
+                            ease: [0.22, 1, 0.36, 1],
+                            delay: reduceMotion ? 0 : isHighlighted
+                              ? 0.12 + searchIndex * 0.14
+                              : searchIndex * 0.03,
+                          }}
                         >
                           <a
                             href={searchItem.url}
@@ -1109,7 +1102,7 @@ export function ToolClusterLivePreview({
                           </a>
                         </motion.li>
                       ))}
-                    </motion.ul>
+                    </ul>
                   ) : null}
                 </span>
                 {item.relativeTime ? (
