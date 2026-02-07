@@ -75,6 +75,7 @@ from api.services.daily_credit_limits import (
     scale_daily_credit_limit_for_tier_change,
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.agent_settings_resume import queue_settings_change_resume
 from api.services.referral_service import ReferralService
 from console.daily_credit import (
     build_agent_daily_credit_context,
@@ -2847,6 +2848,8 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
         )
         max_limit = int(slider_bounds["slider_limit_max"])
         current_limit = agent.daily_credit_limit
+        previous_daily_limit = current_limit
+        daily_limit_changed = False
 
         if action == "double":
             if current_limit is None or current_limit <= 0:
@@ -2858,6 +2861,7 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
                 else:
                     agent.daily_credit_limit = new_limit
                     agent.save(update_fields=["daily_credit_limit"])
+                    daily_limit_changed = True
                     messages.success(request, "Daily limit doubled.")
         elif action == "unlimited":
             if current_limit is None:
@@ -2865,7 +2869,16 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
             else:
                 agent.daily_credit_limit = None
                 agent.save(update_fields=["daily_credit_limit"])
+                daily_limit_changed = True
                 messages.success(request, "Daily limit set to unlimited.")
+
+        if daily_limit_changed:
+            queue_settings_change_resume(
+                agent,
+                daily_credit_limit_changed=True,
+                previous_daily_credit_limit=previous_daily_limit,
+                source="daily_limit_email_action",
+            )
 
         return redirect(redirect_url)
 
@@ -4720,6 +4733,17 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     logger.info("Updated agent %s fields: %s", agent.id, ", ".join(agent_fields_to_update))
                     if 'name' in agent_fields_to_update:
                         maybe_sync_agent_email_display_name(agent, previous_name=prev_name)
+                    daily_limit_changed = 'daily_credit_limit' in agent_fields_to_update
+                    preferred_tier_changed = 'preferred_llm_tier' in agent_fields_to_update
+                    if daily_limit_changed or preferred_tier_changed:
+                        queue_settings_change_resume(
+                            agent,
+                            daily_credit_limit_changed=daily_limit_changed,
+                            previous_daily_credit_limit=prev_daily_limit,
+                            preferred_llm_tier_changed=preferred_tier_changed,
+                            previous_preferred_llm_tier_key=prev_preferred_tier,
+                            source="agent_detail_web",
+                        )
                 if browser_agent is not None and browser_agent_fields_to_update:
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
 

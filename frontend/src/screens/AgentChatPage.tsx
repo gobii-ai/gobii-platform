@@ -37,6 +37,9 @@ function deriveFirstName(agentName?: string | null): string {
 }
 
 const LOW_CREDIT_DAY_THRESHOLD = 2
+const ROSTER_REFRESH_INTERVAL_MS = 20_000
+const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
+const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -50,6 +53,16 @@ type IntelligenceGateState = {
 }
 
 type SpawnIntentStatus = 'idle' | 'loading' | 'ready' | 'done'
+
+type PendingAvatarTracking = Record<string, number>
+
+function normalizeAvatarUrl(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed ? trimmed : null
+}
 
 function buildAgentChatPath(pathname: string, agentId: string): string {
   if (pathname.startsWith('/app')) {
@@ -77,6 +90,11 @@ function compareRosterNames(left: string, right: string): number {
 }
 
 const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persistent agents available/i
+
+type CreateAgentErrorState = {
+  message: string
+  showUpgradeCta: boolean
+}
 
 function extractFirstErrorMessage(payload: unknown): string | null {
   const queue: unknown[] = [payload]
@@ -124,7 +142,7 @@ function extractFirstErrorMessage(payload: unknown): string | null {
   return null
 }
 
-function buildCreateAgentErrorMessage(err: unknown, isProprietaryMode: boolean): string {
+function buildCreateAgentError(err: unknown, isProprietaryMode: boolean): CreateAgentErrorState {
   const fallback = 'Unable to create that agent right now.'
   let message: string | null = null
 
@@ -138,11 +156,20 @@ function buildCreateAgentErrorMessage(err: unknown, isProprietaryMode: boolean):
   const resolved = message ?? fallback
   if (AGENT_LIMIT_ERROR_PATTERN.test(resolved)) {
     if (isProprietaryMode) {
-      return "You've reached your agent limit for your current plan. Upgrade to create more agents."
+      return {
+        message: "You've reached your agent limit for your current plan. Upgrade to create more agents.",
+        showUpgradeCta: true,
+      }
     }
-    return "You've reached your agent limit for this deployment. Adjust deployment settings to allow more agents."
+    return {
+      message: "You've reached your agent limit for this deployment. Adjust deployment settings to allow more agents.",
+      showUpgradeCta: false,
+    }
   }
-  return resolved
+  return {
+    message: resolved,
+    showUpgradeCta: false,
+  }
 }
 
 function insertRosterEntry(agents: AgentRosterEntry[], entry: AgentRosterEntry): AgentRosterEntry[] {
@@ -159,6 +186,42 @@ function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRo
     return roster
   }
   return insertRosterEntry(roster, entry)
+}
+
+function prunePendingAvatarTracking(
+  pending: PendingAvatarTracking,
+  rosterAgents: AgentRosterEntry[],
+  nowMs = Date.now(),
+): PendingAvatarTracking {
+  const pendingEntries = Object.entries(pending)
+  if (pendingEntries.length === 0) {
+    return pending
+  }
+
+  const rosterById = new Map<string, AgentRosterEntry>()
+  for (const agent of rosterAgents) {
+    rosterById.set(agent.id, agent)
+  }
+
+  let changed = false
+  const next: PendingAvatarTracking = {}
+
+  for (const [agentId, expiresAt] of pendingEntries) {
+    if (!Number.isFinite(expiresAt) || expiresAt <= nowMs) {
+      changed = true
+      continue
+    }
+
+    const rosterEntry = rosterById.get(agentId)
+    if (!rosterEntry || normalizeAvatarUrl(rosterEntry.avatarUrl)) {
+      changed = true
+      continue
+    }
+
+    next[agentId] = expiresAt
+  }
+
+  return changed ? next : pending
 }
 
 type AgentRosterQueryData = {
@@ -355,6 +418,15 @@ const TOUCH_SCROLL_UNPIN_THRESHOLD = 40
 const AUTO_SCROLL_REPIN_SUPPRESSION_MS = 1500
 const BOTTOM_REPIN_THRESHOLD_PX = 50
 const NEAR_BOTTOM_THRESHOLD_PX = 100
+const UNPIN_DISTANCE_FROM_BOTTOM_PX = 12
+const PROGRAMMATIC_SCROLL_GUARD_MS = 150
+
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false
+  }
+  return target.closest('input, textarea, select, [contenteditable="true"]') !== null
+}
 
 export function AgentChatPage({
   agentId,
@@ -490,6 +562,17 @@ export function AgentChatPage({
 
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
+  const [pendingAvatarTracking, setPendingAvatarTracking] = useState<PendingAvatarTracking>({})
+  const trackPendingAvatarRefresh = useCallback((agentId: string) => {
+    const expiresAt = Date.now() + ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS
+    setPendingAvatarTracking((current) => {
+      const currentExpiry = current[agentId]
+      if (currentExpiry && currentExpiry >= expiresAt) {
+        return current
+      }
+      return { ...current, [agentId]: expiresAt }
+    })
+  }, [])
 
   const handleCreditEvent = useCallback(() => {
     void refetchQuickSettings()
@@ -509,6 +592,19 @@ export function AgentChatPage({
       const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
       if (!hasName && !hasColor && !hasAvatar && !hasShortDescription && !hasMiniDescription) {
         return
+      }
+      if (hasAvatar) {
+        const avatarFromEvent = typeof rawPayload.agent_avatar_url === 'string' ? rawPayload.agent_avatar_url : null
+        if (normalizeAvatarUrl(avatarFromEvent)) {
+          setPendingAvatarTracking((current) => {
+            if (!current[agentIdFromEvent]) {
+              return current
+            }
+            const next = { ...current }
+            delete next[agentIdFromEvent]
+            return next
+          })
+        }
       }
 
       queryClient.setQueriesData(
@@ -588,11 +684,41 @@ export function AgentChatPage({
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
   const rosterQueryAgentId = resolvedContext ? undefined : (agentId ?? undefined)
+  const hasPendingAvatarTracking = Object.keys(pendingAvatarTracking).length > 0
+  const rosterRefreshIntervalMs = hasPendingAvatarTracking
+    ? ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS
+    : ROSTER_REFRESH_INTERVAL_MS
   const rosterQuery = useAgentRoster({
     enabled: true,
     contextKey: rosterContextKey,
     forAgentId: rosterQueryAgentId,
+    refetchIntervalMs: rosterRefreshIntervalMs,
   })
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const expiryValues = Object.values(pendingAvatarTracking)
+    if (expiryValues.length === 0) {
+      return
+    }
+    const nextExpiry = Math.min(...expiryValues)
+    const delayMs = Math.max(0, nextExpiry - Date.now()) + 25
+    const timeout = window.setTimeout(() => {
+      setPendingAvatarTracking((current) => {
+        return prunePendingAvatarTracking(current, rosterQuery.data?.agents ?? [], Date.now())
+      })
+    }, delayMs)
+    return () => window.clearTimeout(timeout)
+  }, [pendingAvatarTracking, rosterQuery.data?.agents])
+
+  useEffect(() => {
+    if (!rosterQuery.data?.agents) {
+      return
+    }
+    setPendingAvatarTracking((current) => prunePendingAvatarTracking(current, rosterQuery.data.agents))
+  }, [rosterQuery.data?.agents])
 
   useEffect(() => {
     if (!contextData?.context) {
@@ -782,10 +908,16 @@ export function AgentChatPage({
     // Catch scrollbar drags / momentum scrolling where wheel events may not fire consistently.
     const handleScroll = () => {
       const nextScrollTop = container.scrollTop
-      syncNearBottomState(container)
+      const distanceFromBottom = syncNearBottomState(container)
       repinAutoScrollIfAtBottom(container)
+      const movedAwayFromBottom = typeof distanceFromBottom === 'number'
+        && distanceFromBottom > UNPIN_DISTANCE_FROM_BOTTOM_PX
       // Guard against false unpins from programmatic scrolls (scrollIntoView can cause transient scrollTop decreases)
-      if (nextScrollTop < lastScrollTop - 2 && Date.now() - lastProgrammaticScrollAtRef.current > 150) {
+      if (
+        movedAwayFromBottom
+        && nextScrollTop < lastScrollTop - 2
+        && Date.now() - lastProgrammaticScrollAtRef.current > PROGRAMMATIC_SCROLL_GUARD_MS
+      ) {
         unpinAutoScrollFromUserGesture()
       }
       lastScrollTop = nextScrollTop
@@ -793,7 +925,8 @@ export function AgentChatPage({
 
     // Detect scroll-up via wheel
     const handleWheel = (e: WheelEvent) => {
-      if (e.deltaY < 0) {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+      if (e.deltaY < 0 && distanceFromBottom > UNPIN_DISTANCE_FROM_BOTTOM_PX) {
         unpinAutoScrollFromUserGesture()
       }
     }
@@ -810,8 +943,13 @@ export function AgentChatPage({
       const touchY = e.touches[0]?.clientY ?? 0
       const deltaY = touchY - touchStartY
       const elapsed = Date.now() - touchStartTime
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       // Require intentional gesture: larger movement AND not too fast (avoid accidental taps)
-      if (deltaY > TOUCH_SCROLL_UNPIN_THRESHOLD && elapsed > 50) {
+      if (
+        deltaY > TOUCH_SCROLL_UNPIN_THRESHOLD
+        && elapsed > 50
+        && distanceFromBottom > UNPIN_DISTANCE_FROM_BOTTOM_PX
+      ) {
         unpinAutoScrollFromUserGesture()
       }
     }
@@ -819,8 +957,10 @@ export function AgentChatPage({
     // Detect scroll-up via keyboard
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!autoScrollPinnedRef.current) return
+      if (isEditableEventTarget(e.target)) return
       const scrollUpKeys = ['ArrowUp', 'PageUp', 'Home']
-      if (scrollUpKeys.includes(e.key)) {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+      if (scrollUpKeys.includes(e.key) && distanceFromBottom > UNPIN_DISTANCE_FROM_BOTTOM_PX) {
         unpinAutoScrollFromUserGesture()
       }
     }
@@ -1089,7 +1229,7 @@ export function AgentChatPage({
   const [intelligenceOverrides, setIntelligenceOverrides] = useState<Record<string, string>>({})
   const [intelligenceBusy, setIntelligenceBusy] = useState(false)
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
-  const [createAgentError, setCreateAgentError] = useState<string | null>(null)
+  const [createAgentError, setCreateAgentError] = useState<CreateAgentErrorState | null>(null)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
   const spawnIntentAutoSubmittedRef = useRef(false)
@@ -1396,6 +1536,7 @@ export function AgentChatPage({
           agentId: result.agent_id,
           agentName: createdAgentName,
         }
+        trackPendingAvatarRefresh(result.agent_id)
         if (createdAgentEmail) {
           setPendingAgentEmails((current) => ({ ...current, [result.agent_id]: createdAgentEmail }))
         }
@@ -1421,12 +1562,12 @@ export function AgentChatPage({
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
         onAgentCreated?.(result.agent_id)
       } catch (err) {
-        const message = buildCreateAgentErrorMessage(err, isProprietaryMode)
-        setCreateAgentError(message)
+        const errorState = buildCreateAgentError(err, isProprietaryMode)
+        setCreateAgentError(errorState)
         console.error('Failed to create agent:', err)
       }
     },
-    [effectiveContext, isProprietaryMode, onAgentCreated, queryClient, setPendingAgentEmails],
+    [effectiveContext, isProprietaryMode, onAgentCreated, queryClient, setPendingAgentEmails, trackPendingAvatarRefresh],
   )
 
   const handleIntelligenceChange = useCallback(
@@ -1445,6 +1586,8 @@ export function AgentChatPage({
       try {
         await updateAgent(activeAgentId, { preferred_llm_tier: tier })
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+        void refetchQuickSettings()
+        void refreshProcessing()
         return true
       } catch (err) {
         setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: previousTier }))
@@ -1454,7 +1597,7 @@ export function AgentChatPage({
         setIntelligenceBusy(false)
       }
     },
-    [activeAgentId, isNewAgent, queryClient, resolvedIntelligenceTier],
+    [activeAgentId, isNewAgent, queryClient, refreshProcessing, refetchQuickSettings, resolvedIntelligenceTier],
   )
 
   // Start/stop insight rotation based on processing state
@@ -1632,8 +1775,9 @@ export function AgentChatPage({
   const handleUpdateDailyCredits = useCallback(
     async (payload: DailyCreditsUpdatePayload) => {
       await updateQuickSettings({ dailyCredits: payload })
+      void refreshProcessing()
     },
-    [updateQuickSettings],
+    [refreshProcessing, updateQuickSettings],
   )
   const handleUpdateContactPacks = useCallback(
     async (quantities: Record<string, number>) => {
@@ -2009,7 +2153,8 @@ export function AgentChatPage({
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
-        composerError={createAgentError}
+        composerError={createAgentError?.message ?? null}
+        composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}

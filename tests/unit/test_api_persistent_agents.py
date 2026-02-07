@@ -12,6 +12,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
+    PersistentAgentSystemStep,
     UserPhoneNumber,
     UserQuota,
 )
@@ -375,6 +376,47 @@ class PersistentAgentAPITests(TestCase):
         agent = PersistentAgent.objects.get(id=agent_id)
         self.assertEqual(agent.charter, 'Refine outreach list')
         self.assertFalse(agent.is_active)
+
+    def test_update_agent_preferred_llm_tier_triggers_immediate_resume(self):
+        payload = self._create_agent_via_api()
+        agent_id = payload['id']
+        agent = PersistentAgent.objects.get(id=agent_id)
+        self.process_events_mock.reset_mock()
+        # Ensure target tier exists in lean test fixtures.
+        from api.models import IntelligenceTier
+
+        if not IntelligenceTier.objects.filter(key="premium").exists():
+            next_rank = (
+                IntelligenceTier.objects.order_by("-rank").values_list("rank", flat=True).first() or 0
+            ) + 1
+            IntelligenceTier.objects.create(
+                key="premium",
+                display_name="Premium",
+                rank=next_rank,
+                credit_multiplier="1.50",
+            )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            update_response = self.client.patch(
+                f'{PERSISTENT_AGENT_BASE_URL}{agent_id}/',
+                data=json.dumps({'preferred_llm_tier': 'premium'}),
+                content_type='application/json',
+            )
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+
+        agent.refresh_from_db()
+        self.assertEqual(getattr(agent.preferred_llm_tier, "key", None), 'premium')
+        self.process_events_mock.assert_called_once_with(str(agent.id))
+
+        latest_system_step = (
+            PersistentAgentSystemStep.objects
+            .filter(step__agent=agent, code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE)
+            .select_related('step')
+            .order_by('-step__created_at')
+            .first()
+        )
+        self.assertIsNotNone(latest_system_step)
+        self.assertIn("Intelligence level changed", latest_system_step.step.description)
 
     def test_update_agent_name_syncs_blank_email_display_name(self):
         payload = self._create_agent_via_api({'name': 'Original Agent'})

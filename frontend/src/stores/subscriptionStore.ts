@@ -10,6 +10,7 @@ export type UpgradeModalSource =
   | 'contact_cap_callout'
   | 'intelligence_selector'
   | 'trial_onboarding'
+  | 'agent_limit_error'
   | 'unknown'
 
 type UpgradeModalOptions = {

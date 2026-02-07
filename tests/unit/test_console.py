@@ -331,9 +331,10 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)
 
     @tag("batch_console_agents")
+    @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
     @patch('util.analytics.Analytics.track_event')
-    def test_agent_detail_updates_daily_credit_limit(self, mock_track_event):
-        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+    def test_agent_detail_updates_daily_credit_limit(self, mock_track_event, mock_resume_delay):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep, PersistentAgentSystemStep
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -348,18 +349,29 @@ class ConsoleViewsTest(TestCase):
 
         url = reverse('agent_detail', kwargs={'pk': agent.id})
 
-        response = self.client.post(url, {
-            'name': agent.name,
-            'charter': agent.charter,
-            'is_active': 'on',
-            'daily_credit_limit': '2',
-        })
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url, {
+                'name': agent.name,
+                'charter': agent.charter,
+                'is_active': 'on',
+                'daily_credit_limit': '2',
+            })
         self.assertEqual(response.status_code, 302)
+        mock_resume_delay.assert_called_once_with(str(agent.id))
 
         agent.refresh_from_db()
         self.assertEqual(agent.daily_credit_limit, 2)
         self.assertEqual(agent.get_daily_credit_soft_target(), Decimal('2'))
         self.assertEqual(agent.get_daily_credit_hard_limit(), Decimal('4.00'))
+        latest_system_step = (
+            PersistentAgentSystemStep.objects
+            .filter(step__agent=agent, code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE)
+            .select_related('step')
+            .order_by('-step__created_at')
+            .first()
+        )
+        self.assertIsNotNone(latest_system_step)
+        self.assertIn("Daily credit soft target changed", latest_system_step.step.description)
 
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
@@ -374,13 +386,15 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
         self.assertTrue(response.context['daily_credit_low'])
 
-        response = self.client.post(url, {
-            'name': agent.name,
-            'charter': agent.charter,
-            'is_active': 'on',
-            'daily_credit_limit': '',
-        })
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url, {
+                'name': agent.name,
+                'charter': agent.charter,
+                'is_active': 'on',
+                'daily_credit_limit': '',
+            })
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(mock_resume_delay.call_count, 2)
 
         agent.refresh_from_db()
         self.assertIsNone(agent.daily_credit_limit)
@@ -417,8 +431,9 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
 
     @tag("batch_console_agents")
-    def test_agent_quick_settings_api_updates_limit(self):
-        from api.models import PersistentAgent, BrowserUseAgent
+    @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
+    def test_agent_quick_settings_api_updates_limit(self, mock_resume_delay):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentSystemStep
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -432,15 +447,26 @@ class ConsoleViewsTest(TestCase):
         )
 
         url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
-        response = self.client.post(
-            url,
-            data=json.dumps({'dailyCredits': {'daily_credit_limit': 7}}),
-            content_type='application/json',
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=json.dumps({'dailyCredits': {'daily_credit_limit': 7}}),
+                content_type='application/json',
+            )
         self.assertEqual(response.status_code, 200)
 
         agent.refresh_from_db()
         self.assertEqual(agent.daily_credit_limit, 7)
+        mock_resume_delay.assert_called_once_with(str(agent.id))
+        latest_system_step = (
+            PersistentAgentSystemStep.objects
+            .filter(step__agent=agent, code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE)
+            .select_related('step')
+            .order_by('-step__created_at')
+            .first()
+        )
+        self.assertIsNotNone(latest_system_step)
+        self.assertIn("Daily credit soft target changed", latest_system_step.step.description)
 
     @tag("batch_console_agents")
     def test_agent_quick_settings_api_hard_limit_blocked(self):

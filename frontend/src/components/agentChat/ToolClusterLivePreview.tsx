@@ -788,10 +788,24 @@ function deriveLinkedInLabel(toolName: string): string {
   return 'Viewing LinkedIn profile'
 }
 
+const ACTIVE_LABEL_MAP: Record<string, string> = {
+  'Assignment updated': 'Updating assignment',
+  'Schedule updated': 'Updating schedule',
+  'Assignment and schedule updated': 'Updating assignment and schedule',
+  'Database enabled': 'Enabling database',
+  'Email sent': 'Sending email',
+  'SMS sent': 'Sending SMS',
+  'Web message sent': 'Sending web message',
+  'Chat message sent': 'Sending chat message',
+  'Peer message sent': 'Sending peer message',
+  'Webhook sent': 'Sending webhook',
+}
+
 function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
   const semantic = deriveSemanticPreview(entry)
   const kind = classifyActivity(entry)
   const toolName = (entry.toolName || '').toLowerCase()
+  const isPending = entry.status === 'pending'
 
   if (kind === 'linkedin') {
     const target = parseLinkedInTarget(semantic ?? entry.caption ?? entry.summary ?? null)
@@ -847,7 +861,7 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
     const title = pickText(entry.parameters?.title) ?? pickText(entry.caption) ?? pickText(entry.summary) ?? null
     return {
       kind,
-      label: 'Created chart',
+      label: isPending ? 'Creating chart' : 'Created chart',
       detail: title ? clampText(title, 86) : null,
     }
   }
@@ -856,7 +870,7 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
     const prompt = pickText(entry.parameters?.prompt) ?? pickText(entry.caption) ?? pickText(entry.summary) ?? null
     return {
       kind,
-      label: 'Created image',
+      label: isPending ? 'Creating image' : 'Created image',
       detail: prompt ? clampText(prompt, 86) : null,
     }
   }
@@ -864,7 +878,7 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
   const detail = semantic ? clampText(semantic) : null
   return {
     kind,
-    label: entry.label,
+    label: isPending ? (ACTIVE_LABEL_MAP[entry.label] ?? entry.label) : entry.label,
     detail,
   }
 }
@@ -998,7 +1012,7 @@ export function ToolClusterLivePreview({
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
             const previewImageUrl = visual.previewImageUrl
             const isVisualActivity = item.activity.kind === 'chart' || item.activity.kind === 'image'
-            const visualFallbackLabel = item.activity.kind === 'image' ? 'Created image' : 'Created chart'
+            const visualFallbackLabel = item.activity.label
             const visualFallbackAlt = item.activity.kind === 'image' ? 'Generated image' : 'Chart'
 
             // Collect all visual entries with images for grid rendering.
@@ -1049,7 +1063,7 @@ export function ToolClusterLivePreview({
                       <span className="tool-cluster-live-preview__chart-thumb-header">
                         <span className="tool-cluster-live-preview__chart-thumb-header-dot" data-kind={visualItem.activity.kind} />
                         <span className="tool-cluster-live-preview__chart-thumb-header-label">
-                          {visualItem.activity.kind === 'image' ? 'Created image' : 'Created chart'}
+                          {visualItem.activity.label}
                         </span>
                       </span>
                       <span className="tool-cluster-live-preview__chart-thumb-img-wrap">

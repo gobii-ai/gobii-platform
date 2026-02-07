@@ -130,6 +130,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
   composerError?: string | null
+  composerErrorShowUpgrade?: boolean
 }
 
 export function AgentChatLayout({
@@ -227,6 +228,7 @@ export function AgentChatLayout({
   onOpenTaskPacks,
   spawnIntentLoading = false,
   composerError = null,
+  composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
@@ -250,6 +252,7 @@ export function AgentChatLayout({
   const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
+  const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -464,13 +467,59 @@ export function AgentChatLayout({
   const hasTimelineEvents = events.length > 0
   const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || loadingNewer)
-  const showJumpButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || hasUnseenActivity || (!autoScrollPinned && !isNearBottom))
+  const showJumpButton = !initialLoading
+    && hasTimelineEvents
+    && (
+      hasMoreNewer
+      || (!autoScrollPinned && (hasUnseenActivity || !isNearBottom))
+    )
 
   const showBanner = Boolean(agentName)
   const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
   const showHardLimitCallout = Boolean(
     (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
   )
+  const quickIncreaseTarget = useMemo(() => {
+    if (!dailyCredits || !onUpdateDailyCredits || dailyCredits.unlimited) {
+      return null
+    }
+    if (!Number.isFinite(dailyCredits.limit ?? NaN) || !Number.isFinite(dailyCredits.sliderLimitMax)) {
+      return null
+    }
+
+    const currentLimit = Math.round(dailyCredits.limit as number)
+    const maxLimit = Math.round(dailyCredits.sliderLimitMax)
+    const step = Number.isFinite(dailyCredits.sliderStep) && dailyCredits.sliderStep > 0
+      ? Math.round(dailyCredits.sliderStep)
+      : 1
+    const standardLimit = Number.isFinite(dailyCredits.standardSliderLimit)
+      ? Math.round(dailyCredits.standardSliderLimit)
+      : currentLimit + step
+    const target = Math.min(maxLimit, Math.max(currentLimit + step, standardLimit))
+
+    if (target <= currentLimit) {
+      return null
+    }
+    return target
+  }, [dailyCredits, onUpdateDailyCredits])
+  const quickIncreaseLabel = useMemo(() => {
+    if (quickIncreaseTarget === null) {
+      return null
+    }
+    return `Increase to ${quickIncreaseTarget}/day`
+  }, [quickIncreaseTarget])
+  const handleQuickIncreaseLimit = useCallback(async () => {
+    if (!onUpdateDailyCredits || quickIncreaseTarget === null || quickIncreaseBusy) {
+      return
+    }
+    setQuickIncreaseBusy(true)
+    try {
+      await onUpdateDailyCredits({ daily_credit_limit: quickIncreaseTarget })
+      onRefreshDailyCredits?.()
+    } finally {
+      setQuickIncreaseBusy(false)
+    }
+  }, [onUpdateDailyCredits, quickIncreaseTarget, quickIncreaseBusy, onRefreshDailyCredits])
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
   const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
 
@@ -625,6 +674,9 @@ export function AgentChatLayout({
                 {showHardLimitCallout ? (
                   <HardLimitCalloutCard
                     onOpenSettings={handleSettingsOpen}
+                    onQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
+                    quickIncreaseLabel={quickIncreaseLabel ?? undefined}
+                    quickIncreaseBusy={quickIncreaseBusy}
                     upgradeUrl={hardLimitUpgradeUrl}
                     showUpsell={hardLimitShowUpsell}
                   />
@@ -754,6 +806,7 @@ export function AgentChatLayout({
               onOpenTaskPacks={resolvedOpenTaskPacks}
               canManageAgent={canManageAgent}
               submitError={composerError}
+              showSubmitErrorUpgrade={composerErrorShowUpgrade}
             />
           )}
         </div>

@@ -1213,6 +1213,11 @@
 
 .composer-submit-error {
   margin-top: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.625rem;
+  flex-wrap: wrap;
   border-radius: 0.625rem;
   border: 1px solid rgba(239, 68, 68, 0.32);
   background: rgba(254, 242, 242, 0.92);
@@ -1220,6 +1225,33 @@
   font-size: 0.75rem;
   line-height: 1.2rem;
   color: #b91c1c;
+}
+
+.composer-submit-error-text {
+  flex: 1 1 12rem;
+}
+
+.composer-submit-error-upgrade {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid rgba(185, 28, 28, 0.3);
+  background: rgba(255, 255, 255, 0.88);
+  color: #991b1b;
+  padding: 0.15rem 0.55rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1.1rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.composer-submit-error-upgrade:hover {
+  background: rgba(255, 255, 255, 1);
+  border-color: rgba(153, 27, 27, 0.42);
+}
+
+.composer-submit-error-upgrade:focus-visible {
+  outline: 2px solid rgba(185, 28, 28, 0.35);
+  outline-offset: 1px;
 }
 
 .composer-intelligence-pack {
@@ -1936,6 +1968,10 @@
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
+.hard-limit-callout-button--secondary {
+  background: linear-gradient(135deg, #0f766e 0%, #0f766e 30%, #0369a1 100%);
+}
+
 .hard-limit-callout-button:hover {
   transform: translateY(-1px);
   box-shadow: 0 10px 20px rgba(37, 99, 235, 0.25);
@@ -1948,6 +1984,13 @@
 
 .hard-limit-callout-button:active {
   transform: scale(0.98);
+}
+
+.hard-limit-callout-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+  transform: none;
+  box-shadow: none;
 }
 
 
