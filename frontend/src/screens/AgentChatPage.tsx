@@ -1727,32 +1727,6 @@ export function AgentChatPage({
     </div>
   )
 
-  if (isSelectionView) {
-    if (!contextReady || rosterLoading) {
-      return renderSelectionLayout(
-        <div className="flex min-h-[60vh] items-center justify-center">
-          <p className="text-sm font-medium text-slate-500">Loading workspace…</p>
-        </div>,
-      )
-    }
-    return renderSelectionLayout(
-      <AgentSelectState
-        hasAgents={rosterAgents.length > 0}
-        onCreateAgent={handleCreateAgent}
-      />,
-    )
-  }
-
-  // Show a dedicated not-found state with sidebar still accessible
-  if (agentNotFound) {
-    return renderSelectionLayout(
-      <AgentNotFoundState
-        hasOtherAgents={rosterAgents.length > 0}
-        onCreateAgent={handleCreateAgent}
-      />,
-    )
-  }
-
   const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
   const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
   const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
@@ -2064,6 +2038,32 @@ export function AgentChatPage({
   )
 
   const topLevelError = error || (sessionStatus === 'error' ? sessionError : null)
+
+  if (isSelectionView) {
+    if (!contextReady || rosterLoading) {
+      return renderSelectionLayout(
+        <div className="flex min-h-[60vh] items-center justify-center">
+          <p className="text-sm font-medium text-slate-500">Loading workspace…</p>
+        </div>,
+      )
+    }
+    return renderSelectionLayout(
+      <AgentSelectState
+        hasAgents={rosterAgents.length > 0}
+        onCreateAgent={handleCreateAgent}
+      />,
+    )
+  }
+
+  // Show a dedicated not-found state with sidebar still accessible
+  if (agentNotFound) {
+    return renderSelectionLayout(
+      <AgentNotFoundState
+        hasOtherAgents={rosterAgents.length > 0}
+        onCreateAgent={handleCreateAgent}
+      />,
+    )
+  }
 
   return (
     <div className="agent-chat-page" data-processing={isProcessing ? 'true' : 'false'}>

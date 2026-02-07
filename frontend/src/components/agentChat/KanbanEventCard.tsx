@@ -93,8 +93,6 @@ function MiniColumn({
   delay: number
   changes: ChangeInfo[]
 }) {
-  if (count === 0) return null
-
   const maxVisible = 3
   const visibleTitles = titles.slice(0, maxVisible)
   const remaining = count - visibleTitles.length
@@ -116,6 +114,8 @@ function MiniColumn({
     if (actions.includes('created')) return 'kanban-column--pulse-created'
     return ''
   }, [changes, hasChanges])
+
+  if (count === 0) return null
 
   return (
     <div
