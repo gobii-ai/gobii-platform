@@ -4578,129 +4578,160 @@
 }
 
 /* ==========================================================================
-   Response Progress Bar - Loading indicator
+   Response Throbber — Futuristic orbital loading indicator
    ========================================================================== */
 
-.response-progress-container {
-  padding: 0.75rem 0 0.75rem;
-  animation: progressFadeIn 0.4s ease-out;
+.response-throbber-container {
+  display: flex;
+  justify-content: center;
+  padding: 0.125rem 0;
+  animation: throbberIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-@keyframes progressFadeIn {
-  from {
-    opacity: 0;
-    transform: scaleX(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: scaleX(1);
-  }
+.response-throbber-container[hidden] {
+  display: none;
 }
 
-.response-progress-track {
-  height: 3px;
-  border-radius: 9999px;
-  background: linear-gradient(
-    90deg,
-    rgba(148, 163, 184, 0.08) 0%,
-    rgba(148, 163, 184, 0.12) 50%,
-    rgba(148, 163, 184, 0.08) 100%
-  );
-  overflow: visible;
+@keyframes throbberIn {
+  from { opacity: 0; transform: scale(0.7); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.response-throbber {
   position: relative;
+  width: 44px;
+  height: 44px;
 }
 
-.response-progress-fill {
-  height: 100%;
-  border-radius: 9999px;
-  background: linear-gradient(
-    90deg,
-    #10b981 0%,
-    #34d399 50%,
-    #6ee7b7 100%
-  );
-  position: relative;
-  transition: width 16ms linear;
-  min-width: 0;
-  box-shadow:
-    0 0 20px rgba(16, 185, 129, 0.4),
-    0 0 40px rgba(16, 185, 129, 0.2);
-}
-
-/* Flowing shimmer wave across the bar */
-.response-progress-fill::before {
+/* Soft ambient halo */
+.response-throbber::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.4) 50%,
-    transparent 100%
-  );
-  background-size: 200% 100%;
-  animation: progressShimmer 1.5s ease-in-out infinite;
-  border-radius: 9999px;
+  inset: -14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.07) 0%, transparent 70%);
+  animation: haloPulse 3s ease-in-out infinite;
+  pointer-events: none;
 }
 
-@keyframes progressShimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
+@keyframes haloPulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.92); }
+  50%      { opacity: 1;   transform: scale(1.08); }
 }
 
-/* Energetic leading edge glow */
-.response-progress-glow {
+.throbber-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* ---- rings ---- */
+
+.throbber-track {
+  fill: none;
+  stroke: rgba(148, 163, 184, 0.08);
+  stroke-width: 1.5;
+}
+
+.throbber-arc {
+  fill: none;
+  stroke: url(#throbber-grad);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transform-origin: 22px 22px;
+  transform: rotate(-90deg);
+  animation: arcSpin 3.5s linear infinite;
+  filter: drop-shadow(0 0 3px rgba(16, 185, 129, 0.6))
+         drop-shadow(0 0 6px rgba(6, 182, 212, 0.25));
+  will-change: transform, stroke-dasharray;
+}
+
+@keyframes arcSpin {
+  from { transform: rotate(-90deg); }
+  to   { transform: rotate(270deg); }
+}
+
+.throbber-inner {
+  fill: none;
+  stroke: rgba(52, 211, 153, 0.1);
+  stroke-width: 0.75;
+  stroke-dasharray: 5 8;
+  stroke-linecap: round;
+  transform-origin: 22px 22px;
+  animation: ringCCW 9s linear infinite;
+  will-change: transform;
+}
+
+@keyframes ringCCW {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
+}
+
+.throbber-outer {
+  fill: none;
+  stroke: rgba(148, 163, 184, 0.04);
+  stroke-width: 0.5;
+  stroke-dasharray: 2 6;
+  transform-origin: 22px 22px;
+  animation: ringCW 14s linear infinite;
+  will-change: transform;
+}
+
+@keyframes ringCW {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ---- center core ---- */
+
+.throbber-core {
   position: absolute;
   top: 50%;
-  right: 0;
+  left: 50%;
   width: 4px;
   height: 4px;
-  transform: translate(50%, -50%);
-  background: #fff;
+  margin: -2px 0 0 -2px;
+  background: #34d399;
   border-radius: 50%;
-  box-shadow:
-    0 0 4px 2px rgba(255, 255, 255, 0.9),
-    0 0 8px 4px rgba(110, 231, 183, 0.8),
-    0 0 16px 8px rgba(52, 211, 153, 0.5),
-    0 0 32px 12px rgba(16, 185, 129, 0.3);
-  animation: progressPulse 0.8s ease-in-out infinite;
+  animation: coreBreathe 2.5s ease-in-out infinite;
+  will-change: transform, box-shadow;
 }
 
-@keyframes progressPulse {
+@keyframes coreBreathe {
   0%, 100% {
-    transform: translate(50%, -50%) scale(1);
-    opacity: 0.9;
+    transform: scale(1);
+    box-shadow:
+      0 0 4px rgba(52, 211, 153, 0.9),
+      0 0 8px rgba(16, 185, 129, 0.5),
+      0 0 16px rgba(6, 182, 212, 0.2);
   }
   50% {
-    transform: translate(50%, -50%) scale(1.2);
-    opacity: 1;
+    transform: scale(1.5);
+    box-shadow:
+      0 0 6px rgba(52, 211, 153, 1),
+      0 0 14px rgba(16, 185, 129, 0.7),
+      0 0 24px rgba(6, 182, 212, 0.35);
   }
 }
 
+/* ---- reduced motion ---- */
+
 @media (prefers-reduced-motion: reduce) {
-  .response-progress-container {
+  .response-throbber-container { animation: none; }
+  .response-throbber::before  { animation: none; opacity: 0.7; }
+  .throbber-arc {
     animation: none;
+    transform: rotate(-90deg);
+    filter: drop-shadow(0 0 2px rgba(16, 185, 129, 0.4));
   }
-  .response-progress-fill {
-    transition: width 100ms linear;
-    box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
-  }
-  .response-progress-fill::before {
-    animation: none;
-    opacity: 0;
-  }
-  .response-progress-glow {
+  .throbber-inner { animation: none; }
+  .throbber-outer { animation: none; }
+  .throbber-core {
     animation: none;
     box-shadow:
-      0 0 4px 2px rgba(255, 255, 255, 0.8),
-      0 0 8px 4px rgba(110, 231, 183, 0.6);
+      0 0 4px rgba(52, 211, 153, 0.8),
+      0 0 8px rgba(16, 185, 129, 0.4);
   }
 }
 
