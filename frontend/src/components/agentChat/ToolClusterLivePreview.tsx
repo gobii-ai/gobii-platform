@@ -788,11 +788,11 @@ function classifyActivity(entry: ToolEntryDisplay): ActivityKind {
 }
 
 function deriveLinkedInLabel(toolName: string): string {
-  if (toolName.includes('company')) return 'Browsing company page'
-  if (toolName.includes('people_search')) return 'Searching people'
-  if (toolName.includes('job')) return 'Scanning job listings'
-  if (toolName.includes('posts')) return 'Scanning posts'
-  return 'Browsing profile'
+  if (toolName.includes('company')) return 'Viewing LinkedIn company'
+  if (toolName.includes('people_search')) return 'Searching LinkedIn'
+  if (toolName.includes('job')) return 'Viewing LinkedIn jobs'
+  if (toolName.includes('posts')) return 'Viewing LinkedIn posts'
+  return 'Viewing LinkedIn profile'
 }
 
 function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
@@ -1256,8 +1256,8 @@ export function ToolClusterLivePreview({
                           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
                           transition={{ duration: 0.16, ease: 'easeOut' }}
                         >
-                          {linkedInProfile.subtitle
-                            ? `${item.activity.label} · ${linkedInProfile.subtitle}`
+                          {linkedInProfile.subtitle && linkedInProfile.subtitle !== linkedInProfile.displayName
+                            ? linkedInProfile.subtitle
                             : item.activity.label}
                         </motion.span>
                       ) : visual.pageTitle && visual.scrapeTargets.length > 0 ? (
