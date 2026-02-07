@@ -4963,7 +4963,8 @@
 .response-throbber-container {
   display: flex;
   justify-content: center;
-  padding: 0.125rem 0;
+  padding: 0.75rem 0;
+  overflow: hidden;
   animation: throbberIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -4986,13 +4987,13 @@
 .response-throbber::before {
   content: '';
   position: absolute;
-  inset: -18px;
+  inset: -10px;
   border-radius: 50%;
   background: radial-gradient(
     circle,
     rgba(167, 139, 250, 0.15) 0%,
-    rgba(124, 58, 237, 0.06) 45%,
-    transparent 72%
+    rgba(124, 58, 237, 0.06) 50%,
+    transparent 80%
   );
   animation: haloPulse 3s ease-in-out infinite;
   pointer-events: none;
