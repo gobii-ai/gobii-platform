@@ -1046,15 +1046,31 @@ export function ToolClusterLivePreview({
                       whileHover={reduceMotion ? undefined : { scale: 1.02, y: -1 }}
                       onClick={() => onSelectEntry(visualItem.entry)}
                     >
-                      <img
-                        src={visualItem.visual.previewImageUrl!}
-                        alt={visualItem.activity.detail || visualFallbackAlt}
-                        loading="lazy"
-                        className="tool-cluster-live-preview__chart-thumb-img"
-                      />
-                      <span className="tool-cluster-live-preview__chart-thumb-caption">
-                        {visualItem.activity.detail || visualFallbackLabel}
+                      <span className="tool-cluster-live-preview__chart-thumb-header">
+                        <span className="tool-cluster-live-preview__chart-thumb-header-dot" data-kind={visualItem.activity.kind} />
+                        <span className="tool-cluster-live-preview__chart-thumb-header-label">
+                          {visualItem.activity.kind === 'image' ? 'Created image' : 'Created chart'}
+                        </span>
                       </span>
+                      <span className="tool-cluster-live-preview__chart-thumb-img-wrap">
+                        <img
+                          src={visualItem.visual.previewImageUrl!}
+                          alt=""
+                          aria-hidden="true"
+                          className="tool-cluster-live-preview__chart-thumb-img-bg"
+                        />
+                        <img
+                          src={visualItem.visual.previewImageUrl!}
+                          alt={visualItem.activity.detail || visualFallbackAlt}
+                          loading="lazy"
+                          className="tool-cluster-live-preview__chart-thumb-img"
+                        />
+                      </span>
+                      {visualItem.activity.detail && (
+                        <span className="tool-cluster-live-preview__chart-thumb-title">
+                          {visualItem.activity.detail}
+                        </span>
+                      )}
                     </motion.button>
                   ))}
                 </motion.div>

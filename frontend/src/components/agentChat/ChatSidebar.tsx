@@ -190,7 +190,9 @@ export const ChatSidebar = memo(function ChatSidebar({
       <div className="chat-sidebar-inner">
         <div className="chat-sidebar-header" data-collapsed={collapsed ? 'true' : 'false'}>
           {!collapsed ? (
-            <img src="/static/images/noBgWhite.png" alt="Gobii" className="chat-sidebar-logo" />
+            <a href="/" className="chat-sidebar-logo-link">
+              <img src="/static/images/noBgWhite.png" alt="Gobii" className="chat-sidebar-logo" />
+            </a>
           ) : null}
           <div className="chat-sidebar-header-actions">
             {contextSwitcher ? (
