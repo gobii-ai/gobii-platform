@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, RotateCcw, Globe } from 'lucide-react'
+import { ArrowLeft, ArrowRight, RotateCcw, Globe, ExternalLink } from 'lucide-react'
 
 import { MarkdownViewer } from '../../../common/MarkdownViewer'
 import { looksLikeHtml, pickHtmlCandidate, sanitizeHtml } from '../../../../util/sanitize'
@@ -9,6 +9,19 @@ import { KeyValueList, Section } from '../shared'
 
 function pickString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length ? value.trim() : null
+}
+
+function parseHostname(value: string): string | null {
+  try {
+    return new URL(value).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+function buildFaviconUrl(hostname: string | null): string | null {
+  if (!hostname) return null
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`
 }
 
 type LinkItem = { title: string; url: string; position: number }
@@ -250,8 +263,7 @@ export function BrightDataSearchDetail({ entry }: ToolDetailProps) {
   const query = extractBrightDataSearchQuery(parameters)
   const serpItems = extractBrightDataSerpItems(entry.result)
   const resultCount = extractBrightDataResultCount(entry.result) ?? (serpItems.length ? serpItems.length : null)
-  const displayItems = serpItems.slice(0, 10)
-  const hasMore = serpItems.length > displayItems.length
+  const displayItems = serpItems
   const infoItems = [
     query ? { label: 'Query', value: <span className="tool-search-query-inline">“{query}”</span> } : null,
     resultCount !== null ? { label: 'Results', value: String(resultCount) } : null,
@@ -264,23 +276,39 @@ export function BrightDataSearchDetail({ entry }: ToolDetailProps) {
       {displayItems.length ? (
         <Section title="Results">
           <ol className="space-y-2">
-            {displayItems.map((item, idx) => (
-              <li key={`${item.url}-${idx}`} className="flex gap-2">
-                <span className="mt-1 min-w-[1.5rem] text-right text-xs font-medium text-slate-400">
-                  {item.position ?? idx + 1}.
-                </span>
-                <div className="space-y-0.5">
-                  <div className="font-semibold text-slate-800">
-                    <a href={item.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
-                      {item.title}
-                    </a>
-                  </div>
-                  <p className="text-xs text-slate-500 break-all">{item.url}</p>
-                </div>
-              </li>
-            ))}
+            {displayItems.map((item, idx) => {
+              const host = parseHostname(item.url)
+              const faviconUrl = buildFaviconUrl(host)
+              return (
+                <li key={`${item.url}-${idx}`}>
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group flex items-start gap-2 rounded-md border border-slate-200 bg-white px-2 py-2 transition-colors hover:bg-slate-50"
+                  >
+                    <span className="mt-0.5 min-w-[1.5rem] text-right text-xs font-medium text-slate-400">
+                      {item.position ?? idx + 1}.
+                    </span>
+                    <span className="mt-0.5 inline-grid h-5 w-5 shrink-0 place-items-center overflow-hidden rounded-full border border-slate-200 bg-white">
+                      {faviconUrl ? (
+                        <img src={faviconUrl} alt="" className="h-3.5 w-3.5 object-contain" loading="lazy" referrerPolicy="no-referrer" />
+                      ) : (
+                        <Globe className="h-3.5 w-3.5 text-slate-400" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1 space-y-0.5">
+                      <span className="block line-clamp-2 text-sm font-semibold text-slate-800 group-hover:text-indigo-700">
+                        {item.title}
+                      </span>
+                      <span className="block text-xs text-slate-500 break-all">{item.url}</span>
+                    </span>
+                    <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400 group-hover:text-indigo-600" />
+                  </a>
+                </li>
+              )
+            })}
           </ol>
-          {hasMore ? <p className="text-xs text-slate-500">Showing first {displayItems.length} results.</p> : null}
         </Section>
       ) : null}
       {!hasDetails && !displayItems.length ? <p className="text-slate-500">No search details returned.</p> : null}

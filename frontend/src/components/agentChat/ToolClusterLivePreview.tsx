@@ -35,10 +35,28 @@ type ActivityDescriptor = {
 type EntryVisual = {
   badge: string | null
   snippet: string | null
+  linkedInProfile: LinkedInProfileVisual | null
+  searchItems: SearchPreviewItem[]
+  searchTotal: number | null
+}
+
+type LinkedInProfileVisual = {
+  displayName: string
+  subtitle: string | null
+  statusText: string | null
+  avatarUrl: string | null
+  initials: string
+}
+
+type SearchPreviewItem = {
+  title: string
+  url: string
+  host: string
 }
 
 const MAX_DETAIL_LENGTH = 88
 const MAX_PREVIEW_ENTRIES = 3
+const MAX_SEARCH_PREVIEW_ITEMS = 8
 const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
 
 function clampText(value: string, maxLength: number = MAX_DETAIL_LENGTH): string {
@@ -133,6 +151,357 @@ function parseHostFromText(value: string | null | undefined): string | null {
   }
 }
 
+function normalizeSearchCandidateUrl(value: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+  const withProtocol = /^https?:\/\//i.test(normalized) ? normalized : `https://${normalized}`
+  try {
+    const url = new URL(withProtocol)
+    const host = url.hostname.toLowerCase()
+
+    if (host.includes('google.') && url.pathname === '/url') {
+      const candidate = url.searchParams.get('q') || url.searchParams.get('url')
+      if (candidate && /^https?:\/\//i.test(candidate)) {
+        return candidate
+      }
+    }
+
+    if (host.includes('google.') || host.includes('googleusercontent.com')) {
+      return null
+    }
+
+    return url.toString()
+  } catch {
+    return null
+  }
+}
+
+function pickText(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const trimmed = value.trim()
+  return trimmed.length ? trimmed : null
+}
+
+function normalizeSearchPreviewItem(rawTitle: string | null, rawUrl: string | null): SearchPreviewItem | null {
+  const url = normalizeSearchCandidateUrl(rawUrl)
+  if (!url) {
+    return null
+  }
+  const host = parseHostFromText(url)
+  if (!host) {
+    return null
+  }
+  const cleanedTitle = rawTitle ? sanitizeMarkdownTitle(rawTitle) : ''
+  const effectiveTitle = cleanedTitle && !isGenericSearchTitle(cleanedTitle) ? cleanedTitle : host
+  const title = clampText(effectiveTitle, 86)
+  return { title, url, host }
+}
+
+const GENERIC_SEARCH_TITLES = new Set([
+  'read more',
+  'more',
+  'more items',
+  'visit',
+  'visit site',
+  'learn more',
+  'details',
+  'open',
+])
+
+const SEARCH_TITLE_LINE_SKIP = [
+  'people also ask',
+  'discussions and forums',
+  'filters and topics',
+  'accessibility feedback',
+  'feedback',
+  'ai mode',
+]
+
+function sanitizeMarkdownTitle(value: string): string {
+  return value
+    .replace(/^#+\s*/, '')
+    .replace(/[_*`~]+/g, '')
+    .replace(/\\\[/g, '[')
+    .replace(/\\\]/g, ']')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isGenericSearchTitle(value: string | null): boolean {
+  if (!value) {
+    return true
+  }
+  const normalized = sanitizeMarkdownTitle(value)
+    .toLowerCase()
+    .replace(/[.…]+$/g, '')
+    .trim()
+  return GENERIC_SEARCH_TITLES.has(normalized)
+}
+
+function isPlausibleSearchTitleLine(line: string): boolean {
+  const normalized = sanitizeMarkdownTitle(line)
+  if (normalized.length < 4) {
+    return false
+  }
+  if (!/[a-zA-Z]/.test(normalized)) {
+    return false
+  }
+  if (/^https?:\/\//i.test(normalized)) {
+    return false
+  }
+  if (normalized.startsWith('![') || normalized.startsWith('[') || normalized === ']') {
+    return false
+  }
+  const lowered = normalized.toLowerCase()
+  if (SEARCH_TITLE_LINE_SKIP.some((token) => lowered.includes(token))) {
+    return false
+  }
+  if (isGenericSearchTitle(normalized)) {
+    return false
+  }
+  return true
+}
+
+function extractForwardSearchTitle(source: string, fromIndex: number): string | null {
+  const window = source.slice(fromIndex, Math.min(source.length, fromIndex + 440))
+  const headingMatch = window.match(/###\s+([^\n]+)/)
+  if (headingMatch?.[1]) {
+    const heading = sanitizeMarkdownTitle(headingMatch[1])
+    if (isPlausibleSearchTitleLine(heading)) {
+      return heading
+    }
+  }
+
+  const lines = window
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  for (const line of lines) {
+    if (isPlausibleSearchTitleLine(line)) {
+      return sanitizeMarkdownTitle(line)
+    }
+  }
+  return null
+}
+
+function extractBackwardSearchTitle(source: string, toIndex: number): string | null {
+  const window = source.slice(Math.max(0, toIndex - 260), toIndex)
+  const lines = window
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .reverse()
+  for (const line of lines) {
+    if (isPlausibleSearchTitleLine(line)) {
+      return sanitizeMarkdownTitle(line)
+    }
+  }
+  return null
+}
+
+function extractMarkdownSearchItems(value: string): SearchPreviewItem[] {
+  const items: SearchPreviewItem[] = []
+  const markdownLinkPattern = /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g
+
+  let match: RegExpExecArray | null
+  while ((match = markdownLinkPattern.exec(value)) !== null) {
+    let title = pickText(match[1])
+    const url = pickText(match[2])
+    if (isGenericSearchTitle(title)) {
+      title =
+        extractForwardSearchTitle(value, match.index + match[0].length) ??
+        extractBackwardSearchTitle(value, match.index) ??
+        title
+    }
+    const normalized = normalizeSearchPreviewItem(title, url)
+    if (!normalized) {
+      continue
+    }
+    items.push(normalized)
+    if (items.length >= MAX_SEARCH_PREVIEW_ITEMS * 4) {
+      break
+    }
+  }
+
+  return items
+}
+
+function dedupeSearchItems(items: SearchPreviewItem[]): SearchPreviewItem[] {
+  const seen = new Set<string>()
+  const unique: SearchPreviewItem[] = []
+  for (const item of items) {
+    const key = item.url
+    if (seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    unique.push(item)
+  }
+  return unique
+}
+
+function buildFaviconUrl(host: string): string {
+  return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`
+}
+
+function pickFromRecord(record: Record<string, unknown>, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = pickText(record[key])
+    if (value) {
+      return value
+    }
+  }
+  return null
+}
+
+function normalizeUrlLike(value: string | null): string | null {
+  if (!value) {
+    return null
+  }
+  if (value.startsWith('//')) {
+    return `https:${value}`
+  }
+  return value
+}
+
+function isLikelyProfileRecord(record: Record<string, unknown>): boolean {
+  return Boolean(
+    pickFromRecord(record, [
+      'name',
+      'first_name',
+      'last_name',
+      'headline',
+      'title',
+      'occupation',
+      'current_company_name',
+      'profile_url',
+      'url',
+      'city',
+      'country_code',
+    ]),
+  )
+}
+
+function pickLinkedInProfileRecord(value: unknown): Record<string, unknown> | null {
+  const parsed = parseMaybeJson(value)
+  const candidates: unknown[] = []
+
+  if (Array.isArray(parsed)) {
+    candidates.push(...parsed)
+  } else if (isRecord(parsed)) {
+    candidates.push(parsed)
+    if (Array.isArray(parsed.result)) {
+      candidates.push(...parsed.result)
+    } else if (isRecord(parsed.result)) {
+      candidates.push(parsed.result)
+      if (Array.isArray(parsed.result.result)) {
+        candidates.push(...parsed.result.result)
+      }
+      if (isRecord(parsed.result.data)) {
+        candidates.push(parsed.result.data)
+      }
+    }
+    if (Array.isArray(parsed.data)) {
+      candidates.push(...parsed.data)
+    } else if (isRecord(parsed.data)) {
+      candidates.push(parsed.data)
+    }
+  }
+
+  const firstProfile = candidates.find((item) => isRecord(item) && isLikelyProfileRecord(item))
+  return (firstProfile as Record<string, unknown> | undefined) ?? null
+}
+
+function pickLinkedInStatusText(value: unknown): string | null {
+  const parsed = parseMaybeJson(value)
+  if (!isRecord(parsed)) {
+    return null
+  }
+
+  const possibleContainers: Record<string, unknown>[] = [parsed]
+  if (isRecord(parsed.result)) {
+    possibleContainers.push(parsed.result)
+  }
+  if (isRecord(parsed.data)) {
+    possibleContainers.push(parsed.data)
+  }
+
+  for (const container of possibleContainers) {
+    const status = pickText(container.status)?.toLowerCase() ?? ''
+    if (status === 'starting' || status === 'pending' || status === 'running' || status === 'queued') {
+      return 'Syncing profile data…'
+    }
+  }
+  return null
+}
+
+function deriveInitials(value: string | null): string {
+  if (!value) {
+    return 'LI'
+  }
+  const parts = value
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+  if (!parts.length) {
+    return 'LI'
+  }
+  return parts.map((part) => part.charAt(0).toUpperCase()).join('')
+}
+
+function deriveLinkedInProfileVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor): LinkedInProfileVisual {
+  const profileRecord = pickLinkedInProfileRecord(entry.result)
+  const fallbackTarget = parseLinkedInTarget(entry.caption ?? entry.summary ?? null)
+
+  const fullName = profileRecord
+    ? pickFromRecord(profileRecord, ['name', 'full_name']) ??
+      [pickText(profileRecord.first_name), pickText(profileRecord.last_name)].filter(Boolean).join(' ').trim()
+    : null
+  const displayName = clampText(fullName || fallbackTarget || 'LinkedIn profile', 52)
+
+  const currentCompany = profileRecord && isRecord(profileRecord.current_company) ? profileRecord.current_company : null
+  const companyName =
+    (currentCompany ? pickFromRecord(currentCompany, ['name']) : null) ??
+    (profileRecord ? pickFromRecord(profileRecord, ['current_company_name', 'company_name', 'company']) : null)
+  const headline = profileRecord ? pickFromRecord(profileRecord, ['headline', 'title', 'occupation']) : null
+  const city = profileRecord ? pickFromRecord(profileRecord, ['city']) : null
+  const countryCode = profileRecord ? pickFromRecord(profileRecord, ['country_code']) : null
+  const location = [city, countryCode].filter(Boolean).join(', ') || null
+  const subtitle = clampText([headline, companyName, location].filter(Boolean).join(' • ') || activity.detail || '', 86) || null
+
+  const statusText = pickLinkedInStatusText(entry.result)
+  const avatarSource =
+    profileRecord
+      ? pickFromRecord(profileRecord, [
+          'profile_picture',
+          'profile_picture_url',
+          'profile_photo',
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+          'display_picture_url',
+          'picture',
+        ])
+      : null
+  const avatarUrl = normalizeUrlLike(avatarSource)
+
+  return {
+    displayName,
+    subtitle,
+    statusText,
+    avatarUrl,
+    initials: deriveInitials(displayName),
+  }
+}
+
 function pickResultArray(value: unknown): unknown[] | null {
   if (Array.isArray(value)) {
     return value
@@ -208,6 +577,40 @@ function pickSearchSnippet(value: unknown): string | null {
   return null
 }
 
+function extractSearchPreviewItems(value: unknown): { items: SearchPreviewItem[]; total: number } {
+  const parsed = parseMaybeJson(value)
+  const candidates: SearchPreviewItem[] = []
+
+  if (typeof parsed === 'string') {
+    candidates.push(...extractMarkdownSearchItems(parsed))
+  }
+
+  if (isRecord(parsed) && typeof parsed.result === 'string') {
+    candidates.push(...extractMarkdownSearchItems(parsed.result))
+  }
+
+  const resultArray = pickResultArray(parsed) ?? (isRecord(parsed) ? pickResultArray(parsed.result) : null)
+  if (resultArray?.length) {
+    for (const candidate of resultArray) {
+      if (!isRecord(candidate)) {
+        continue
+      }
+      const title = pickText(candidate.title) || pickText(candidate.name) || pickText(candidate.headline) || pickText(candidate.t)
+      const url = pickText(candidate.url) || pickText(candidate.link) || pickText(candidate.domain) || pickText(candidate.u)
+      const normalized = normalizeSearchPreviewItem(title, url)
+      if (normalized) {
+        candidates.push(normalized)
+      }
+    }
+  }
+
+  const deduped = dedupeSearchItems(candidates)
+  return {
+    items: deduped.slice(0, MAX_SEARCH_PREVIEW_ITEMS),
+    total: deduped.length,
+  }
+}
+
 function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor): EntryVisual {
   const toolName = (entry.toolName ?? '').toLowerCase()
 
@@ -221,30 +624,42 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
         : null
     const enabledPreview = outcome.enabledTools.slice(0, 3).join(', ')
     const snippet = enabledPreview ? clampText(`Enabled: ${enabledPreview}`, 96) : null
-    return { badge, snippet }
+    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null }
   }
 
   if (activity.kind === 'search') {
+    const searchPreview = extractSearchPreviewItems(entry.result)
     const count = pickResultCount(entry.result)
-    const badge = count !== null ? `${count} result${count === 1 ? '' : 's'}` : null
+    const effectiveTotal = count !== null ? Math.max(count, searchPreview.total) : searchPreview.total || null
+    const badge = effectiveTotal !== null ? `${effectiveTotal} result${effectiveTotal === 1 ? '' : 's'}` : null
     return {
       badge,
       snippet: pickSearchSnippet(entry.result),
+      linkedInProfile: null,
+      searchItems: searchPreview.items,
+      searchTotal: effectiveTotal,
     }
   }
 
   if (activity.kind === 'snapshot') {
     const host = parseHostFromText(entry.caption ?? entry.summary ?? null)
     return {
-      badge: 'Web',
+      badge: null,
       snippet: host ? clampText(`Source: ${host}`, 96) : null,
+      linkedInProfile: null,
+      searchItems: [],
+      searchTotal: null,
     }
   }
 
   if (activity.kind === 'linkedin') {
+    const linkedInProfile = deriveLinkedInProfileVisual(entry, activity)
     return {
-      badge: 'Profile',
-      snippet: activity.detail ? clampText(activity.detail, 96) : null,
+      badge: linkedInProfile.statusText ? 'Syncing' : 'Profile',
+      snippet: null,
+      linkedInProfile,
+      searchItems: [],
+      searchTotal: null,
     }
   }
 
@@ -252,6 +667,9 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
   return {
     badge: itemCount !== null ? `${itemCount} item${itemCount === 1 ? '' : 's'}` : null,
     snippet: null,
+    linkedInProfile: null,
+    searchItems: [],
+    searchTotal: null,
   }
 }
 
@@ -482,16 +900,23 @@ export function ToolClusterLivePreview({
             const isHighlighted = isActive && previewState === 'active'
             const isNew = newEntryIdSet.has(entry.id)
             const showSearchSweep = !reduceMotion && isHighlighted && item.activity.kind === 'search'
-            const detailText = isHighlighted && streamingThought ? streamingThought : item.activity.detail
+            const detailText =
+              item.activity.kind === 'thinking' && isHighlighted && streamingThought ? streamingThought : item.activity.detail
+            const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
+            const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
+            const searchTotal = item.activity.kind === 'search' ? visual.searchTotal : null
+            const searchTruncated = Boolean(searchTotal !== null && searchTotal > searchItems.length)
             return (
-              <motion.button
+              <motion.div
                 key={entry.id}
-                type="button"
                 layout={!reduceMotion}
                 className="tool-cluster-live-preview__entry"
                 data-active={isHighlighted ? 'true' : 'false'}
                 data-kind={item.activity.kind}
                 data-new={isNew ? 'true' : 'false'}
+                data-profile-card={linkedInProfile ? 'true' : 'false'}
+                role="button"
+                tabIndex={0}
                 initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 5, scale: 0.995 }}
                 animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
                 exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.995 }}
@@ -503,6 +928,12 @@ export function ToolClusterLivePreview({
                 whileHover={reduceMotion ? undefined : { x: 1.5 }}
                 whileTap={reduceMotion ? undefined : { scale: 0.998 }}
                 onClick={() => onSelectEntry(entry)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onSelectEntry(entry)
+                  }
+                }}
               >
                 {showSearchSweep ? (
                   <motion.span
@@ -513,37 +944,80 @@ export function ToolClusterLivePreview({
                     aria-hidden="true"
                   />
                 ) : null}
-                <motion.span
-                  className={`tool-cluster-live-preview__entry-icon ${entry.iconBgClass} ${entry.iconColorClass}`}
-                  animate={
-                    reduceMotion || !isHighlighted
-                      ? undefined
-                      : item.activity.kind === 'linkedin'
-                        ? { scale: [1, 1.08, 1] }
+                {linkedInProfile ? (
+                  <motion.span
+                    className="tool-cluster-live-preview__profile-avatar"
+                    animate={reduceMotion || !isHighlighted ? undefined : { scale: [1, 1.06, 1] }}
+                    transition={reduceMotion || !isHighlighted ? undefined : { duration: 0.96, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    {linkedInProfile.avatarUrl ? (
+                      <img
+                        src={linkedInProfile.avatarUrl}
+                        alt={linkedInProfile.displayName}
+                        loading="lazy"
+                        className="tool-cluster-live-preview__profile-avatar-image"
+                      />
+                    ) : (
+                      <span className="tool-cluster-live-preview__profile-avatar-fallback">{linkedInProfile.initials}</span>
+                    )}
+                    {isHighlighted ? (
+                      <motion.span
+                        className="tool-cluster-live-preview__profile-live-dot"
+                        animate={reduceMotion ? undefined : { scale: [1, 1.18, 1], opacity: [0.55, 1, 0.55] }}
+                        transition={reduceMotion ? undefined : { duration: 1, repeat: Infinity, ease: 'easeInOut' }}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </motion.span>
+                ) : (
+                  <motion.span
+                    className={`tool-cluster-live-preview__entry-icon ${entry.iconBgClass} ${entry.iconColorClass}`}
+                    animate={
+                      reduceMotion || !isHighlighted
+                        ? undefined
                         : item.activity.kind === 'search'
                           ? { rotate: [0, -5, 5, 0] }
                           : { scale: [1, 1.05, 1] }
-                  }
-                  transition={
-                    reduceMotion || !isHighlighted
-                      ? undefined
-                      : item.activity.kind === 'search'
-                        ? { duration: 0.58, repeat: Infinity, ease: 'easeInOut' }
-                        : { duration: 1.05, repeat: Infinity, ease: 'easeInOut' }
-                  }
-                >
-                  <ToolIconSlot entry={entry} />
-                </motion.span>
+                    }
+                    transition={
+                      reduceMotion || !isHighlighted
+                        ? undefined
+                        : item.activity.kind === 'search'
+                          ? { duration: 0.58, repeat: Infinity, ease: 'easeInOut' }
+                          : { duration: 1.05, repeat: Infinity, ease: 'easeInOut' }
+                    }
+                  >
+                    <ToolIconSlot entry={entry} />
+                  </motion.span>
+                )}
                 <span className="tool-cluster-live-preview__entry-main">
                   <span className="tool-cluster-live-preview__entry-label-row">
-                    <span className="tool-cluster-live-preview__entry-label">{item.activity.label}</span>
+                    <span className="tool-cluster-live-preview__entry-label">
+                      {linkedInProfile ? linkedInProfile.displayName : item.activity.label}
+                    </span>
+                    {linkedInProfile ? (
+                      <span className="tool-cluster-live-preview__entry-badge tool-cluster-live-preview__entry-badge--action">
+                        {item.activity.label}
+                      </span>
+                    ) : null}
                     {visual.badge ? <span className="tool-cluster-live-preview__entry-badge">{visual.badge}</span> : null}
                     {item.activity.kind === 'search' ? (
                       <Search className="tool-cluster-live-preview__entry-search-icon" aria-hidden="true" />
                     ) : null}
                   </span>
                   <AnimatePresence initial={false} mode="wait">
-                    {detailText ? (
+                    {linkedInProfile?.subtitle ? (
+                      <motion.span
+                        key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle}`}
+                        className="tool-cluster-live-preview__entry-caption"
+                        initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
+                        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                        exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
+                        transition={{ duration: 0.16, ease: 'easeOut' }}
+                      >
+                        {linkedInProfile.subtitle}
+                      </motion.span>
+                    ) : detailText ? (
                       <motion.span
                         key={`${entry.id}-detail-${detailText}`}
                         className="tool-cluster-live-preview__entry-caption"
@@ -556,8 +1030,54 @@ export function ToolClusterLivePreview({
                       </motion.span>
                     ) : null}
                   </AnimatePresence>
-                  {visual.snippet && visual.snippet !== detailText ? (
+                  {visual.snippet && visual.snippet !== detailText && searchItems.length === 0 ? (
                     <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
+                  ) : null}
+                  {searchItems.length ? (
+                    <motion.ul
+                      className="tool-cluster-live-preview__search-results"
+                      initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
+                      animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                      transition={{ duration: 0.2, ease: 'easeOut', delay: reduceMotion ? 0 : 0.04 }}
+                    >
+                      {searchTruncated ? (
+                        <li className="tool-cluster-live-preview__search-results-meta">
+                          Showing {searchItems.length} of {searchTotal} results
+                        </li>
+                      ) : null}
+                      {searchItems.map((searchItem, searchIndex) => (
+                        <motion.li
+                          key={`${entry.id}-search-item-${searchItem.url}`}
+                          className="tool-cluster-live-preview__search-result-row"
+                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          transition={{ duration: 0.16, ease: 'easeOut', delay: reduceMotion ? 0 : 0.05 + searchIndex * 0.03 }}
+                        >
+                          <a
+                            href={searchItem.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="tool-cluster-live-preview__search-result-link"
+                            onPointerDown={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => event.stopPropagation()}
+                          >
+                            <span className="tool-cluster-live-preview__search-result-favicon-wrap">
+                              <img
+                                src={buildFaviconUrl(searchItem.host)}
+                                alt=""
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                className="tool-cluster-live-preview__search-result-favicon"
+                              />
+                            </span>
+                            <span className="tool-cluster-live-preview__search-result-title">{searchItem.title}</span>
+                            <span className="tool-cluster-live-preview__search-result-host">{searchItem.host}</span>
+                          </a>
+                        </motion.li>
+                      ))}
+                    </motion.ul>
                   ) : null}
                 </span>
                 {item.relativeTime ? (
@@ -565,7 +1085,7 @@ export function ToolClusterLivePreview({
                     {item.relativeTime}
                   </time>
                 ) : null}
-              </motion.button>
+              </motion.div>
             )
           })}
         </AnimatePresence>
