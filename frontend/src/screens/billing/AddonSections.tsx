@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { BadgeCheck, GlobeLock, Layers3, Plus, Users } from 'lucide-react'
+import { BadgeCheck, GlobeLock, Layers3, Minus, Plus, Users } from 'lucide-react'
 
 import type { BillingAddonKindKey, BillingInitialData } from './types'
 import type { BillingDraftAction, BillingDraftState } from './draft'
@@ -89,7 +89,6 @@ export function AddonSections({
         {ADDON_SECTIONS.map((section) => {
           const options = initialData.addons.kinds[section.key]?.options ?? []
           const selectableOptions = options.filter((opt) => opt.priceId)
-          const selected = draft.selectedAddonByKind[section.key] ?? ''
 
           if (section.key === 'advancedCaptcha') {
             const option = captchaOptions[0] ?? null
@@ -139,7 +138,7 @@ export function AddonSections({
             .map((opt) => {
               const currentQty = initialAddonQuantities[opt.priceId] ?? 0
               const nextQty = draft.addonQuantities[opt.priceId] ?? 0
-              const visible = currentQty > 0 || nextQty > 0
+              const visible = nextQty > 0
               return { opt, currentQty, nextQty, visible }
             })
             .filter((row) => row.visible)
@@ -160,7 +159,6 @@ export function AddonSections({
                 {rows.length ? (
                   <div className="space-y-2">
                     {rows.map(({ opt, currentQty, nextQty }) => {
-                      const isRemoved = currentQty > 0 && nextQty === 0
                       const isChanged = currentQty !== nextQty
                       const currency = normalizeCurrency(opt.currency || initialData.addons.totals.currency || 'USD')
                       const lineCents = (typeof opt.unitAmount === 'number' ? opt.unitAmount : 0) * nextQty
@@ -172,7 +170,7 @@ export function AddonSections({
                           badge={
                             isChanged ? (
                               <span className="text-amber-700">
-                                {isRemoved ? 'Will be removed' : `Will change (${currentQty} → ${nextQty})`}
+                                {currentQty > 0 ? `Staged (${currentQty} → ${nextQty})` : 'Staged'}
                               </span>
                             ) : null
                           }
@@ -189,32 +187,24 @@ export function AddonSections({
                           }
                           actions={
                             <>
-                              {nextQty > 0 ? (
-                                <button
-                                  type="button"
-                                  onClick={() => dispatch({ type: 'addon.remove', priceId: opt.priceId })}
-                                  disabled={!addonsInteractable || saving}
-                                  className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-semibold text-rose-700 transition hover:border-rose-300 disabled:opacity-50"
-                                >
-                                  Remove
-                                </button>
-                              ) : null}
-                              {currentQty > 0 && nextQty === 0 ? (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    dispatch({
-                                      type: 'addon.undo',
-                                      priceId: opt.priceId,
-                                      initialQty: initialAddonQuantities[opt.priceId] ?? 0,
-                                    })
-                                  }
-                                  disabled={!addonsInteractable || saving}
-                                  className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 disabled:opacity-50"
-                                >
-                                  Undo
-                                </button>
-                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => dispatch({ type: 'addon.adjust', priceId: opt.priceId, delta: -1 })}
+                                disabled={!addonsInteractable || saving || nextQty <= 0}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
+                                aria-label="Decrease quantity"
+                              >
+                                <Minus className="h-4 w-4" strokeWidth={3} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => dispatch({ type: 'addon.adjust', priceId: opt.priceId, delta: 1 })}
+                                disabled={!addonsInteractable || saving || nextQty >= 999}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-50"
+                                aria-label="Increase quantity"
+                              >
+                                <Plus className="h-4 w-4" strokeWidth={3} />
+                              </button>
                             </>
                           }
                         />
@@ -228,39 +218,50 @@ export function AddonSections({
                 )}
 
                 {selectableOptions.length ? (
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <div className="relative flex-1">
-                      <select
-                        value={selected}
-                        onChange={(event) =>
-                          dispatch({
-                            type: 'addon.selectOption',
-                            kind: section.key,
-                            priceId: event.target.value,
-                          })
-                        }
-                        disabled={!addonsInteractable || saving}
-                        className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-3 py-2.5 pr-10 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:opacity-50"
-                        aria-label={`Select ${section.title} option`}
-                      >
-                        <option value="">Select an option…</option>
-                        {selectableOptions.map((opt) => (
-                          <option key={opt.priceId} value={opt.priceId}>
-                            {buildAddonOptionLabel(section.key, opt)}
-                            {opt.priceDisplay ? ` (${opt.priceDisplay}/mo)` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => dispatch({ type: 'addon.addSelected', kind: section.key })}
-                      disabled={!addonsInteractable || saving || !selected}
-                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add
-                    </button>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {selectableOptions.map((opt) => {
+                      const qty = draft.addonQuantities[opt.priceId] ?? 0
+                      const label = buildAddonOptionLabel(section.key, opt)
+                      const currency = normalizeCurrency(opt.currency || initialData.addons.totals.currency || 'USD')
+                      const unitCents = typeof opt.unitAmount === 'number' ? opt.unitAmount : null
+                      const priceLabel = unitCents !== null ? `${formatCents(unitCents, currency)}/mo` : (opt.priceDisplay ? `${opt.priceDisplay}/mo` : null)
+
+                      return (
+                        <button
+                          key={opt.priceId}
+                          type="button"
+                          onClick={() => dispatch({ type: 'addon.add', priceId: opt.priceId })}
+                          disabled={!addonsInteractable || saving}
+                          className={[
+                            'group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left transition',
+                            'hover:border-blue-200 hover:bg-blue-50/30',
+                            'disabled:opacity-50 disabled:hover:border-slate-200 disabled:hover:bg-white',
+                          ].join(' ')}
+                        >
+                          <div className="space-y-1 transition-opacity duration-150 group-hover:opacity-0">
+                            <div className="text-sm font-bold text-slate-900">{label}</div>
+                            {priceLabel ? (
+                              <div className="text-xs font-semibold text-slate-500">{priceLabel}</div>
+                            ) : (
+                              <div className="text-xs font-semibold text-slate-500">Billed monthly</div>
+                            )}
+                          </div>
+
+                          {qty > 0 ? (
+                            <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-slate-900 px-2 py-1 text-xs font-semibold text-white">
+                              x{qty}
+                            </div>
+                          ) : null}
+
+                          <div className="pointer-events-none absolute inset-0 grid place-items-center opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                            <div className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm">
+                              <Plus className="h-4 w-4" />
+                              Add
+                            </div>
+                          </div>
+                        </button>
+                      )
+                    })}
                   </div>
                 ) : (
                   <div className="text-sm text-slate-600">No options are configured for this add-on.</div>

@@ -13,7 +13,6 @@ import type { BillingInitialData, BillingScreenProps, DedicatedIpAssignedAgent, 
 import { billingDraftReducer, initialDraftState, type BillingDraftState } from './draft'
 import { buildInitialAddonQuantityMap } from './utils'
 import { BillingHeader } from './BillingHeader'
-import { SeatManager } from './SeatManager'
 import { AddonSections } from './AddonSections'
 import { DedicatedIpSection } from './DedicatedIpSection'
 import { SubscriptionSummary } from './SubscriptionSummary'
@@ -308,20 +307,11 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           initialData={initialData}
           onChangePlan={!isOrg && isProprietaryMode ? () => openUpgradeModal('unknown') : undefined}
           onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? () => setCancelModalOpen(true) : undefined}
+          seatTarget={initialData.contextType === 'organization' ? (draft.seatTarget ?? initialData.seats.purchased) : undefined}
+          saving={saving}
+          onAdjustSeat={initialData.contextType === 'organization' ? handleSeatAdjust : undefined}
+          onCancelScheduledSeatChange={initialData.contextType === 'organization' ? handleCancelSeatSchedule : undefined}
         />
-
-        {initialData.contextType === 'organization' ? (
-          <section className="card">
-            <SeatManager
-              initialData={initialData}
-              seatTarget={draft.seatTarget ?? initialData.seats.purchased}
-              canManage={initialData.canManageBilling}
-              saving={saving}
-              onAdjust={handleSeatAdjust}
-              onCancelScheduledChange={handleCancelSeatSchedule}
-            />
-          </section>
-        ) : null}
 
         <AddonSections
           initialData={initialData}

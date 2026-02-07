@@ -1,11 +1,10 @@
-import type { BillingAddonKindKey, BillingInitialData, DedicatedIpProxy } from './types'
+import type { BillingInitialData, DedicatedIpProxy } from './types'
 import { buildInitialAddonQuantityMap } from './utils'
 
 export type BillingDraftState = {
   seatTarget: number | null
   cancelSeatSchedule: boolean
   addonQuantities: Record<string, number>
-  selectedAddonByKind: Record<BillingAddonKindKey, string>
   dedicatedAddQty: number
   dedicatedRemoveIds: string[]
   dedicatedUnassignIds: string[]
@@ -16,10 +15,8 @@ export type BillingDraftAction =
   | { type: 'seat.setTarget'; value: number }
   | { type: 'seat.adjust'; delta: number; min: number }
   | { type: 'seat.cancelSchedule' }
-  | { type: 'addon.selectOption'; kind: BillingAddonKindKey; priceId: string }
-  | { type: 'addon.addSelected'; kind: BillingAddonKindKey }
-  | { type: 'addon.remove'; priceId: string }
-  | { type: 'addon.undo'; priceId: string; initialQty: number }
+  | { type: 'addon.add'; priceId: string }
+  | { type: 'addon.adjust'; priceId: string; delta: number }
   | { type: 'captcha.setEnabled'; enabled: boolean; priceIds: string[]; activePriceId: string }
   | { type: 'dedicated.setAddQty'; value: number }
   | { type: 'dedicated.stageRemove'; proxy: DedicatedIpProxy; unassign: boolean }
@@ -37,7 +34,6 @@ export function initialDraftState(initialData: BillingInitialData): BillingDraft
     seatTarget: initialData.contextType === 'organization' ? initialData.seats.purchased : null,
     cancelSeatSchedule: false,
     addonQuantities: buildInitialAddonQuantityMap(initialData.addons),
-    selectedAddonByKind: { taskPack: '', contactPack: '', browserTaskPack: '', advancedCaptcha: '' },
     dedicatedAddQty: 0,
     dedicatedRemoveIds: [],
     dedicatedUnassignIds: [],
@@ -57,32 +53,26 @@ export function billingDraftReducer(state: BillingDraftState, action: BillingDra
     }
     case 'seat.cancelSchedule':
       return { ...state, cancelSeatSchedule: true }
-    case 'addon.selectOption':
-      return {
-        ...state,
-        selectedAddonByKind: { ...state.selectedAddonByKind, [action.kind]: action.priceId },
-      }
-    case 'addon.addSelected': {
-      const selected = (state.selectedAddonByKind[action.kind] || '').trim()
-      if (!selected) {
-        return state
-      }
+    case 'addon.add': {
+      const selected = (action.priceId || '').trim()
+      if (!selected) return state
       const current = state.addonQuantities[selected] ?? 0
       return {
         ...state,
         addonQuantities: { ...state.addonQuantities, [selected]: Math.min(999, current + 1) },
       }
     }
-    case 'addon.remove':
+    case 'addon.adjust': {
+      const priceId = (action.priceId || '').trim()
+      if (!priceId) return state
+      const current = state.addonQuantities[priceId] ?? 0
+      const next = clampInt(current + action.delta, 0, 999)
+      if (next === current) return state
       return {
         ...state,
-        addonQuantities: { ...state.addonQuantities, [action.priceId]: 0 },
+        addonQuantities: { ...state.addonQuantities, [priceId]: next },
       }
-    case 'addon.undo':
-      return {
-        ...state,
-        addonQuantities: { ...state.addonQuantities, [action.priceId]: clampInt(action.initialQty, 0, 999) },
-      }
+    }
     case 'captcha.setEnabled': {
       const nextQuantities = { ...state.addonQuantities }
       action.priceIds.forEach((pid) => {
@@ -118,4 +108,3 @@ export function billingDraftReducer(state: BillingDraftState, action: BillingDra
       return state
   }
 }
-

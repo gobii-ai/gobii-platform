@@ -2,14 +2,27 @@ import { Building2, CreditCard, ShieldAlert } from 'lucide-react'
 
 import type { BillingInitialData } from './types'
 import { formatCents, normalizeCurrency, planMonthlyPriceCents } from './utils'
+import { SeatManager } from './SeatManager'
 
 type BillingHeaderProps = {
   initialData: BillingInitialData
   onChangePlan?: () => void
   onCancel?: () => void
+  seatTarget?: number
+  saving?: boolean
+  onAdjustSeat?: (delta: number) => void
+  onCancelScheduledSeatChange?: () => void
 }
 
-export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHeaderProps) {
+export function BillingHeader({
+  initialData,
+  onChangePlan,
+  onCancel,
+  seatTarget,
+  saving = false,
+  onAdjustSeat,
+  onCancelScheduledSeatChange,
+}: BillingHeaderProps) {
   const isOrg = initialData.contextType === 'organization'
   const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
   const planCurrency = isOrg
@@ -28,9 +41,21 @@ export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHe
     return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(d)
   })()
 
+  const pendingSeatLabel = (() => {
+    if (!isOrg) return null
+    if (initialData.seats.pendingQuantity === null || !initialData.seats.pendingEffectiveAtIso) {
+      return null
+    }
+    const date = new Date(initialData.seats.pendingEffectiveAtIso)
+    const effective = Number.isFinite(date.getTime())
+      ? date.toLocaleDateString()
+      : initialData.seats.pendingEffectiveAtIso
+    return `Seats scheduled to change to ${initialData.seats.pendingQuantity} on ${effective}.`
+  })()
+
   return (
     <section className="card" data-section="billing-plan">
-      <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
             {isOrg ? <Building2 className="h-4 w-4 text-slate-500" /> : <CreditCard className="h-4 w-4 text-slate-500" />}
@@ -84,6 +109,20 @@ export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHe
                 Cancel
               </button>
             ) : null}
+
+          {isOrg && typeof seatTarget === 'number' && onAdjustSeat && onCancelScheduledSeatChange ? (
+            <div className="sm:self-center">
+              <SeatManager
+                initialData={initialData}
+                seatTarget={seatTarget}
+                canManage={initialData.canManageBilling}
+                saving={saving}
+                onAdjust={onAdjustSeat}
+                onCancelScheduledChange={onCancelScheduledSeatChange}
+                variant="inline"
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -112,6 +151,22 @@ export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHe
                 ? (trialEndsLabel ? `Trial until ${trialEndsLabel}` : 'Trial')
                 : (initialData.paidSubscriber ? 'Active' : 'Free')}
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isOrg && pendingSeatLabel && onCancelScheduledSeatChange ? (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>{pendingSeatLabel}</div>
+            <button
+              type="button"
+              onClick={onCancelScheduledSeatChange}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm font-semibold text-amber-800 transition hover:border-amber-300 disabled:opacity-50"
+              disabled={!initialData.canManageBilling || saving}
+            >
+              Cancel scheduled change
+            </button>
           </div>
         </div>
       ) : null}
