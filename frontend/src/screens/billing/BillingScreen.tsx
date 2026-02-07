@@ -142,6 +142,9 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     if (typeof document === 'undefined') {
       return
     }
+    if (typeof window === 'undefined') {
+      return
+    }
 
     const el = document.getElementById('billing-summary-actions')
     if (!el) {
@@ -149,28 +152,22 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       return
     }
 
-    const view = globalThis as any
-    if (typeof view?.addEventListener !== 'function' || typeof view?.removeEventListener !== 'function') {
-      return
-    }
-
-    const IO = view?.IntersectionObserver
-    if (typeof IO !== 'function') {
+    if (typeof window.IntersectionObserver !== 'function') {
       const check = () => {
         const rect = el.getBoundingClientRect()
-        const inView = rect.top < (Number(view?.innerHeight) || 0) && rect.bottom > 0
+        const inView = rect.top < window.innerHeight && rect.bottom > 0
         setSummaryActionsVisible(inView)
       }
       check()
-      view.addEventListener('scroll', check, { passive: true })
-      view.addEventListener('resize', check)
+      window.addEventListener('scroll', check, { passive: true })
+      window.addEventListener('resize', check)
       return () => {
-        view.removeEventListener('scroll', check)
-        view.removeEventListener('resize', check)
+        window.removeEventListener('scroll', check)
+        window.removeEventListener('resize', check)
       }
     }
 
-    const observer = new IO(
+    const observer = new window.IntersectionObserver(
       (entries: Array<{ isIntersecting?: boolean }>) => {
         const entry = entries[0]
         setSummaryActionsVisible(Boolean(entry && entry.isIntersecting))
@@ -189,18 +186,17 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       setNearTop(true)
       return
     }
-    const view = globalThis as any
-    if (typeof view?.addEventListener !== 'function' || typeof view?.removeEventListener !== 'function') {
+    if (typeof window === 'undefined') {
       return
     }
 
     const update = () => {
-      const y = typeof view?.scrollY === 'number' ? view.scrollY : 0
+      const y = window.scrollY
       setNearTop(y < 240)
     }
     update()
-    view.addEventListener('scroll', update, { passive: true })
-    return () => view.removeEventListener('scroll', update)
+    window.addEventListener('scroll', update, { passive: true })
+    return () => window.removeEventListener('scroll', update)
   }, [hasAnyChanges])
 
   const resetDraft = useCallback(() => {

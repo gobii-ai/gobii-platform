@@ -10017,6 +10017,10 @@ def console_billing_update(request):
     - Seat reductions are scheduled for the next cycle via SubscriptionSchedule (existing behavior).
     - Add-ons and dedicated IPs are disabled for orgs until at least one seat is purchased.
     """
+    support_detail = (
+        "An error occurred while updating billing. "
+        "Please contact support@gobii.ai for help."
+    )
 
     def _parse_payload():
         try:
@@ -10361,10 +10365,17 @@ def console_billing_update(request):
                         response_dict["stripeActionUrl"] = hosted_url
         except stripe.error.StripeError as exc:
             logger.warning("Stripe error changing plan for user %s: %s", getattr(owner_obj, "id", None), exc)
-            return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
+            return JsonResponse(
+                {"ok": False, "error": "stripe_error", "detail": support_detail},
+                status=400,
+            )
         except Exception as exc:
             logger.exception("Failed to change plan for user %s: %s", getattr(owner_obj, "id", None), exc)
-            return JsonResponse({"ok": False, "error": "server_error"}, status=400)
+            transaction.set_rollback(True)
+            return JsonResponse(
+                {"ok": False, "error": "server_error", "detail": support_detail},
+                status=500,
+            )
 
         return None
 
@@ -10499,7 +10510,10 @@ def console_billing_update(request):
                 )
         except stripe.error.StripeError as exc:
             logger.warning("Stripe error updating add-ons for %s %s: %s", owner_type_str, getattr(owner_obj, "id", None), exc)
-            return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
+            return JsonResponse(
+                {"ok": False, "error": "stripe_error", "detail": support_detail},
+                status=400,
+            )
 
         return None
 
@@ -10617,57 +10631,69 @@ def console_billing_update(request):
                     response_dict["stripeActionUrl"] = action_url
         except stripe.error.StripeError as exc:
             logger.warning("Stripe error updating dedicated IP quantity for %s %s: %s", owner_type_str, getattr(owner_obj, "id", None), exc)
-            return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
+            return JsonResponse(
+                {"ok": False, "error": "stripe_error", "detail": support_detail},
+                status=400,
+            )
         except (ValueError, ImproperlyConfigured) as exc:
             return JsonResponse({"ok": False, "error": str(exc)}, status=400)
 
         return None
 
     payload = _parse_payload()
-    if payload is None:
+    if payload is None or not isinstance(payload, dict):
         return JsonResponse({"ok": False, "error": "invalid_json"}, status=400)
 
-    owner_resolved = _resolve_owner(payload)
-    if isinstance(owner_resolved, HttpResponse):
-        return owner_resolved
-    owner, owner_type = owner_resolved
+    try:
+        owner_resolved = _resolve_owner(payload)
+        if isinstance(owner_resolved, HttpResponse):
+            return owner_resolved
+        owner, owner_type = owner_resolved
 
-    if not stripe_status().enabled:
-        return JsonResponse({"ok": False, "error": "stripe_disabled"}, status=404)
+        if not stripe_status().enabled:
+            return JsonResponse({"ok": False, "error": "stripe_disabled"}, status=404)
 
-    response_payload: dict[str, object] = {"ok": True}
+        response_payload: dict[str, object] = {"ok": True}
 
-    plan_response = _apply_plan(payload, owner, owner_type, response_payload)
-    if isinstance(plan_response, HttpResponse):
-        return plan_response
+        plan_response = _apply_plan(payload, owner, owner_type, response_payload)
+        if isinstance(plan_response, HttpResponse):
+            return plan_response
 
-    seats_response = _apply_seats(payload, owner, owner_type, response_payload)
-    if isinstance(seats_response, HttpResponse):
-        return seats_response
+        seats_response = _apply_seats(payload, owner, owner_type, response_payload)
+        if isinstance(seats_response, HttpResponse):
+            return seats_response
 
-    # ---------------------------------------------------------------------
-    # Org gating: require paid seats for add-ons/dedicated IP changes
-    # ---------------------------------------------------------------------
-    addon_quantities = payload.get("addonQuantities") or {}
-    dedicated_changes = payload.get("dedicatedIps") or {}
-    if owner_type == "organization" and (addon_quantities or dedicated_changes):
-        billing = getattr(owner, "billing", None)
-        if billing is None or getattr(billing, "purchased_seats", 0) <= 0:
-            return JsonResponse(
-                {
-                    "ok": False,
-                    "error": "seats_required",
-                    "detail": "Purchase at least one seat before managing add-ons or dedicated IPs.",
-                },
-                status=400,
-            )
+        # ---------------------------------------------------------------------
+        # Org gating: require paid seats for add-ons/dedicated IP changes
+        # ---------------------------------------------------------------------
+        addon_quantities = payload.get("addonQuantities") or {}
+        dedicated_changes = payload.get("dedicatedIps") or {}
+        if owner_type == "organization" and (addon_quantities or dedicated_changes):
+            billing = getattr(owner, "billing", None)
+            if billing is None or getattr(billing, "purchased_seats", 0) <= 0:
+                return JsonResponse(
+                    {
+                        "ok": False,
+                        "error": "seats_required",
+                        "detail": "Purchase at least one seat before managing add-ons or dedicated IPs.",
+                    },
+                    status=400,
+                )
 
-    addons_response = _apply_addons(payload, owner, owner_type, response_payload)
-    if isinstance(addons_response, HttpResponse):
-        return addons_response
+        addons_response = _apply_addons(payload, owner, owner_type, response_payload)
+        if isinstance(addons_response, HttpResponse):
+            return addons_response
 
-    dedicated_response = _apply_dedicated_ips(payload, owner, owner_type, response_payload)
-    if isinstance(dedicated_response, HttpResponse):
-        return dedicated_response
+        dedicated_response = _apply_dedicated_ips(payload, owner, owner_type, response_payload)
+        if isinstance(dedicated_response, HttpResponse):
+            return dedicated_response
 
-    return JsonResponse(response_payload, status=200)
+        return JsonResponse(response_payload, status=200)
+    except Exception:
+        # Ensure we don't commit partial DB changes while returning a JSON error.
+        transaction.set_rollback(True)
+        logger.exception("Unhandled error in console_billing_update for user %s", getattr(request.user, "id", None))
+        return JsonResponse(
+            {"ok": False, "error": "server_error", "detail": support_detail},
+            status=500,
+        )
