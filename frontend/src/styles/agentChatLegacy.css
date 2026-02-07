@@ -2432,7 +2432,7 @@
 }
 
 .tool-cluster-live-preview__entry[data-has-results="true"] .tool-cluster-live-preview__entry-header {
-  padding: 0.48rem 0.56rem;
+  padding: 0.38rem 0.56rem 0;
   background: linear-gradient(180deg, rgba(239, 246, 255, 0.7) 0%, rgba(248, 250, 255, 0.25) 100%);
   border-radius: 0.58rem 0.58rem 0 0;
 }
@@ -2798,11 +2798,11 @@
 .tool-cluster-live-preview__search-results {
   grid-column: 1 / -1;
   margin: 0;
-  padding: 0.06rem 0 0.22rem;
+  padding: 0 0 0.22rem;
   list-style: none;
   display: grid;
   gap: 0;
-  border-top: 1px solid rgba(15, 23, 42, 0.05);
+  border-top: none;
 }
 
 .tool-cluster-live-preview__search-result-row {
