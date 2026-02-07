@@ -1556,6 +1556,42 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], "evt-123")
 
+    def test_invoice_payment_succeeded_does_not_emit_subscribe_for_trial_start(self):
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        payload = _build_invoice_payload(
+            customer_id="cus_user_succeeded",
+            subscription_id="sub_user_succeeded",
+            amount_paid=0,
+            status="paid",
+            billing_reason="subscription_create",
+            product_id="prod_plan",
+        )
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
+            subscription=SimpleNamespace(
+                id="sub_user_succeeded",
+                stripe_data={
+                    "status": "trialing",
+                    "trial_end": str(trial_end),
+                },
+            ),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_invoice_payment_succeeded(event)
+
+        mock_capi.assert_not_called()
+
     def test_invoice_payment_succeeded_emits_trial_converted_event(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
         payload = _build_invoice_payload(

@@ -1465,7 +1465,22 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             )
 
         try:
-            should_subscribe = billing_reason == "subscription_create" or trial_conversion
+            subscription_status = str(_get_stripe_data_value(subscription_data, "status") or "").lower()
+            trial_start_invoice = bool(
+                billing_reason == "subscription_create"
+                and (
+                    subscription_status == "trialing"
+                    or (
+                        trial_end_dt is not None
+                        and (line_start_dt is None or trial_end_dt.date() > line_start_dt.date())
+                    )
+                )
+            )
+            # Stripe can emit invoice.payment_succeeded when a trial starts (often amount=0).
+            # Keep Subscribe for non-trial subscription starts and trial conversion billing.
+            should_subscribe = trial_conversion or (
+                billing_reason == "subscription_create" and not trial_start_invoice
+            )
             if should_subscribe and owner_type == "user" and owner:
                 marketing_properties = {
                     "plan": plan_value,

@@ -7452,6 +7452,16 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 return response
             return redirect("organization_detail", org_id=self.org.id)
 
+        logger.warning(
+            "Organization invite validation failed org_id=%s actor_id=%s email=%s role=%s seats_available=%s errors=%s",
+            str(self.org.id),
+            str(request.user.id),
+            (request.POST.get("email") or "").strip().lower(),
+            (request.POST.get("role") or "").strip(),
+            getattr(billing, "seats_available", None),
+            form.errors.get_json_data(),
+        )
+
         if request.htmx:
             context = {
                 "form": form,
@@ -7464,7 +7474,7 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 request,
                 "partials/_org_invite_modal.html",
                 context,
-                status=400,
+                status=422,
             )
 
         context = self.get_context_data(invite_form=form)
