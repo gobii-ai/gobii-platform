@@ -27,7 +27,7 @@ export function BillingHeader({
   const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
   const planCurrency = isOrg
     ? normalizeCurrency(initialData.seats.currency || (initialData.plan?.currency as string | undefined) || 'USD')
-    : normalizeCurrency((initialData.plan?.currency as string | undefined) ?? 'USD')
+    : normalizeCurrency((initialData.plan?.currency as string | undefined) || 'USD')
   const basePriceCents = isOrg
     ? Math.max(0, Math.round((initialData.seats.unitPrice || 0) * 100))
     : planMonthlyPriceCents(initialData.plan)

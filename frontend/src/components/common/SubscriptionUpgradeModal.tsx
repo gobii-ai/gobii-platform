@@ -11,6 +11,7 @@ type SubscriptionUpgradeModalProps = {
   onUpgrade: (plan: PlanTier) => void
   source?: string
   dismissible?: boolean
+  allowDowngrade?: boolean
 }
 
 export function SubscriptionUpgradeModal({
@@ -19,6 +20,7 @@ export function SubscriptionUpgradeModal({
   onUpgrade,
   source,
   dismissible = true,
+  allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
   const { trialDaysByPlan } = useSubscriptionStore()
   const handleClose = useCallback(() => {
@@ -31,7 +33,7 @@ export function SubscriptionUpgradeModal({
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
   const title = isTrialOnboarding
     ? (maxTrialDays > 0 ? `Start ${maxTrialDays}-day Free Trial` : 'Choose your plan')
-    : 'Upgrade your plan'
+    : (allowDowngrade ? 'Change your plan' : 'Upgrade your plan')
   const subtitle = isTrialOnboarding
     ? 'Choose your plan to continue'
     : 'Choose the plan that fits your needs'
@@ -104,6 +106,7 @@ export function SubscriptionUpgradeModal({
             currentPlan={currentPlan}
             onUpgrade={onUpgrade}
             source={source}
+            allowDowngrade={allowDowngrade}
           />
         </div>
       </div>

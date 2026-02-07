@@ -63,7 +63,6 @@ export function DedicatedIpSection({
                 <StagedRow
                   key={proxy.id}
                   title={label}
-                  badge={stagedRemove ? <span className="text-amber-700">Will be removed</span> : null}
                   subtitle={
                     proxy.assignedAgents.length
                       ? `In use by ${proxy.assignedAgents.map((a) => a.name).join(', ')}`
@@ -125,7 +124,7 @@ export function DedicatedIpSection({
             </button>
           </div>
 
-          <div className="text-sm text-slate-600">Add this many new dedicated IPs (staged).</div>
+          <div className="text-sm text-slate-600">Add this many new dedicated IPs.</div>
         </div>
 
         {!initialData.dedicatedIps.allowed ? (
@@ -137,4 +136,3 @@ export function DedicatedIpSection({
     </div>
   )
 }
-

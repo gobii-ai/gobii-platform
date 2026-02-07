@@ -8,6 +8,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   cancelLabel = 'Cancel',
+  confirmDisabled = false,
   icon,
   busy = false,
   danger = false,
@@ -59,7 +60,7 @@ export function ConfirmDialog({
               <button
                 type="button"
                 onClick={onConfirm}
-                disabled={busy}
+                disabled={busy || confirmDisabled}
                 className={[
                   'inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-60',
                   danger ? 'bg-rose-600 hover:bg-rose-700 focus:ring-rose-500' : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500',
@@ -85,4 +86,3 @@ export function ConfirmDialog({
     document.body,
   )
 }
-

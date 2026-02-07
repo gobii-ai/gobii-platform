@@ -112,6 +112,7 @@ export type ConfirmDialogProps = {
   description?: ReactNode
   confirmLabel: string
   cancelLabel?: string
+  confirmDisabled?: boolean
   icon?: ReactNode
   busy?: boolean
   danger?: boolean

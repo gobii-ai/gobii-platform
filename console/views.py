@@ -134,6 +134,7 @@ from util.subscription_helper import (
     is_community_unlimited_mode,
     get_user_max_contacts_per_agent,
     get_subscription_base_price,
+    ensure_single_individual_subscription,
 )
 from util.urls import (
     IMMERSIVE_RETURN_TO_SESSION_KEY,
@@ -10246,6 +10247,78 @@ def console_billing_update(request):
 
         return None
 
+    def _apply_plan(payload_dict, owner_obj, owner_type_str, response_dict):
+        plan_target = (payload_dict.get("planTarget") or "").strip().lower()
+        if not plan_target:
+            return None
+        if owner_type_str != "user":
+            return JsonResponse({"ok": False, "error": "invalid_owner_for_plan_change"}, status=400)
+
+        # Prevent mixing plan switches with other changes; Stripe behavior differs for each flow.
+        if payload_dict.get("addonQuantities") or payload_dict.get("dedicatedIps"):
+            return JsonResponse({"ok": False, "error": "plan_change_must_be_separate"}, status=400)
+
+        if plan_target not in {"startup", "scale"}:
+            return JsonResponse({"ok": False, "error": "invalid_plan_target"}, status=400)
+
+        stripe_settings = get_stripe_settings()
+        if plan_target == "startup":
+            licensed_price_id = getattr(stripe_settings, "startup_price_id", "") or ""
+            metered_price_id = getattr(stripe_settings, "startup_additional_task_price_id", "") or ""
+        else:
+            licensed_price_id = getattr(stripe_settings, "scale_price_id", "") or ""
+            metered_price_id = getattr(stripe_settings, "scale_additional_task_price_id", "") or ""
+
+        if not licensed_price_id:
+            return JsonResponse({"ok": False, "error": "plan_not_configured"}, status=400)
+
+        try:
+            customer = get_or_create_stripe_customer(owner_obj)
+            if not customer or not getattr(customer, "id", None):
+                return JsonResponse({"ok": False, "error": "stripe_customer_missing"}, status=400)
+
+            # Only allow switching when an existing subscription exists; otherwise use checkout.
+            updated, action = ensure_single_individual_subscription(
+                str(customer.id),
+                licensed_price_id=licensed_price_id,
+                metered_price_id=metered_price_id or None,
+                metadata={
+                    "plan_target": plan_target,
+                    "plan_requestor_id": str(request.user.id),
+                    "source": "console_react_billing_update",
+                },
+                idempotency_key=f"console-plan-{customer.id}-{plan_target}-{request.user.id}",
+                create_if_missing=False,
+            )
+            if action == "absent" or not updated:
+                return JsonResponse({"ok": False, "error": "no_active_subscription"}, status=400)
+
+            updated_id = updated.get("id") if isinstance(updated, Mapping) else None
+            if not updated_id:
+                return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
+
+            _assign_stripe_api_key()
+            refreshed = stripe.Subscription.retrieve(
+                updated_id,
+                expand=["latest_invoice.payment_intent", "latest_invoice"],
+            )
+            invoice = refreshed.get("latest_invoice") if isinstance(refreshed, Mapping) else None
+            if isinstance(invoice, Mapping):
+                hosted_url = invoice.get("hosted_invoice_url")
+                payment_intent = invoice.get("payment_intent")
+                if hosted_url and isinstance(payment_intent, Mapping):
+                    intent_status = payment_intent.get("status")
+                    if intent_status in {"requires_action", "requires_payment_method"}:
+                        response_dict["stripeActionUrl"] = hosted_url
+        except stripe.error.StripeError as exc:
+            logger.warning("Stripe error changing plan for user %s: %s", getattr(owner_obj, "id", None), exc)
+            return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
+        except Exception as exc:
+            logger.exception("Failed to change plan for user %s: %s", getattr(owner_obj, "id", None), exc)
+            return JsonResponse({"ok": False, "error": "server_error"}, status=400)
+
+        return None
+
     def _apply_addons(payload_dict, owner_obj, owner_type_str, response_dict):
         addon_quantities = payload_dict.get("addonQuantities") or {}
         if not addon_quantities:
@@ -10514,6 +10587,10 @@ def console_billing_update(request):
         return JsonResponse({"ok": False, "error": "stripe_disabled"}, status=404)
 
     response_payload: dict[str, object] = {"ok": True}
+
+    plan_response = _apply_plan(payload, owner, owner_type, response_payload)
+    if isinstance(plan_response, HttpResponse):
+        return plan_response
 
     seats_response = _apply_seats(payload, owner, owner_type, response_payload)
     if isinstance(seats_response, HttpResponse):

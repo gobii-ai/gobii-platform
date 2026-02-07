@@ -15,7 +15,6 @@ export type BillingDraftAction =
   | { type: 'seat.setTarget'; value: number }
   | { type: 'seat.adjust'; delta: number; min: number }
   | { type: 'seat.cancelSchedule' }
-  | { type: 'addon.add'; priceId: string }
   | { type: 'addon.adjust'; priceId: string; delta: number }
   | { type: 'captcha.setEnabled'; enabled: boolean; priceIds: string[]; activePriceId: string }
   | { type: 'dedicated.setAddQty'; value: number }
@@ -53,15 +52,6 @@ export function billingDraftReducer(state: BillingDraftState, action: BillingDra
     }
     case 'seat.cancelSchedule':
       return { ...state, cancelSeatSchedule: true }
-    case 'addon.add': {
-      const selected = (action.priceId || '').trim()
-      if (!selected) return state
-      const current = state.addonQuantities[selected] ?? 0
-      return {
-        ...state,
-        addonQuantities: { ...state.addonQuantities, [selected]: Math.min(999, current + 1) },
-      }
-    }
     case 'addon.adjust': {
       const priceId = (action.priceId || '').trim()
       if (!priceId) return state

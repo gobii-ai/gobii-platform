@@ -7,11 +7,24 @@ import { formatCents, normalizeCurrency, planMonthlyPriceCents, resolveAddonLine
 type SubscriptionSummaryProps = {
   initialData: BillingInitialData
   draft: BillingDraftState
+  showActions?: boolean
+  saving?: boolean
+  error?: string | null
+  onSave?: () => void
+  onCancel?: () => void
 }
 
 type SummaryItem = { id: string; label: string; money: Money }
 
-export function SubscriptionSummary({ initialData, draft }: SubscriptionSummaryProps) {
+export function SubscriptionSummary({
+  initialData,
+  draft,
+  showActions = false,
+  saving = false,
+  error = null,
+  onSave,
+  onCancel,
+}: SubscriptionSummaryProps) {
   const isOrg = initialData.contextType === 'organization'
   const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
   const planCurrency = isOrg
@@ -68,7 +81,7 @@ export function SubscriptionSummary({ initialData, draft }: SubscriptionSummaryP
   })()
 
   return (
-    <section className="card" data-section="billing-summary">
+    <section className="card scroll-mt-28" data-section="billing-summary" id="billing-summary">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
           <CreditCard className="h-4 w-4 text-slate-500" />
@@ -98,6 +111,34 @@ export function SubscriptionSummary({ initialData, draft }: SubscriptionSummaryP
           </div>
         </div>
       </div>
+
+      {showActions ? (
+        <div className="mt-5 space-y-3" id="billing-summary-actions">
+          {error ? (
+            <div className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          ) : null}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={saving || !onCancel}
+              className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={saving || !onSave}
+              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : 'Update subscription'}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

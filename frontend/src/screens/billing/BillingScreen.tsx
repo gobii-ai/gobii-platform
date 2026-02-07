@@ -1,11 +1,9 @@
-import { useCallback, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
 
 import { HttpError, jsonRequest } from '../../api/http'
-import { SaveBar } from '../../components/common/SaveBar'
 import { SubscriptionUpgradeModal } from '../../components/common/SubscriptionUpgradeModal'
 import { type PlanTier, useSubscriptionStore } from '../../stores/subscriptionStore'
-import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 
@@ -104,7 +102,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     upgradeModalDismissible,
     openUpgradeModal,
     closeUpgradeModal,
-    ensureAuthenticated,
   } = useSubscriptionStore()
 
   const [draft, dispatch] = useReducer(billingDraftReducer, initialDraftState(initialData))
@@ -118,12 +115,68 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const [dedicatedPrompt, setDedicatedPrompt] = useState<DedicatedRemovePrompt | null>(null)
   const [trialConfirmOpen, setTrialConfirmOpen] = useState(false)
   const [trialConfirmPayload, setTrialConfirmPayload] = useState<Record<string, unknown> | null>(null)
+  const [planConfirmOpen, setPlanConfirmOpen] = useState(false)
+  const [planConfirmTarget, setPlanConfirmTarget] = useState<PlanTier | null>(null)
+  const [planConfirmBusy, setPlanConfirmBusy] = useState(false)
+  const [planConfirmError, setPlanConfirmError] = useState<string | null>(null)
+  const [summaryActionsVisible, setSummaryActionsVisible] = useState(false)
 
   const addonsDisabledReason = useMemo(() => computeAddonsDisabledReason(initialData), [initialData])
   const addonsInteractable = useMemo(() => computeAddonsInteractable(initialData), [initialData])
   const dedicatedInteractable = useMemo(() => computeDedicatedInteractable(initialData), [initialData])
 
   const hasAnyChanges = useMemo(() => isDraftDirty(initialData, draft), [draft, initialData])
+
+  // Hide the bottom "Review and update" nudge once the user can see the real Update button.
+  // (It is redundant and visually noisy when the summary actions are already in view.)
+  useEffect(() => {
+    if (!hasAnyChanges) {
+      setSummaryActionsVisible(false)
+      return
+    }
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    const el = document.getElementById('billing-summary-actions')
+    if (!el) {
+      setSummaryActionsVisible(false)
+      return
+    }
+
+    const view = globalThis as any
+    if (typeof view?.addEventListener !== 'function' || typeof view?.removeEventListener !== 'function') {
+      return
+    }
+
+    const IO = view?.IntersectionObserver
+    if (typeof IO !== 'function') {
+      const check = () => {
+        const rect = el.getBoundingClientRect()
+        const inView = rect.top < (Number(view?.innerHeight) || 0) && rect.bottom > 0
+        setSummaryActionsVisible(inView)
+      }
+      check()
+      view.addEventListener('scroll', check, { passive: true })
+      view.addEventListener('resize', check)
+      return () => {
+        view.removeEventListener('scroll', check)
+        view.removeEventListener('resize', check)
+      }
+    }
+
+    const observer = new IO(
+      (entries: Array<{ isIntersecting?: boolean }>) => {
+        const entry = entries[0]
+        setSummaryActionsVisible(Boolean(entry && entry.isIntersecting))
+      },
+      {
+        threshold: 0.05,
+      },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasAnyChanges])
 
   const resetDraft = useCallback(() => {
     setSaveError(null)
@@ -167,19 +220,16 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     setDedicatedPrompt(null)
   }, [dedicatedPrompt, dispatch, initialData.dedicatedIps.proxies])
 
-  const handleUpgrade = useCallback(async (plan: PlanTier) => {
-    const authenticated = await ensureAuthenticated()
-    if (!authenticated) {
-      return
-    }
-    track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
+  const handlePlanSelect = useCallback((plan: PlanTier) => {
+    track(AnalyticsEvent.UPGRADE_PLAN_SELECTED, {
       plan,
       source: upgradeModalSource ?? 'billing',
     })
     closeUpgradeModal()
-    const checkoutPath = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
-    window.open(appendReturnTo(checkoutPath, '/console/billing/'), '_top')
-  }, [closeUpgradeModal, ensureAuthenticated, upgradeModalSource])
+    setPlanConfirmTarget(plan)
+    setPlanConfirmError(null)
+    setPlanConfirmOpen(true)
+  }, [closeUpgradeModal, upgradeModalSource])
 
   const submitSave = useCallback(async (payload: Record<string, unknown>) => {
     if (saving) return
@@ -284,6 +334,13 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     }
   }, [cancelBusy, initialData])
 
+  const dismissPlanConfirm = useCallback(() => {
+    setPlanConfirmOpen(false)
+    setPlanConfirmTarget(null)
+    setPlanConfirmBusy(false)
+    setPlanConfirmError(null)
+  }, [])
+
   return (
     <div className="app-shell">
       <div className="card card--header">
@@ -333,25 +390,42 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           />
         </section>
 
-        <SubscriptionSummary initialData={initialData} draft={draft} />
+        <SubscriptionSummary
+          initialData={initialData}
+          draft={draft}
+          showActions={hasAnyChanges}
+          saving={saving}
+          error={saveError}
+          onSave={handleSave}
+          onCancel={resetDraft}
+        />
       </main>
 
-      <SaveBar
-        id="billing-save-bar"
-        visible={hasAnyChanges}
-        onCancel={resetDraft}
-        onSave={handleSave}
-        busy={saving}
-        error={saveError}
-      />
+      {hasAnyChanges && !summaryActionsVisible ? (
+        <div className="fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:px-6">
+          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-white shadow-lg">
+            <div className="min-w-0 text-sm font-semibold">
+              You have unsaved changes.
+            </div>
+            <button
+              type="button"
+              onClick={() => document.getElementById('billing-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+              className="inline-flex flex-none items-center justify-center rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
+            >
+              Review and update
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {isUpgradeModalOpen && !isOrg && isProprietaryMode ? (
         <SubscriptionUpgradeModal
           currentPlan={currentPlan}
           onClose={closeUpgradeModal}
-          onUpgrade={handleUpgrade}
+          onUpgrade={handlePlanSelect}
           source={upgradeModalSource ?? undefined}
           dismissible={upgradeModalDismissible}
+          allowDowngrade
         />
       ) : null}
 
@@ -389,7 +463,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         danger
         onConfirm={confirmDedicatedRemove}
         onClose={() => setDedicatedPrompt(null)}
-        footerNote="Changes are staged until you click Save."
+        footerNote="Changes apply when you click Save."
       >
         {dedicatedPrompt ? (
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
@@ -433,6 +507,56 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           setTrialConfirmOpen(false)
           setTrialConfirmPayload(null)
         }}
+      />
+
+      <ConfirmDialog
+        open={planConfirmOpen}
+        title={planConfirmTarget === 'startup' ? 'Switch to Pro?' : 'Switch to Scale?'}
+        description={
+          <>
+            This changes your base subscription plan immediately.
+            {hasAnyChanges ? (
+              <div className="mt-2 text-sm font-semibold text-amber-800">
+                Save or cancel your changes below before switching plans.
+              </div>
+            ) : null}
+            {planConfirmError ? (
+              <div className="mt-2 text-sm font-semibold text-rose-700">
+                {planConfirmError}
+              </div>
+            ) : null}
+          </>
+        }
+        confirmLabel="Continue"
+        cancelLabel="Back"
+        confirmDisabled={hasAnyChanges || planConfirmBusy}
+        busy={planConfirmBusy}
+        onConfirm={async () => {
+          if (!planConfirmTarget) return
+          if (hasAnyChanges) return
+          setPlanConfirmBusy(true)
+          setPlanConfirmError(null)
+          try {
+            const result = await jsonRequest<{ ok: boolean; stripeActionUrl?: string }>(
+              initialData.endpoints.updateUrl,
+              {
+                method: 'POST',
+                includeCsrf: true,
+                json: { ownerType: 'user', planTarget: planConfirmTarget },
+              },
+            )
+            if (result?.stripeActionUrl) {
+              window.location.assign(result.stripeActionUrl)
+              return
+            }
+            window.location.reload()
+          } catch (error) {
+            setPlanConfirmError(safeErrorMessage(error))
+          } finally {
+            setPlanConfirmBusy(false)
+          }
+        }}
+        onClose={dismissPlanConfirm}
       />
     </div>
   )
