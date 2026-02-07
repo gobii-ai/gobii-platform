@@ -85,7 +85,7 @@ export function AddonSections({
         </div>
       ) : null}
 
-      <div className="mt-6 space-y-10">
+      <div className="mt-6 grid grid-cols-1 gap-10 lg:grid-cols-2">
         {ADDON_SECTIONS.map((section) => {
           const options = initialData.addons.kinds[section.key]?.options ?? []
           const selectableOptions = options.filter((opt) => opt.priceId)
@@ -98,8 +98,8 @@ export function AddonSections({
             const priceHint = unitCents !== null ? `${formatCents(unitCents, inferredCurrency)}/mo` : null
 
             return (
-              <div key={section.key} className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
-                <div className="flex items-start gap-3 sm:w-72">
+              <div key={section.key} className="rounded-2xl border border-slate-200 p-5">
+                <div className="flex items-start gap-3">
                   <div className="mt-0.5 grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-700">
                     {section.icon}
                   </div>
@@ -109,7 +109,7 @@ export function AddonSections({
                   </div>
                 </div>
 
-                <div className="min-w-0 flex-1 space-y-3">
+                <div className="mt-5 space-y-3">
                   {captchaOptions.length ? (
                     <ToggleSwitch
                       checked={captchaEnabled}
@@ -145,8 +145,8 @@ export function AddonSections({
             .filter((row) => row.visible)
 
           return (
-            <div key={section.key} className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
-              <div className="flex items-start gap-3 sm:w-72">
+            <div key={section.key} className="rounded-2xl border border-slate-200 p-5">
+              <div className="flex items-start gap-3">
                 <div className="mt-0.5 grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-700">
                   {section.icon}
                 </div>
@@ -156,7 +156,7 @@ export function AddonSections({
                 </div>
               </div>
 
-              <div className="min-w-0 flex-1 space-y-4">
+              <div className="mt-5 space-y-4">
                 {rows.length ? (
                   <div className="space-y-2">
                     {rows.map(({ opt, currentQty, nextQty }) => {
@@ -273,4 +273,3 @@ export function AddonSections({
     </section>
   )
 }
-
