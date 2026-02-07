@@ -23,7 +23,7 @@ type PreviewEntry = {
   relativeTime: string | null
 }
 
-type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'kanban' | 'tool'
+type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'kanban' | 'chart' | 'tool'
 type PreviewState = 'active' | 'complete'
 
 type ActivityDescriptor = {
@@ -40,6 +40,8 @@ type EntryVisual = {
   searchTotal: number | null
   enabledToolInfos: FriendlyToolInfo[]
   scrapeTargets: ScrapeTargetItem[]
+  chartImageUrl: string | null
+  pageTitle: string | null
 }
 
 type ScrapeTargetItem = {
@@ -652,6 +654,24 @@ function extractScrapeTargets(entry: ToolEntryDisplay): ScrapeTargetItem[] {
   return items
 }
 
+function extractPageTitle(entry: ToolEntryDisplay): string | null {
+  if (entry.status === 'pending') return null
+  const parsed = parseMaybeJson(entry.result)
+  if (!isRecord(parsed)) return null
+  const md = typeof parsed.result === 'string' ? parsed.result : null
+  if (!md) return null
+  const lines = md.split('\n').map((l: string) => l.trim()).filter(Boolean)
+  for (const line of lines.slice(0, 3)) {
+    const cleaned = line.replace(/^#+\s*/, '').replace(/[[\]()]/g, '').replace(/\s+/g, ' ').trim()
+    if (cleaned.length >= 4 && /[a-zA-Z]/.test(cleaned)) {
+      // Strip common suffixes like " | LinkedIn", " - Google"
+      const stripped = cleaned.replace(/\s*[|–-]\s*(LinkedIn|Google|Search|Facebook|Twitter|X)$/i, '').trim()
+      return clampText(stripped || cleaned, 72)
+    }
+  }
+  return null
+}
+
 function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor): EntryVisual {
   const toolName = (entry.toolName ?? '').toLowerCase()
   const scrapeTargets = activity.kind === 'linkedin' ? [] : extractScrapeTargets(entry)
@@ -667,7 +687,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     const enabledPreview = outcome.enabledTools.slice(0, 3).map(toFriendlyToolName).join(', ')
     const snippet = enabledPreview ? clampText(`Enabled: ${enabledPreview}`, 96) : null
     const enabledToolInfos = outcome.enabledTools.map(getFriendlyToolInfo)
-    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos, scrapeTargets: [] }
+    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos, scrapeTargets: [], chartImageUrl: null, pageTitle: null }
   }
 
   if (activity.kind === 'search') {
@@ -683,11 +703,14 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchTotal: effectiveTotal,
       enabledToolInfos: [],
       scrapeTargets: [],
+      chartImageUrl: null,
+      pageTitle: null,
     }
   }
 
   if (activity.kind === 'snapshot') {
     const host = parseHostFromText(entry.caption ?? entry.summary ?? null)
+    const pageTitle = extractPageTitle(entry)
     return {
       badge: null,
       snippet: host ? clampText(`Source: ${host}`, 96) : null,
@@ -696,6 +719,8 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchTotal: null,
       enabledToolInfos: [],
       scrapeTargets,
+      chartImageUrl: null,
+      pageTitle,
     }
   }
 
@@ -709,6 +734,23 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchTotal: null,
       enabledToolInfos: [],
       scrapeTargets: [],
+      chartImageUrl: null,
+      pageTitle: null,
+    }
+  }
+
+  if (activity.kind === 'chart') {
+    const chartImageUrl = entry.sourceEntry?.chartImageUrl ?? null
+    return {
+      badge: null,
+      snippet: null,
+      linkedInProfile: null,
+      searchItems: [],
+      searchTotal: null,
+      enabledToolInfos: [],
+      scrapeTargets: [],
+      chartImageUrl,
+      pageTitle: null,
     }
   }
 
@@ -721,6 +763,8 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     searchTotal: null,
     enabledToolInfos: [],
     scrapeTargets,
+    chartImageUrl: null,
+    pageTitle: null,
   }
 }
 
@@ -731,6 +775,7 @@ function classifyActivity(entry: ToolEntryDisplay): ActivityKind {
   if (toolName === 'kanban') return 'kanban'
   if (toolName.includes('linkedin') || label.includes('linkedin')) return 'linkedin'
   if (toolName.includes('search') || label.includes('search')) return 'search'
+  if (toolName === 'create_chart' || label === 'chart') return 'chart'
   if (
     toolName.includes('scrape_as_markdown') ||
     toolName.includes('scrape_as_html') ||
@@ -802,6 +847,15 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
       kind,
       label: 'Updating kanban',
       detail,
+    }
+  }
+
+  if (kind === 'chart') {
+    const title = pickText(entry.parameters?.title) ?? pickText(entry.caption) ?? pickText(entry.summary) ?? null
+    return {
+      kind,
+      label: 'Created chart',
+      detail: title ? clampText(title, 86) : null,
     }
   }
 
@@ -958,6 +1012,67 @@ export function ToolClusterLivePreview({
               item.activity.kind === 'thinking' && isHighlighted && streamingThought ? streamingThought : item.activity.detail
             const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
+            const chartImageUrl = visual.chartImageUrl
+
+            // Collect all chart entries with images for grid rendering
+            const chartEntries = chartImageUrl
+              ? previewEntries.filter((pe) => pe.visual.chartImageUrl)
+              : []
+            const isFirstChartEntry = chartEntries.length > 0 && chartEntries[0].entry.id === entry.id
+            const isSubsequentChartEntry = chartImageUrl && !isFirstChartEntry
+
+            // Skip subsequent chart entries — they're rendered in the first chart's grid
+            if (isSubsequentChartEntry) return null
+
+            // Render consolidated chart grid
+            if (isFirstChartEntry) {
+              const isSingle = chartEntries.length === 1
+              return (
+                <motion.div
+                  key={`chart-grid-${entry.id}`}
+                  layout={!reduceMotion}
+                  className="tool-cluster-live-preview__chart-grid"
+                  data-count={Math.min(chartEntries.length, 4)}
+                  initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 5, scale: 0.995 }}
+                  animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                  exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.995 }}
+                  transition={{
+                    duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
+                    ease: 'easeOut',
+                    delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
+                  }}
+                >
+                  {chartEntries.map((chartItem, chartIndex) => (
+                    <motion.button
+                      key={chartItem.entry.id}
+                      type="button"
+                      className="tool-cluster-live-preview__chart-thumb"
+                      data-single={isSingle ? 'true' : 'false'}
+                      initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 8, scale: 0.96 }}
+                      animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                      transition={{
+                        duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.12,
+                        ease: [0.22, 1, 0.36, 1],
+                        delay: reduceMotion ? 0 : isLatestEvent ? 0.06 + chartIndex * 0.1 : chartIndex * 0.02,
+                      }}
+                      whileHover={reduceMotion ? undefined : { scale: 1.02, y: -1 }}
+                      onClick={() => onSelectEntry(chartItem.entry)}
+                    >
+                      <img
+                        src={chartItem.visual.chartImageUrl!}
+                        alt={chartItem.activity.detail || 'Chart'}
+                        loading="lazy"
+                        className="tool-cluster-live-preview__chart-thumb-img"
+                      />
+                      <span className="tool-cluster-live-preview__chart-thumb-caption">
+                        {chartItem.activity.detail || 'Created chart'}
+                      </span>
+                    </motion.button>
+                  ))}
+                </motion.div>
+              )
+            }
+
             return (
               <motion.div
                 key={entry.id}
@@ -966,6 +1081,7 @@ export function ToolClusterLivePreview({
                 data-active={isHighlighted ? 'true' : 'false'}
                 data-kind={item.activity.kind}
                 data-has-results={searchItems.length > 0 ? 'true' : 'false'}
+                data-has-tools={visual.enabledToolInfos.length > 0 ? 'true' : 'false'}
                 data-new={isNew ? 'true' : 'false'}
                 data-profile-card={linkedInProfile ? 'true' : 'false'}
                 role="button"
@@ -1022,7 +1138,7 @@ export function ToolClusterLivePreview({
                       />
                     ) : null}
                   </motion.span>
-                ) : !searchItems.length ? (
+                ) : !searchItems.length && !visual.enabledToolInfos.length ? (
                   <motion.span
                     className={`tool-cluster-live-preview__entry-icon ${entry.iconBgClass} ${entry.iconColorClass}`}
                     animate={
@@ -1046,18 +1162,22 @@ export function ToolClusterLivePreview({
                 <span className="tool-cluster-live-preview__entry-header">
                   <span className="tool-cluster-live-preview__entry-main">
                     <span className="tool-cluster-live-preview__entry-label-row">
-                      {searchItems.length > 0 ? (
+                      {searchItems.length > 0 || visual.enabledToolInfos.length > 0 ? (
                         <motion.span
                           className={`tool-cluster-live-preview__entry-icon tool-cluster-live-preview__entry-icon--inline ${entry.iconBgClass} ${entry.iconColorClass}`}
                           animate={
                             reduceMotion || !isHighlighted
                               ? undefined
-                              : { rotate: [0, -5, 5, 0] }
+                              : searchItems.length > 0
+                                ? { rotate: [0, -5, 5, 0] }
+                                : { scale: [1, 1.05, 1] }
                           }
                           transition={
                             reduceMotion || !isHighlighted
                               ? undefined
-                              : { duration: 0.58, repeat: Infinity, ease: 'easeInOut' }
+                              : searchItems.length > 0
+                                ? { duration: 0.58, repeat: Infinity, ease: 'easeInOut' }
+                                : { duration: 1.05, repeat: Infinity, ease: 'easeInOut' }
                           }
                         >
                           <ToolIconSlot entry={entry} />
@@ -1104,7 +1224,7 @@ export function ToolClusterLivePreview({
                             </span>
                           ) : null}
                         </span>
-                      ) : visual.badge && !visual.enabledToolInfos.length ? (
+                      ) : visual.badge ? (
                         <>
                           <span className="tool-cluster-live-preview__entry-separator" aria-hidden="true">·</span>
                           <span className="tool-cluster-live-preview__entry-count">{visual.badge}</span>
@@ -1140,6 +1260,17 @@ export function ToolClusterLivePreview({
                             ? `${item.activity.label} · ${linkedInProfile.subtitle}`
                             : item.activity.label}
                         </motion.span>
+                      ) : visual.pageTitle && visual.scrapeTargets.length > 0 ? (
+                        <motion.span
+                          key={`${entry.id}-page-title-${visual.pageTitle}`}
+                          className="tool-cluster-live-preview__entry-caption"
+                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
+                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
+                          transition={{ duration: 0.16, ease: 'easeOut' }}
+                        >
+                          {visual.pageTitle}
+                        </motion.span>
                       ) : detailText && !visual.enabledToolInfos.length && !searchItems.length && !visual.scrapeTargets.length ? (
                         <motion.span
                           key={`${entry.id}-detail-${detailText}`}
@@ -1153,34 +1284,7 @@ export function ToolClusterLivePreview({
                         </motion.span>
                       ) : null}
                     </AnimatePresence>
-                    {visual.enabledToolInfos.length ? (
-                      <div className="tool-cluster-live-preview__enabled-tools">
-                        {visual.enabledToolInfos.map((info, cardIndex) => {
-                          const CardIcon = info.icon
-                          return (
-                            <motion.div
-                              key={`card-${cardIndex}-${info.label}`}
-                              className="tool-cluster-live-preview__enabled-tool-card"
-                              initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 12, scale: 0.92 }}
-                              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-                              transition={{
-                                duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
-                                ease: [0.22, 1, 0.36, 1],
-                                delay: reduceMotion ? 0 : isLatestEvent
-                                  ? 0.1 + cardIndex * 0.12
-                                  : cardIndex * 0.015,
-                              }}
-                              whileHover={reduceMotion ? undefined : { scale: 1.04, y: -2 }}
-                            >
-                              <span className={`tool-cluster-live-preview__enabled-tool-card-icon ${info.iconBgClass} ${info.iconColorClass}`}>
-                                <CardIcon aria-hidden="true" />
-                              </span>
-                              <span className="tool-cluster-live-preview__enabled-tool-card-label">{info.label}</span>
-                            </motion.div>
-                          )
-                        })}
-                      </div>
-                    ) : visual.snippet && visual.snippet !== detailText && searchItems.length === 0 && !visual.scrapeTargets.length ? (
+                    {!visual.enabledToolInfos.length && visual.snippet && visual.snippet !== detailText && searchItems.length === 0 && !visual.scrapeTargets.length ? (
                       <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
                     ) : null}
                   </span>
@@ -1234,6 +1338,36 @@ export function ToolClusterLivePreview({
                       </motion.li>
                     ))}
                   </ul>
+                ) : null}
+                {visual.enabledToolInfos.length ? (
+                  <div className="tool-cluster-live-preview__enabled-tools-section">
+                    <div className="tool-cluster-live-preview__enabled-tools">
+                      {visual.enabledToolInfos.map((info, cardIndex) => {
+                        const CardIcon = info.icon
+                        return (
+                          <motion.div
+                            key={`card-${cardIndex}-${info.label}`}
+                            className="tool-cluster-live-preview__enabled-tool-card"
+                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 10, scale: 0.94 }}
+                            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                            transition={{
+                              duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
+                              ease: [0.22, 1, 0.36, 1],
+                              delay: reduceMotion ? 0 : isLatestEvent
+                                ? 0.1 + cardIndex * 0.12
+                                : cardIndex * 0.015,
+                            }}
+                            whileHover={reduceMotion ? undefined : { scale: 1.04, y: -1 }}
+                          >
+                            <span className={`tool-cluster-live-preview__enabled-tool-card-icon ${info.iconBgClass} ${info.iconColorClass}`}>
+                              <CardIcon aria-hidden="true" />
+                            </span>
+                            <span className="tool-cluster-live-preview__enabled-tool-card-label">{info.label}</span>
+                          </motion.div>
+                        )
+                      })}
+                    </div>
+                  </div>
                 ) : null}
               </motion.div>
             )

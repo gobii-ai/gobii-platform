@@ -349,6 +349,63 @@ class ImpliedSendTests(TestCase):
         params = mock_send_chat.call_args[0][1]
         self.assertTrue(params.get("will_continue_work"))
 
+    @patch("api.agent.core.event_processing._should_imply_continue", return_value=False)
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_rechecks_open_kanban_before_sleep(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+        _mock_should_imply_continue,
+    ):
+        """A conservative implied-stop decision should be overridden when open kanban + continuation text are present."""
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Continue researching portfolio companies",
+            status=PersistentAgentKanbanCard.Status.TODO,
+        )
+
+        first_resp = self._mock_completion("I've scraped the profiles. Let me extract key details next.")
+        second_resp = self._mock_completion(None)
+
+        mock_completion.side_effect = [
+            (
+                first_resp,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+            (
+                second_resp,
+                {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+        ]
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+        params = mock_send_chat.call_args[0][1]
+        self.assertNotIn("will_continue_work", params)
+        self.assertEqual(mock_completion.call_count, 2)
+
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")

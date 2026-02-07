@@ -489,6 +489,41 @@ def _serialize_thinking(env: ThinkingEnvelope) -> dict:
     }
 
 
+_FILE_REF_RE = re.compile(r"^\$\[(.+)\]$")
+
+
+def _extract_chart_image_url(tool_call: PersistentAgentToolCall) -> str | None:
+    """For create_chart calls, resolve the $[/path] file ref to a download URL."""
+    import json as _json
+
+    if (tool_call.tool_name or "").lower() != "create_chart":
+        return None
+    if (getattr(tool_call, "status", None) or "complete") != "complete":
+        return None
+    raw = tool_call.result
+    if not raw:
+        return None
+    try:
+        result = _json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(result, dict) or result.get("status") == "error":
+        return None
+    for key in ("file", "chart_url", "image_url", "url"):
+        value = result.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        match = _FILE_REF_RE.match(value.strip())
+        file_path = match.group(1).strip() if match else None
+        if file_path:
+            agent_id = tool_call.step.agent_id
+            query = urlencode({"path": file_path})
+            return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
+        if value.strip().startswith("http"):
+            return value.strip()
+    return None
+
+
 def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     step = env.step
     tool_call = env.tool_call
@@ -496,7 +531,7 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     meta = _tool_icon_for(tool_name)
     meta["label"] = _friendly_tool_label(tool_name, labels)
     status = getattr(tool_call, "status", None) or "complete"
-    return {
+    entry: dict = {
         "id": str(step.id),
         "cursor": env.cursor.encode(),
         "timestamp": _format_timestamp(step.created_at),
@@ -507,6 +542,10 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         "result": tool_call.result,
         "status": status,
     }
+    chart_url = _extract_chart_image_url(tool_call)
+    if chart_url:
+        entry["chartImageUrl"] = chart_url
+    return entry
 
 
 def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -> dict:

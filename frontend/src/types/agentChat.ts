@@ -58,6 +58,7 @@ export type ToolCallEntry = {
   charterText?: string | null
   status?: ToolCallStatus | null
   cursor?: string
+  chartImageUrl?: string | null
 }
 
 export type ToolClusterEvent = {

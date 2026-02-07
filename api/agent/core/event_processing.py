@@ -3216,6 +3216,7 @@ def _run_agent_loop(
             implied_send = False
             tool_calls = list(raw_tool_calls)
             implied_stop_after_send = False  # Track if implied send should force stop
+            implied_send_message_text = ""
             if message_text and not has_explicit_send:
                 # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                 # This is safer—agent won't keep running unexpectedly.
@@ -3247,6 +3248,7 @@ def _run_agent_loop(
                 if implied_call:
                     implied_send = True
                     implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
+                    implied_send_message_text = message_text
                     tool_calls = [implied_call] + tool_calls
                     logger.info(
                         "Agent %s: treating message content as implied %s send.",
@@ -3759,6 +3761,19 @@ def _run_agent_loop(
                 and not followup_required
                 and last_explicit_continue is None
             ):
+                # Re-check against persisted kanban/message state before stopping.
+                # This prevents premature sleep when initial implied-continuation inference
+                # was too conservative but the delivered text clearly signals ongoing work.
+                if (
+                    implied_send_message_text
+                    and _has_open_kanban_work(agent)
+                    and _has_continuation_signal(implied_send_message_text)
+                ):
+                    logger.info(
+                        "Agent %s: implied send stop overridden due to open kanban work + continuation signal.",
+                        agent.id,
+                    )
+                    continue
                 logger.info(
                     "Agent %s: implied send without continuation phrase; auto-sleeping.",
                     agent.id,
