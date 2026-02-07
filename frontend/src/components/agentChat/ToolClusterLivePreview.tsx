@@ -226,7 +226,6 @@ export function ToolClusterLivePreview({ cluster, isLatestEvent, timelineDialogI
     () =>
       cluster.entries
         .slice(-3)
-        .reverse()
         .map((entry) => ({
           entry,
           activity: deriveActivityDescriptor(entry),
@@ -236,8 +235,8 @@ export function ToolClusterLivePreview({ cluster, isLatestEvent, timelineDialogI
   )
 
   const activePreviewEntry = useMemo<PreviewEntry | null>(() => {
-    const pendingEntry = previewEntries.find((item) => item.entry.status === 'pending')
-    return pendingEntry ?? previewEntries[0] ?? null
+    const pendingEntry = [...previewEntries].reverse().find((item) => item.entry.status === 'pending')
+    return pendingEntry ?? previewEntries[previewEntries.length - 1] ?? null
   }, [previewEntries])
 
   const pendingCount = useMemo(
