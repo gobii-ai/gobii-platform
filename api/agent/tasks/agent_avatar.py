@@ -82,7 +82,7 @@ def _generate_visual_description_via_llm(
         {
             "role": "system",
             "content": (
-                "You design authentic, warm visual identities for AI agents. Given the agent's name and charter, "
+                "You design authentic, inviting visual identities for AI agents. Given the agent's name and charter, "
                 "write one flowing prose paragraph describing WHO this person is - their stable physical identity "
                 "that will remain consistent across different photos and contexts. "
                 "\n\n"
@@ -93,7 +93,8 @@ def _generate_visual_description_via_llm(
                 "Naturally weave in:\n"
                 "• Physical traits - skin tone, eye color, facial features, hair (color, texture, length), "
                 "approximate age, build, distinctive characteristics\n"
-                "• Natural expression and energy - their resting warmth, the vibe they carry, what draws you to them\n"
+                "• Eyes and expression - what do their eyes look like when they're really listening? What's their resting expression? "
+                "What makes their face specifically *theirs*?\n"
                 "• Personal style sensibility - their general aesthetic (polished, casual, eclectic, minimalist, etc.)\n"
                 "\n"
                 "Do NOT describe lighting, camera angles, specific settings, or how they'd be photographed - "
@@ -101,11 +102,10 @@ def _generate_visual_description_via_llm(
                 "\n\n"
                 "Infer the person's most likely ethnicity and appearance from their name. "
                 "For ambiguous or invented names, default to demographics roughly proportional to real-world populations. "
-                "Some people are polished, others wonderfully imperfect. Let each person feel distinctly themselves. "
-                "Prioritize warmth and relatability over perfection. "
+                "Let each person feel distinctly themselves. Don't default to conventionally attractive — just be authentic. "
                 "\n\n"
                 "Avoid fantasy elements, celebrities, copyrighted characters, bullet lists, or disclaimers. "
-                "Just describe a real, warm human being who could be recognized in any photo."
+                "Just describe a real, friendly human being who could be recognized in any photo."
             ),
         },
         {

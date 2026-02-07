@@ -39,7 +39,8 @@ export const TimelineEventList = memo(function TimelineEventList({
 
   return (
     <ToolDetailProvider>
-      {events.map((event) => {
+      {events.map((event, index) => {
+        const isLatestEvent = index === events.length - 1
         if (event.kind === 'message') {
           return (
             <MessageEventCard
@@ -69,6 +70,7 @@ export const TimelineEventList = memo(function TimelineEventList({
             <ToolClusterCard
               key={event.cursor}
               cluster={cluster}
+              isLatestEvent={isLatestEvent}
               suppressedThinkingCursor={suppressedThinkingCursor}
             />
           )
@@ -80,6 +82,7 @@ export const TimelineEventList = memo(function TimelineEventList({
           <ToolClusterCard
             key={event.cursor}
             cluster={event}
+            isLatestEvent={isLatestEvent}
             suppressedThinkingCursor={suppressedThinkingCursor}
           />
         )

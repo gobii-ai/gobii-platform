@@ -7,44 +7,13 @@ import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { ToolIconSlot } from './ToolIconSlot'
 import { ToolProviderBadge } from './ToolProviderBadge'
-import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
+import { deriveEntryCaption, deriveThinkingPreview } from './tooling/clusterPreviewText'
+import type { ToolClusterTransform } from './tooling/types'
 
 type ToolClusterTimelineOverlayProps = {
   open: boolean
   cluster: ToolClusterTransform
   onClose: () => void
-}
-
-function deriveCaption(entry: ToolEntryDisplay): string | null {
-  if (entry.caption && entry.caption !== entry.label) {
-    return entry.caption
-  }
-  if (entry.summary && entry.summary !== entry.label) {
-    return entry.summary
-  }
-  return null
-}
-
-function deriveThinkingPreview(entry: ToolEntryDisplay): string | null {
-  if (entry.toolName !== 'thinking') {
-    return null
-  }
-  const reasoning = typeof entry.result === 'string' ? entry.result : ''
-  if (!reasoning.trim()) {
-    return null
-  }
-  const lines = reasoning.split(/\r?\n/)
-  const firstLineIndex = lines.findIndex((line) => line.trim().length > 0)
-  if (firstLineIndex === -1) {
-    return null
-  }
-  const firstLine = lines[firstLineIndex]
-    .trimEnd()
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-  const remainder = lines.slice(firstLineIndex + 1).join('\n')
-  const hasMore = remainder.trim().length > 0
-  return hasMore ? `${firstLine}…` : firstLine
 }
 
 export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClusterTimelineOverlayProps) {
@@ -102,7 +71,7 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
               const detailId = `tool-cluster-timeline-detail-${slugify(entry.id)}`
               const isOpen = openEntryId === entry.id
               const relativeTime = formatRelativeTimestamp(entry.timestamp)
-              const caption = deriveCaption(entry)
+              const caption = deriveEntryCaption(entry)
               const thinkingPreview = deriveThinkingPreview(entry)
               const kind = entry.toolName === 'thinking' ? 'thinking' : entry.toolName === 'kanban' ? 'kanban' : 'tool'
               const DetailComponent = entry.detailComponent

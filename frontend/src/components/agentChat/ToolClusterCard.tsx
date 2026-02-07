@@ -4,6 +4,7 @@ import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistr
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import { ToolIconSlot } from './ToolIconSlot'
 import { ToolProviderBadge } from './ToolProviderBadge'
+import { ToolClusterLivePreview } from './ToolClusterLivePreview'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
@@ -12,10 +13,11 @@ import { scrollIntoViewIfNeeded } from './scrollIntoView'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
+  isLatestEvent?: boolean
   suppressedThinkingCursor?: string | null
 }
 
-export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {
+export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatestEvent = false, suppressedThinkingCursor }: ToolClusterCardProps) {
   const transformed = useMemo(
     () => transformToolCluster(cluster, { suppressedThinkingCursor }),
     [cluster, suppressedThinkingCursor],
@@ -71,9 +73,8 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
   }, [cluster.cursor, setOpenKey, transformed])
 
   const handleToggleCluster = useCallback(() => {
-    if (!transformed.collapsible) return
     setTimelineOpen(true)
-  }, [transformed.collapsible])
+  }, [])
 
   const handleChipClick = useCallback(
     (entry: ToolEntryDisplay) => {
@@ -207,30 +208,15 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
       data-earliest={transformed.earliestTimestamp}
     >
       <div className="tool-cluster-shell">
-        {transformed.collapsible ? (
-          <div className="tool-cluster-summary">
-            <button
-              type="button"
-              className="tool-cluster-batch-toggle"
-              data-role="cluster-toggle"
-              aria-expanded={timelineOpen ? 'true' : 'false'}
-              aria-haspopup="dialog"
-              aria-controls={timelineDialogId}
-              onClick={handleToggleCluster}
-            >
-              <span className="tool-cluster-batch-icon">
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h10v10H7z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 5h10v10H5z" opacity="0.55" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 9h10v10H9z" opacity="0.4" />
-                </svg>
-              </span>
-              <span className="tool-cluster-batch-label">
-                <span data-role="cluster-count">{transformed.entryCount}</span> events
-              </span>
-            </button>
-          </div>
-        ) : null}
+        <div className="tool-cluster-summary">
+          <ToolClusterLivePreview
+            cluster={transformed}
+            isLatestEvent={isLatestEvent}
+            timelineDialogId={timelineDialogId}
+            timelineOpen={timelineOpen}
+            onOpenTimeline={handleToggleCluster}
+          />
+        </div>
 
         <ul className="tool-chip-list" role="list">
           {transformed.entries.map((entry) => {
@@ -269,9 +255,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
           {!collapsed && activeEntry ? renderDetail(activeEntry) : null}
         </div>
       </div>
-      {transformed.collapsible ? (
-        <ToolClusterTimelineOverlay open={timelineOpen} cluster={transformed} onClose={() => setTimelineOpen(false)} />
-      ) : null}
+      <ToolClusterTimelineOverlay open={timelineOpen} cluster={transformed} onClose={() => setTimelineOpen(false)} />
     </article>
   )
 })

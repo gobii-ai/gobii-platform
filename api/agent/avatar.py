@@ -35,7 +35,7 @@ def build_avatar_prompt(*, agent: PersistentAgent, visual_description: str, char
 
     return (
         "Create an authentic, photorealistic square portrait of this specific person. "
-        "This should feel like a genuine photograph of someone you'd want to talk to - warm, relatable, human. "
+        "They are looking directly into the camera — genuine eye contact, like they're mid-conversation with you. "
         "One person only, no text, no logos, no watermark. "
         "\n\n"
         f"Agent name: {safe_name}\n"
@@ -50,7 +50,9 @@ def build_avatar_prompt(*, agent: PersistentAgent, visual_description: str, char
         "Render this EXACT person, then choose the photographic approach (lighting, composition, setting, mood) "
         "that authentically captures them in the context of their role. Let creative variety emerge naturally - "
         "different roles might call for different photographic treatments (intimate window light, environmental "
-        "portraits, golden hour outdoors, studio, candid moments, etc.). Make them feel warm, genuine, and real. "
+        "portraits, golden hour outdoors, studio, candid moments, etc.). "
+        "Head and shoulders framing, shallow depth of field, sharp focus on the eyes. "
+        "Not a stock photo — a real person."
         "\n\n"
         "Technical constraints: modern color photo, realistic human proportions, no fantasy elements, "
         "no cartoon/anime/3D render style."
