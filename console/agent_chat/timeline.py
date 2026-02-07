@@ -21,6 +21,7 @@ from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
 from bleach.sanitizer import Cleaner
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
+from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.models import (
     BrowserUseAgentTask,
@@ -161,6 +162,7 @@ class KanbanEnvelope:
 class ProcessingSnapshot:
     active: bool
     web_tasks: list[dict]
+    next_scheduled_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -1007,6 +1009,52 @@ def _build_web_task_payload(task: BrowserUseAgentTask, *, now: datetime | None =
     }
 
 
+def _coerce_schedule_eta_to_timedelta(eta: object) -> timedelta | None:
+    if eta is None:
+        return None
+    if isinstance(eta, timedelta):
+        return eta
+    if isinstance(eta, (int, float)):
+        return timedelta(seconds=float(eta))
+    return None
+
+
+def _compute_next_scheduled_run(agent: PersistentAgent, *, now: datetime | None = None) -> datetime | None:
+    """Return the next known scheduled wake-up for an agent."""
+
+    if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
+        return None
+
+    current_env = getattr(settings, "GOBII_RELEASE_ENV", "local")
+    if (agent.execution_environment or "local") != current_env:
+        return None
+
+    schedule_value = (agent.schedule or "").strip()
+    if not schedule_value:
+        return None
+
+    try:
+        schedule_obj = ScheduleParser.parse(schedule_value)
+    except ValueError:
+        return None
+
+    if schedule_obj is None:
+        return None
+
+    current_time = now or timezone.now()
+    try:
+        eta = schedule_obj.remaining_estimate(current_time)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+    delay = _coerce_schedule_eta_to_timedelta(eta)
+    if delay is None:
+        return None
+    if delay.total_seconds() < 0:
+        delay = timedelta(seconds=0)
+    return current_time + delay
+
+
 def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
     """Compute current processing activity and active web tasks for an agent."""
 
@@ -1044,13 +1092,15 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
         web_tasks = [_build_web_task_payload(task, now=now) for task in active_tasks]
 
     active = bool(heartbeat_active or lock_active or queued_flag or web_tasks)
-    return ProcessingSnapshot(active=active, web_tasks=web_tasks)
+    next_scheduled_at = _compute_next_scheduled_run(agent)
+    return ProcessingSnapshot(active=active, web_tasks=web_tasks, next_scheduled_at=next_scheduled_at)
 
 
 def serialize_processing_snapshot(snapshot: ProcessingSnapshot) -> dict:
     return {
         "active": snapshot.active,
         "webTasks": snapshot.web_tasks,
+        "nextScheduledAt": _format_timestamp(snapshot.next_scheduled_at),
     }
 
 

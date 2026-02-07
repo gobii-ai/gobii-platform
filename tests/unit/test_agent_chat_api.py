@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
@@ -281,6 +282,18 @@ class AgentChatAPITests(TestCase):
         self.assertTrue(snapshot.active)
 
     @tag("batch_agent_chat")
+    def test_processing_snapshot_includes_next_scheduled_at_when_idle(self):
+        self.agent.schedule = "@hourly"
+        self.agent.execution_environment = getattr(settings, "GOBII_RELEASE_ENV", "local")
+        self.agent.is_active = True
+        self.agent.life_state = PersistentAgent.LifeState.ACTIVE
+        self.agent.save(update_fields=["schedule", "execution_environment", "is_active", "life_state"])
+
+        snapshot = build_processing_snapshot(self.agent)
+
+        self.assertIsNotNone(snapshot.next_scheduled_at)
+
+    @tag("batch_agent_chat")
     def test_timeline_includes_thinking_events(self):
         completion = PersistentAgentCompletion.objects.create(
             agent=self.agent,
@@ -549,6 +562,22 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(web_task.get("status"), BrowserUseAgentTask.StatusChoices.IN_PROGRESS)
         self.assertEqual(web_task.get("statusLabel"), task.get_status_display())
         self.assertEqual(web_task.get("promptPreview"), "Visit example.com")
+        self.assertIn("nextScheduledAt", snapshot)
+
+    @tag("batch_agent_chat")
+    def test_processing_status_endpoint_includes_next_scheduled_at(self):
+        self.agent.schedule = "@hourly"
+        self.agent.execution_environment = getattr(settings, "GOBII_RELEASE_ENV", "local")
+        self.agent.is_active = True
+        self.agent.life_state = PersistentAgent.LifeState.ACTIVE
+        self.agent.save(update_fields=["schedule", "execution_environment", "is_active", "life_state"])
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/processing/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        snapshot = payload.get("processing_snapshot") or {}
+
+        self.assertIsInstance(snapshot.get("nextScheduledAt"), str)
 
     @tag("batch_agent_chat")
     def test_processing_status_reports_active_when_only_queued(self):

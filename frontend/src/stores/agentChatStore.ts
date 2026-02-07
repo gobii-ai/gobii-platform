@@ -18,7 +18,7 @@ import { mergeTimelineEvents, normalizeTimelineEvent, prepareTimelineEvents } fr
 const TIMELINE_WINDOW_SIZE = 100
 let refreshLatestInFlight = false
 
-const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [] }
+const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
 
 type ProcessingUpdateInput = boolean | Partial<ProcessingSnapshot> | null | undefined
 
@@ -42,17 +42,35 @@ function coerceProcessingSnapshot(snapshot: Partial<ProcessingSnapshot> | null |
         }))
     : []
 
+  const hasNextScheduledAt = Object.prototype.hasOwnProperty.call(snapshot, 'nextScheduledAt')
+  const nextScheduledAt = typeof snapshot.nextScheduledAt === 'string'
+    ? snapshot.nextScheduledAt
+    : snapshot.nextScheduledAt === null
+      ? null
+      : undefined
+
   return {
     active: Boolean(snapshot.active) || webTasks.length > 0,
     webTasks,
+    ...(hasNextScheduledAt ? { nextScheduledAt } : {}),
   }
 }
 
 function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnapshot {
   if (typeof input === 'boolean') {
-    return { active: input, webTasks: [] }
+    return { active: input, webTasks: [], nextScheduledAt: null }
   }
   return coerceProcessingSnapshot(input)
+}
+
+function resolveNextScheduledAt(snapshot: ProcessingSnapshot, fallback: string | null = null): string | null {
+  if (typeof snapshot.nextScheduledAt === 'string') {
+    return snapshot.nextScheduledAt
+  }
+  if (snapshot.nextScheduledAt === null) {
+    return null
+  }
+  return fallback
 }
 
 function findLatestThinkingEvent(events: TimelineEvent[]): ThinkingEvent | null {
@@ -242,6 +260,7 @@ type CachedAgentState = {
   processingStartedAt: number | null
   awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
+  nextScheduledAt: string | null
   agentColorHex: string | null
   agentName: string | null
   agentAvatarUrl: string | null
@@ -266,6 +285,7 @@ export type AgentChatState = {
   processingStartedAt: number | null
   awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
+  nextScheduledAt: string | null
   loading: boolean
   loadingOlder: boolean
   loadingNewer: boolean
@@ -339,6 +359,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   processingStartedAt: null,
   awaitingResponse: false,
   processingWebTasks: [],
+  nextScheduledAt: null,
   loading: false,
   loadingOlder: false,
   loadingNewer: false,
@@ -396,6 +417,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           processingStartedAt: currentState.processingStartedAt,
           awaitingResponse: currentState.awaitingResponse,
           processingWebTasks: currentState.processingWebTasks,
+          nextScheduledAt: currentState.nextScheduledAt,
           agentColorHex: currentState.agentColorHex,
           agentName: currentState.agentName,
           agentAvatarUrl: currentState.agentAvatarUrl,
@@ -430,6 +452,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       processingStartedAt: cachedState?.processingStartedAt ?? null,
       awaitingResponse: cachedState?.awaitingResponse ?? false,
       processingWebTasks: cachedState?.processingWebTasks ?? [],
+      nextScheduledAt: cachedState?.nextScheduledAt ?? null,
       loadingOlder: false,
       loadingNewer: false,
       refreshingLatest: false,
@@ -517,6 +540,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingActive: processingSnapshot.active,
         processingStartedAt: finalProcessingStartedAt,
         processingWebTasks: processingSnapshot.webTasks,
+        nextScheduledAt: resolveNextScheduledAt(processingSnapshot, cachedState?.nextScheduledAt ?? null),
         loading: false,
         autoScrollPinned: true,
         autoScrollPinSuppressedUntil: null,
@@ -558,6 +582,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           processingActive: snapshot.active,
           processingStartedAt,
           processingWebTasks: snapshot.webTasks,
+          nextScheduledAt: resolveNextScheduledAt(snapshot, state.nextScheduledAt),
           awaitingResponse: snapshot.active ? false : state.awaitingResponse,
         }
       })
@@ -623,6 +648,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
             processingActive: processingSnapshot.active,
             processingStartedAt,
             processingWebTasks: processingSnapshot.webTasks,
+            nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
             pendingEvents,
             hasUnseenActivity: incoming.length ? true : current.hasUnseenActivity,
             streaming: nextStreaming,
@@ -650,6 +676,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           processingActive: processingSnapshot.active,
           processingStartedAt,
           processingWebTasks: processingSnapshot.webTasks,
+          nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
           pendingEvents: [],
           streaming: nextStreaming,
           streamingClearOnDone: nextStreamingClearOnDone,
@@ -753,6 +780,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           processingActive: processingSnapshot.active,
           processingStartedAt,
           processingWebTasks: processingSnapshot.webTasks,
+          nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
           loadingNewer: false,
           agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
           awaitingResponse: nextAwaitingResponse,
@@ -799,6 +827,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           processingActive: processingSnapshot.active,
           processingStartedAt,
           processingWebTasks: processingSnapshot.webTasks,
+          nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
           hasUnseenActivity: false,
           loading: false,
           pendingEvents: [],
@@ -1076,6 +1105,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingActive: snapshot.active,
         processingStartedAt,
         processingWebTasks: snapshot.webTasks,
+        nextScheduledAt: resolveNextScheduledAt(snapshot, state.nextScheduledAt),
         hasUnseenActivity: !state.autoScrollPinned && snapshot.active ? true : state.hasUnseenActivity,
         awaitingResponse: snapshot.active ? false : state.awaitingResponse,
       }

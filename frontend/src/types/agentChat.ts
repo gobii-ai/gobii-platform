@@ -89,6 +89,7 @@ export type ProcessingWebTask = {
 export type ProcessingSnapshot = {
   active: boolean
   webTasks: ProcessingWebTask[]
+  nextScheduledAt?: string | null
 }
 
 export type MessageEvent = {

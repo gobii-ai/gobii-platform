@@ -17,6 +17,7 @@ import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
+import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
@@ -109,6 +110,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   loadingNewer?: boolean
   initialLoading?: boolean
   processingWebTasks?: ProcessingWebTask[]
+  nextScheduledAt?: string | null
   processingStartedAt?: number | null
   awaitingResponse?: boolean
   streaming?: StreamState | null
@@ -127,6 +129,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
+  composerError?: string | null
 }
 
 export function AgentChatLayout({
@@ -192,6 +195,7 @@ export function AgentChatLayout({
   processingStartedAt,
   awaitingResponse = false,
   processingWebTasks = [],
+  nextScheduledAt = null,
   streaming,
   onLoadOlder,
   onLoadNewer,
@@ -222,6 +226,7 @@ export function AgentChatLayout({
   llmTierError = null,
   onOpenTaskPacks,
   spawnIntentLoading = false,
+  composerError = null,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
@@ -447,6 +452,14 @@ export function AgentChatLayout({
   const hideResponseSkeleton = isActivelyStreamingContent || hasMoreNewer
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
+  const showScheduledResumeEvent = Boolean(
+    !initialLoading
+    && !processingActive
+    && !awaitingResponse
+    && !isStreaming
+    && !hasMoreNewer
+    && nextScheduledAt,
+  )
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const hasTimelineEvents = events.length > 0
   const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
@@ -574,7 +587,7 @@ export function AgentChatLayout({
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
-              <div id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
+              <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
                 <div
                   id="timeline-load-older"
                   className="timeline-load-control"
@@ -594,7 +607,7 @@ export function AgentChatLayout({
                   </button>
                 </div>
 
-                <div id="timeline-event-list" className="flex flex-col gap-3">
+                <div id="timeline-event-list" className="flex flex-col">
                   <TimelineEventList
                     agentFirstName={agentFirstName}
                     events={events}
@@ -606,6 +619,9 @@ export function AgentChatLayout({
                     suppressedThinkingCursor={suppressedThinkingCursor}
                   />
                 </div>
+                {showScheduledResumeEvent ? (
+                  <ScheduledResumeCard nextScheduledAt={nextScheduledAt} />
+                ) : null}
                 {showHardLimitCallout ? (
                   <HardLimitCalloutCard
                     onOpenSettings={handleSettingsOpen}
@@ -641,7 +657,7 @@ export function AgentChatLayout({
                 ) : null}
 
                 {showStreamingSlot && !hasMoreNewer ? (
-                  <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
+                  <div id="streaming-response-slot" className="streaming-response-slot flex flex-col">
                     {hasStreamingContent ? (
                       <StreamingReplyCard
                         content={streaming?.content || ''}
@@ -738,6 +754,7 @@ export function AgentChatLayout({
               intelligenceError={llmTierError}
               onOpenTaskPacks={resolvedOpenTaskPacks}
               canManageAgent={canManageAgent}
+              submitError={composerError}
             />
           )}
         </div>

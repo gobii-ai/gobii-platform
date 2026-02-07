@@ -127,6 +127,7 @@ type AgentComposerProps = {
   intelligenceError?: string | null
   onOpenTaskPacks?: () => void
   canManageAgent?: boolean
+  submitError?: string | null
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -155,6 +156,7 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceError = null,
   onOpenTaskPacks,
   canManageAgent = true,
+  submitError = null,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -767,6 +769,11 @@ export const AgentComposer = memo(function AgentComposer({
                     </button>
                   </span>
                 ))}
+              </div>
+            ) : null}
+            {submitError ? (
+              <div className="composer-submit-error" role="alert" aria-live="polite">
+                {submitError}
               </div>
             ) : null}
           </div>

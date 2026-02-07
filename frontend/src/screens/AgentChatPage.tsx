@@ -76,6 +76,75 @@ function compareRosterNames(left: string, right: string): number {
   return left.localeCompare(right, undefined, { sensitivity: 'base' })
 }
 
+const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persistent agents available/i
+
+function extractFirstErrorMessage(payload: unknown): string | null {
+  const queue: unknown[] = [payload]
+  const seen = new Set<object>()
+
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (typeof current === 'string') {
+      const trimmed = current.trim()
+      if (trimmed) {
+        return trimmed
+      }
+      continue
+    }
+
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        queue.push(entry)
+      }
+      continue
+    }
+
+    if (!current || typeof current !== 'object') {
+      continue
+    }
+
+    if (seen.has(current)) {
+      continue
+    }
+    seen.add(current)
+
+    const record = current as Record<string, unknown>
+    const priorityKeys = ['error', 'detail', 'message', 'non_field_errors', '__all__']
+    for (const key of priorityKeys) {
+      if (key in record) {
+        queue.unshift(record[key])
+      }
+    }
+
+    for (const value of Object.values(record)) {
+      queue.push(value)
+    }
+  }
+
+  return null
+}
+
+function buildCreateAgentErrorMessage(err: unknown, isProprietaryMode: boolean): string {
+  const fallback = 'Unable to create that agent right now.'
+  let message: string | null = null
+
+  if (err instanceof HttpError) {
+    message = extractFirstErrorMessage(err.body)
+  } else if (err instanceof Error) {
+    const trimmed = err.message.trim()
+    message = trimmed || null
+  }
+
+  const resolved = message ?? fallback
+  if (AGENT_LIMIT_ERROR_PATTERN.test(resolved)) {
+    if (isProprietaryMode) {
+      return "You've reached your agent limit for your current plan. Upgrade to create more agents."
+    }
+    return "You've reached your agent limit for this deployment. Adjust deployment settings to allow more agents."
+  }
+  return resolved
+}
+
 function insertRosterEntry(agents: AgentRosterEntry[], entry: AgentRosterEntry): AgentRosterEntry[] {
   const insertionIndex = agents.findIndex((agent) => compareRosterNames(entry.name, agent.name) < 0)
   if (insertionIndex === -1) {
@@ -393,6 +462,7 @@ export function AgentChatPage({
   const processingStartedAt = useAgentChatStore((state) => state.processingStartedAt)
   const awaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
+  const nextScheduledAt = useAgentChatStore((state) => state.nextScheduledAt)
   const streaming = useAgentChatStore((state) => state.streaming)
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
@@ -1346,24 +1416,12 @@ export function AgentChatPage({
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
         onAgentCreated?.(result.agent_id)
       } catch (err) {
-        let message = 'Unable to create that agent right now.'
-        if (err instanceof HttpError) {
-          if (typeof err.body === 'string' && err.body.trim()) {
-            message = err.body.trim()
-          } else if (err.body && typeof err.body === 'object') {
-            const payloadError = (err.body as { error?: unknown }).error
-            if (typeof payloadError === 'string' && payloadError.trim()) {
-              message = payloadError.trim()
-            }
-          }
-        } else if (err instanceof Error && err.message.trim()) {
-          message = err.message.trim()
-        }
+        const message = buildCreateAgentErrorMessage(err, isProprietaryMode)
         setCreateAgentError(message)
         console.error('Failed to create agent:', err)
       }
     },
-    [effectiveContext, onAgentCreated, queryClient, setPendingAgentEmails],
+    [effectiveContext, isProprietaryMode, onAgentCreated, queryClient, setPendingAgentEmails],
   )
 
   const handleIntelligenceChange = useCallback(
@@ -1856,7 +1914,7 @@ export function AgentChatPage({
     spawnFlow && isNewAgent && (spawnIntentStatus === 'loading' || spawnIntentStatus === 'ready'),
   )
 
-  const topLevelError = createAgentError || error || (sessionStatus === 'error' ? sessionError : null)
+  const topLevelError = error || (sessionStatus === 'error' ? sessionError : null)
 
   return (
     <div className="agent-chat-page">
@@ -1946,6 +2004,7 @@ export function AgentChatPage({
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
+        composerError={createAgentError}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}
@@ -1955,6 +2014,7 @@ export function AgentChatPage({
         processingStartedAt={isNewAgent ? null : processingStartedAt}
         awaitingResponse={isNewAgent ? false : awaitingResponse}
         processingWebTasks={isNewAgent ? [] : processingWebTasks}
+        nextScheduledAt={isNewAgent ? null : nextScheduledAt}
         streaming={isNewAgent ? null : streaming}
         onLoadOlder={isNewAgent ? undefined : (hasMoreOlder ? loadOlder : undefined)}
         onLoadNewer={isNewAgent ? undefined : (hasMoreNewer ? loadNewer : undefined)}
