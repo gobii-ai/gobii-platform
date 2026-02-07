@@ -144,7 +144,7 @@ from util.urls import (
 from console.agent_chat.access import resolve_agent_for_request, user_can_manage_agent, user_is_collaborator
 from config import settings
 from config.stripe_config import get_stripe_settings
-from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
+from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED, get_plan_config
 from waffle import flag_is_active
 from api.services.email_verification import has_verified_email
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
@@ -1430,15 +1430,29 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 )
                 org_addons_disabled = (not can_manage_billing) or (not has_stripe_subscription)
 
+                org_plan_cfg = get_plan_config("org_team") or {}
+                seat_unit_price_raw = org_plan_cfg.get("price_per_seat", org_plan_cfg.get("price", 0)) or 0
+                try:
+                    seat_unit_price = float(Decimal(str(seat_unit_price_raw)))
+                except Exception:
+                    seat_unit_price = 0.0
+                seat_currency = (org_plan_cfg.get("currency") or (overview.get("plan") or {}).get("currency") or "USD").upper()
+
                 billing_props = {
                     "contextType": "organization",
                     "organization": {"id": str(organization.id), "name": organization.name},
                     "canManageBilling": can_manage_billing,
                     "plan": overview.get("plan") or {},
+                    "trial": {
+                        "isTrialing": False,
+                        "trialEndsAtIso": None,
+                    },
                     "seats": {
                         "purchased": overview.get("seats", {}).get("purchased", 0),
                         "reserved": overview.get("seats", {}).get("reserved", 0),
                         "available": overview.get("seats", {}).get("available", 0),
+                        "unitPrice": seat_unit_price,
+                        "currency": seat_currency,
                         "pendingQuantity": (overview.get("pending_seats") or {}).get("quantity"),
                         "pendingEffectiveAtIso": (
                             (overview.get("pending_seats") or {}).get("effective_at").isoformat()
@@ -1560,11 +1574,18 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
         )
         context["addon_context"] = addon_context
 
+        trial_end = getattr(sub, "trial_end", None) if sub is not None else None
+        is_trialing = bool(sub is not None and getattr(sub, "status", "") == "trialing")
+
         billing_props = {
             "contextType": "personal",
             "canManageBilling": True,
             "paidSubscriber": bool(paid_subscriber),
             "plan": subscription_plan,
+            "trial": {
+                "isTrialing": bool(is_trialing),
+                "trialEndsAtIso": trial_end.isoformat() if trial_end else None,
+            },
             "periodStartDate": context.get("period_start_date"),
             "periodEndDate": context.get("period_end_date"),
             "cancelAt": context.get("cancel_at"),
@@ -9502,8 +9523,17 @@ def _update_addon_quantity(
     return redirect(_billing_redirect(owner, owner_type))
 
 
-def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: int) -> None:
-    """Ensure the Stripe subscription item reflects the desired dedicated IP quantity."""
+def _update_stripe_dedicated_ip_quantity(
+    owner,
+    owner_type: str,
+    desired_qty: int,
+    *,
+    end_trial_now: bool = False,
+) -> str | None:
+    """Ensure the Stripe subscription item reflects the desired dedicated IP quantity.
+
+    Returns a Stripe hosted invoice URL when the update requires customer action (SCA / payment method).
+    """
     desired_qty = int(desired_qty)
     subscription = get_active_subscription(owner)
     if not subscription:
@@ -9520,7 +9550,7 @@ def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: in
 
     subscription_data = stripe.Subscription.retrieve(
         subscription.id,
-        expand=["items.data.price"],
+        expand=["items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
     )
 
     dedicated_item = None
@@ -9538,16 +9568,27 @@ def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: in
         modify_kwargs = {
             "items": items_payload,
             "proration_behavior": "always_invoice",
-            "expand": ["items.data.price"],
+            "expand": ["items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
             "payment_behavior": "pending_if_incomplete",
         }
-        stripe.Subscription.modify(subscription.id, **modify_kwargs)
+        if end_trial_now and (subscription_data.get("status") or "") == "trialing":
+            modify_kwargs["trial_end"] = "now"
+        updated = stripe.Subscription.modify(subscription.id, **modify_kwargs)
+        invoice = updated.get("latest_invoice") if isinstance(updated, Mapping) else None
+        if isinstance(invoice, Mapping):
+            hosted_url = invoice.get("hosted_invoice_url")
+            payment_intent = invoice.get("payment_intent")
+            if hosted_url and isinstance(payment_intent, Mapping):
+                intent_status = payment_intent.get("status")
+                if intent_status in {"requires_action", "requires_payment_method"}:
+                    return hosted_url
     elif dedicated_item is not None:
         stripe.Subscription.modify(
             subscription.id,
             items=[{"id": dedicated_item.get("id"), "deleted": True}],
             proration_behavior="always_invoice",
         )
+    return None
 
 
 @login_required
@@ -10205,7 +10246,7 @@ def console_billing_update(request):
 
         return None
 
-    def _apply_addons(payload_dict, owner_obj, owner_type_str):
+    def _apply_addons(payload_dict, owner_obj, owner_type_str, response_dict):
         addon_quantities = payload_dict.get("addonQuantities") or {}
         if not addon_quantities:
             return None
@@ -10244,7 +10285,10 @@ def console_billing_update(request):
 
         try:
             _assign_stripe_api_key()
-            stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
+            stripe_subscription = stripe.Subscription.retrieve(
+                subscription.id,
+                expand=["customer", "items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
+            )
             items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
 
             existing_qty: dict[str, int] = {}
@@ -10260,11 +10304,15 @@ def console_billing_update(request):
                 except (TypeError, ValueError):
                     existing_qty[pid] = 0
 
+            is_trialing = (stripe_subscription.get("status") or "") == "trialing"
+            is_purchase = False
             items_payload: list[dict[str, Any]] = []
             for price_id, desired_qty in desired_quantities.items():
                 current_qty = existing_qty.get(price_id, 0)
                 if desired_qty == current_qty:
                     continue
+                if desired_qty > current_qty:
+                    is_purchase = True
                 if desired_qty > 0:
                     if price_id in item_id_by_price:
                         items_payload.append({"id": item_id_by_price[price_id], "quantity": desired_qty})
@@ -10278,20 +10326,46 @@ def console_billing_update(request):
                 modify_kwargs: dict[str, object] = {
                     "items": items_payload,
                     "proration_behavior": "always_invoice",
-                    "expand": ["items.data.price"],
+                    "expand": ["items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
                 }
-                if not any(item.get("deleted") for item in items_payload):
+                if is_purchase or not any(item.get("deleted") for item in items_payload):
                     modify_kwargs["payment_behavior"] = "pending_if_incomplete"
+                if is_trialing and is_purchase:
+                    # Policy: purchasing add-ons during a trial ends the trial immediately and charges now.
+                    modify_kwargs["trial_end"] = "now"
                 updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
                 updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
 
-                period_start, period_end = BillingService.get_current_billing_period_for_owner(owner_obj)
-                tz = timezone.get_current_timezone()
-                period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
-                period_end_dt = timezone.make_aware(
-                    datetime.combine(period_end + timedelta(days=1), datetime.min.time()),
-                    tz,
-                )
+                invoice = updated_subscription.get("latest_invoice") if isinstance(updated_subscription, Mapping) else None
+                if isinstance(invoice, Mapping):
+                    hosted_url = invoice.get("hosted_invoice_url")
+                    payment_intent = invoice.get("payment_intent")
+                    if hosted_url and isinstance(payment_intent, Mapping):
+                        intent_status = payment_intent.get("status")
+                        if intent_status in {"requires_action", "requires_payment_method"}:
+                            response_dict["stripeActionUrl"] = hosted_url
+
+                period_start_dt = None
+                period_end_dt = None
+                if isinstance(updated_subscription, Mapping):
+                    start_ts = updated_subscription.get("current_period_start")
+                    end_ts = updated_subscription.get("current_period_end")
+                    if start_ts and end_ts:
+                        try:
+                            period_start_dt = datetime.fromtimestamp(int(start_ts), tz=dt_timezone.utc)
+                            period_end_dt = datetime.fromtimestamp(int(end_ts), tz=dt_timezone.utc)
+                        except (TypeError, ValueError, OSError):
+                            period_start_dt = None
+                            period_end_dt = None
+
+                if period_start_dt is None or period_end_dt is None:
+                    period_start, period_end = BillingService.get_current_billing_period_for_owner(owner_obj)
+                    tz = timezone.get_current_timezone()
+                    period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
+                    period_end_dt = timezone.make_aware(
+                        datetime.combine(period_end + timedelta(days=1), datetime.min.time()),
+                        tz,
+                    )
                 AddonEntitlementService.sync_subscription_entitlements(
                     owner=owner_obj,
                     owner_type=owner_type_str,
@@ -10307,7 +10381,7 @@ def console_billing_update(request):
 
         return None
 
-    def _apply_dedicated_ips(payload_dict, owner_obj, owner_type_str):
+    def _apply_dedicated_ips(payload_dict, owner_obj, owner_type_str, response_dict):
         dedicated_changes = payload_dict.get("dedicatedIps") or {}
         if not dedicated_changes:
             return None
@@ -10397,7 +10471,14 @@ def console_billing_update(request):
             _assign_stripe_api_key()
             current_qty = DedicatedProxyService.allocated_count(owner_obj)
             desired_qty = current_qty + add_quantity
-            _update_stripe_dedicated_ip_quantity(owner_obj, owner_type_str, desired_qty)
+            action_url = _update_stripe_dedicated_ip_quantity(
+                owner_obj,
+                owner_type_str,
+                desired_qty,
+                end_trial_now=bool(add_quantity > 0),
+            )
+            if action_url:
+                response_dict["stripeActionUrl"] = action_url
 
             allocated = 0
             for _ in range(add_quantity):
@@ -10409,7 +10490,9 @@ def console_billing_update(request):
 
             actual_qty = DedicatedProxyService.allocated_count(owner_obj)
             if actual_qty != desired_qty:
-                _update_stripe_dedicated_ip_quantity(owner_obj, owner_type_str, actual_qty)
+                action_url = _update_stripe_dedicated_ip_quantity(owner_obj, owner_type_str, actual_qty)
+                if action_url:
+                    response_dict["stripeActionUrl"] = action_url
         except stripe.error.StripeError as exc:
             logger.warning("Stripe error updating dedicated IP quantity for %s %s: %s", owner_type_str, getattr(owner_obj, "id", None), exc)
             return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
@@ -10453,11 +10536,11 @@ def console_billing_update(request):
                 status=400,
             )
 
-    addons_response = _apply_addons(payload, owner, owner_type)
+    addons_response = _apply_addons(payload, owner, owner_type, response_payload)
     if isinstance(addons_response, HttpResponse):
         return addons_response
 
-    dedicated_response = _apply_dedicated_ips(payload, owner, owner_type)
+    dedicated_response = _apply_dedicated_ips(payload, owner, owner_type, response_payload)
     if isinstance(dedicated_response, HttpResponse):
         return dedicated_response
 

@@ -12,8 +12,21 @@ type BillingHeaderProps = {
 export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHeaderProps) {
   const isOrg = initialData.contextType === 'organization'
   const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
-  const planCurrency = normalizeCurrency((initialData.plan?.currency as string | undefined) ?? 'USD')
-  const basePriceCents = planMonthlyPriceCents(initialData.plan)
+  const planCurrency = isOrg
+    ? normalizeCurrency(initialData.seats.currency || (initialData.plan?.currency as string | undefined) || 'USD')
+    : normalizeCurrency((initialData.plan?.currency as string | undefined) ?? 'USD')
+  const basePriceCents = isOrg
+    ? Math.max(0, Math.round((initialData.seats.unitPrice || 0) * 100))
+    : planMonthlyPriceCents(initialData.plan)
+  const isTrialing = initialData.trial?.isTrialing
+  const trialEndsAtIso = initialData.trial?.trialEndsAtIso
+
+  const trialEndsLabel = (() => {
+    if (!trialEndsAtIso) return null
+    const d = new Date(trialEndsAtIso)
+    if (Number.isNaN(d.getTime())) return null
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(d)
+  })()
 
   return (
     <section className="card" data-section="billing-plan">
@@ -23,7 +36,14 @@ export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHe
             {isOrg ? <Building2 className="h-4 w-4 text-slate-500" /> : <CreditCard className="h-4 w-4 text-slate-500" />}
             <span>Base plan</span>
           </div>
-          <div className="text-2xl font-bold text-slate-900">{planName}</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="text-2xl font-bold text-slate-900">{planName}</div>
+            {isTrialing ? (
+              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                Free trial
+              </span>
+            ) : null}
+          </div>
           {isOrg ? (
             <p className="text-sm text-slate-600">
               {formatCents(basePriceCents, planCurrency)} per seat per month.
@@ -33,6 +53,11 @@ export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHe
               {formatCents(basePriceCents, planCurrency)} per month.
             </p>
           )}
+          {isTrialing && trialEndsLabel ? (
+            <p className="text-sm font-semibold text-amber-800">
+              Trial ends {trialEndsLabel}.
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -83,7 +108,9 @@ export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHe
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Status</div>
             <div className="mt-1 text-sm font-semibold text-slate-900">
-              {initialData.paidSubscriber ? 'Active' : 'Free'}
+              {isTrialing
+                ? (trialEndsLabel ? `Trial until ${trialEndsLabel}` : 'Trial')
+                : (initialData.paidSubscriber ? 'Active' : 'Free')}
             </div>
           </div>
         </div>
@@ -91,4 +118,3 @@ export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHe
     </section>
   )
 }
-

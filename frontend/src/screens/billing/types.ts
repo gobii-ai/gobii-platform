@@ -52,11 +52,17 @@ export type BillingEndpoints = {
   cancelSubscriptionUrl?: string
 }
 
+export type BillingTrial = {
+  isTrialing: boolean
+  trialEndsAtIso: string | null
+}
+
 export type BillingPersonalData = {
   contextType: 'personal'
   canManageBilling: boolean
   paidSubscriber: boolean
   plan: BillingPlan
+  trial: BillingTrial
   periodStartDate?: string | null
   periodEndDate?: string | null
   cancelAt?: string | null
@@ -72,10 +78,13 @@ export type BillingOrgData = {
   organization: { id: string; name: string }
   canManageBilling: boolean
   plan: BillingPlan
+  trial: BillingTrial
   seats: {
     purchased: number
     reserved: number
     available: number
+    unitPrice: number
+    currency: string
     pendingQuantity: number | null
     pendingEffectiveAtIso: string | null
     hasStripeSubscription: boolean
@@ -119,4 +128,3 @@ export type ToggleSwitchProps = {
   description?: ReactNode
   onChange: (checked: boolean) => void
 }
-

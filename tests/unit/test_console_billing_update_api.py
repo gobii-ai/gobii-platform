@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -66,6 +67,62 @@ class ConsoleBillingUpdateApiTests(TestCase):
         session.save()
 
         self.url = reverse("console_billing_update")
+
+    @patch("console.views.AddonEntitlementService.sync_subscription_entitlements")
+    @patch("console.views.BillingService.get_current_billing_period_for_owner", return_value=(date(2026, 2, 1), date(2026, 3, 1)))
+    @patch("console.views.AddonEntitlementService.get_price_options", return_value=[SimpleNamespace(price_id="price_task_pack")])
+    @patch("console.views._get_owner_plan_id", return_value="startup")
+    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_trial"))
+    @patch("console.views._assign_stripe_api_key", return_value=None)
+    @patch("console.views.stripe.Subscription.modify")
+    @patch("console.views.stripe.Subscription.retrieve")
+    @patch("console.views.stripe_status")
+    def test_trial_addon_purchase_ends_trial_immediately(
+        self,
+        mock_stripe_status,
+        mock_retrieve,
+        mock_modify,
+        mock_assign_key,
+        mock_get_active_subscription,
+        mock_get_plan_id,
+        mock_get_price_options,
+        mock_period,
+        mock_sync_entitlements,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["context_name"] = self.user.get_full_name() or self.user.email
+        session.save()
+
+        mock_retrieve.return_value = {
+            "id": "sub_trial",
+            "status": "trialing",
+            "items": {"data": []},
+        }
+        mock_modify.return_value = {
+            "id": "sub_trial",
+            "status": "active",
+            "items": {"data": []},
+            "latest_invoice": None,
+        }
+
+        resp = self.client.post(
+            self.url,
+            data=json.dumps({
+                "ownerType": "user",
+                "addonQuantities": {"price_task_pack": 1},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("ok"))
+
+        _, kwargs = mock_modify.call_args
+        self.assertEqual(kwargs.get("trial_end"), "now")
 
     @patch("console.views.stripe_status")
     def test_org_addons_rejected_without_seats(self, mock_stripe_status):

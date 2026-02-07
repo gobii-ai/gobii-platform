@@ -89,6 +89,13 @@ function isDraftDirty(initialData: BillingInitialData, draft: BillingDraftState)
 
 export function BillingScreen({ initialData }: BillingScreenProps) {
   const isOrg = initialData.contextType === 'organization'
+  const trialEndsLabel = useMemo(() => {
+    const iso = initialData.trial?.trialEndsAtIso
+    if (!iso) return null
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(d)
+  }, [initialData.trial?.trialEndsAtIso])
 
   const {
     currentPlan,
@@ -110,6 +117,8 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const [cancelError, setCancelError] = useState<string | null>(null)
 
   const [dedicatedPrompt, setDedicatedPrompt] = useState<DedicatedRemovePrompt | null>(null)
+  const [trialConfirmOpen, setTrialConfirmOpen] = useState(false)
+  const [trialConfirmPayload, setTrialConfirmPayload] = useState<Record<string, unknown> | null>(null)
 
   const addonsDisabledReason = useMemo(() => computeAddonsDisabledReason(initialData), [initialData])
   const addonsInteractable = useMemo(() => computeAddonsInteractable(initialData), [initialData])
@@ -173,43 +182,10 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     window.open(appendReturnTo(checkoutPath, '/console/billing/'), '_top')
   }, [closeUpgradeModal, ensureAuthenticated, upgradeModalSource])
 
-  const handleSave = useCallback(async () => {
+  const submitSave = useCallback(async (payload: Record<string, unknown>) => {
     if (saving) return
     setSaving(true)
     setSaveError(null)
-
-    const payload: Record<string, unknown> = {}
-    if (initialData.contextType === 'organization') {
-      payload.ownerType = 'organization'
-      payload.organizationId = initialData.organization.id
-      payload.seatsTarget = draft.seatTarget
-      payload.cancelSeatSchedule = draft.cancelSeatSchedule
-    } else {
-      payload.ownerType = 'user'
-    }
-
-    const initialAddons = buildInitialAddonQuantityMap(initialData.addons)
-    const addonDiff: Record<string, number> = {}
-    const addonKeys = Object.keys({ ...initialAddons, ...draft.addonQuantities })
-    addonKeys.forEach((key) => {
-      const nextQty = draft.addonQuantities[key] ?? 0
-      const initialQty = initialAddons[key] ?? 0
-      if (nextQty !== initialQty) {
-        addonDiff[key] = nextQty
-      }
-    })
-    if (Object.keys(addonDiff).length && addonsInteractable) {
-      payload.addonQuantities = addonDiff
-    }
-
-    if ((draft.dedicatedAddQty > 0 || draft.dedicatedRemoveIds.length) && dedicatedInteractable) {
-      payload.dedicatedIps = {
-        addQuantity: draft.dedicatedAddQty,
-        removeProxyIds: draft.dedicatedRemoveIds,
-        unassignProxyIds: draft.dedicatedUnassignIds,
-      }
-    }
-
     try {
       const result = await jsonRequest<{ ok: boolean; redirectUrl?: string; stripeActionUrl?: string }>(
         initialData.endpoints.updateUrl,
@@ -234,7 +210,57 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     } finally {
       setSaving(false)
     }
-  }, [addonsInteractable, dedicatedInteractable, draft, initialData, saving])
+  }, [initialData.endpoints.updateUrl, saving])
+
+  const handleSave = useCallback(async () => {
+    const payload: Record<string, unknown> = {}
+    if (initialData.contextType === 'organization') {
+      payload.ownerType = 'organization'
+      payload.organizationId = initialData.organization.id
+      payload.seatsTarget = draft.seatTarget
+      payload.cancelSeatSchedule = draft.cancelSeatSchedule
+    } else {
+      payload.ownerType = 'user'
+    }
+
+    const initialAddons = buildInitialAddonQuantityMap(initialData.addons)
+    const addonDiff: Record<string, number> = {}
+    let addonPurchase = false
+    const addonKeys = Object.keys({ ...initialAddons, ...draft.addonQuantities })
+    addonKeys.forEach((key) => {
+      const nextQty = draft.addonQuantities[key] ?? 0
+      const initialQty = initialAddons[key] ?? 0
+      if (nextQty !== initialQty) {
+        addonDiff[key] = nextQty
+      }
+      if (nextQty > initialQty) {
+        addonPurchase = true
+      }
+    })
+    if (Object.keys(addonDiff).length && addonsInteractable) {
+      payload.addonQuantities = addonDiff
+    } else {
+      addonPurchase = false
+    }
+
+    const dedicatedPurchase = Boolean(dedicatedInteractable && draft.dedicatedAddQty > 0)
+    if ((draft.dedicatedAddQty > 0 || draft.dedicatedRemoveIds.length) && dedicatedInteractable) {
+      payload.dedicatedIps = {
+        addQuantity: draft.dedicatedAddQty,
+        removeProxyIds: draft.dedicatedRemoveIds,
+        unassignProxyIds: draft.dedicatedUnassignIds,
+      }
+    }
+
+    const trialing = Boolean(initialData.trial?.isTrialing)
+    if (trialing && (addonPurchase || dedicatedPurchase) && !trialConfirmOpen) {
+      setTrialConfirmPayload(payload)
+      setTrialConfirmOpen(true)
+      return
+    }
+
+    await submitSave(payload)
+  }, [addonsInteractable, dedicatedInteractable, draft, initialData, submitSave, trialConfirmOpen])
 
   const handleCancelSubscription = useCallback(async () => {
     if (cancelBusy) return
@@ -394,6 +420,30 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           </div>
         ) : null}
       </ConfirmDialog>
+
+      <ConfirmDialog
+        open={trialConfirmOpen}
+        title="End free trial and charge now?"
+        description={
+          <>
+            You are currently in a free trial{trialEndsLabel ? ` (scheduled to end ${trialEndsLabel})` : ''}. Purchasing
+            add-ons ends your trial immediately and you will be charged today.
+          </>
+        }
+        confirmLabel="Confirm"
+        icon={<ShieldAlert className="h-5 w-5" />}
+        onConfirm={() => {
+          if (!trialConfirmPayload) return
+          setTrialConfirmOpen(false)
+          const payload = trialConfirmPayload
+          setTrialConfirmPayload(null)
+          submitSave(payload)
+        }}
+        onClose={() => {
+          setTrialConfirmOpen(false)
+          setTrialConfirmPayload(null)
+        }}
+      />
     </div>
   )
 }

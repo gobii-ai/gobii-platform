@@ -14,8 +14,12 @@ type SummaryItem = { id: string; label: string; money: Money }
 export function SubscriptionSummary({ initialData, draft }: SubscriptionSummaryProps) {
   const isOrg = initialData.contextType === 'organization'
   const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
-  const planCurrency = normalizeCurrency((initialData.plan?.currency as string | undefined) ?? 'USD')
-  const basePriceCents = planMonthlyPriceCents(initialData.plan)
+  const planCurrency = isOrg
+    ? normalizeCurrency(initialData.seats.currency || (initialData.plan?.currency as string | undefined) || 'USD')
+    : normalizeCurrency((initialData.plan?.currency as string | undefined) ?? 'USD')
+  const basePriceCents = isOrg
+    ? Math.max(0, Math.round((initialData.seats.unitPrice || 0) * 100))
+    : planMonthlyPriceCents(initialData.plan)
 
   const seatTarget = isOrg ? (draft.seatTarget ?? initialData.seats.purchased) : 0
 
@@ -97,4 +101,3 @@ export function SubscriptionSummary({ initialData, draft }: SubscriptionSummaryP
     </section>
   )
 }
-
