@@ -558,6 +558,7 @@ export function AgentChatPage({
   useEffect(() => {
     autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
   }, [autoScrollPinSuppressedUntil])
+  const lastProgrammaticScrollAtRef = useRef(0)
   const forceScrollOnNextUpdateRef = useRef(false)
   const didInitialScrollRef = useRef(false)
   const isNearBottomRef = useRef(isNearBottom)
@@ -582,6 +583,10 @@ export function AgentChatPage({
 
   const repinAutoScrollIfAtBottom = useCallback((container: HTMLElement | null) => {
     if (!container || autoScrollPinnedRef.current) {
+      return
+    }
+    // Respect the suppression window after intentional user scroll-up
+    if (autoScrollPinSuppressedUntilRef.current && Date.now() < autoScrollPinSuppressedUntilRef.current) {
       return
     }
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
@@ -708,7 +713,8 @@ export function AgentChatPage({
       const nextScrollTop = container.scrollTop
       syncNearBottomState(container)
       repinAutoScrollIfAtBottom(container)
-      if (nextScrollTop < lastScrollTop - 2) {
+      // Guard against false unpins from programmatic scrolls (scrollIntoView can cause transient scrollTop decreases)
+      if (nextScrollTop < lastScrollTop - 2 && Date.now() - lastProgrammaticScrollAtRef.current > 150) {
         unpinAutoScrollFromUserGesture()
       }
       lastScrollTop = nextScrollTop
@@ -770,7 +776,7 @@ export function AgentChatPage({
   useEffect(() => {
     const wasProcessing = prevProcessingRef.current
     prevProcessingRef.current = processingActive
-    if (wasProcessing && !processingActive && !isNearBottomRef.current) {
+    if (wasProcessing && !processingActive && !isNearBottomRef.current && !autoScrollPinnedRef.current) {
       setAutoScrollPinned(false)
     }
   }, [processingActive, setAutoScrollPinned])
@@ -791,6 +797,7 @@ export function AgentChatPage({
     // Container scrolling: scroll the timeline-shell, not the window
     const container = document.getElementById('timeline-shell')
     const sentinel = document.getElementById('timeline-bottom-sentinel')
+    lastProgrammaticScrollAtRef.current = Date.now()
     if (sentinel) {
       // scrollIntoView is more reliable across browsers
       sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
@@ -851,9 +858,10 @@ export function AgentChatPage({
     setTimelineNode(node)
   }, [])
 
-  // Observe timeline changes (e.g. images loading) to keep pinned to bottom
+  // Observe timeline changes (e.g. images loading, new DOM elements) to keep pinned to bottom
   useEffect(() => {
     if (!timelineNode) return
+    const inner = document.getElementById('timeline-events')
 
     const observer = new ResizeObserver(() => {
       // If pinned, ensure we stay at the bottom when content changes
@@ -861,10 +869,12 @@ export function AgentChatPage({
         jumpToBottom()
       }
       syncNearBottomState(timelineNode)
-      // IntersectionObserver handles isNearBottom updates automatically
     })
 
     observer.observe(timelineNode)
+    if (inner) {
+      observer.observe(inner)
+    }
     return () => observer.disconnect()
   }, [timelineNode, jumpToBottom, syncNearBottomState])
 
