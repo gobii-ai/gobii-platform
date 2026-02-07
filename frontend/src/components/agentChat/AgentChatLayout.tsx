@@ -6,7 +6,6 @@ import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
-import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
@@ -112,8 +111,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   processingStartedAt?: number | null
   awaitingResponse?: boolean
   streaming?: StreamState | null
-  streamingThinkingCollapsed?: boolean
-  onToggleStreamingThinking?: () => void
   insights?: InsightEvent[]
   currentInsightIndex?: number
   onDismissInsight?: (insightId: string) => void
@@ -195,8 +192,6 @@ export function AgentChatLayout({
   awaitingResponse = false,
   processingWebTasks = [],
   streaming,
-  streamingThinkingCollapsed = false,
-  onToggleStreamingThinking,
   onLoadOlder,
   onLoadNewer,
   onJumpToLatest,
@@ -437,15 +432,10 @@ export function AgentChatLayout({
   }, [agentId, contactCapStatus?.limitReached, contactCapDismissed, contactPackShowUpgrade])
 
   const isStreaming = Boolean(streaming && !streaming.done)
-  const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
   const suppressedThinkingCursor = streaming?.cursor ?? null
-  // Show streaming reasoning while streaming, or briefly after done to allow collapse animation
-  // (streaming is cleared when historical thinking event arrives)
-  const showStreamingReasoning = hasStreamingReasoning && (isStreaming || streaming?.done)
-
-  // Streaming slot shows while actively streaming content, or briefly after done for reasoning collapse
-  const showStreamingSlot = showStreamingReasoning || (hasStreamingContent && isStreaming)
+  // Streaming reasoning renders in the live tool preview; this slot only holds streaming content.
+  const showStreamingSlot = hasStreamingContent && isStreaming
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -641,14 +631,6 @@ export function AgentChatLayout({
 
                 {showStreamingSlot && !hasMoreNewer ? (
                   <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
-                    {showStreamingReasoning && onToggleStreamingThinking ? (
-                      <ThinkingBubble
-                        reasoning={streaming?.reasoning || ''}
-                        isStreaming={isStreaming}
-                        collapsed={streamingThinkingCollapsed}
-                        onToggle={onToggleStreamingThinking}
-                      />
-                    ) : null}
                     {hasStreamingContent ? (
                       <StreamingReplyCard
                         content={streaming?.content || ''}

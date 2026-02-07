@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
@@ -13,11 +13,13 @@ import type { ToolClusterTransform } from './tooling/types'
 type ToolClusterTimelineOverlayProps = {
   open: boolean
   cluster: ToolClusterTransform
+  initialOpenEntryId?: string | null
   onClose: () => void
 }
 
-export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClusterTimelineOverlayProps) {
+export function ToolClusterTimelineOverlay({ open, cluster, initialOpenEntryId = null, onClose }: ToolClusterTimelineOverlayProps) {
   const [openEntryId, setOpenEntryId] = useState<string | null>(null)
+  const entryRowRefs = useRef<Record<string, HTMLLIElement | null>>({})
   const titleId = useMemo(() => `tool-cluster-timeline-title-${slugify(cluster.cursor)}`, [cluster.cursor])
   const dialogId = useMemo(() => `tool-cluster-timeline-dialog-${slugify(cluster.cursor)}`, [cluster.cursor])
 
@@ -41,6 +43,31 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
       document.body.style.overflow = originalOverflow
     }
   }, [onClose, open])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    if (!initialOpenEntryId) {
+      setOpenEntryId(null)
+      return
+    }
+    const hasTarget = cluster.entries.some((entry) => entry.id === initialOpenEntryId)
+    if (hasTarget) {
+      setOpenEntryId(initialOpenEntryId)
+    }
+  }, [cluster.entries, initialOpenEntryId, open])
+
+  useEffect(() => {
+    if (!open || !openEntryId) {
+      return
+    }
+    const row = entryRowRefs.current[openEntryId]
+    if (!row) {
+      return
+    }
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [open, openEntryId])
 
   const handleToggleEntry = useCallback((entryId: string) => {
     setOpenEntryId((current) => (current === entryId ? null : entryId))
@@ -76,7 +103,15 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
               const kind = entry.toolName === 'thinking' ? 'thinking' : entry.toolName === 'kanban' ? 'kanban' : 'tool'
               const DetailComponent = entry.detailComponent
               return (
-                <li key={entry.id} className="tool-cluster-timeline-item" data-kind={kind}>
+                <li
+                  key={entry.id}
+                  className="tool-cluster-timeline-item"
+                  data-kind={kind}
+                  data-entry-id={entry.id}
+                  ref={(node) => {
+                    entryRowRefs.current[entry.id] = node
+                  }}
+                >
                   <button
                     type="button"
                     className="tool-cluster-timeline-row"

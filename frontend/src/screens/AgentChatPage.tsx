@@ -395,8 +395,6 @@ export function AgentChatPage({
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
-  const streamingThinkingCollapsed = useAgentChatStore((state) => state.streamingThinkingCollapsed)
-  const setStreamingThinkingCollapsed = useAgentChatStore((state) => state.setStreamingThinkingCollapsed)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
   const refreshLatest = useAgentChatStore((state) => state.refreshLatest)
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
@@ -1386,11 +1384,6 @@ export function AgentChatPage({
     [activeAgentId, isNewAgent, queryClient, resolvedIntelligenceTier],
   )
 
-
-  const handleToggleStreamingThinking = useCallback(() => {
-    setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
-  }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
-
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (processingActive || awaitingResponse || (streaming && !streaming.done))
   useEffect(() => {
@@ -1953,8 +1946,6 @@ export function AgentChatPage({
         awaitingResponse={isNewAgent ? false : awaitingResponse}
         processingWebTasks={isNewAgent ? [] : processingWebTasks}
         streaming={isNewAgent ? null : streaming}
-        streamingThinkingCollapsed={streamingThinkingCollapsed}
-        onToggleStreamingThinking={handleToggleStreamingThinking}
         onLoadOlder={isNewAgent ? undefined : (hasMoreOlder ? loadOlder : undefined)}
         onLoadNewer={isNewAgent ? undefined : (hasMoreNewer ? loadNewer : undefined)}
         onSendMessage={handleSend}

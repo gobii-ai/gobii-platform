@@ -262,15 +262,6 @@ function pickNonToolTimestamp(
   return null
 }
 
-function resolveSegmentCursor(segment: TimelineEvent[]): string {
-  if (!segment.length) {
-    return '0:steps:segment'
-  }
-  return segment.reduce((earliest, event) => {
-    return compareTimelineCursors(event.cursor, earliest) < 0 ? event.cursor : earliest
-  }, segment[0].cursor)
-}
-
 function buildCluster(
   base: ToolClusterEvent,
   entries: ToolCallEntry[],
@@ -306,7 +297,7 @@ export function mergeToolClusters(base: ToolClusterEvent, incoming: ToolClusterE
   return buildCluster(base, [...base.entries, ...incoming.entries], threshold, incoming.cursor, thinkingEntries, kanbanEntries)
 }
 
-function coalesceTimelineEvents(events: TimelineEvent[], latestKanbanCursor: string | null): TimelineEvent[] {
+function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   const deduped: TimelineEvent[] = []
   const seenToolEntryIds = new Set<string>()
   let segment: TimelineEvent[] = []
@@ -318,9 +309,7 @@ function coalesceTimelineEvents(events: TimelineEvent[], latestKanbanCursor: str
 
     const stepEvents = segment.filter((event): event is ToolClusterEvent => event.kind === 'steps')
     const thinkingEvents = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
-    const kanbanEvents = segment.filter((event): event is KanbanEvent => event.kind === 'kanban')
-
-    if (!stepEvents.length && !kanbanEvents.length) {
+    if (!stepEvents.length) {
       deduped.push(...segment)
       segment = []
       return
@@ -354,7 +343,7 @@ function coalesceTimelineEvents(events: TimelineEvent[], latestKanbanCursor: str
 
     const toolEntries = Array.from(toolEntryMap.values())
     const mergedThinking = mergeThinkingEntries(stepThinking, thinkingEvents)
-    const mergedKanban = mergeKanbanEntries(stepKanban, kanbanEvents)
+    const mergedKanban = stepKanban
 
     if (toolEntries.length) {
       const threshold = collapseThreshold || 3
@@ -366,29 +355,12 @@ function coalesceTimelineEvents(events: TimelineEvent[], latestKanbanCursor: str
         threshold,
         secondaryCursor,
         mergedThinking,
-        mergedKanban,
+        undefined,
       )
       deduped.push(mergedCluster)
-      segment = []
-      return
-    }
-
-    if (mergedKanban?.length) {
-      const cursor = resolveSegmentCursor(segment)
-      const earliestTimestamp = pickNonToolTimestamp(mergedThinking, mergedKanban, 'earliest')
-      const latestTimestamp = pickNonToolTimestamp(mergedThinking, mergedKanban, 'latest')
-      deduped.push({
-        kind: 'steps',
-        cursor,
-        entries: [],
-        entryCount: 0,
-        collapseThreshold: Math.max(collapseThreshold, 3),
-        collapsible: false,
-        earliestTimestamp,
-        latestTimestamp,
-        thinkingEntries: mergedThinking?.length ? mergedThinking : undefined,
-        kanbanEntries: mergedKanban,
-      })
+      if (mergedKanban?.length) {
+        deduped.push(...mergedKanban)
+      }
       segment = []
       return
     }
@@ -396,12 +368,17 @@ function coalesceTimelineEvents(events: TimelineEvent[], latestKanbanCursor: str
     if (mergedThinking?.length) {
       deduped.push(...mergedThinking)
     }
+    if (mergedKanban?.length) {
+      deduped.push(...mergedKanban)
+      segment = []
+      return
+    }
+
     segment = []
   }
 
   for (const event of events) {
-    const isCollapsibleKanban = event.kind === 'kanban' && event.cursor !== latestKanbanCursor
-    if (event.kind === 'steps' || event.kind === 'thinking' || isCollapsibleKanban) {
+    if (event.kind === 'steps' || event.kind === 'thinking') {
       segment.push(event)
       continue
     }
@@ -415,22 +392,11 @@ function coalesceTimelineEvents(events: TimelineEvent[], latestKanbanCursor: str
   return deduped
 }
 
-function getLatestKanbanCursor(events: TimelineEvent[]): string | null {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i]
-    if (event.kind === 'kanban') {
-      return event.cursor
-    }
-  }
-  return null
-}
-
 function finalizeTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   const sorted = sortTimelineEvents(events)
-  const latestKanbanCursor = getLatestKanbanCursor(sorted)
-  const coalesced = coalesceTimelineEvents(sorted, latestKanbanCursor)
+  const coalesced = coalesceTimelineEvents(sorted)
   const resorted = sortTimelineEvents(coalesced)
-  return coalesceTimelineEvents(resorted, latestKanbanCursor)
+  return coalesceTimelineEvents(resorted)
 }
 
 export function prepareTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {

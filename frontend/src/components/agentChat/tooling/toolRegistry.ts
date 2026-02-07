@@ -236,6 +236,7 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
     meta: entry.meta,
     sourceEntry: entry,
     mcpInfo: mcpInfo ?? undefined,
+    separateFromPreview: transform.separateFromPreview ?? false,
   }
 }
 
@@ -298,6 +299,7 @@ function buildKanbanEntry(clusterCursor: string, entry: KanbanEvent): ToolEntryD
     detailComponent: KanbanUpdateDetail,
     meta: undefined,
     sourceEntry: undefined,
+    separateFromPreview: true,
   }
 }
 

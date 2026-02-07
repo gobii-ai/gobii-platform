@@ -58,6 +58,7 @@ export const SKIP_TOOL_NAMES = CHAT_SKIP_TOOL_NAMES
 
 const LINKEDIN_ICON_BG_CLASS = 'bg-sky-100'
 const LINKEDIN_ICON_COLOR_CLASS = 'text-sky-700'
+const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
 
 export type ToolMetadataConfig = {
   name: string
@@ -168,6 +169,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       return {
         charterText,
         caption: charterText ? truncate(charterText, 48) : entry.caption ?? 'Assignment updated',
+        separateFromPreview: true,
       }
     },
   },
@@ -183,6 +185,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const summary = summarizeSchedule(scheduleValue)
       return {
         caption: summary ?? (scheduleValue ? truncate(scheduleValue, 40) : 'Disabled'),
+        separateFromPreview: true,
       }
     },
   },
@@ -252,6 +255,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
           detailComponent: AgentConfigUpdateDetail,
           charterText: charterValue ?? undefined,
           sqlStatements: statements,
+          separateFromPreview: true,
         }
 
         if (updatesCharter && updatesSchedule) {
@@ -385,7 +389,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'search_tools',
     aliases: ['search_web', 'web_search', 'search'],
-    label: 'Web search',
+    label: 'Tool search',
     icon: Search,
     iconBgClass: 'bg-blue-100',
     iconColorClass: 'text-blue-600',
@@ -393,7 +397,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     derive(entry, parameters) {
       const rawQuery = coerceString(parameters?.query) || coerceString(parameters?.prompt)
       const truncatedQuery = rawQuery ? truncate(rawQuery, 48) : null
-      const isToolSearch = entry.toolName?.toLowerCase() === 'search_tools'
+      const isToolSearch = TOOL_SEARCH_TOOL_NAMES.has(entry.toolName?.toLowerCase() ?? '')
 
       if (isToolSearch) {
         const { caption, summary } = summarizeToolSearchForCaption(entry, truncatedQuery)
@@ -407,7 +411,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
 
       const fallbackCaption = truncatedQuery ? `“${truncatedQuery}”` : null
       return {
-        label: 'Web search',
+        label: 'Tool search',
         caption: fallbackCaption ?? 'Search',
       }
     },
@@ -1125,7 +1129,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'mcp_brightdata_scrape_as_markdown',
     aliases: ['scrape_as_markdown'],
-    label: 'Web snapshot',
+    label: 'Browsing the web',
     icon: ScanText,
     iconBgClass: 'bg-fuchsia-100',
     iconColorClass: 'text-fuchsia-600',
@@ -1138,14 +1142,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         null
       const caption = url ? truncate(url, 64) : null
       return {
-        caption: caption ?? entry.caption ?? 'Web snapshot',
+        caption: caption ?? entry.caption ?? 'Browsing the web',
       }
     },
   },
   {
     name: 'mcp_brightdata_scrape_as_html',
     aliases: ['scrape_as_html'],
-    label: 'Web snapshot',
+    label: 'Browsing the web',
     icon: ScanText,
     iconBgClass: 'bg-fuchsia-100',
     iconColorClass: 'text-fuchsia-600',
@@ -1158,7 +1162,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         null
       const caption = url ? truncate(url, 64) : null
       return {
-        caption: caption ?? entry.caption ?? 'Web snapshot',
+        caption: caption ?? entry.caption ?? 'Browsing the web',
       }
     },
   },

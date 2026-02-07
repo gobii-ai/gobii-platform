@@ -1,7 +1,6 @@
 import { memo } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
-import { ToolDetailProvider } from './tooling/ToolDetailContext'
 import { KanbanEventCard } from './KanbanEventCard'
 import type { TimelineEvent, ToolClusterEvent } from './types'
 
@@ -38,7 +37,7 @@ export const TimelineEventList = memo(function TimelineEventList({
   }
 
   return (
-    <ToolDetailProvider>
+    <>
       {events.map((event, index) => {
         const isLatestEvent = index === events.length - 1
         if (event.kind === 'message') {
@@ -87,6 +86,6 @@ export const TimelineEventList = memo(function TimelineEventList({
           />
         )
       })}
-    </ToolDetailProvider>
+    </>
   )
 })
