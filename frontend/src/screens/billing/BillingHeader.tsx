@@ -1,0 +1,94 @@
+import { Building2, CreditCard, ShieldAlert } from 'lucide-react'
+
+import type { BillingInitialData } from './types'
+import { formatCents, normalizeCurrency, planMonthlyPriceCents } from './utils'
+
+type BillingHeaderProps = {
+  initialData: BillingInitialData
+  onChangePlan?: () => void
+  onCancel?: () => void
+}
+
+export function BillingHeader({ initialData, onChangePlan, onCancel }: BillingHeaderProps) {
+  const isOrg = initialData.contextType === 'organization'
+  const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
+  const planCurrency = normalizeCurrency((initialData.plan?.currency as string | undefined) ?? 'USD')
+  const basePriceCents = planMonthlyPriceCents(initialData.plan)
+
+  return (
+    <section className="card" data-section="billing-plan">
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+            {isOrg ? <Building2 className="h-4 w-4 text-slate-500" /> : <CreditCard className="h-4 w-4 text-slate-500" />}
+            <span>Base plan</span>
+          </div>
+          <div className="text-2xl font-bold text-slate-900">{planName}</div>
+          {isOrg ? (
+            <p className="text-sm text-slate-600">
+              {formatCents(basePriceCents, planCurrency)} per seat per month.
+            </p>
+          ) : (
+            <p className="text-sm text-slate-600">
+              {formatCents(basePriceCents, planCurrency)} per month.
+            </p>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {initialData.contextType === 'personal' && onChangePlan ? (
+            <button
+              type="button"
+              onClick={onChangePlan}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            >
+              Change plan
+            </button>
+          ) : null}
+
+          {initialData.contextType === 'personal'
+            && initialData.paidSubscriber
+            && !initialData.cancelAtPeriodEnd
+            && onCancel ? (
+              <button
+                type="button"
+                onClick={onCancel}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700 transition hover:border-rose-300 hover:text-rose-800 focus:outline-none focus:ring-2 focus:ring-rose-500/30"
+              >
+                <ShieldAlert className="h-4 w-4" />
+                Cancel
+              </button>
+            ) : null}
+        </div>
+      </div>
+
+      {initialData.contextType === 'personal' ? (
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Billing period</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">
+              {initialData.periodStartDate && initialData.periodEndDate
+                ? `${initialData.periodStartDate} to ${initialData.periodEndDate}`
+                : '—'}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Renewal</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">
+              {initialData.cancelAtPeriodEnd && initialData.cancelAt
+                ? `Cancels on ${initialData.cancelAt}`
+                : (initialData.periodEndDate ?? '—')}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Status</div>
+            <div className="mt-1 text-sm font-semibold text-slate-900">
+              {initialData.paidSubscriber ? 'Active' : 'Free'}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
