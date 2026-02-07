@@ -112,6 +112,10 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const [cancelBusy, setCancelBusy] = useState(false)
   const [cancelError, setCancelError] = useState<string | null>(null)
 
+  const [resumeModalOpen, setResumeModalOpen] = useState(false)
+  const [resumeBusy, setResumeBusy] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
+
   const [dedicatedPrompt, setDedicatedPrompt] = useState<DedicatedRemovePrompt | null>(null)
   const [trialConfirmOpen, setTrialConfirmOpen] = useState(false)
   const [trialConfirmPayload, setTrialConfirmPayload] = useState<Record<string, unknown> | null>(null)
@@ -120,6 +124,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const [planConfirmBusy, setPlanConfirmBusy] = useState(false)
   const [planConfirmError, setPlanConfirmError] = useState<string | null>(null)
   const [summaryActionsVisible, setSummaryActionsVisible] = useState(false)
+  const [nearTop, setNearTop] = useState(true)
 
   const addonsDisabledReason = useMemo(() => computeAddonsDisabledReason(initialData), [initialData])
   const addonsInteractable = useMemo(() => computeAddonsInteractable(initialData), [initialData])
@@ -176,6 +181,26 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     )
     observer.observe(el)
     return () => observer.disconnect()
+  }, [hasAnyChanges])
+
+  // If the user is already deep in the page, the nudge adds noise.
+  useEffect(() => {
+    if (!hasAnyChanges) {
+      setNearTop(true)
+      return
+    }
+    const view = globalThis as any
+    if (typeof view?.addEventListener !== 'function' || typeof view?.removeEventListener !== 'function') {
+      return
+    }
+
+    const update = () => {
+      const y = typeof view?.scrollY === 'number' ? view.scrollY : 0
+      setNearTop(y < 240)
+    }
+    update()
+    view.addEventListener('scroll', update, { passive: true })
+    return () => view.removeEventListener('scroll', update)
   }, [hasAnyChanges])
 
   const resetDraft = useCallback(() => {
@@ -334,6 +359,29 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     }
   }, [cancelBusy, initialData])
 
+  const handleResumeSubscription = useCallback(async () => {
+    if (resumeBusy) return
+    const url = initialData.contextType === 'personal' ? initialData.endpoints.resumeSubscriptionUrl : undefined
+    if (!url) return
+    setResumeBusy(true)
+    setResumeError(null)
+    try {
+      const result = await jsonRequest<{ success: boolean; error?: string }>(url, {
+        method: 'POST',
+        includeCsrf: true,
+      })
+      if (!result?.success) {
+        setResumeError(result?.error ?? 'Unable to resume subscription.')
+        return
+      }
+      window.location.reload()
+    } catch (error) {
+      setResumeError(safeErrorMessage(error))
+    } finally {
+      setResumeBusy(false)
+    }
+  }, [initialData, resumeBusy])
+
   const dismissPlanConfirm = useCallback(() => {
     setPlanConfirmOpen(false)
     setPlanConfirmTarget(null)
@@ -364,6 +412,13 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           initialData={initialData}
           onChangePlan={!isOrg && isProprietaryMode ? () => openUpgradeModal('unknown') : undefined}
           onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? () => setCancelModalOpen(true) : undefined}
+          onResume={!isOrg
+            && initialData.contextType === 'personal'
+            && initialData.paidSubscriber
+            && initialData.cancelAtPeriodEnd
+            && initialData.endpoints.resumeSubscriptionUrl
+            ? () => setResumeModalOpen(true)
+            : undefined}
           seatTarget={initialData.contextType === 'organization' ? (draft.seatTarget ?? initialData.seats.purchased) : undefined}
           saving={saving}
           onAdjustSeat={initialData.contextType === 'organization' ? handleSeatAdjust : undefined}
@@ -401,7 +456,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         />
       </main>
 
-      {hasAnyChanges && !summaryActionsVisible ? (
+      {hasAnyChanges && !summaryActionsVisible && nearTop ? (
         <div className="fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:px-6">
           <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-white shadow-lg">
             <div className="min-w-0 text-sm font-semibold">
@@ -445,6 +500,23 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         danger
         onConfirm={handleCancelSubscription}
         onClose={() => (cancelBusy ? null : setCancelModalOpen(false))}
+      />
+
+      <ConfirmDialog
+        open={resumeModalOpen}
+        title="Resume subscription?"
+        description={
+          <>
+            Your subscription will stay active and renew normally.
+            {resumeError ? <div className="mt-2 text-sm font-semibold text-rose-700">{resumeError}</div> : null}
+          </>
+        }
+        confirmLabel="Resume subscription"
+        cancelLabel="Keep cancellation"
+        icon={<ShieldAlert className="h-5 w-5" />}
+        busy={resumeBusy}
+        onConfirm={handleResumeSubscription}
+        onClose={() => (resumeBusy ? null : setResumeModalOpen(false))}
       />
 
       <ConfirmDialog

@@ -50,6 +50,7 @@ export type DedicatedIpContext = {
 export type BillingEndpoints = {
   updateUrl: string
   cancelSubscriptionUrl?: string
+  resumeSubscriptionUrl?: string
 }
 
 export type BillingTrial = {

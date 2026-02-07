@@ -1603,6 +1603,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             "endpoints": {
                 "updateUrl": reverse("console_billing_update"),
                 "cancelSubscriptionUrl": reverse("cancel_subscription"),
+                "resumeSubscriptionUrl": reverse("resume_subscription"),
             },
         }
         context["billing_props"] = billing_props
@@ -1859,7 +1860,7 @@ def get_user_plan_api(request):
 @require_POST
 @tracer.start_as_current_span("BILLING Cancel Subscription")
 def cancel_subscription(request):
-    """Endpoint to cancel the user's subscription."""
+    """Endpoint to cancel the user's subscription at period end."""
     if not stripe_status().enabled:
         return JsonResponse({
             'success': False,
@@ -1880,17 +1881,65 @@ def cancel_subscription(request):
             )
 
             return JsonResponse({'success': True})
-        except Exception as e:
-            return JsonResponse({
+        except stripe.error.StripeError:
+            return JsonResponse(
+                {
                     'success': False,
                     'error': 'Error cancelling subscription'
                 },
-                status=500)
+                status=500,
+            )
     else:
         return JsonResponse({
             'success': False,
             'error': "You do not have an active subscription to cancel."
         }, status=400)
+
+@login_required
+@require_POST
+@tracer.start_as_current_span("BILLING Resume Subscription")
+def resume_subscription(request):
+    """Undo a scheduled cancellation (cancel_at_period_end=False)."""
+    if not stripe_status().enabled:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Stripe billing is not available in this deployment.'
+            },
+            status=404,
+        )
+
+    sub = get_active_subscription(request.user)
+    if not sub:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': "You do not have an active subscription to resume."
+            },
+            status=400,
+        )
+
+    try:
+        _assign_stripe_api_key()
+        stripe.Subscription.modify(sub.id, cancel_at_period_end=False)
+
+        Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.BILLING_UPDATED,
+            source=AnalyticsSource.WEB,
+            properties={
+                "update_type": "subscription_resume",
+            },
+        )
+        return JsonResponse({'success': True})
+    except stripe.error.StripeError:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Error resuming subscription'
+            },
+            status=500,
+        )
 
 @login_required
 def tasks_view(request):

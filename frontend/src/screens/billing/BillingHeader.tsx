@@ -1,4 +1,4 @@
-import { Building2, CreditCard, ShieldAlert } from 'lucide-react'
+import { Building2, CreditCard, RotateCcw, ShieldAlert } from 'lucide-react'
 
 import type { BillingInitialData } from './types'
 import { formatCents, normalizeCurrency, planMonthlyPriceCents } from './utils'
@@ -8,6 +8,7 @@ type BillingHeaderProps = {
   initialData: BillingInitialData
   onChangePlan?: () => void
   onCancel?: () => void
+  onResume?: () => void
   seatTarget?: number
   saving?: boolean
   onAdjustSeat?: (delta: number) => void
@@ -18,6 +19,7 @@ export function BillingHeader({
   initialData,
   onChangePlan,
   onCancel,
+  onResume,
   seatTarget,
   saving = false,
   onAdjustSeat,
@@ -107,6 +109,20 @@ export function BillingHeader({
               >
                 <ShieldAlert className="h-4 w-4" />
                 Cancel
+              </button>
+            ) : null}
+
+          {initialData.contextType === 'personal'
+            && initialData.paidSubscriber
+            && initialData.cancelAtPeriodEnd
+            && onResume ? (
+              <button
+                type="button"
+                onClick={onResume}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Resume subscription
               </button>
             ) : null}
 

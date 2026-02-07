@@ -202,6 +202,7 @@ from console.views import (
     get_billing_settings,
     get_user_plan_api,
     cancel_subscription,
+    resume_subscription,
     tasks_view,
     task_result_view,
     task_cancel_view,
@@ -455,6 +456,7 @@ urlpatterns = [
 
     path('billing/settings/update/', update_billing_settings, name='update_billing_settings'),
     path('billing/settings/cancel-subscription/', cancel_subscription, name='cancel_subscription'),
+    path('billing/settings/resume-subscription/', resume_subscription, name='resume_subscription'),
     path('billing/addons/task-packs/', update_task_pack_quantity, name='update_task_pack_quantity'),
     path('billing/addons/contact-packs/', update_contact_pack_quantity, name='update_contact_pack_quantity'),
     path('billing/addons/', update_addons, name='update_addons'),
