@@ -181,6 +181,20 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(response.json().get("error"), "Invalid context override.")
 
     @tag("batch_agent_chat")
+    def test_quick_create_ignores_unsupported_tier_selection(self):
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": "Create with stale tier", "preferred_llm_tier": "lite"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertIsNotNone(created_agent.preferred_llm_tier)
+        self.assertEqual(created_agent.preferred_llm_tier.key, "standard")
+
+    @tag("batch_agent_chat")
     def test_timeline_endpoint_returns_expected_events(self):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)

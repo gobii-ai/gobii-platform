@@ -116,17 +116,6 @@ function parseSearchQuery(value: string | null): string | null {
   return clampText(cleaned, 64)
 }
 
-function extractStreamingThought(value: string): string {
-  const lines = value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-  if (!lines.length) {
-    return clampText(value, 110)
-  }
-  return clampText(lines[lines.length - 1], 110)
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -885,7 +874,6 @@ export function ToolClusterLivePreview({
 }: ToolClusterLivePreviewProps) {
   const reduceMotion = useReducedMotion()
   const processingActive = useAgentChatStore((state) => state.processingActive)
-  const streaming = useAgentChatStore((state) => state.streaming)
   const [newEntryIds, setNewEntryIds] = useState<string[]>([])
   const previousEntryIdsRef = useRef<string[]>([])
   const newEntryTimeoutRef = useRef<number | null>(null)
@@ -914,26 +902,10 @@ export function ToolClusterLivePreview({
     () => previewableEntries.filter((entry) => entry.status === 'pending' || entry.toolName === 'thinking').length,
     [previewableEntries],
   )
-  const streamingReasoning = (streaming?.reasoning ?? '').trim()
-  const showStreamingReasoning = isLatestEvent && streamingReasoning.length > 0
-  const streamingThought = useMemo(
-    () => (showStreamingReasoning ? extractStreamingThought(streamingReasoning) : null),
-    [showStreamingReasoning, streamingReasoning],
-  )
-  const hasActiveStreamingReasoning = Boolean(
-    showStreamingReasoning && streaming?.source === 'stream' && !streaming?.done,
-  )
-  const hasActiveProcessing = (processingActive && isLatestEvent) || hasActiveStreamingReasoning
+  const hasActiveProcessing = processingActive && isLatestEvent
   const activePreviewEntry = useMemo<PreviewEntry | null>(() => {
-    const pendingEntry = [...previewEntries].reverse().find((item) => item.entry.status === 'pending')
-    if (pendingEntry) {
-      return pendingEntry
-    }
-    if (!hasActiveStreamingReasoning) {
-      return null
-    }
-    return [...previewEntries].reverse().find((item) => item.entry.toolName === 'thinking') ?? null
-  }, [hasActiveStreamingReasoning, previewEntries])
+    return [...previewEntries].reverse().find((item) => item.entry.status === 'pending') ?? null
+  }, [previewEntries])
   const previewState = derivePreviewState(activePreviewEntry?.entry ?? null, hasActiveProcessing)
   const activeEntryId = activePreviewEntry?.entry.id ?? null
   const newEntryIdSet = useMemo(() => new Set(newEntryIds), [newEntryIds])
@@ -1008,8 +980,7 @@ export function ToolClusterLivePreview({
             const isHighlighted = isActive && previewState === 'active'
             const isNew = newEntryIdSet.has(entry.id)
             const showSearchSweep = !reduceMotion && isHighlighted && item.activity.kind === 'search'
-            const detailText =
-              item.activity.kind === 'thinking' && isHighlighted && streamingThought ? streamingThought : item.activity.detail
+            const detailText = item.activity.detail
             const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
             const chartImageUrl = visual.chartImageUrl

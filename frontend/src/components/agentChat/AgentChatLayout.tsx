@@ -7,6 +7,7 @@ import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
 import { StreamingReplyCard } from './StreamingReplyCard'
+import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
@@ -433,9 +434,11 @@ export function AgentChatLayout({
 
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingContent = Boolean(streaming?.content?.trim())
-  const suppressedThinkingCursor = streaming?.cursor ?? null
-  // Streaming reasoning renders in the live tool preview; this slot only holds streaming content.
+  // Un-suppress the static thinking entry once streaming completes so it appears in its chronological position
+  const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
   const showStreamingSlot = hasStreamingContent && isStreaming
+  // Show streaming thinking card at the bottom until content starts arriving
+  const showStreamingThinking = Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -596,6 +599,7 @@ export function AgentChatLayout({
                     agentFirstName={agentFirstName}
                     events={events}
                     agentColorHex={agentColorHex || undefined}
+                    agentAvatarUrl={agentAvatarUrl}
                     viewerUserId={viewerUserId ?? null}
                     viewerEmail={viewerEmail ?? null}
                     initialLoading={initialLoading}
@@ -629,12 +633,21 @@ export function AgentChatLayout({
                   />
                 ) : null}
 
+                {showStreamingThinking ? (
+                  <StreamingThinkingCard
+                    reasoning={streaming?.reasoning || ''}
+                    isStreaming={isStreaming}
+                  />
+                ) : null}
+
                 {showStreamingSlot && !hasMoreNewer ? (
                   <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
                     {hasStreamingContent ? (
                       <StreamingReplyCard
                         content={streaming?.content || ''}
                         agentFirstName={agentFirstName}
+                        agentAvatarUrl={agentAvatarUrl}
+                        agentColorHex={agentColorHex}
                         isStreaming={isStreaming}
                       />
                     ) : null}

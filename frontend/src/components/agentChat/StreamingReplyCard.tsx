@@ -1,15 +1,18 @@
 import { useMemo } from 'react'
 import { MarkdownViewer } from '../common/MarkdownViewer'
+import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { looksLikeHtml, sanitizeHtml, stripBlockquoteQuotes } from '../../util/sanitize'
 import { useTypewriter } from '../../hooks/useTypewriter'
 
 type StreamingReplyCardProps = {
   content: string
   agentFirstName: string
+  agentAvatarUrl?: string | null
+  agentColorHex?: string | null
   isStreaming: boolean
 }
 
-export function StreamingReplyCard({ content, agentFirstName, isStreaming }: StreamingReplyCardProps) {
+export function StreamingReplyCard({ content, agentFirstName, agentAvatarUrl, agentColorHex, isStreaming }: StreamingReplyCardProps) {
   // Typewriter effect: animate text character-by-character for smoother perceived latency
   const { displayedContent, isWaiting } = useTypewriter(content, isStreaming, {
     charsPerFrame: 3,
@@ -52,6 +55,14 @@ export function StreamingReplyCard({ content, agentFirstName, isStreaming }: Str
     >
       <div className="chat-bubble chat-bubble--agent streaming-reply-bubble">
         <div className="chat-author chat-author--agent">
+          <AgentAvatarBadge
+            name={agentFirstName || 'Agent'}
+            avatarUrl={agentAvatarUrl}
+            className="chat-author-avatar"
+            imageClassName="chat-author-avatar-image"
+            textClassName="chat-author-avatar-text"
+            style={{ background: agentColorHex || '#6366f1' }}
+          />
           {agentFirstName || 'Agent'}
         </div>
         <div className="chat-content prose prose-sm max-w-none leading-relaxed text-slate-800">

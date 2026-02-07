@@ -9,6 +9,7 @@ type TimelineEventListProps = {
   events: TimelineEvent[]
   initialLoading?: boolean
   agentColorHex?: string
+  agentAvatarUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
   suppressedThinkingCursor?: string | null
@@ -19,6 +20,7 @@ export const TimelineEventList = memo(function TimelineEventList({
   events,
   initialLoading = false,
   agentColorHex,
+  agentAvatarUrl,
   viewerUserId,
   viewerEmail,
   suppressedThinkingCursor,
@@ -48,6 +50,7 @@ export const TimelineEventList = memo(function TimelineEventList({
               message={event.message}
               agentFirstName={agentFirstName}
               agentColorHex={agentColorHex}
+              agentAvatarUrl={agentAvatarUrl}
               viewerUserId={viewerUserId ?? null}
               viewerEmail={viewerEmail ?? null}
             />
