@@ -1374,19 +1374,71 @@ export function AgentChatPage({
       isOrgOwned: false,
     }
   }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
+  const rosterAgentsWithActiveMeta = useMemo(() => {
+    if (!activeAgentId) {
+      return rosterAgents
+    }
+
+    let changed = false
+    const nextAgents = rosterAgents.map((agent) => {
+      if (agent.id !== activeAgentId) {
+        return agent
+      }
+
+      const nextName = resolvedAgentName || agent.name || 'Agent'
+      const nextAvatarUrl = normalizeAvatarUrl(resolvedAvatarUrl) ?? normalizeAvatarUrl(agent.avatarUrl)
+      const nextColor = resolvedAgentColorHex ?? agent.displayColorHex ?? null
+      const nextEmail = resolvedAgentEmail ?? agent.email ?? null
+      const nextSms = resolvedAgentSms ?? agent.sms ?? null
+      const nextIsOrgOwned = agent.isOrgOwned ?? resolvedIsOrgOwned
+
+      if (
+        nextName === agent.name
+        && nextAvatarUrl === agent.avatarUrl
+        && nextColor === agent.displayColorHex
+        && nextEmail === (agent.email ?? null)
+        && nextSms === (agent.sms ?? null)
+        && nextIsOrgOwned === agent.isOrgOwned
+      ) {
+        return agent
+      }
+
+      changed = true
+      return {
+        ...agent,
+        name: nextName,
+        avatarUrl: nextAvatarUrl,
+        displayColorHex: nextColor,
+        email: nextEmail,
+        sms: nextSms,
+        isOrgOwned: nextIsOrgOwned,
+      }
+    })
+
+    return changed ? nextAgents : rosterAgents
+  }, [
+    activeAgentId,
+    resolvedAgentColorHex,
+    resolvedAgentEmail,
+    resolvedAgentName,
+    resolvedAgentSms,
+    resolvedAvatarUrl,
+    resolvedIsOrgOwned,
+    rosterAgents,
+  ])
   const sidebarAgents = useMemo(() => {
     if (!contextReady) {
       return []
     }
     if (!activeAgentId) {
-      return rosterAgents
+      return rosterAgentsWithActiveMeta
     }
-    const hasActive = rosterAgents.some((agent) => agent.id === activeAgentId)
+    const hasActive = rosterAgentsWithActiveMeta.some((agent) => agent.id === activeAgentId)
     if (hasActive || !fallbackAgent) {
-      return rosterAgents
+      return rosterAgentsWithActiveMeta
     }
-    return [fallbackAgent, ...rosterAgents]
-  }, [activeAgentId, contextReady, fallbackAgent, rosterAgents])
+    return [fallbackAgent, ...rosterAgentsWithActiveMeta]
+  }, [activeAgentId, contextReady, fallbackAgent, rosterAgentsWithActiveMeta])
 
   const resolvedInviteUrl = useMemo(() => {
     if (collaboratorInviteUrl) {

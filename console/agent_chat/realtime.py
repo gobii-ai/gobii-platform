@@ -10,6 +10,10 @@ def user_stream_group_name(agent_id: str, user_id: int) -> str:
     return f"agent-chat-{agent_id}-user-{user_id}"
 
 
+def user_profile_group_name(user_id: int) -> str:
+    return f"agent-chat-user-{user_id}"
+
+
 def send_stream_event(agent_id: str, user_id: int, payload: dict) -> None:
     if not agent_id or user_id is None:
         return

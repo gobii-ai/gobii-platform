@@ -6037,31 +6037,41 @@
    ========================================================================== */
 
 .agent-fab {
+  --_accent: var(--agent-fab-accent, #6366f1);
   position: fixed;
-  right: 1rem;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 1rem);
+  right: 1.875rem;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 1.625rem);
   z-index: 50;
   display: none;
   align-items: center;
   justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.375rem;
-  border: none;
-  background: #ffffff;
-  color: #94a3b8;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  background: var(--_accent);
+  color: white;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.12),
+    0 0 0 0 var(--_accent);
   transition:
-    background 0.15s ease,
-    color 0.15s ease,
-    box-shadow 0.15s ease;
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
   -webkit-tap-highlight-color: transparent;
+  animation: agent-fab-enter 0.4s ease 0.6s both;
 }
 
-.agent-fab svg {
-  width: 1rem;
-  height: 1rem;
+@keyframes agent-fab-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @media (max-width: 767px) {
@@ -6071,20 +6081,22 @@
 }
 
 .agent-fab:hover {
-  background: #f1f5f9;
-  color: #64748b;
+  transform: scale(1.08);
+  box-shadow:
+    0 4px 14px rgba(0, 0, 0, 0.18),
+    0 0 0 3px color-mix(in srgb, var(--_accent) 30%, transparent);
 }
 
 .agent-fab:active {
-  background: #e2e8f0;
-  box-shadow: none;
+  transform: scale(0.95);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.12);
 }
 
 .agent-fab-avatar {
   width: 100%;
   height: 100%;
-  border-radius: 0.75rem;
-  background: var(--agent-accent, #6366f1);
+  border-radius: 50%;
+  background: var(--_accent);
   display: grid;
   place-items: center;
   overflow: hidden;
@@ -6097,29 +6109,33 @@
 }
 
 .agent-fab-avatar-text {
-  color: #f8fafc;
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
 }
 
-.agent-fab-badge {
+/* Small badge in the bottom-right showing the switch icon */
+.agent-fab-switch-badge {
   position: absolute;
-  top: -0.375rem;
-  right: -0.375rem;
-  min-width: 1.125rem;
+  bottom: -0.125rem;
+  right: -0.125rem;
+  width: 1.125rem;
   height: 1.125rem;
-  padding: 0 0.3rem;
-  border-radius: 999px;
-  background: #6366f1;
+  border-radius: 50%;
+  background: #1e293b;
   color: white;
-  font-size: 0.625rem;
-  font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid white;
-  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
+  border: 1.5px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.agent-fab-switch-badge svg {
+  width: 0.5625rem;
+  height: 0.5625rem;
 }
 
 /* Mobile sheet */

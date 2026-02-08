@@ -1,6 +1,7 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
+import { motion } from 'framer-motion'
 import '../../styles/agentChatLegacy.css'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -720,8 +721,10 @@ export function AgentChatLayout({
           id="agent-workspace-root"
           style={composerPalette.cssVars}
         >
-          {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          {/* Scrollable timeline container — layoutScroll tells framer-motion
+              to account for scroll offset so layout animations inside don't
+              re-trigger when the user scrolls. */}
+          <motion.div ref={timelineRef} id="timeline-shell" layoutScroll data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
@@ -849,7 +852,7 @@ export function AgentChatLayout({
               </div>
             </div>
 
-          </div>
+          </motion.div>
 
           {/* Jump button outside scroll container so position:fixed works on iOS Safari */}
           <button

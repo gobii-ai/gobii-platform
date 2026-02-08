@@ -1,10 +1,11 @@
-import base64
+from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
-from api.agent.tools.create_chart import execute_create_chart, get_create_chart_tool
+from api.agent.tools.create_chart import _build_chart_save_path, execute_create_chart, get_create_chart_tool
 from api.models import BrowserUseAgent, PersistentAgent
 
 
@@ -427,3 +428,19 @@ class CreateChartToolTests(TestCase):
             self.assertIn(result["file"], result["inline"])
             mock_write.assert_called_once()
             mock_signed_url.assert_called_once()
+
+    def test_build_chart_save_path_is_unique_within_same_second(self):
+        with patch("api.agent.tools.create_chart.datetime") as mock_datetime, \
+                patch("api.agent.tools.create_chart.uuid.uuid4") as mock_uuid4:
+            mock_datetime.now.return_value = datetime(2026, 2, 8, 17, 53, 56)
+            mock_uuid4.side_effect = [
+                SimpleNamespace(hex="a1b2c3d4feedbeef"),
+                SimpleNamespace(hex="e5f60718cafebabe"),
+            ]
+
+            first_path = _build_chart_save_path("bar")
+            second_path = _build_chart_save_path("bar")
+
+        self.assertTrue(first_path.startswith("/charts/bar_20260208_175356_"))
+        self.assertTrue(second_path.startswith("/charts/bar_20260208_175356_"))
+        self.assertNotEqual(first_path, second_path)
