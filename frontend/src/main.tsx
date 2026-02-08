@@ -17,6 +17,7 @@ const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageS
 const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
 const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
 const SystemSettingsScreen = lazy(async () => ({ default: (await import('./screens/SystemSettingsScreen')).SystemSettingsScreen }))
+const BillingScreen = lazy(async () => ({ default: (await import('./screens/BillingScreen')).BillingScreen }))
 const EvalsScreen = lazy(async () => ({ default: (await import('./screens/EvalsScreen')).EvalsScreen }))
 const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/EvalsDetailScreen')).EvalsDetailScreen }))
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
@@ -179,6 +180,12 @@ switch (appName) {
   case 'system-settings':
     screen = <SystemSettingsScreen />
     break
+  case 'billing': {
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = readJsonScript<import('./screens/BillingScreen').BillingScreenProps['initialData']>(propsId)
+    screen = <BillingScreen initialData={initialData} />
+    break
+  }
   case 'evals':
     screen = <EvalsScreen />
     break

@@ -59,6 +59,7 @@ type SubscriptionUpgradePlansProps = {
   variant?: 'modal' | 'inline'
   pricingLinkLabel?: string
   source?: string
+  allowDowngrade?: boolean
 }
 
 export function SubscriptionUpgradePlans({
@@ -67,16 +68,18 @@ export function SubscriptionUpgradePlans({
   variant = 'modal',
   pricingLinkLabel = 'View full comparison',
   source,
+  allowDowngrade = false,
 }: SubscriptionUpgradePlansProps) {
   const { trialDaysByPlan } = useSubscriptionStore()
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
-  const isUpgrade = useCallback(
+  const canSelectPlan = useCallback(
     (planId: PlanTier) => {
       if (!currentPlan) return planId !== 'free'
+      if (allowDowngrade) return planId !== currentPlan && planId !== 'free'
       const order: PlanTier[] = ['free', 'startup', 'scale']
       return order.indexOf(planId) > order.indexOf(currentPlan)
     },
-    [currentPlan],
+    [allowDowngrade, currentPlan],
   )
 
   const handlePlanSelect = useCallback((planId: PlanTier) => {
@@ -102,11 +105,11 @@ export function SubscriptionUpgradePlans({
         <div className="grid gap-5 sm:grid-cols-2">
           {PLANS.map((plan) => {
             const isCurrent = isCurrentPlan(plan.id)
-            const canUpgrade = isUpgrade(plan.id)
+            const canUpgrade = canSelectPlan(plan.id)
             const trialDays = plan.id === 'startup' ? trialDaysByPlan.startup : trialDaysByPlan.scale
             const ctaLabel = isTrialOnboarding
               ? (trialDays > 0 ? `Start ${trialDays}-day Free Trial` : `Get ${plan.name}`)
-              : `Get ${plan.name}`
+              : (allowDowngrade ? `Select ${plan.name}` : `Get ${plan.name}`)
 
             return (
               <div

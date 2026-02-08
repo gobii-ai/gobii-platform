@@ -1,6 +1,6 @@
 from contextlib import ExitStack
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.messages import get_messages
@@ -37,6 +37,9 @@ class DedicatedIpBillingTests(TestCase):
             patch("console.views.DedicatedProxyService.release_specific", return_value=True),
             patch("console.views.DedicatedProxyService.allocated_count", return_value=allocated_count),
             patch("console.views.get_user_plan", return_value={"id": PlanNamesChoices.STARTUP.value}),
+            # Views import this function inside the handler; patch the source module so
+            # the imported reference is our stub.
+            patch("console.billing_update_service.apply_dedicated_ip_changes", return_value=None),
         ]
 
     def test_add_dedicated_ips_success(self):
@@ -103,6 +106,12 @@ class DedicatedIpBillingTests(TestCase):
             mock_status.return_value.enabled = True
             for patcher in self._common_patches(allocated_count=3):
                 stack.enter_context(patcher)
+            stack.enter_context(
+                patch(
+                    "console.views.DedicatedProxyService.allocated_proxies",
+                    return_value=MagicMock(values_list=MagicMock(return_value=["proxy-1", "proxy-2", "proxy-3"])),
+                )
+            )
             resp = self.client.post(url)
 
         self.assertEqual(resp.status_code, 302)
