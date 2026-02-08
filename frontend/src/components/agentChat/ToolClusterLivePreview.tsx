@@ -1052,10 +1052,9 @@ export function ToolClusterLivePreview({
                   data-count={Math.min(visualEntries.length, 4)}
                   initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 3 }}
                   animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                  exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                  exit={reduceMotion ? { opacity: 1 } : { opacity: 0, transition: { duration: 0.12, ease: 'easeOut' } }}
                   transition={{
                     duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
-                    exit: { duration: 0.12 },
                     ease: 'easeOut',
                     delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                   }}
@@ -1122,10 +1121,9 @@ export function ToolClusterLivePreview({
                 tabIndex={0}
                 initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 3 }}
                 animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-                exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
+                exit={reduceMotion ? { opacity: 1 } : { opacity: 0, transition: { duration: 0.12, ease: 'easeOut' } }}
                 transition={{
                   duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
-                  exit: { duration: 0.12 },
                   ease: 'easeOut',
                   delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                 }}
