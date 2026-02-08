@@ -958,7 +958,7 @@ export function ToolClusterLivePreview({
     newEntryTimeoutRef.current = window.setTimeout(() => {
       setNewEntryIds([])
       newEntryTimeoutRef.current = null
-    }, 900)
+    }, 500)
     return () => {
       if (newEntryTimeoutRef.current !== null) {
         window.clearTimeout(newEntryTimeoutRef.current)
@@ -977,30 +977,23 @@ export function ToolClusterLivePreview({
       className="tool-cluster-live-preview"
       data-state={previewState}
       layout={!reduceMotion}
-      transition={reduceMotion ? undefined : { type: 'spring', stiffness: 430, damping: 34, mass: 0.55 }}
+      transition={reduceMotion ? undefined : { type: 'spring', stiffness: 300, damping: 30 }}
     >
-      <AnimatePresence initial={false}>
-        {hiddenEntryCount > 0 ? (
-          <motion.button
-            key={`hidden-actions-${hiddenEntryCount}`}
-            type="button"
-            className="tool-cluster-live-preview__more-link"
-            onClick={onOpenTimeline}
-            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
-            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
-            exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-          >
-            <span className="tool-cluster-live-preview__more-link-line" aria-hidden="true" />
-            <span className="tool-cluster-live-preview__more-link-label">
-              {hiddenEntryCount} more actions
-            </span>
-            <span className="tool-cluster-live-preview__more-link-line" aria-hidden="true" />
-          </motion.button>
-        ) : null}
-      </AnimatePresence>
+      {hiddenEntryCount > 0 ? (
+        <button
+          type="button"
+          className="tool-cluster-live-preview__more-link"
+          onClick={onOpenTimeline}
+        >
+          <span className="tool-cluster-live-preview__more-link-line" aria-hidden="true" />
+          <span className="tool-cluster-live-preview__more-link-label">
+            {hiddenEntryCount} more actions
+          </span>
+          <span className="tool-cluster-live-preview__more-link-line" aria-hidden="true" />
+        </button>
+      ) : null}
       <div className="tool-cluster-live-preview__feed" aria-label="Recent tool activity">
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {previewEntries.map((item, index) => {
             const { entry, visual } = item
             const isActive = entry.id === activeEntryId
@@ -1034,11 +1027,12 @@ export function ToolClusterLivePreview({
                   layout={!reduceMotion}
                   className="tool-cluster-live-preview__chart-grid"
                   data-count={Math.min(visualEntries.length, 4)}
-                  initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 5, scale: 0.995 }}
-                  animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-                  exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.995 }}
+                  initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 3 }}
+                  animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                  exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
                   transition={{
                     duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
+                    exit: { duration: 0.12 },
                     ease: 'easeOut',
                     delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                   }}
@@ -1103,11 +1097,12 @@ export function ToolClusterLivePreview({
                 data-profile-card={linkedInProfile ? 'true' : 'false'}
                 role="button"
                 tabIndex={0}
-                initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 5, scale: 0.995 }}
-                animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
-                exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -4, scale: 0.995 }}
+                initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 3 }}
+                animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
                 transition={{
                   duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
+                  exit: { duration: 0.12 },
                   ease: 'easeOut',
                   delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                 }}

@@ -167,23 +167,30 @@ function resolveClusterCursor(
   entries: ToolCallEntry[],
   fallback: string,
   secondaryFallback: string,
-  thinkingEntries: ThinkingEvent[] | undefined,
-  kanbanEntries: KanbanEvent[] | undefined,
+  _thinkingEntries: ThinkingEvent[] | undefined,
+  _kanbanEntries: KanbanEvent[] | undefined,
 ): string {
+  // Anchor the cluster position to the first tool-call entry's cursor.
+  // This prevents the cluster from jumping when thinking/kanban entries
+  // with earlier timestamps get folded in later.
   const entryCursors = entries
     .map((entry) => entry.cursor)
     .filter((cursor): cursor is string => Boolean(cursor))
-  const thinkingCursors = (thinkingEntries ?? [])
-    .map((entry) => entry.cursor)
-    .filter((cursor): cursor is string => Boolean(cursor))
-  const kanbanCursors = (kanbanEntries ?? [])
-    .map((entry) => entry.cursor)
-    .filter((cursor): cursor is string => Boolean(cursor))
-  const cursors = [...entryCursors, ...thinkingCursors, ...kanbanCursors]
-  if (!cursors.length) {
-    return compareTimelineCursors(fallback, secondaryFallback) <= 0 ? fallback : secondaryFallback
+  if (entryCursors.length) {
+    return entryCursors[0]
   }
-  return cursors.reduce((earliest, cursor) => (compareTimelineCursors(cursor, earliest) < 0 ? cursor : earliest))
+  // Fallback for thinking-only clusters: use the earliest cursor from any sub-entry.
+  const thinkingCursors = (_thinkingEntries ?? [])
+    .map((entry) => entry.cursor)
+    .filter((cursor): cursor is string => Boolean(cursor))
+  const kanbanCursors = (_kanbanEntries ?? [])
+    .map((entry) => entry.cursor)
+    .filter((cursor): cursor is string => Boolean(cursor))
+  const nonToolCursors = [...thinkingCursors, ...kanbanCursors]
+  if (nonToolCursors.length) {
+    return nonToolCursors.reduce((earliest, cursor) => (compareTimelineCursors(cursor, earliest) < 0 ? cursor : earliest))
+  }
+  return compareTimelineCursors(fallback, secondaryFallback) <= 0 ? fallback : secondaryFallback
 }
 
 function pickTimestamp(entries: ToolCallEntry[], direction: 'earliest' | 'latest'): string | null {

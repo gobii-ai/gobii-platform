@@ -1,9 +1,16 @@
 import { memo, useMemo } from 'react'
-import { AlarmClock } from 'lucide-react'
+import { AlarmClock, PlusSquare, Settings, Zap } from 'lucide-react'
 import { formatRelativeTimestamp } from '../../util/time'
 
 type ScheduledResumeCardProps = {
   nextScheduledAt?: string | null
+  onDoubleLimit?: () => void | Promise<void>
+  doubleLimitLabel?: string
+  onSetUnlimited?: () => void | Promise<void>
+  onOpenSettings?: () => void
+  onOpenTaskPacks?: () => void
+  onUpgrade?: () => void | Promise<void>
+  actionBusy?: boolean
 }
 
 const TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
@@ -46,7 +53,16 @@ function formatWakeTime(target: Date, reference: Date): string {
   return DATE_TIME_FORMATTER.format(target)
 }
 
-export const ScheduledResumeCard = memo(function ScheduledResumeCard({ nextScheduledAt }: ScheduledResumeCardProps) {
+export const ScheduledResumeCard = memo(function ScheduledResumeCard({
+  nextScheduledAt,
+  onDoubleLimit,
+  doubleLimitLabel = 'Double daily limit',
+  onSetUnlimited,
+  onOpenSettings,
+  onOpenTaskPacks,
+  onUpgrade,
+  actionBusy = false,
+}: ScheduledResumeCardProps) {
   const parsed = useMemo(() => {
     if (!nextScheduledAt) {
       return null
@@ -69,6 +85,13 @@ export const ScheduledResumeCard = memo(function ScheduledResumeCard({ nextSched
   const title = isFuture && relativeText
     ? `Agent will continue ${relativeText}`
     : 'Agent will continue soon'
+  const hasActions = Boolean(
+    onDoubleLimit
+    || onSetUnlimited
+    || onOpenTaskPacks
+    || onUpgrade
+    || onOpenSettings,
+  )
 
   return (
     <article className="timeline-event scheduled-resume-card" aria-live="polite">
@@ -83,6 +106,70 @@ export const ScheduledResumeCard = memo(function ScheduledResumeCard({ nextSched
         </time>
       </div>
       <span className="scheduled-resume-card__pill">Scheduled wake-up</span>
+      {hasActions ? (
+        <div className="scheduled-resume-card__actions">
+          {onDoubleLimit ? (
+            <button
+              type="button"
+              className="scheduled-resume-card__action scheduled-resume-card__action--primary"
+              onClick={() => {
+                void onDoubleLimit()
+              }}
+              disabled={actionBusy}
+            >
+              <Zap size={14} />
+              {doubleLimitLabel}
+            </button>
+          ) : null}
+          {onSetUnlimited ? (
+            <button
+              type="button"
+              className="scheduled-resume-card__action"
+              onClick={() => {
+                void onSetUnlimited()
+              }}
+              disabled={actionBusy}
+            >
+              Set unlimited
+            </button>
+          ) : null}
+          {onOpenTaskPacks ? (
+            <button
+              type="button"
+              className="scheduled-resume-card__action"
+              onClick={onOpenTaskPacks}
+              disabled={actionBusy}
+            >
+              <PlusSquare size={14} />
+              Buy task pack
+            </button>
+          ) : null}
+          {onUpgrade ? (
+            <button
+              type="button"
+              className="scheduled-resume-card__action scheduled-resume-card__action--primary"
+              onClick={() => {
+                void onUpgrade()
+              }}
+              disabled={actionBusy}
+            >
+              <Zap size={14} />
+              Upgrade plan
+            </button>
+          ) : null}
+          {onOpenSettings ? (
+            <button
+              type="button"
+              className="scheduled-resume-card__action"
+              onClick={onOpenSettings}
+              disabled={actionBusy}
+            >
+              <Settings size={14} />
+              Open settings
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </article>
   )
 })

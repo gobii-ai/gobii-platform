@@ -5,6 +5,15 @@ import { ToolClusterCard } from './ToolClusterCard'
 import { KanbanEventCard } from './KanbanEventCard'
 import type { TimelineEvent, ToolClusterEvent } from './types'
 
+// Derive a stable key for a cluster based on its first entry, so React
+// doesn't unmount/remount when the cluster cursor shifts.
+function stableEventKey(event: TimelineEvent): string {
+  if (event.kind === 'steps' && event.entries.length > 0) {
+    return `cluster:${event.entries[0].id}`
+  }
+  return event.cursor
+}
+
 type TimelineEventListProps = {
   agentFirstName: string
   events: TimelineEvent[]
@@ -47,10 +56,11 @@ export const TimelineEventList = memo(function TimelineEventList({
     <>
       {events.map((event, index) => {
         const isLatestEvent = index === events.length - 1
+        const key = stableEventKey(event)
         if (event.kind === 'message') {
           return (
             <MessageEventCard
-              key={event.cursor}
+              key={key}
               eventCursor={event.cursor}
               message={event.message}
               agentFirstName={agentFirstName}
@@ -75,7 +85,7 @@ export const TimelineEventList = memo(function TimelineEventList({
           }
           return (
             <ToolClusterCard
-              key={event.cursor}
+              key={key}
               cluster={cluster}
               isLatestEvent={isLatestEvent}
               suppressedThinkingCursor={suppressedThinkingCursor}
@@ -83,11 +93,11 @@ export const TimelineEventList = memo(function TimelineEventList({
           )
         }
         if (event.kind === 'kanban') {
-          return <KanbanEventCard key={event.cursor} event={event} />
+          return <KanbanEventCard key={key} event={event} />
         }
         return (
           <ToolClusterCard
-            key={event.cursor}
+            key={key}
             cluster={event}
             isLatestEvent={isLatestEvent}
             suppressedThinkingCursor={suppressedThinkingCursor}

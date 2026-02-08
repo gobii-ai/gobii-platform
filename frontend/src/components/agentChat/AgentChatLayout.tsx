@@ -243,6 +243,8 @@ export function AgentChatLayout({
     upgradeModalSource,
     upgradeModalDismissible,
     isProprietaryMode,
+    openUpgradeModal,
+    ensureAuthenticated,
   } = useSubscriptionStore()
   const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -253,6 +255,7 @@ export function AgentChatLayout({
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
+  const [scheduledLimitBusy, setScheduledLimitBusy] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -463,6 +466,16 @@ export function AgentChatLayout({
     && !hasMoreNewer
     && nextScheduledAt,
   )
+  const showScheduledCreditActions = Boolean(
+    showScheduledResumeEvent
+    && (
+      showTaskCreditsWarning
+      || dailyCredits?.low
+      || dailyCreditsStatus?.softTargetExceeded
+      || dailyCreditsStatus?.hardLimitReached
+      || dailyCreditsStatus?.hardLimitBlocked
+    ),
+  )
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const hasTimelineEvents = events.length > 0
   const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
@@ -521,6 +534,81 @@ export function AgentChatLayout({
       setQuickIncreaseBusy(false)
     }
   }, [onUpdateDailyCredits, quickIncreaseTarget, quickIncreaseBusy, onRefreshDailyCredits])
+  const scheduledDoubleLimitTarget = useMemo(() => {
+    if (!showScheduledCreditActions || !dailyCredits || !onUpdateDailyCredits || dailyCredits.unlimited) {
+      return null
+    }
+    if (!Number.isFinite(dailyCredits.limit ?? NaN) || !Number.isFinite(dailyCredits.sliderLimitMax)) {
+      return null
+    }
+    const currentLimit = Math.round(dailyCredits.limit as number)
+    const maxLimit = Math.round(dailyCredits.sliderLimitMax)
+    const target = Math.min(maxLimit, currentLimit * 2)
+    if (target <= currentLimit) {
+      return null
+    }
+    return target
+  }, [showScheduledCreditActions, dailyCredits, onUpdateDailyCredits])
+  const scheduledDoubleLimitLabel = useMemo(() => {
+    if (scheduledDoubleLimitTarget === null) {
+      return null
+    }
+    return `Double to ${scheduledDoubleLimitTarget}/day`
+  }, [scheduledDoubleLimitTarget])
+  const handleScheduledDoubleLimit = useCallback(async () => {
+    if (!onUpdateDailyCredits || scheduledDoubleLimitTarget === null || scheduledLimitBusy || quickIncreaseBusy) {
+      return
+    }
+    setScheduledLimitBusy(true)
+    try {
+      await onUpdateDailyCredits({ daily_credit_limit: scheduledDoubleLimitTarget })
+      onRefreshDailyCredits?.()
+    } finally {
+      setScheduledLimitBusy(false)
+    }
+  }, [
+    onUpdateDailyCredits,
+    scheduledDoubleLimitTarget,
+    scheduledLimitBusy,
+    quickIncreaseBusy,
+    onRefreshDailyCredits,
+  ])
+  const canSetUnlimitedFromSchedule = Boolean(
+    showScheduledCreditActions
+    && onUpdateDailyCredits
+    && dailyCredits
+    && !dailyCredits.unlimited,
+  )
+  const handleScheduledSetUnlimited = useCallback(async () => {
+    if (!onUpdateDailyCredits || !canSetUnlimitedFromSchedule || scheduledLimitBusy || quickIncreaseBusy) {
+      return
+    }
+    setScheduledLimitBusy(true)
+    try {
+      await onUpdateDailyCredits({ daily_credit_limit: null })
+      onRefreshDailyCredits?.()
+    } finally {
+      setScheduledLimitBusy(false)
+    }
+  }, [
+    onUpdateDailyCredits,
+    canSetUnlimitedFromSchedule,
+    scheduledLimitBusy,
+    quickIncreaseBusy,
+    onRefreshDailyCredits,
+  ])
+  const canShowScheduledUpgrade = Boolean(showScheduledCreditActions && isProprietaryMode && !isCollaborator)
+  const handleScheduledUpgrade = useCallback(async () => {
+    if (!canShowScheduledUpgrade) {
+      return
+    }
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
+    openUpgradeModal('task_credits_callout')
+  }, [canShowScheduledUpgrade, ensureAuthenticated, openUpgradeModal])
+  const scheduledActionBusy = quickIncreaseBusy || scheduledLimitBusy
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
   const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
 
@@ -670,7 +758,16 @@ export function AgentChatLayout({
                   />
                 </div>
                 {showScheduledResumeEvent ? (
-                  <ScheduledResumeCard nextScheduledAt={nextScheduledAt} />
+                  <ScheduledResumeCard
+                    nextScheduledAt={nextScheduledAt}
+                    onDoubleLimit={scheduledDoubleLimitTarget !== null ? handleScheduledDoubleLimit : undefined}
+                    doubleLimitLabel={scheduledDoubleLimitLabel ?? undefined}
+                    onSetUnlimited={canSetUnlimitedFromSchedule ? handleScheduledSetUnlimited : undefined}
+                    onOpenSettings={showScheduledCreditActions && onUpdateDailyCredits ? handleSettingsOpen : undefined}
+                    onOpenTaskPacks={showScheduledCreditActions ? resolvedOpenTaskPacks : undefined}
+                    onUpgrade={canShowScheduledUpgrade ? handleScheduledUpgrade : undefined}
+                    actionBusy={scheduledActionBusy}
+                  />
                 ) : null}
                 {showHardLimitCallout ? (
                   <HardLimitCalloutCard
