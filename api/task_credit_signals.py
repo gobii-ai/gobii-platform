@@ -8,11 +8,15 @@ from pages.account_info_cache import invalidate_account_info_cache
 logger = logging.getLogger(__name__)
 
 
-def _invalidate_for_task_credit(instance) -> None:
+def _invalidate_user_cache(instance) -> None:
+    """Invalidate user-scoped caches based on instance.user_id."""
     user_id = getattr(instance, "user_id", None)
     if user_id:
         invalidate_account_info_cache(user_id)
 
+
+def _invalidate_org_cache(instance) -> None:
+    """Invalidate organization-scoped caches based on instance.organization_id."""
     org_id = getattr(instance, "organization_id", None)
     if org_id:
         try:
@@ -21,6 +25,11 @@ def _invalidate_for_task_credit(instance) -> None:
             invalidate_console_home_metrics_cache("organization", org_id)
         except Exception:
             logger.exception("Failed to invalidate console home metrics cache for org %s", org_id)
+
+
+def _invalidate_for_task_credit(instance) -> None:
+    _invalidate_user_cache(instance)
+    _invalidate_org_cache(instance)
 
 
 def _on_task_credit_saved(sender, instance, **kwargs) -> None:
@@ -32,21 +41,11 @@ def _on_task_credit_deleted(sender, instance, **kwargs) -> None:
 
 
 def _on_user_billing_saved(sender, instance, **kwargs) -> None:
-    user_id = getattr(instance, "user_id", None)
-    if user_id:
-        invalidate_account_info_cache(user_id)
+    _invalidate_user_cache(instance)
 
 
 def _on_org_billing_saved(sender, instance, **kwargs) -> None:
-    org_id = getattr(instance, "organization_id", None)
-    if not org_id:
-        return
-    try:
-        from console.home_metrics import invalidate_console_home_metrics_cache
-
-        invalidate_console_home_metrics_cache("organization", org_id)
-    except Exception:
-        logger.exception("Failed to invalidate console home metrics cache for org %s", org_id)
+    _invalidate_org_cache(instance)
 
 
 def register_task_credit_cache_invalidation() -> None:
@@ -78,4 +77,3 @@ def register_task_credit_cache_invalidation() -> None:
         sender=OrganizationBilling,
         dispatch_uid="org_billing_cache_invalidate_post_save",
     )
-
