@@ -189,13 +189,22 @@ PUBLIC_BRAND_NAME = env(
     "PUBLIC_BRAND_NAME",
     default=_proprietary_default("brand", "PUBLIC_BRAND_NAME", fallback="Agent Platform"),
 )
-PUBLIC_SITE_URL = env(
-    "PUBLIC_SITE_URL",
-    default=_proprietary_default("brand", "PUBLIC_SITE_URL", fallback="http://localhost:8000"),
-)
+def _public_site_url_default(*, debug: bool | None = None) -> str:
+    debug_mode = DEBUG if debug is None else debug
+    if debug_mode:
+        # Local/dev defaults should stay HTTP-friendly even in proprietary mode.
+        return "http://localhost:8000"
+    return _proprietary_default("brand", "PUBLIC_SITE_URL", fallback="http://localhost:8000")
 
 
-def _cookie_secure_default(site_url: str) -> bool:
+PUBLIC_SITE_URL = env("PUBLIC_SITE_URL", default=_public_site_url_default())
+
+
+def _cookie_secure_default(site_url: str, *, debug: bool | None = None) -> bool:
+    debug_mode = DEBUG if debug is None else debug
+    if debug_mode:
+        return False
+
     parsed = urlparse((site_url or "").strip())
     scheme = parsed.scheme.lower()
     if scheme == "https":
@@ -204,7 +213,7 @@ def _cookie_secure_default(site_url: str) -> bool:
         return False
     if not scheme and parsed.netloc:
         return False
-    return not DEBUG
+    return True
 
 
 _SECURE_COOKIE_DEFAULT = _cookie_secure_default(PUBLIC_SITE_URL)
