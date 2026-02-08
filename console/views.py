@@ -1260,7 +1260,6 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 assigned = [
                     {"id": str(pa.id), "name": pa.name}
                     for pa in assigned_agents
-                    if pa is not None
                 ]
                 payload.append(
                     {
@@ -1428,9 +1427,11 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 seat_unit_price_raw = org_plan_cfg.get("price_per_seat", org_plan_cfg.get("price", 0)) or 0
                 try:
                     seat_unit_price = float(Decimal(str(seat_unit_price_raw)))
-                except Exception:
+                except (InvalidOperation, TypeError, ValueError, OverflowError):
                     seat_unit_price = 0.0
                 seat_currency = (org_plan_cfg.get("currency") or (overview.get("plan") or {}).get("currency") or "USD").upper()
+                pending_seats = overview.get("pending_seats") or {}
+                pending_effective_at = pending_seats.get("effective_at")
 
                 billing_props = {
                     "contextType": "organization",
@@ -1447,12 +1448,8 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                         "available": overview.get("seats", {}).get("available", 0),
                         "unitPrice": seat_unit_price,
                         "currency": seat_currency,
-                        "pendingQuantity": (overview.get("pending_seats") or {}).get("quantity"),
-                        "pendingEffectiveAtIso": (
-                            (overview.get("pending_seats") or {}).get("effective_at").isoformat()
-                            if (overview.get("pending_seats") or {}).get("effective_at") is not None
-                            else None
-                        ),
+                        "pendingQuantity": pending_seats.get("quantity"),
+                        "pendingEffectiveAtIso": pending_effective_at.isoformat() if pending_effective_at is not None else None,
                         "hasStripeSubscription": has_stripe_subscription,
                     },
                     "addons": _serialize_addon_context(addon_context),
@@ -1632,8 +1629,8 @@ class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
                 return_url=return_url,
             )
             return redirect(session.url)
-        except stripe.error.StripeError as exc:
-            logger.exception("Failed to create Stripe billing portal session for user %s: %s", request.user.id, exc)
+        except stripe.error.StripeError:
+            logger.exception("Failed to create Stripe billing portal session for user %s", request.user.id)
             messages.error(
                 request,
                 "We weren't able to open the Stripe billing portal. Please try again or contact support.",
@@ -2946,10 +2943,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 ]
                 selected = preferred_proxy is not None and proxy.id == preferred_proxy.id
                 in_use_elsewhere = any(
-                    pa.id != agent.id for pa in assigned_agents if pa is not None
+                    pa.id != agent.id for pa in assigned_agents
                 )
                 label = proxy.static_ip or proxy.host
-                assigned_names = [pa.name for pa in assigned_agents if pa is not None]
+                assigned_names = [pa.name for pa in assigned_agents]
 
                 dedicated_options.append(
                     {
@@ -4320,8 +4317,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 except ValidationError as e:
                     err = e.messages[0] if hasattr(e, 'messages') and e.messages else str(e)
                     return JsonResponse({'success': False, 'error': err}, status=400)
-                except Exception as e:
-                    logger.exception("An error occurred during agent reassignment for agent %s", agent.id, e)
+                except Exception:
+                    logger.exception("An error occurred during agent reassignment for agent %s", agent.id)
                     return JsonResponse({'success': False, 'error': 'An unexpected error occurred. Please try again.'}, status=500)
             
             return JsonResponse({'success': False, 'error': 'Invalid action'})
@@ -8182,8 +8179,8 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 organization=org,
             )
             return redirect(session.url)
-        except Exception as exc:
-            logger.exception("Failed to create Stripe checkout session for org %s: %s", org.id, exc)
+        except stripe.error.StripeError:
+            logger.exception("Failed to create Stripe checkout session for org %s", org.id)
             messages.error(
                 request,
                 "We weren’t able to start the checkout flow. Please try again or contact support.",
@@ -8532,8 +8529,8 @@ class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, Lo
             )
 
             return redirect(session.url)
-        except Exception as exc:
-            logger.exception("Failed to create Stripe billing portal session for org %s: %s", org.id, exc)
+        except stripe.error.StripeError:
+            logger.exception("Failed to create Stripe billing portal session for org %s", org.id)
             messages.error(
                 request,
                 "We weren’t able to open the Stripe billing portal. Please try again or contact support.",
