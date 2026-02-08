@@ -13,9 +13,12 @@
     let returnToPath = null;
     let lastHistoryPath = null;
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    const APP_BASE_PATH = '/app';
+    const DEFAULT_RETURN_PATH = '/console/agents/';
 
     const isNarrowScreen = () => window.matchMedia('(max-width: 900px)').matches;
     const shouldBypassOverlay = () => isTouchDevice && isNarrowScreen();
+    const isAppPath = (pathname) => pathname === APP_BASE_PATH || pathname.startsWith(`${APP_BASE_PATH}/`);
 
     const applyViewportVars = () => {
       const viewport = window.visualViewport;
@@ -35,6 +38,24 @@
 
     const getCurrentPath = () => {
       return `${window.location.pathname}${window.location.search}${window.location.hash}` || '/';
+    };
+
+    const sanitizeReturnToPath = (rawPath) => {
+      if (!rawPath) {
+        return DEFAULT_RETURN_PATH;
+      }
+      try {
+        const url = new URL(rawPath, window.location.origin);
+        if (url.origin !== window.location.origin) {
+          return DEFAULT_RETURN_PATH;
+        }
+        if (isAppPath(url.pathname)) {
+          return DEFAULT_RETURN_PATH;
+        }
+        return `${url.pathname}${url.search}${url.hash}` || DEFAULT_RETURN_PATH;
+      } catch {
+        return DEFAULT_RETURN_PATH;
+      }
     };
 
     const buildLaunchPath = (returnTo) => {
@@ -69,7 +90,7 @@
     };
 
     const openOverlay = ({ src, returnTo, historyPath } = {}) => {
-      const resolvedReturnTo = returnTo || returnToPath || getCurrentPath();
+      const resolvedReturnTo = sanitizeReturnToPath(returnTo || returnToPath || getCurrentPath());
 
       const rawTarget = src || buildLaunchPath(resolvedReturnTo);
 
@@ -110,8 +131,9 @@
       setState('closed');
       frame.src = 'about:blank';
       lastHistoryPath = null;
-      if (!preserveHistory && returnToPath) {
-        window.history.replaceState({}, '', returnToPath);
+      const closeDestination = sanitizeReturnToPath(returnToPath);
+      if (!preserveHistory) {
+        window.history.replaceState({}, '', closeDestination);
       }
       returnToPath = null;
     };

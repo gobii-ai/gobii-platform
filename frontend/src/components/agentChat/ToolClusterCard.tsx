@@ -133,16 +133,16 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
         {separatedEntryPlacement.beforePreview.length ? (
           <div className="tool-cluster-separate-list">{separatedEntryPlacement.beforePreview.map(renderSeparatedEntry)}</div>
         ) : null}
-        <div className="tool-cluster-summary">
-          {hasPreviewEntries ? (
+        {hasPreviewEntries ? (
+          <div className="tool-cluster-summary">
             <ToolClusterLivePreview
               cluster={transformed}
               isLatestEvent={isLatestEvent}
               onOpenTimeline={handleToggleCluster}
               onSelectEntry={handlePreviewEntrySelect}
             />
-          ) : null}
-        </div>
+          </div>
+        ) : null}
         {separatedEntryPlacement.afterPreview.length ? (
           <div className="tool-cluster-separate-list">{separatedEntryPlacement.afterPreview.map(renderSeparatedEntry)}</div>
         ) : null}

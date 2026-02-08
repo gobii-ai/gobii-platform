@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.urls import reverse
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 from bs4 import BeautifulSoup
 from api.services.daily_credit_settings import get_daily_credit_settings_for_plan
 from constants.plans import PlanNames
@@ -515,6 +515,85 @@ class ConsoleViewsTest(TestCase):
         status = payload.get('status', {}).get('dailyCredits', {})
         self.assertFalse(status.get('hardLimitBlocked'))
         self.assertFalse(status.get('hardLimitReached'))
+
+    @tag("batch_console_agents")
+    def test_agent_addons_api_task_pack_update_queues_owner_resume(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Addons API Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Addons API Agent",
+            charter="Task pack resume flow",
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+        body = {"taskPacks": {"quantities": {"price_task_pack": 1}}}
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.api_views.update_task_pack_quantities", return_value=(True, None, 200)) as mock_update_task, \
+             patch("console.api_views.build_agent_addons_payload", return_value={"status": {}}), \
+             patch("console.api_views.queue_owner_task_pack_resume", return_value=1) as mock_owner_resume, \
+             patch("console.api_views.queue_settings_change_resume") as mock_agent_resume:
+            response = self.client.post(
+                url,
+                data=json.dumps(body),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_update_task.assert_called_once_with(
+            owner=self.user,
+            owner_type="user",
+            plan_id=ANY,
+            quantities={"price_task_pack": 1},
+        )
+        mock_owner_resume.assert_called_once_with(
+            owner_id=self.user.id,
+            owner_type="user",
+            source="agent_addons_api_owner_resume",
+        )
+        mock_agent_resume.assert_not_called()
+
+    @tag("batch_console_agents")
+    def test_agent_addons_api_falls_back_to_agent_resume_when_owner_resume_noops(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Addons API Fallback Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Addons API Fallback Agent",
+            charter="Task pack fallback resume flow",
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+        body = {"taskPacks": {"quantities": {"price_task_pack": 1}}}
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.api_views.update_task_pack_quantities", return_value=(True, None, 200)), \
+             patch("console.api_views.build_agent_addons_payload", return_value={"status": {}}), \
+             patch("console.api_views.queue_owner_task_pack_resume", return_value=0), \
+             patch("console.api_views.queue_settings_change_resume", return_value=True) as mock_agent_resume:
+            response = self.client.post(
+                url,
+                data=json.dumps(body),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_agent_resume.assert_called_once_with(
+            agent,
+            task_pack_changed=True,
+            source="agent_addons_api",
+        )
 
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')

@@ -118,6 +118,47 @@ export function extractBrightDataSearchQuery(parameters: Record<string, unknown>
     }
   }
 
+  const batchKeys = ['queries', 'searches', 'query_list']
+  for (const key of batchKeys) {
+    const rawBatch = parameters[key]
+    if (!Array.isArray(rawBatch) || !rawBatch.length) {
+      continue
+    }
+
+    const extracted: string[] = []
+    for (const item of rawBatch) {
+      if (typeof item === 'string') {
+        const trimmed = item.trim()
+        if (trimmed.length > 0) {
+          extracted.push(trimmed)
+        }
+        continue
+      }
+
+      if (typeof item === 'object' && item !== null && !Array.isArray(item)) {
+        const itemRecord = item as Record<string, unknown>
+        for (const nestedKey of keysToCheck) {
+          const nested = itemRecord[nestedKey]
+          if (typeof nested !== 'string') {
+            continue
+          }
+          const trimmed = nested.trim()
+          if (trimmed.length > 0) {
+            extracted.push(trimmed)
+            break
+          }
+        }
+      }
+    }
+
+    if (extracted.length === 1) {
+      return extracted[0]
+    }
+    if (extracted.length > 1) {
+      return `${extracted[0]} (+${extracted.length - 1} more)`
+    }
+  }
+
   return null
 }
 

@@ -4,6 +4,7 @@ import { ExternalLink, Search } from 'lucide-react'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
 import { toFriendlyToolName, getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
+import { extractBrightDataSearchQuery } from '../tooling/brightdata'
 import { ToolIconSlot } from './ToolIconSlot'
 import { deriveSemanticPreview } from './tooling/clusterPreviewText'
 import { parseToolSearchResult } from './tooling/searchUtils'
@@ -109,11 +110,32 @@ function parseSearchQuery(value: string | null): string | null {
   if (!value) {
     return null
   }
-  const cleaned = value.split('•')[0]?.trim() ?? value.trim()
-  const quoteMatch = cleaned.match(/[“"]([^”"]+)[”"]/)
-  if (quoteMatch?.[1]) {
-    return clampText(quoteMatch[1], 64)
+
+  // Strip only the known trailing counter we append in captions (e.g., ` • 12 results`).
+  const cleaned = value.replace(/\s+•\s+\d[\d,]*\s+results?$/i, '').trim()
+  const wrappedWithCurlyQuotes = cleaned.startsWith('“') && cleaned.endsWith('”')
+  if (wrappedWithCurlyQuotes && cleaned.length > 2) {
+    return clampText(cleaned.slice(1, -1).trim(), 64)
   }
+
+  const wrappedWithStraightQuotes = cleaned.startsWith('"') && cleaned.endsWith('"')
+  if (wrappedWithStraightQuotes && cleaned.length > 2) {
+    return clampText(cleaned.slice(1, -1).trim(), 64)
+  }
+
+  const quoteMatch = cleaned.match(/“(.+)”/)
+  if (quoteMatch?.[1]) {
+    return clampText(quoteMatch[1].trim(), 64)
+  }
+
+  // Only unwrap straight quotes when there is exactly one quoted segment.
+  // Multiple straight-quoted segments are often full boolean queries like:
+  // site:github.com "foo" OR "bar" — we should preserve the full expression.
+  const straightQuoteMatches = [...cleaned.matchAll(/"([^"]+)"/g)]
+  if (straightQuoteMatches.length === 1 && straightQuoteMatches[0]?.[1]) {
+    return clampText(straightQuoteMatches[0][1].trim(), 64)
+  }
+
   return clampText(cleaned, 64)
 }
 
@@ -818,7 +840,8 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
   }
 
   if (kind === 'search') {
-    const query = parseSearchQuery(semantic ?? entry.caption ?? entry.summary ?? null)
+    const parameterQuery = extractBrightDataSearchQuery(entry.parameters)
+    const query = parseSearchQuery(parameterQuery ?? semantic ?? entry.caption ?? entry.summary ?? null)
     const isToolSearch = TOOL_SEARCH_TOOL_NAMES.has(toolName) || entry.label.toLowerCase() === 'tool search'
     const label = isToolSearch ? 'Searching tools' : 'Searching web'
     return {

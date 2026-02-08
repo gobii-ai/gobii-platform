@@ -822,12 +822,28 @@ def ingest_inbound_message(
                         if available != TASKS_UNLIMITED and available < min_cost:
                             # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
                             try:
+                                try:
+                                    billing_url = _build_site_url(reverse("billing"))
+                                    if agent_obj.organization_id:
+                                        billing_url = append_context_query(
+                                            billing_url,
+                                            agent_obj.organization_id,
+                                        )
+                                except (
+                                    NoReverseMatch,
+                                    Site.DoesNotExist,
+                                    MultipleObjectsReturned,
+                                    DatabaseError,
+                                    ValueError,
+                                ):
+                                    billing_url = ""
                                 context = {
                                     "agent": agent_obj,
                                     "owner": agent_obj.user,
                                     "sender": parsed.sender,
                                     "subject": parsed.subject or "",
                                     "is_proprietary_mode": settings.GOBII_PROPRIETARY_MODE,
+                                    "billing_url": billing_url,
                                 }
                                 subject = render_to_string(
                                     "emails/agent_out_of_credits_subject.txt", context

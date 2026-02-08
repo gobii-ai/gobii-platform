@@ -5808,21 +5808,24 @@
   font-size: 0.9375rem;
   border-radius: 0;
   border: none;
-  border-bottom: 1px dashed rgba(99, 102, 241, 0.25);
-  background: rgba(99, 102, 241, 0.03);
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  background: rgba(99, 102, 241, 0.06);
+  color: #4338ca;
 }
 
 .chat-sidebar-create-btn--drawer:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(99, 102, 241, 0.1);
 }
 
 .chat-sidebar-create-btn--drawer:active {
-  background: rgba(99, 102, 241, 0.12);
+  background: rgba(99, 102, 241, 0.15);
 }
 
 .chat-sidebar-create-btn--drawer .chat-sidebar-create-btn-icon {
   width: 2.75rem;
   height: 2.75rem;
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
 }
 
 /* Sidebar search */

@@ -30,9 +30,10 @@ def queue_settings_change_resume(
     previous_daily_credit_limit=None,
     preferred_llm_tier_changed: bool = False,
     previous_preferred_llm_tier_key: str | None = None,
+    task_pack_changed: bool = False,
     source: str = "unknown",
 ) -> bool:
-    if not daily_credit_limit_changed and not preferred_llm_tier_changed:
+    if not daily_credit_limit_changed and not preferred_llm_tier_changed and not task_pack_changed:
         return False
 
     notes_payload: dict[str, object] = {
@@ -63,8 +64,17 @@ def queue_settings_change_resume(
             f"Intelligence level changed from {previous_tier} to {current_tier}."
         )
 
-    description = (
+    if task_pack_changed:
+        notes_payload["changes"]["task_pack"] = {"updated": True}
+        change_fragments.append("Task pack credits were updated.")
+
+    description_prefix = (
         "Agent settings updated. "
+        if daily_credit_limit_changed or preferred_llm_tier_changed
+        else "Agent capacity updated. "
+    )
+    description = (
+        description_prefix
         + " ".join(change_fragments)
         + " Resume immediately with the updated configuration."
     )
@@ -80,3 +90,33 @@ def queue_settings_change_resume(
 
     transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
     return True
+
+
+def queue_owner_task_pack_resume(
+    *,
+    owner_id,
+    owner_type: str,
+    source: str = "unknown",
+) -> int:
+    normalized_owner_type = str(owner_type or "").strip().lower()
+    if not owner_id or normalized_owner_type not in {"organization", "user"}:
+        return 0
+
+    agents = PersistentAgent.objects.non_eval().filter(
+        is_active=True,
+        life_state=PersistentAgent.LifeState.ACTIVE,
+    )
+    if normalized_owner_type == "organization":
+        agents = agents.filter(organization_id=owner_id)
+    else:
+        agents = agents.filter(user_id=owner_id, organization__isnull=True)
+
+    resumed_count = 0
+    for agent in agents.only("id", "daily_credit_limit").iterator(chunk_size=200):
+        if queue_settings_change_resume(
+            agent,
+            task_pack_changed=True,
+            source=source,
+        ):
+            resumed_count += 1
+    return resumed_count

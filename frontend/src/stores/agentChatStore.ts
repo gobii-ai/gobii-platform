@@ -971,7 +971,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     let shouldRefreshLatest = false
 
     set((state) => {
-      const awaitingResponse = false
       const existingStream = state.streaming
       let isNewStream = false
       let base: StreamState
@@ -981,6 +980,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       } else {
         base = existingStream
       }
+      // Keep awaitingResponse until a processing/timeline update explicitly clears it.
+      // This prevents a loading-indicator gap between stream completion and follow-up tool events.
+      // Also mark fresh streams as awaiting so non-sendMessage stream flows stay consistent.
+      const awaitingResponse = state.awaitingResponse || isNewStream
 
       const reasoningDelta = payload.reasoning_delta ?? ''
       const contentDelta = payload.content_delta ?? ''
