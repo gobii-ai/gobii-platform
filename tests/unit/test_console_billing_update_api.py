@@ -68,15 +68,21 @@ class ConsoleBillingUpdateApiTests(TestCase):
 
         self.url = reverse("console_billing_update")
 
-    @patch("console.views.AddonEntitlementService.sync_subscription_entitlements")
-    @patch("console.views.BillingService.get_current_billing_period_for_owner", return_value=(date(2026, 2, 1), date(2026, 3, 1)))
-    @patch("console.views.AddonEntitlementService.get_price_options", return_value=[SimpleNamespace(price_id="price_task_pack")])
-    @patch("console.views._get_owner_plan_id", return_value="startup")
-    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_trial"))
-    @patch("console.views._assign_stripe_api_key", return_value=None)
-    @patch("console.views.stripe.Subscription.modify")
-    @patch("console.views.stripe.Subscription.retrieve")
-    @patch("console.views.stripe_status")
+    @patch("console.billing_update_service.AddonEntitlementService.sync_subscription_entitlements")
+    @patch(
+        "console.billing_update_service.BillingService.get_current_billing_period_for_owner",
+        return_value=(date(2026, 2, 1), date(2026, 3, 1)),
+    )
+    @patch(
+        "console.billing_update_service.AddonEntitlementService.get_price_options",
+        return_value=[SimpleNamespace(price_id="price_task_pack")],
+    )
+    @patch("console.billing_update_service._get_owner_plan_id", return_value="startup")
+    @patch("console.billing_update_service.get_active_subscription", return_value=SimpleNamespace(id="sub_trial"))
+    @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
+    @patch("console.billing_update_service.stripe.Subscription.modify")
+    @patch("console.billing_update_service.stripe.Subscription.retrieve")
+    @patch("console.billing_update_service.stripe_status")
     def test_trial_addon_purchase_ends_trial_immediately(
         self,
         mock_stripe_status,
@@ -124,7 +130,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
         _, kwargs = mock_modify.call_args
         self.assertEqual(kwargs.get("trial_end"), "now")
 
-    @patch("console.views.stripe_status")
+    @patch("console.billing_update_service.stripe_status")
     def test_org_addons_rejected_without_seats(self, mock_stripe_status):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
 
@@ -146,8 +152,8 @@ class ConsoleBillingUpdateApiTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload.get("error"), "seats_required")
 
-    @patch("console.views.stripe_status")
-    @patch("console.views._get_owner_plan_id", return_value="org_team")
+    @patch("console.billing_update_service.stripe_status")
+    @patch("console.billing_update_service._get_owner_plan_id", return_value="org_team")
     def test_dedicated_ip_removal_requires_unassign_and_is_scoped(self, mock_get_plan_id, mock_stripe_status):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
 
@@ -207,19 +213,16 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertIn("Org Agent", payload.get("assignedAgents", []))
         self.assertNotIn("Other Org Agent", payload.get("assignedAgents", []))
 
-    @patch("console.views._update_stripe_dedicated_ip_quantity")
-    @patch("console.views._assign_stripe_api_key")
-    @patch("console.views.stripe_status")
-    @patch("console.views._get_owner_plan_id", return_value="org_team")
+    @patch("console.billing_update_service._update_stripe_dedicated_ip_quantity")
+    @patch("console.billing_update_service.stripe_status")
+    @patch("console.billing_update_service._get_owner_plan_id", return_value="org_team")
     def test_dedicated_ip_removal_with_unassign_only_clears_owner_agents(
         self,
         mock_get_plan_id,
         mock_stripe_status,
-        mock_assign_key,
         mock_update_dedicated_qty,
     ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
-        mock_assign_key.return_value = None
         mock_update_dedicated_qty.return_value = None
 
         self.org.billing.purchased_seats = 1

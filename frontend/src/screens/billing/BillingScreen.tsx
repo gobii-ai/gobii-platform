@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
+import { useCallback, useMemo, useReducer, useState } from 'react'
 import { CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
 
-import { HttpError, jsonRequest } from '../../api/http'
+import { jsonRequest } from '../../api/http'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { SubscriptionUpgradeModal } from '../../components/common/SubscriptionUpgradeModal'
 import { type PlanTier, useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track } from '../../util/analytics'
@@ -15,36 +16,14 @@ import { AddonSections } from './AddonSections'
 import { DedicatedIpSection } from './DedicatedIpSection'
 import { SubscriptionSummary } from './SubscriptionSummary'
 import { ConfirmDialog } from './ConfirmDialog'
+import { useBillingNudgeVisibility } from './useBillingNudgeVisibility'
+import { useConfirmPostAction } from './useConfirmPostAction'
 
 type DedicatedRemovePrompt = {
   proxyId: string
   proxyLabel: string
   assignedAgents: DedicatedIpAssignedAgent[]
   unassign: boolean
-}
-
-function safeErrorMessage(error: unknown): string {
-  if (error instanceof HttpError) {
-    const body = error.body
-    if (body && typeof body === 'object') {
-      const maybeDetail = (body as { detail?: unknown }).detail
-      const maybeError = (body as { error?: unknown }).error
-      if (typeof maybeDetail === 'string' && maybeDetail.trim()) {
-        return maybeDetail
-      }
-      if (typeof maybeError === 'string' && maybeError.trim()) {
-        return maybeError
-      }
-    }
-    if (typeof body === 'string' && body.trim()) {
-      return body
-    }
-    return 'Request failed. Please try again.'
-  }
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-  return 'Request failed. Please try again.'
 }
 
 function computeAddonsDisabledReason(initialData: BillingInitialData): string | null {
@@ -108,14 +87,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const [cancelModalOpen, setCancelModalOpen] = useState(false)
-  const [cancelBusy, setCancelBusy] = useState(false)
-  const [cancelError, setCancelError] = useState<string | null>(null)
-
-  const [resumeModalOpen, setResumeModalOpen] = useState(false)
-  const [resumeBusy, setResumeBusy] = useState(false)
-  const [resumeError, setResumeError] = useState<string | null>(null)
-
   const [dedicatedPrompt, setDedicatedPrompt] = useState<DedicatedRemovePrompt | null>(null)
   const [trialConfirmOpen, setTrialConfirmOpen] = useState(false)
   const [trialConfirmPayload, setTrialConfirmPayload] = useState<Record<string, unknown> | null>(null)
@@ -123,8 +94,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const [planConfirmTarget, setPlanConfirmTarget] = useState<PlanTier | null>(null)
   const [planConfirmBusy, setPlanConfirmBusy] = useState(false)
   const [planConfirmError, setPlanConfirmError] = useState<string | null>(null)
-  const [summaryActionsVisible, setSummaryActionsVisible] = useState(false)
-  const [nearTop, setNearTop] = useState(true)
 
   const addonsDisabledReason = useMemo(() => computeAddonsDisabledReason(initialData), [initialData])
   const addonsInteractable = useMemo(() => computeAddonsInteractable(initialData), [initialData])
@@ -132,72 +101,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
 
   const hasAnyChanges = useMemo(() => isDraftDirty(initialData, draft), [draft, initialData])
 
-  // Hide the bottom "Review and update" nudge once the user can see the real Update button.
-  // (It is redundant and visually noisy when the summary actions are already in view.)
-  useEffect(() => {
-    if (!hasAnyChanges) {
-      setSummaryActionsVisible(false)
-      return
-    }
-    if (typeof document === 'undefined') {
-      return
-    }
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const el = document.getElementById('billing-summary-actions')
-    if (!el) {
-      setSummaryActionsVisible(false)
-      return
-    }
-
-    if (typeof window.IntersectionObserver !== 'function') {
-      const check = () => {
-        const rect = el.getBoundingClientRect()
-        const inView = rect.top < window.innerHeight && rect.bottom > 0
-        setSummaryActionsVisible(inView)
-      }
-      check()
-      window.addEventListener('scroll', check, { passive: true })
-      window.addEventListener('resize', check)
-      return () => {
-        window.removeEventListener('scroll', check)
-        window.removeEventListener('resize', check)
-      }
-    }
-
-    const observer = new window.IntersectionObserver(
-      (entries: Array<{ isIntersecting?: boolean }>) => {
-        const entry = entries[0]
-        setSummaryActionsVisible(Boolean(entry && entry.isIntersecting))
-      },
-      {
-        threshold: 0.05,
-      },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [hasAnyChanges])
-
-  // If the user is already deep in the page, the nudge adds noise.
-  useEffect(() => {
-    if (!hasAnyChanges) {
-      setNearTop(true)
-      return
-    }
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const update = () => {
-      const y = window.scrollY
-      setNearTop(y < 240)
-    }
-    update()
-    window.addEventListener('scroll', update, { passive: true })
-    return () => window.removeEventListener('scroll', update)
-  }, [hasAnyChanges])
+  const { summaryActionsVisible, nearTop } = useBillingNudgeVisibility({ enabled: hasAnyChanges })
 
   const resetDraft = useCallback(() => {
     setSaveError(null)
@@ -332,51 +236,10 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     await submitSave(payload)
   }, [addonsInteractable, dedicatedInteractable, draft, initialData, submitSave, trialConfirmOpen])
 
-  const handleCancelSubscription = useCallback(async () => {
-    if (cancelBusy) return
-    const url = initialData.contextType === 'personal' ? initialData.endpoints.cancelSubscriptionUrl : undefined
-    if (!url) return
-    setCancelBusy(true)
-    setCancelError(null)
-    try {
-      const result = await jsonRequest<{ success: boolean; error?: string }>(url, {
-        method: 'POST',
-        includeCsrf: true,
-      })
-      if (!result?.success) {
-        setCancelError(result?.error ?? 'Unable to cancel subscription.')
-        return
-      }
-      window.location.reload()
-    } catch (error) {
-      setCancelError(safeErrorMessage(error))
-    } finally {
-      setCancelBusy(false)
-    }
-  }, [cancelBusy, initialData])
-
-  const handleResumeSubscription = useCallback(async () => {
-    if (resumeBusy) return
-    const url = initialData.contextType === 'personal' ? initialData.endpoints.resumeSubscriptionUrl : undefined
-    if (!url) return
-    setResumeBusy(true)
-    setResumeError(null)
-    try {
-      const result = await jsonRequest<{ success: boolean; error?: string }>(url, {
-        method: 'POST',
-        includeCsrf: true,
-      })
-      if (!result?.success) {
-        setResumeError(result?.error ?? 'Unable to resume subscription.')
-        return
-      }
-      window.location.reload()
-    } catch (error) {
-      setResumeError(safeErrorMessage(error))
-    } finally {
-      setResumeBusy(false)
-    }
-  }, [initialData, resumeBusy])
+  const cancelUrl = initialData.contextType === 'personal' ? initialData.endpoints.cancelSubscriptionUrl : undefined
+  const resumeUrl = initialData.contextType === 'personal' ? initialData.endpoints.resumeSubscriptionUrl : undefined
+  const cancelAction = useConfirmPostAction({ url: cancelUrl, defaultErrorMessage: 'Unable to cancel subscription.' })
+  const resumeAction = useConfirmPostAction({ url: resumeUrl, defaultErrorMessage: 'Unable to resume subscription.' })
 
   const dismissPlanConfirm = useCallback(() => {
     setPlanConfirmOpen(false)
@@ -407,13 +270,13 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         <BillingHeader
           initialData={initialData}
           onChangePlan={!isOrg && isProprietaryMode ? () => openUpgradeModal('unknown') : undefined}
-          onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? () => setCancelModalOpen(true) : undefined}
+          onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? cancelAction.openDialog : undefined}
           onResume={!isOrg
             && initialData.contextType === 'personal'
             && initialData.paidSubscriber
             && initialData.cancelAtPeriodEnd
             && initialData.endpoints.resumeSubscriptionUrl
-            ? () => setResumeModalOpen(true)
+            ? resumeAction.openDialog
             : undefined}
           seatTarget={initialData.contextType === 'organization' ? (draft.seatTarget ?? initialData.seats.purchased) : undefined}
           saving={saving}
@@ -481,38 +344,38 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       ) : null}
 
       <ConfirmDialog
-        open={cancelModalOpen}
+        open={cancelAction.open}
         title="Cancel subscription"
         description={
           <>
             You will keep access until the end of your current billing period.
-            {cancelError ? <div className="mt-2 text-sm font-semibold text-rose-700">{cancelError}</div> : null}
+            {cancelAction.error ? <div className="mt-2 text-sm font-semibold text-rose-700">{cancelAction.error}</div> : null}
           </>
         }
         confirmLabel="Cancel subscription"
         cancelLabel="Keep subscription"
         icon={<ShieldAlert className="h-5 w-5" />}
-        busy={cancelBusy}
+        busy={cancelAction.busy}
         danger
-        onConfirm={handleCancelSubscription}
-        onClose={() => (cancelBusy ? null : setCancelModalOpen(false))}
+        onConfirm={cancelAction.confirm}
+        onClose={cancelAction.closeDialog}
       />
 
       <ConfirmDialog
-        open={resumeModalOpen}
+        open={resumeAction.open}
         title="Resume subscription?"
         description={
           <>
             Your subscription will stay active and renew normally.
-            {resumeError ? <div className="mt-2 text-sm font-semibold text-rose-700">{resumeError}</div> : null}
+            {resumeAction.error ? <div className="mt-2 text-sm font-semibold text-rose-700">{resumeAction.error}</div> : null}
           </>
         }
         confirmLabel="Resume subscription"
         cancelLabel="Keep cancellation"
         icon={<ShieldAlert className="h-5 w-5" />}
-        busy={resumeBusy}
-        onConfirm={handleResumeSubscription}
-        onClose={() => (resumeBusy ? null : setResumeModalOpen(false))}
+        busy={resumeAction.busy}
+        onConfirm={resumeAction.confirm}
+        onClose={resumeAction.closeDialog}
       />
 
       <ConfirmDialog

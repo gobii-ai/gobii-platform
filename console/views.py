@@ -77,6 +77,7 @@ from console.daily_credit import (
     serialize_daily_credit_payload,
 )
 from console.home_metrics import get_console_home_metrics
+from console.role_constants import BILLING_MANAGE_ROLES
 
 from api.models import (
     ApiKey,
@@ -467,14 +468,6 @@ def _get_checkout_trial_days() -> tuple[int, int]:
 # verified phone number on their account. Toggle this to force showing the
 # phone screen even when a verified number exists.
 SKIP_VERIFIED_SMS_SCREEN = True
-
-BILLING_MANAGE_ROLES = {
-    OrganizationMembership.OrgRole.OWNER,
-    OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.BILLING,
-}
-if settings.SOLUTIONS_PARTNER_BILLING_ACCESS:
-    BILLING_MANAGE_ROLES.add(OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
 
 MEMBER_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
@@ -9573,77 +9566,8 @@ def _update_addon_quantity(
     return redirect(_billing_redirect(owner, owner_type))
 
 
-def _update_stripe_dedicated_ip_quantity(
-    owner,
-    owner_type: str,
-    desired_qty: int,
-    *,
-    end_trial_now: bool = False,
-) -> str | None:
-    """Ensure the Stripe subscription item reflects the desired dedicated IP quantity.
-
-    Returns a Stripe hosted invoice URL when the update requires customer action (SCA / payment method).
-    """
-    desired_qty = int(desired_qty)
-    subscription = get_active_subscription(owner)
-    if not subscription:
-        raise ValueError("Active subscription not found")
-
-    stripe_settings = get_stripe_settings()
-    dedicated_price_id = (
-        stripe_settings.startup_dedicated_ip_price_id
-        if owner_type == "user"
-        else stripe_settings.org_team_dedicated_ip_price_id
-    )
-    if not dedicated_price_id:
-        raise ValueError("Dedicated IP price not configured")
-
-    subscription_data = stripe.Subscription.retrieve(
-        subscription.id,
-        expand=["items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
-    )
-
-    dedicated_item = None
-    for item in subscription_data.get("items", {}).get("data", []) or []:
-        price = item.get("price") or {}
-        if price.get("id") == dedicated_price_id:
-            dedicated_item = item
-            break
-
-    if desired_qty > 0:
-        if dedicated_item is None:
-            items_payload = [{"price": dedicated_price_id, "quantity": desired_qty}]
-        else:
-            items_payload = [{"id": dedicated_item.get("id"), "quantity": desired_qty}]
-        modify_kwargs = {
-            "items": items_payload,
-            "proration_behavior": "always_invoice",
-            "expand": ["items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
-            "payment_behavior": "pending_if_incomplete",
-        }
-        if end_trial_now and (subscription_data.get("status") or "") == "trialing":
-            modify_kwargs["trial_end"] = "now"
-        updated = stripe.Subscription.modify(subscription.id, **modify_kwargs)
-        invoice = updated.get("latest_invoice") if isinstance(updated, Mapping) else None
-        if isinstance(invoice, Mapping):
-            hosted_url = invoice.get("hosted_invoice_url")
-            payment_intent = invoice.get("payment_intent")
-            if hosted_url and isinstance(payment_intent, Mapping):
-                intent_status = payment_intent.get("status")
-                if intent_status in {"requires_action", "requires_payment_method"}:
-                    return hosted_url
-    elif dedicated_item is not None:
-        stripe.Subscription.modify(
-            subscription.id,
-            items=[{"id": dedicated_item.get("id"), "deleted": True}],
-            proration_behavior="always_invoice",
-        )
-    return None
-
-
 @login_required
 @require_POST
-@transaction.atomic
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Update Task Pack Quantity")
 def update_task_pack_quantity(request, owner, owner_type):
@@ -9660,7 +9584,6 @@ def update_task_pack_quantity(request, owner, owner_type):
 
 @login_required
 @require_POST
-@transaction.atomic
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Update Contact Pack Quantity")
 def update_contact_pack_quantity(request, owner, owner_type):
@@ -9677,45 +9600,24 @@ def update_contact_pack_quantity(request, owner, owner_type):
 
 @login_required
 @require_POST
-@transaction.atomic
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Update Add-ons Batch")
 def update_addons(request, owner, owner_type):
+    from console.billing_update_service import (
+        BillingUpdateError,
+        SUPPORT_DETAIL,
+        apply_addon_price_quantities,
+    )
+
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect("billing")
-
-    plan_id = _get_owner_plan_id(owner, owner_type)
-    task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "task_pack")
-    contact_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "contact_pack")
-    browser_task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "browser_task_limit")
-    advanced_captcha_options = AddonEntitlementService.get_price_options(
-        owner_type,
-        plan_id,
-        "advanced_captcha_resolution",
-    )
-    all_options = (task_options or []) + (contact_options or []) + (browser_task_options or []) + (advanced_captcha_options or [])
-    if not all_options:
-        messages.error(request, "No add-ons are configured for your plan.")
-        return redirect(_billing_redirect(owner, owner_type))
-
-    price_to_kind: dict[str, str] = {}
-    for opt in task_options or []:
-        price_to_kind[opt.price_id] = "task_pack"
-    for opt in contact_options or []:
-        price_to_kind[opt.price_id] = "contact_pack"
-    for opt in browser_task_options or []:
-        price_to_kind[opt.price_id] = "browser_task_limit"
-    for opt in advanced_captcha_options or []:
-        price_to_kind[opt.price_id] = "advanced_captcha_resolution"
 
     desired_quantities: dict[str, int] = {}
     for key, value in request.POST.items():
         if not key.startswith("quantity__"):
             continue
         price_id = key.replace("quantity__", "", 1)
-        if price_id not in price_to_kind:
-            continue
         try:
             qty = int(value)
         except (TypeError, ValueError):
@@ -9726,147 +9628,36 @@ def update_addons(request, owner, owner_type):
             return redirect(_billing_redirect(owner, owner_type))
         desired_quantities[price_id] = qty
 
-    owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
-    posted_qty_keys = [key for key in request.POST.keys() if key.startswith("quantity__")]
-    logger.info(
-        "Add-ons update requested: owner_type=%s owner_id=%s plan_id=%s posted_keys=%s desired_quantities=%s",
-        owner_type,
-        owner_id,
-        plan_id,
-        posted_qty_keys,
-        desired_quantities,
-    )
-
     if not desired_quantities:
         messages.error(request, "No add-on quantities provided.")
         return redirect(_billing_redirect(owner, owner_type))
 
-    subscription = get_active_subscription(owner, preferred_plan_id=plan_id)
-    if not subscription:
-        messages.error(request, "No active subscription found.")
-        return redirect(_billing_redirect(owner, owner_type))
-
     try:
-        _assign_stripe_api_key()
-        stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
-        customer_id = (stripe_subscription.get("customer") or "")
-        if not customer_id:
-            messages.error(request, "Stripe customer not found for this subscription.")
-            return redirect(_billing_redirect(owner, owner_type))
-
-        items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
-
-        # Build existing quantities map
-        existing_qty: dict[str, int] = {}
-        item_id_by_price: dict[str, str] = {}
-        for item in items_data or []:
-            price = item.get("price") or {}
-            pid = price.get("id")
-            if not pid:
-                continue
-            item_id_by_price[pid] = item.get("id")
-            try:
-                existing_qty[pid] = int(item.get("quantity") or 0)
-            except (TypeError, ValueError):
-                existing_qty[pid] = 0
-
-        logger.info(
-            "Add-ons existing quantities: owner_type=%s owner_id=%s subscription_id=%s existing_qty=%s",
+        action_url = apply_addon_price_quantities(
+            owner,
             owner_type,
-            owner_id,
-            subscription.id,
-            existing_qty,
+            desired_quantities=desired_quantities,
+            created_via="console_batch_update",
+            end_trial_on_purchase=False,
         )
-
-        changes_made = False
-        items_payload: list[dict[str, Any]] = []
-        for price_id, desired_qty in desired_quantities.items():
-            current_qty = existing_qty.get(price_id, 0)
-            if desired_qty == current_qty:
-                continue
-
-            if desired_qty > 0:
-                if price_id in item_id_by_price:
-                    items_payload.append({"id": item_id_by_price[price_id], "quantity": desired_qty})
-                else:
-                    items_payload.append({"price": price_id, "quantity": desired_qty})
-            else:
-                if price_id in item_id_by_price:
-                    items_payload.append({"id": item_id_by_price[price_id], "deleted": True})
-            changes_made = True
-
-        if changes_made:
-            modify_kwargs = {
-                "items": items_payload,
-                "proration_behavior": "always_invoice",
-                "expand": ["items.data.price"],
-            }
-            if not any(item.get("deleted") for item in items_payload):
-                modify_kwargs["payment_behavior"] = "pending_if_incomplete"
-            updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
-            updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
-            if not isinstance(updated_items, list):
-                logger.warning(
-                    "Add-ons update returned unexpected items format: owner_type=%s owner_id=%s subscription_id=%s",
-                    owner_type,
-                    owner_id,
-                    subscription.id,
-                )
-                updated_items = []
-            else:
-                logger.info(
-                    "Add-ons updated on Stripe: owner_type=%s owner_id=%s subscription_id=%s items_payload=%s",
-                    owner_type,
-                    owner_id,
-                    subscription.id,
-                    items_payload,
-                )
-            try:
-                period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
-                tz = timezone.get_current_timezone()
-                period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
-                period_end_dt = timezone.make_aware(
-                    datetime.combine(period_end + timedelta(days=1), datetime.min.time()),
-                    tz,
-                )
-                AddonEntitlementService.sync_subscription_entitlements(
-                    owner=owner,
-                    owner_type=owner_type,
-                    plan_id=plan_id,
-                    subscription_items=updated_items,
-                    period_start=period_start_dt,
-                    period_end=period_end_dt,
-                    created_via="console_batch_update",
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to sync add-on entitlements after batch update for %s",
-                    owner_id or owner,
-                )
-        else:
-            logger.info(
-                "Add-ons update noop: owner_type=%s owner_id=%s subscription_id=%s desired_quantities=%s existing_qty=%s",
-                owner_type,
-                owner_id,
-                subscription.id,
-                desired_quantities,
-                existing_qty,
-            )
-
+        if action_url:
+            return redirect(action_url)
         messages.success(request, "Add-ons updated.")
-    except stripe.error.StripeError as exc:
-        logger.warning("Stripe API error while updating addons: %s", exc)
-        messages.error(request, f"A billing error occurred: {exc}")
-    except Exception as exc:
-        logger.exception("Failed to update add-ons for %s", owner_id or owner)
-        messages.error(request, "An unexpected error occurred while updating add-ons.")
+    except BillingUpdateError as exc:
+        if exc.detail:
+            messages.error(request, exc.detail)
+        elif exc.code == "invalid_addon_price":
+            messages.error(request, "That add-on tier is not available for your plan.")
+        elif exc.code == "addons_not_configured":
+            messages.error(request, "No add-ons are configured for your plan.")
+        else:
+            messages.error(request, SUPPORT_DETAIL if exc.code in {"stripe_error", "server_error"} else "Unable to update add-ons.")
 
     return redirect(_billing_redirect(owner, owner_type))
 
 
 @login_required
 @require_POST
-@transaction.atomic
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Add Dedicated IP Quantity")
 def add_dedicated_ip_quantity(request, owner, owner_type):
@@ -9896,44 +9687,35 @@ def add_dedicated_ip_quantity(request, owner, owner_type):
                 messages.error(request, error)
         return redirect(_billing_redirect(owner, owner_type))
 
-    add_quantity = form.cleaned_data["quantity"]
+    from console.billing_update_service import (
+        BillingUpdateError,
+        SUPPORT_DETAIL,
+        apply_dedicated_ip_changes,
+    )
 
+    add_quantity = int(form.cleaned_data["quantity"])
     try:
-        _assign_stripe_api_key()
-
-        customer = get_or_create_stripe_customer(owner)
-        if not customer:
-            raise ValueError("Stripe customer not found for owner")
-
-        current_qty = DedicatedProxyService.allocated_count(owner)
-        desired_qty = current_qty + int(add_quantity)
-
-        _update_stripe_dedicated_ip_quantity(owner, owner_type, desired_qty)
-
-        missing = desired_qty - current_qty
-        allocated = 0
-        for _ in range(missing):
-            try:
-                DedicatedProxyService.allocate_proxy(owner)
-                allocated += 1
-            except DedicatedProxyUnavailableError:
-                messages.warning(
-                    request,
-                    "Not enough dedicated IP inventory was available. We've allocated as many as possible.",
-                )
-                break
-
+        action_url = apply_dedicated_ip_changes(
+            owner,
+            owner_type,
+            add_quantity=add_quantity,
+            remove_proxy_ids=[],
+            unassign_proxy_ids=set(),
+        )
+        if action_url:
+            return redirect(action_url)
         messages.success(request, "Dedicated IP quantity updated.")
+    except BillingUpdateError as exc:
+        messages.error(request, exc.detail or SUPPORT_DETAIL)
     except Exception as exc:
         logger.exception("Failed to update dedicated IP quantity", exc_info=True)
-        messages.error(request, f"Failed to update dedicated IPs: {exc}")
+        messages.error(request, SUPPORT_DETAIL)
 
     return redirect(_billing_redirect(owner, owner_type))
 
 
 @login_required
 @require_POST
-@transaction.atomic
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Remove Dedicated IP")
 def remove_dedicated_ip(request, owner, owner_type):
@@ -9946,32 +9728,35 @@ def remove_dedicated_ip(request, owner, owner_type):
         messages.error(request, "Missing dedicated IP identifier.")
         return redirect(_billing_redirect(owner, owner_type))
 
+    from console.billing_update_service import (
+        BillingUpdateError,
+        SUPPORT_DETAIL,
+        apply_dedicated_ip_changes,
+    )
+
     try:
-        _assign_stripe_api_key()
-        current_qty = DedicatedProxyService.allocated_count(owner)
-        if current_qty <= 0:
-            messages.info(request, "No dedicated IPs to remove.")
-            return redirect(_billing_redirect(owner, owner_type))
-
-        if not DedicatedProxyService.release_specific(owner, proxy_id):
-            messages.error(request, "Dedicated IP was already released.")
-            return redirect(_billing_redirect(owner, owner_type))
-
-        desired_qty = max(current_qty - 1, 0)
-
-        _update_stripe_dedicated_ip_quantity(owner, owner_type, desired_qty)
-
+        action_url = apply_dedicated_ip_changes(
+            owner,
+            owner_type,
+            add_quantity=0,
+            remove_proxy_ids=[proxy_id],
+            # Legacy endpoint: automatically unassign scoped agents before removing.
+            unassign_proxy_ids={proxy_id},
+        )
+        if action_url:
+            return redirect(action_url)
         messages.success(request, "Dedicated IP removed.")
+    except BillingUpdateError as exc:
+        messages.error(request, exc.detail or SUPPORT_DETAIL)
     except Exception as exc:
         logger.exception("Failed to remove dedicated IP", exc_info=True)
-        messages.error(request, f"Failed to remove dedicated IP: {exc}")
+        messages.error(request, SUPPORT_DETAIL)
 
     return redirect(_billing_redirect(owner, owner_type))
 
 
 @login_required
 @require_POST
-@transaction.atomic
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Remove All Dedicated IPs")
 def remove_all_dedicated_ip(request, owner, owner_type):
@@ -9979,21 +9764,35 @@ def remove_all_dedicated_ip(request, owner, owner_type):
         messages.error(request, "Stripe billing is not available in this deployment.")
         return redirect('billing')
 
+    from console.billing_update_service import (
+        BillingUpdateError,
+        SUPPORT_DETAIL,
+        apply_dedicated_ip_changes,
+    )
+
     try:
-        _assign_stripe_api_key()
-        current_qty = DedicatedProxyService.allocated_count(owner)
-        if current_qty <= 0:
+        proxy_ids = list(
+            DedicatedProxyService.allocated_proxies(owner).values_list("id", flat=True)
+        )
+        if not proxy_ids:
             messages.info(request, "No dedicated IPs to remove.")
             return redirect(_billing_redirect(owner, owner_type))
 
-        DedicatedProxyService.release_for_owner(owner)
-
-        _update_stripe_dedicated_ip_quantity(owner, owner_type, 0)
-
+        action_url = apply_dedicated_ip_changes(
+            owner,
+            owner_type,
+            add_quantity=0,
+            remove_proxy_ids=[str(pid) for pid in proxy_ids],
+            unassign_proxy_ids={str(pid) for pid in proxy_ids},
+        )
+        if action_url:
+            return redirect(action_url)
         messages.success(request, "All dedicated IPs removed.")
+    except BillingUpdateError as exc:
+        messages.error(request, exc.detail or SUPPORT_DETAIL)
     except Exception as exc:
         logger.exception("Failed to remove all dedicated IPs", exc_info=True)
-        messages.error(request, f"Failed to remove dedicated IPs: {exc}")
+        messages.error(request, SUPPORT_DETAIL)
 
     return redirect(_billing_redirect(owner, owner_type))
 
@@ -10007,693 +9806,9 @@ def _billing_redirect(owner, owner_type: str) -> str:
 
 @login_required
 @require_POST
-@transaction.atomic
 @tracer.start_as_current_span("CONSOLE Billing Update (JSON)")
 def console_billing_update(request):
-    """Apply staged billing changes from the React billing screen.
+    from console.billing_update_service import handle_console_billing_update
 
-    Design constraints:
-    - Seat increases are applied via direct Stripe subscription updates (no Billing Portal).
-    - Seat reductions are scheduled for the next cycle via SubscriptionSchedule (existing behavior).
-    - Add-ons and dedicated IPs are disabled for orgs until at least one seat is purchased.
-    """
-    support_detail = (
-        "An error occurred while updating billing. "
-        "Please contact support@gobii.ai for help."
-    )
-
-    def _parse_payload():
-        try:
-            return json.loads(request.body or "{}")
-        except json.JSONDecodeError:
-            return None
-
-    def _resolve_owner(payload_dict):
-        desired_owner_type = (payload_dict.get("ownerType") or "").strip().lower()
-        desired_org_id = (payload_dict.get("organizationId") or "").strip()
-
-        resolved_context = build_console_context(request)
-        if resolved_context.current_context.type == "organization":
-            membership = resolved_context.current_membership
-            if membership is None:
-                return JsonResponse({"ok": False, "error": "org_access_lost"}, status=403)
-            if membership.role not in BILLING_MANAGE_ROLES:
-                return JsonResponse({"ok": False, "error": "forbidden"}, status=403)
-            owner_obj = membership.org
-            resolved_owner_type = "organization"
-            if desired_owner_type and desired_owner_type != "organization":
-                return JsonResponse({"ok": False, "error": "context_mismatch"}, status=400)
-            if desired_org_id and str(owner_obj.id) != desired_org_id:
-                return JsonResponse({"ok": False, "error": "context_mismatch"}, status=400)
-            return owner_obj, resolved_owner_type
-
-        owner_obj = request.user
-        resolved_owner_type = "user"
-        if desired_owner_type and desired_owner_type != "user":
-            return JsonResponse({"ok": False, "error": "context_mismatch"}, status=400)
-        return owner_obj, resolved_owner_type
-
-    def _apply_seats(payload_dict, owner_obj, owner_type_str, response_dict):
-        seats_target = payload_dict.get("seatsTarget", None)
-        cancel_seat_schedule = bool(payload_dict.get("cancelSeatSchedule", False))
-        if owner_type_str != "organization" or seats_target is None:
-            return None
-
-        try:
-            seats_target_int = int(seats_target)
-        except (TypeError, ValueError):
-            return JsonResponse({"ok": False, "error": "invalid_seats_target"}, status=400)
-        if seats_target_int < 0:
-            return JsonResponse({"ok": False, "error": "invalid_seats_target"}, status=400)
-
-        billing = getattr(owner_obj, "billing", None)
-        if billing is None:
-            return JsonResponse({"ok": False, "error": "missing_org_billing"}, status=400)
-
-        seats_reserved = getattr(billing, "seats_reserved", 0) or 0
-        if seats_target_int < seats_reserved:
-            return JsonResponse(
-                {
-                    "ok": False,
-                    "error": "seats_below_reserved",
-                    "detail": "Cannot reduce seats below reserved. Remove members or invites first.",
-                },
-                status=400,
-            )
-
-        stripe_settings = get_stripe_settings()
-        seat_price_id = getattr(stripe_settings, "org_team_price_id", "") or ""
-        if not seat_price_id:
-            return JsonResponse({"ok": False, "error": "seat_price_not_configured"}, status=400)
-
-        subscription_id = getattr(billing, "stripe_subscription_id", None)
-        if not subscription_id:
-            # No active subscription yet; seat purchases require Stripe Checkout.
-            if seats_target_int > 0:
-                try:
-                    _assign_stripe_api_key()
-                    customer = get_or_create_stripe_customer(owner_obj)
-                    if not customer or not getattr(customer, "id", None):
-                        return JsonResponse({"ok": False, "error": "stripe_customer_missing"}, status=400)
-
-                    success_url = request.build_absolute_uri(reverse("billing")) + "?seats_success=1"
-                    cancel_url = request.build_absolute_uri(reverse("billing")) + "?seats_cancelled=1"
-
-                    session = stripe.checkout.Session.create(
-                        customer=customer.id,
-                        api_key=stripe.api_key,
-                        mode="subscription",
-                        success_url=success_url,
-                        cancel_url=cancel_url,
-                        allow_promotion_codes=True,
-                        line_items=[{"price": seat_price_id, "quantity": seats_target_int}],
-                        metadata={
-                            "org_id": str(owner_obj.id),
-                            "seat_requestor_id": str(request.user.id),
-                        },
-                    )
-                    response_dict["redirectUrl"] = session.url
-                    return JsonResponse(response_dict, status=200)
-                except stripe.error.StripeError as exc:
-                    logger.warning("Stripe error starting org seat checkout for org %s: %s", owner_obj.id, exc)
-                    return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
-            return None
-
-        try:
-            _assign_stripe_api_key()
-            subscription = stripe.Subscription.retrieve(
-                subscription_id,
-                expand=["items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
-            )
-        except stripe.error.StripeError as exc:
-            logger.warning("Stripe error retrieving org subscription %s: %s", subscription_id, exc)
-            return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
-
-        subscription_items = (subscription.get("items") or {}).get("data", []) or []
-        licensed_item = None
-        for item in subscription_items:
-            price = item.get("price", {}) or {}
-            usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
-            price_id = price.get("id")
-            if usage_type == "licensed" or (price_id and price_id == seat_price_id):
-                licensed_item = item
-                break
-
-        if not licensed_item:
-            return JsonResponse({"ok": False, "error": "seat_item_missing"}, status=400)
-
-        try:
-            current_quantity = int(licensed_item.get("quantity") or 0)
-        except (TypeError, ValueError):
-            current_quantity = 0
-
-        if seats_target_int == current_quantity and cancel_seat_schedule:
-            schedule_id = getattr(billing, "pending_seat_schedule_id", "") or ""
-            if schedule_id:
-                try:
-                    stripe.SubscriptionSchedule.release(schedule_id)
-                except stripe.error.StripeError as exc:
-                    logger.warning("Stripe error cancelling seat schedule %s: %s", schedule_id, exc)
-                    return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
-
-                billing.pending_seat_quantity = None
-                billing.pending_seat_effective_at = None
-                billing.pending_seat_schedule_id = ""
-                billing.save(
-                    update_fields=[
-                        "pending_seat_quantity",
-                        "pending_seat_effective_at",
-                        "pending_seat_schedule_id",
-                    ]
-                )
-            return None
-
-        if seats_target_int > current_quantity:
-            try:
-                updated = stripe.Subscription.modify(
-                    subscription_id,
-                    items=[{"id": licensed_item.get("id"), "quantity": seats_target_int}],
-                    metadata={
-                        **(subscription.get("metadata") or {}),
-                        "seat_requestor_id": str(request.user.id),
-                    },
-                    proration_behavior="always_invoice",
-                    payment_behavior="pending_if_incomplete",
-                    expand=["latest_invoice.payment_intent", "latest_invoice"],
-                )
-            except stripe.error.StripeError as exc:
-                logger.warning("Stripe error updating org seats for subscription %s: %s", subscription_id, exc)
-                return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
-
-            invoice = updated.get("latest_invoice") if isinstance(updated, Mapping) else None
-            if isinstance(invoice, Mapping):
-                hosted_url = invoice.get("hosted_invoice_url")
-                payment_intent = invoice.get("payment_intent")
-                if hosted_url and isinstance(payment_intent, Mapping):
-                    intent_status = payment_intent.get("status")
-                    if intent_status in {"requires_action", "requires_payment_method"}:
-                        response_dict["stripeActionUrl"] = hosted_url
-            return None
-
-        if seats_target_int < current_quantity:
-            try:
-                schedule_id = subscription.get("schedule") or getattr(billing, "pending_seat_schedule_id", "")
-                if schedule_id:
-                    stripe.SubscriptionSchedule.release(schedule_id)
-                    billing.pending_seat_quantity = None
-                    billing.pending_seat_effective_at = None
-                    billing.pending_seat_schedule_id = ""
-                    billing.save(
-                        update_fields=[
-                            "pending_seat_quantity",
-                            "pending_seat_effective_at",
-                            "pending_seat_schedule_id",
-                        ]
-                    )
-
-                current_phase_items: list[dict[str, object]] = []
-                next_phase_items: list[dict[str, object]] = []
-                for item in subscription_items:
-                    price = item.get("price", {}) or {}
-                    price_id = price.get("id")
-                    if not price_id:
-                        continue
-
-                    usage_type = price.get("usage_type") or (price.get("recurring", {}) or {}).get("usage_type")
-                    is_seat_item = (
-                        item is licensed_item
-                        or usage_type == "licensed"
-                        or (price_id and price_id == seat_price_id)
-                    )
-                    try:
-                        quantity = int(item.get("quantity") or 0)
-                    except (TypeError, ValueError):
-                        quantity = 0
-
-                    current_payload: dict[str, object] = {"price": price_id}
-                    next_payload: dict[str, object] = {"price": price_id}
-
-                    if is_seat_item:
-                        current_payload["quantity"] = current_quantity
-                        next_payload["quantity"] = seats_target_int
-                    elif usage_type != "metered" and quantity > 0:
-                        current_payload["quantity"] = quantity
-                        next_payload["quantity"] = quantity
-
-                    current_phase_items.append(current_payload)
-                    next_phase_items.append(next_payload)
-
-                current_period_start_ts = subscription.get("current_period_start")
-                current_period_end_ts = subscription.get("current_period_end")
-
-                phases: list[dict[str, object]] = [
-                    {
-                        "items": current_phase_items,
-                        "proration_behavior": "none",
-                    },
-                    {
-                        "items": next_phase_items,
-                        "proration_behavior": "none",
-                    },
-                ]
-                if current_period_start_ts:
-                    phases[0]["start_date"] = int(current_period_start_ts)
-                if current_period_end_ts:
-                    period_end_int = int(current_period_end_ts)
-                    phases[0]["end_date"] = period_end_int
-                    phases[1]["start_date"] = period_end_int
-
-                metadata = {
-                    "org_id": str(owner_obj.id),
-                    "seat_requestor_id": str(request.user.id),
-                    "seat_target_quantity": str(seats_target_int),
-                }
-
-                schedule = stripe.SubscriptionSchedule.create(from_subscription=subscription.get("id"))
-                stripe.SubscriptionSchedule.modify(
-                    getattr(schedule, "id", ""),
-                    phases=phases,
-                    end_behavior="release",
-                    metadata=metadata,
-                )
-
-                effective_at = None
-                if current_period_end_ts:
-                    try:
-                        effective_at = datetime.fromtimestamp(int(current_period_end_ts), tz=dt_timezone.utc)
-                    except (TypeError, ValueError, OSError):
-                        effective_at = None
-
-                billing.pending_seat_quantity = seats_target_int
-                billing.pending_seat_effective_at = effective_at
-                billing.pending_seat_schedule_id = getattr(schedule, "id", "") or ""
-                billing.save(
-                    update_fields=[
-                        "pending_seat_quantity",
-                        "pending_seat_effective_at",
-                        "pending_seat_schedule_id",
-                    ]
-                )
-            except stripe.error.StripeError as exc:
-                logger.warning("Stripe error scheduling seat reduction for org %s: %s", owner_obj.id, exc)
-                return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
-
-        return None
-
-    def _apply_plan(payload_dict, owner_obj, owner_type_str, response_dict):
-        plan_target = (payload_dict.get("planTarget") or "").strip().lower()
-        if not plan_target:
-            return None
-        if owner_type_str != "user":
-            return JsonResponse({"ok": False, "error": "invalid_owner_for_plan_change"}, status=400)
-
-        # Prevent mixing plan switches with other changes; Stripe behavior differs for each flow.
-        if payload_dict.get("addonQuantities") or payload_dict.get("dedicatedIps"):
-            return JsonResponse({"ok": False, "error": "plan_change_must_be_separate"}, status=400)
-
-        if plan_target not in {"startup", "scale"}:
-            return JsonResponse({"ok": False, "error": "invalid_plan_target"}, status=400)
-
-        stripe_settings = get_stripe_settings()
-        if plan_target == "startup":
-            licensed_price_id = getattr(stripe_settings, "startup_price_id", "") or ""
-            metered_price_id = getattr(stripe_settings, "startup_additional_task_price_id", "") or ""
-        else:
-            licensed_price_id = getattr(stripe_settings, "scale_price_id", "") or ""
-            metered_price_id = getattr(stripe_settings, "scale_additional_task_price_id", "") or ""
-
-        if not licensed_price_id:
-            return JsonResponse({"ok": False, "error": "plan_not_configured"}, status=400)
-
-        try:
-            customer = get_or_create_stripe_customer(owner_obj)
-            if not customer or not getattr(customer, "id", None):
-                return JsonResponse({"ok": False, "error": "stripe_customer_missing"}, status=400)
-
-            # Only allow switching when an existing subscription exists; otherwise use checkout.
-            updated, action = ensure_single_individual_subscription(
-                str(customer.id),
-                licensed_price_id=licensed_price_id,
-                metered_price_id=metered_price_id or None,
-                metadata={
-                    "plan_target": plan_target,
-                    "plan_requestor_id": str(request.user.id),
-                    "source": "console_react_billing_update",
-                },
-                idempotency_key=f"console-plan-{customer.id}-{plan_target}-{request.user.id}",
-                create_if_missing=False,
-            )
-            if action == "absent" or not updated:
-                return JsonResponse({"ok": False, "error": "no_active_subscription"}, status=400)
-
-            updated_id = updated.get("id") if isinstance(updated, Mapping) else None
-            if not updated_id:
-                return JsonResponse({"ok": False, "error": "stripe_error"}, status=400)
-
-            _assign_stripe_api_key()
-            refreshed = stripe.Subscription.retrieve(
-                updated_id,
-                expand=["latest_invoice.payment_intent", "latest_invoice"],
-            )
-            invoice = refreshed.get("latest_invoice") if isinstance(refreshed, Mapping) else None
-            if isinstance(invoice, Mapping):
-                hosted_url = invoice.get("hosted_invoice_url")
-                payment_intent = invoice.get("payment_intent")
-                if hosted_url and isinstance(payment_intent, Mapping):
-                    intent_status = payment_intent.get("status")
-                    if intent_status in {"requires_action", "requires_payment_method"}:
-                        response_dict["stripeActionUrl"] = hosted_url
-        except stripe.error.StripeError as exc:
-            logger.warning("Stripe error changing plan for user %s: %s", getattr(owner_obj, "id", None), exc)
-            return JsonResponse(
-                {"ok": False, "error": "stripe_error", "detail": support_detail},
-                status=400,
-            )
-        except Exception as exc:
-            logger.exception("Failed to change plan for user %s: %s", getattr(owner_obj, "id", None), exc)
-            transaction.set_rollback(True)
-            return JsonResponse(
-                {"ok": False, "error": "server_error", "detail": support_detail},
-                status=500,
-            )
-
-        return None
-
-    def _apply_addons(payload_dict, owner_obj, owner_type_str, response_dict):
-        addon_quantities = payload_dict.get("addonQuantities") or {}
-        if not addon_quantities:
-            return None
-        if not isinstance(addon_quantities, Mapping):
-            return JsonResponse({"ok": False, "error": "invalid_addon_quantities"}, status=400)
-
-        desired_quantities: dict[str, int] = {}
-        for price_id, raw_qty in addon_quantities.items():
-            pid = str(price_id).strip()
-            if not pid:
-                continue
-            try:
-                qty = int(raw_qty)
-            except (TypeError, ValueError):
-                return JsonResponse({"ok": False, "error": "invalid_addon_quantities"}, status=400)
-            if qty < 0 or qty > 999:
-                return JsonResponse({"ok": False, "error": "invalid_addon_quantities"}, status=400)
-            desired_quantities[pid] = qty
-
-        plan_id = _get_owner_plan_id(owner_obj, owner_type_str)
-        task_options = AddonEntitlementService.get_price_options(owner_type_str, plan_id, "task_pack")
-        contact_options = AddonEntitlementService.get_price_options(owner_type_str, plan_id, "contact_pack")
-        browser_task_options = AddonEntitlementService.get_price_options(owner_type_str, plan_id, "browser_task_limit")
-        advanced_captcha_options = AddonEntitlementService.get_price_options(owner_type_str, plan_id, "advanced_captcha_resolution")
-        all_options = (task_options or []) + (contact_options or []) + (browser_task_options or []) + (advanced_captcha_options or [])
-        allowed_price_ids = {opt.price_id for opt in all_options if getattr(opt, "price_id", None)}
-        if not allowed_price_ids:
-            return JsonResponse({"ok": False, "error": "addons_not_configured"}, status=400)
-        for pid in desired_quantities.keys():
-            if pid not in allowed_price_ids:
-                return JsonResponse({"ok": False, "error": "invalid_addon_price"}, status=400)
-
-        subscription = get_active_subscription(owner_obj, preferred_plan_id=plan_id)
-        if not subscription:
-            return JsonResponse({"ok": False, "error": "no_active_subscription"}, status=400)
-
-        try:
-            _assign_stripe_api_key()
-            stripe_subscription = stripe.Subscription.retrieve(
-                subscription.id,
-                expand=["customer", "items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
-            )
-            items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
-
-            existing_qty: dict[str, int] = {}
-            item_id_by_price: dict[str, str] = {}
-            for item in items_data or []:
-                price = item.get("price") or {}
-                pid = price.get("id")
-                if not pid:
-                    continue
-                item_id_by_price[pid] = item.get("id")
-                try:
-                    existing_qty[pid] = int(item.get("quantity") or 0)
-                except (TypeError, ValueError):
-                    existing_qty[pid] = 0
-
-            is_trialing = (stripe_subscription.get("status") or "") == "trialing"
-            is_purchase = False
-            items_payload: list[dict[str, Any]] = []
-            for price_id, desired_qty in desired_quantities.items():
-                current_qty = existing_qty.get(price_id, 0)
-                if desired_qty == current_qty:
-                    continue
-                if desired_qty > current_qty:
-                    is_purchase = True
-                if desired_qty > 0:
-                    if price_id in item_id_by_price:
-                        items_payload.append({"id": item_id_by_price[price_id], "quantity": desired_qty})
-                    else:
-                        items_payload.append({"price": price_id, "quantity": desired_qty})
-                else:
-                    if price_id in item_id_by_price:
-                        items_payload.append({"id": item_id_by_price[price_id], "deleted": True})
-
-            if items_payload:
-                modify_kwargs: dict[str, object] = {
-                    "items": items_payload,
-                    "proration_behavior": "always_invoice",
-                    "expand": ["items.data.price", "latest_invoice.payment_intent", "latest_invoice"],
-                }
-                if is_purchase or not any(item.get("deleted") for item in items_payload):
-                    modify_kwargs["payment_behavior"] = "pending_if_incomplete"
-                if is_trialing and is_purchase:
-                    # Policy: purchasing add-ons during a trial ends the trial immediately and charges now.
-                    modify_kwargs["trial_end"] = "now"
-                updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
-                updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
-
-                invoice = updated_subscription.get("latest_invoice") if isinstance(updated_subscription, Mapping) else None
-                if isinstance(invoice, Mapping):
-                    hosted_url = invoice.get("hosted_invoice_url")
-                    payment_intent = invoice.get("payment_intent")
-                    if hosted_url and isinstance(payment_intent, Mapping):
-                        intent_status = payment_intent.get("status")
-                        if intent_status in {"requires_action", "requires_payment_method"}:
-                            response_dict["stripeActionUrl"] = hosted_url
-
-                period_start_dt = None
-                period_end_dt = None
-                if isinstance(updated_subscription, Mapping):
-                    start_ts = updated_subscription.get("current_period_start")
-                    end_ts = updated_subscription.get("current_period_end")
-                    if start_ts and end_ts:
-                        try:
-                            period_start_dt = datetime.fromtimestamp(int(start_ts), tz=dt_timezone.utc)
-                            period_end_dt = datetime.fromtimestamp(int(end_ts), tz=dt_timezone.utc)
-                        except (TypeError, ValueError, OSError):
-                            period_start_dt = None
-                            period_end_dt = None
-
-                if period_start_dt is None or period_end_dt is None:
-                    period_start, period_end = BillingService.get_current_billing_period_for_owner(owner_obj)
-                    tz = timezone.get_current_timezone()
-                    period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
-                    period_end_dt = timezone.make_aware(
-                        datetime.combine(period_end + timedelta(days=1), datetime.min.time()),
-                        tz,
-                    )
-                AddonEntitlementService.sync_subscription_entitlements(
-                    owner=owner_obj,
-                    owner_type=owner_type_str,
-                    plan_id=plan_id,
-                    subscription_items=updated_items,
-                    period_start=period_start_dt,
-                    period_end=period_end_dt,
-                    created_via="console_react_billing_update",
-                )
-        except stripe.error.StripeError as exc:
-            logger.warning("Stripe error updating add-ons for %s %s: %s", owner_type_str, getattr(owner_obj, "id", None), exc)
-            return JsonResponse(
-                {"ok": False, "error": "stripe_error", "detail": support_detail},
-                status=400,
-            )
-
-        return None
-
-    def _apply_dedicated_ips(payload_dict, owner_obj, owner_type_str, response_dict):
-        dedicated_changes = payload_dict.get("dedicatedIps") or {}
-        if not dedicated_changes:
-            return None
-
-        if not isinstance(dedicated_changes, Mapping):
-            return JsonResponse({"ok": False, "error": "invalid_dedicated_ips"}, status=400)
-
-        plan_id = _get_owner_plan_id(owner_obj, owner_type_str)
-        if plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.FREE):
-            return JsonResponse({"ok": False, "error": "plan_required"}, status=400)
-
-        add_quantity = dedicated_changes.get("addQuantity") or 0
-        try:
-            add_quantity = int(add_quantity)
-        except (TypeError, ValueError):
-            return JsonResponse({"ok": False, "error": "invalid_dedicated_ips"}, status=400)
-        if add_quantity < 0 or add_quantity > 99:
-            return JsonResponse({"ok": False, "error": "invalid_dedicated_ips"}, status=400)
-
-        remove_proxy_ids = dedicated_changes.get("removeProxyIds") or []
-        unassign_proxy_ids = {str(pid).strip() for pid in (dedicated_changes.get("unassignProxyIds") or []) if str(pid).strip()}
-        if not isinstance(remove_proxy_ids, list):
-            return JsonResponse({"ok": False, "error": "invalid_dedicated_ips"}, status=400)
-
-        normalized_remove: list[str] = []
-        for proxy_id in remove_proxy_ids:
-            pid = str(proxy_id).strip()
-            if pid and pid not in normalized_remove:
-                normalized_remove.append(pid)
-
-        if normalized_remove:
-            owned_ids = {
-                str(pid)
-                for pid in (
-                DedicatedProxyService.allocated_proxies(owner_obj)
-                .filter(id__in=normalized_remove)
-                .values_list("id", flat=True)
-                )
-            }
-            for proxy_id in normalized_remove:
-                if proxy_id not in owned_ids:
-                    return JsonResponse({"ok": False, "error": "dedicated_ip_not_owned", "proxyId": proxy_id}, status=400)
-
-            assigned_qs = PersistentAgent.objects.filter(browser_use_agent__preferred_proxy_id__in=normalized_remove)
-            if owner_type_str == "organization":
-                assigned_qs = assigned_qs.filter(organization=owner_obj)
-            else:
-                assigned_qs = assigned_qs.filter(user=owner_obj, organization__isnull=True)
-            assigned_pairs = list(assigned_qs.values_list("browser_use_agent__preferred_proxy_id", "name"))
-            assigned_by_proxy: dict[str, list[str]] = {}
-            for proxy_id, agent_name in assigned_pairs:
-                pid = str(proxy_id)
-                assigned_by_proxy.setdefault(pid, []).append(agent_name)
-
-            requires_unassign = [
-                proxy_id
-                for proxy_id in normalized_remove
-                if proxy_id not in unassign_proxy_ids and assigned_by_proxy.get(proxy_id)
-            ]
-            if requires_unassign:
-                first = requires_unassign[0]
-                return JsonResponse(
-                    {
-                        "ok": False,
-                        "error": "dedicated_ip_unassign_required",
-                        "proxyId": first,
-                        "assignedAgents": assigned_by_proxy.get(first, []),
-                    },
-                    status=400,
-                )
-
-            if unassign_proxy_ids:
-                browser_qs = BrowserUseAgent.objects.filter(preferred_proxy_id__in=list(unassign_proxy_ids))
-                if owner_type_str == "organization":
-                    browser_qs = browser_qs.filter(persistent_agent__organization=owner_obj)
-                else:
-                    browser_qs = browser_qs.filter(persistent_agent__user=owner_obj, persistent_agent__organization__isnull=True)
-                browser_qs.update(preferred_proxy=None)
-
-            for proxy_id in normalized_remove:
-                try:
-                    DedicatedProxyService.release_specific(owner_obj, proxy_id)
-                except ValueError as exc:
-                    return JsonResponse({"ok": False, "error": str(exc)}, status=400)
-
-        try:
-            _assign_stripe_api_key()
-            current_qty = DedicatedProxyService.allocated_count(owner_obj)
-            desired_qty = current_qty + add_quantity
-            action_url = _update_stripe_dedicated_ip_quantity(
-                owner_obj,
-                owner_type_str,
-                desired_qty,
-                end_trial_now=bool(add_quantity > 0),
-            )
-            if action_url:
-                response_dict["stripeActionUrl"] = action_url
-
-            allocated = 0
-            for _ in range(add_quantity):
-                try:
-                    DedicatedProxyService.allocate_proxy(owner_obj)
-                    allocated += 1
-                except DedicatedProxyUnavailableError:
-                    break
-
-            actual_qty = DedicatedProxyService.allocated_count(owner_obj)
-            if actual_qty != desired_qty:
-                action_url = _update_stripe_dedicated_ip_quantity(owner_obj, owner_type_str, actual_qty)
-                if action_url:
-                    response_dict["stripeActionUrl"] = action_url
-        except stripe.error.StripeError as exc:
-            logger.warning("Stripe error updating dedicated IP quantity for %s %s: %s", owner_type_str, getattr(owner_obj, "id", None), exc)
-            return JsonResponse(
-                {"ok": False, "error": "stripe_error", "detail": support_detail},
-                status=400,
-            )
-        except (ValueError, ImproperlyConfigured) as exc:
-            return JsonResponse({"ok": False, "error": str(exc)}, status=400)
-
-        return None
-
-    payload = _parse_payload()
-    if payload is None or not isinstance(payload, dict):
-        return JsonResponse({"ok": False, "error": "invalid_json"}, status=400)
-
-    try:
-        owner_resolved = _resolve_owner(payload)
-        if isinstance(owner_resolved, HttpResponse):
-            return owner_resolved
-        owner, owner_type = owner_resolved
-
-        if not stripe_status().enabled:
-            return JsonResponse({"ok": False, "error": "stripe_disabled"}, status=404)
-
-        response_payload: dict[str, object] = {"ok": True}
-
-        plan_response = _apply_plan(payload, owner, owner_type, response_payload)
-        if isinstance(plan_response, HttpResponse):
-            return plan_response
-
-        seats_response = _apply_seats(payload, owner, owner_type, response_payload)
-        if isinstance(seats_response, HttpResponse):
-            return seats_response
-
-        # ---------------------------------------------------------------------
-        # Org gating: require paid seats for add-ons/dedicated IP changes
-        # ---------------------------------------------------------------------
-        addon_quantities = payload.get("addonQuantities") or {}
-        dedicated_changes = payload.get("dedicatedIps") or {}
-        if owner_type == "organization" and (addon_quantities or dedicated_changes):
-            billing = getattr(owner, "billing", None)
-            if billing is None or getattr(billing, "purchased_seats", 0) <= 0:
-                return JsonResponse(
-                    {
-                        "ok": False,
-                        "error": "seats_required",
-                        "detail": "Purchase at least one seat before managing add-ons or dedicated IPs.",
-                    },
-                    status=400,
-                )
-
-        addons_response = _apply_addons(payload, owner, owner_type, response_payload)
-        if isinstance(addons_response, HttpResponse):
-            return addons_response
-
-        dedicated_response = _apply_dedicated_ips(payload, owner, owner_type, response_payload)
-        if isinstance(dedicated_response, HttpResponse):
-            return dedicated_response
-
-        return JsonResponse(response_payload, status=200)
-    except Exception:
-        # Ensure we don't commit partial DB changes while returning a JSON error.
-        transaction.set_rollback(True)
-        logger.exception("Unhandled error in console_billing_update for user %s", getattr(request.user, "id", None))
-        return JsonResponse(
-            {"ok": False, "error": "server_error", "detail": support_detail},
-            status=500,
-        )
+    payload, status = handle_console_billing_update(request)
+    return JsonResponse(payload, status=status)

@@ -162,6 +162,7 @@ from api.services.system_settings import (
 from constants.plans import PlanNamesChoices
 from util.integrations import stripe_status
 from util.subscription_helper import get_active_subscription, get_organization_plan, get_user_plan
+from console.role_constants import BILLING_MANAGE_ROLES
 
 
 logger = logging.getLogger(__name__)
@@ -169,14 +170,6 @@ logger = logging.getLogger(__name__)
 GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
 MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
 MANAGED_EMAIL_PROVIDER_KEYS = GOOGLE_PROVIDER_KEYS | MICROSOFT_PROVIDER_KEYS
-
-BILLING_MANAGE_ROLES = {
-    OrganizationMembership.OrgRole.OWNER,
-    OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.BILLING,
-}
-if settings.SOLUTIONS_PARTNER_BILLING_ACCESS:
-    BILLING_MANAGE_ROLES.add(OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
 
 
 def _can_manage_contact_packs(request: HttpRequest, agent: PersistentAgent, plan_payload: dict | None) -> bool:
