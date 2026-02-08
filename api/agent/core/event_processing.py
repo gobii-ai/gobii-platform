@@ -454,6 +454,26 @@ COMPLETION_PHRASES = (
     "here's what i found",
 )
 
+# Explicit message-tool sends without will_continue_work can still be safely
+# inferred as "continue" when the message is a clear progress update. These
+# phrases indicate the opposite: acknowledge-and-stop / wait-for-user intent.
+STOP_HINT_PHRASES = (
+    "let me know if you need",
+    "if you need anything else",
+    "if needed",
+    "reach out later",
+    "reach out if",
+    "don't follow up",
+    "do not follow up",
+    "won't follow up",
+    "i won't follow up",
+    "i will not follow up",
+    "i'll wait",
+    "i will wait",
+    "standing by",
+    "whenever you're ready",
+)
+
 
 def _has_completion_signal(text: str) -> bool:
     """Return True if text contains phrases indicating the agent is done."""
@@ -461,6 +481,33 @@ def _has_completion_signal(text: str) -> bool:
         return False
     lower_text = text.lower()
     return any(phrase in lower_text for phrase in COMPLETION_PHRASES)
+
+
+def _has_stop_hint_signal(text: str) -> bool:
+    """Return True if text suggests defer/wait intent rather than continued work."""
+    if not text:
+        return False
+    lower_text = text.lower()
+    return any(phrase in lower_text for phrase in STOP_HINT_PHRASES)
+
+
+def _should_infer_message_tool_continuation(message_text: str) -> bool:
+    """Infer continuation for explicit message tools when flag is omitted.
+
+    This is intentionally conservative:
+    - Continue only on strong continuation language.
+    - Never continue on completion/defer hints.
+    - Never continue when asking the user a question (usually waiting on input).
+    """
+    if not message_text:
+        return False
+    if "?" in message_text:
+        return False
+    if _has_completion_signal(message_text):
+        return False
+    if _has_stop_hint_signal(message_text):
+        return False
+    return _has_continuation_signal(message_text)
 
 
 __all__ = ["process_agent_events", "CANONICAL_CONTINUATION_PHRASE", "CANONICAL_COMPLETION_PHRASE"]
@@ -2897,6 +2944,7 @@ def _run_agent_loop(
             return cumulative_token_usage
 
     reasoning_only_streak = 0
+    inferred_message_continue_streak = 0
     continuation_notice: Optional[str] = None
 
     for i in range(max_remaining):
@@ -3380,6 +3428,10 @@ def _run_agent_loop(
             executed_calls = 0
             followup_required = False
             last_explicit_continue: Optional[bool] = None  # Final explicit will_continue_work in batch
+            allow_inferred_message_continue = inferred_message_continue_streak == 0
+            inferred_continue_call_tokens: set[str] = set()
+            inferred_message_continue_this_iteration = False
+            executed_non_message_action = False
             try:
                 tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
@@ -3535,8 +3587,10 @@ def _run_agent_loop(
                     call_id = getattr(call, "id", None)
                     if not call_id and isinstance(call, dict):
                         call_id = call.get("id")
+                    call_token = str(call_id or f"idx-{idx}")
                     if tool_name in MESSAGE_TOOL_NAMES:
                         body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+                        explicit_continue_hint = _coerce_optional_bool(tool_params.get("will_continue_work"))
                         if body_key and isinstance(tool_params.get(body_key), str):
                             cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
                                 tool_params[body_key]
@@ -3544,8 +3598,30 @@ def _run_agent_loop(
                             if found_phrase:
                                 tool_params[body_key] = cleaned_body
                                 tool_params["will_continue_work"] = True
-                        # Note: explicit send_chat_message without will_continue_work defaults to STOP
-                        # (consistent with other message tools). Agent must set will_continue_work=true to continue.
+                            elif (
+                                explicit_continue_hint is None
+                                and allow_inferred_message_continue
+                                and _should_infer_message_tool_continuation(cleaned_body)
+                            ):
+                                tool_params["will_continue_work"] = True
+                                inferred_continue_call_tokens.add(call_token)
+                                logger.info(
+                                    "Agent %s: inferred will_continue_work=true for %s based on progress-update language.",
+                                    agent.id,
+                                    tool_name,
+                                )
+                            elif (
+                                explicit_continue_hint is None
+                                and not allow_inferred_message_continue
+                                and _should_infer_message_tool_continuation(cleaned_body)
+                            ):
+                                logger.info(
+                                    "Agent %s: suppressing inferred continuation for %s to avoid progress-message loops without work tools.",
+                                    agent.id,
+                                    tool_name,
+                                )
+                        # Explicit message tools still default to STOP when the flag is omitted.
+                        # We only auto-continue on strong progress-update language.
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
@@ -3730,6 +3806,8 @@ def _run_agent_loop(
                         explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
                         if explicit_continue is not None:
                             last_explicit_continue = explicit_continue
+                        if explicit_continue is True and call_token in inferred_continue_call_tokens:
+                            inferred_message_continue_this_iteration = True
 
                     if tool_had_error or tool_had_warning:
                         followup_required = True
@@ -3737,11 +3815,20 @@ def _run_agent_loop(
                         followup_required = True
 
                     executed_calls += 1
+                    if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
+                        executed_non_message_action = True
 
             config_had_errors = _apply_agent_config_updates()
             kanban_had_errors, _ = _apply_kanban_updates()
             if config_had_errors or kanban_had_errors:
                 followup_required = True
+
+            if executed_non_message_action:
+                inferred_message_continue_streak = 0
+            elif inferred_message_continue_this_iteration:
+                inferred_message_continue_streak += 1
+            else:
+                inferred_message_continue_streak = 0
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
