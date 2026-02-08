@@ -2119,7 +2119,7 @@ def build_prompt_context(
     )
     kanban_note = (
         f"Kanban ({KANBAN_CARDS_TABLE}): your memory across sessions. Credits reset daily; your board doesn't. "
-        "Use for multi-step work (research, investigations, 3+ tool calls). Skip for simple tasks (quick lookups, single questions)—just do those directly. "
+        "Use for work with multiple independent phases (research across sources, multi-part investigations). Skip when the work is one logical thing even if it takes several tool calls—just do it directly. "
         "Status: todo/doing/done. Priority: higher = more urgent. "
         "Each card has a friendly_id (slug of the title) alongside id—use friendly_id in WHERE clauses. "
         "Copy friendly_id exactly from the kanban_snapshot above—don't guess or assume values. "
@@ -3197,28 +3197,43 @@ def _get_formatting_guidance(
     # Build guidance based on primary medium
     if primary_medium == "WEB":
         return (
-            "Web chat formatting (rich markdown):\n"
-            "Make your output visually stunning—something they'd screenshot:\n"
-            "• ## Headers to frame sections—give structure to your response\n"
-            "• **Charts first**—3+ numbers? Visualize them. create_chart → paste `inline` from result\n"
-            "• **Tables for structured data**—items with attributes belong in tables, not prose\n"
-            "• **Bold** key metrics, names, and takeaways\n"
-            "• Emoji as visual anchors (📈 📊 🔥 ✓ ✗) to aid scanning\n"
-            "• Links everywhere—every company, person, product should be clickable\n"
-            "• Short insight after data (1-2 sentences)\n"
-            "• End with a forward prompt\n\n"
-            "Pattern: Header → Chart (if numbers) → Table → Insight → Offer\n"
-            "Default to visual: if you're about to write numbers in a paragraph, stop—chart or table them.\n"
-            "Example:\n"
-            '  "## 📊 Market Snapshot\n\n'
+            "Web chat formatting:\n"
+            "Make your output visually stunning and instantly scannable—something they'd screenshot and share.\n\n"
+            "Design principles:\n"
+            "• **Rhythm and variety**—mix formats, don't repeat the same pattern over and over\n"
+            "• **Visual hierarchy**—use headers, whitespace, grouping to create layers\n"
+            "• **Emoji strategically**—visual anchors, not decoration on every line\n"
+            "• **Whitespace is content**—let sections breathe\n"
+            "• **Bold what matters**—make key info pop\n\n"
+            "Here's what great looks like:\n\n"
+            '  "## 🌤️ Frederick, MD\n\n'
+            "  **27°F** · Light snow · Feels like **23°F**\n\n"
+            "  💧 Humidity 100% · 💨 WSW 3 mph · 👁️ 1 mile visibility\n\n"
+            "  ---\n\n"
+            "  ### Today\\'s Forecast\n\n"
+            "  High **32°F** • Low **8°F**\n\n"
+            "  Sunrise 7:12 AM • Sunset 5:36 PM\n\n"
+            "  > 🧥 Bundle up—it\\'s a cold one out there!\n\n"
+            '  Want the weekly outlook?"\n\n'
+            "Notice:\n"
+            "• Opening line gives most important info (temp + conditions) in a natural flow\n"
+            "• Secondary details grouped on one line with emoji\n"
+            "• Not every piece of data gets its own line—variety creates visual interest\n"
+            "• Forecast section formatted differently than current conditions\n"
+            "• Blockquote for personality\n\n"
+            "Another example:\n\n"
+            '  "## 📊 Q4 Results\n\n'
+            "  **$13.1M revenue** • Up 21% YoY\n\n"
             "  ![](result.inline from create_chart)\n\n"
-            "  | Asset | Price | 24h | 7d | Signal |\n"
-            "  |-------|-------|-----|-----|--------|\n"
-            "  | [**BTC**](url) | $67,240 | +2.3% 📈 | +8.1% | 🟢 Bullish |\n"
-            "  | [**ETH**](url) | $3,412 | +1.8% 📈 | +5.2% | 🟡 Neutral |\n"
-            "  | [**SOL**](url) | $142.50 | +4.1% 📈 | +12.3% | 🟢 Strong |\n\n"
-            "  > 💡 **Key move:** BTC broke $66k resistance on high volume—often signals continuation.\n\n"
-            '  Want alerts on specific price levels?"'
+            "  | Region | Revenue | Growth |\n"
+            "  |--------|---------|--------|\n"
+            "  | [**Americas**](url) | $5.8M | 🟢 +31% |\n"
+            "  | [**APAC**](url) | $4.2M | 🟢 +23% |\n"
+            "  | [**EMEA**](url) | $3.1M | 🟡 +8% |\n\n"
+            "  > 💡 Americas drove 60% of growth—mainly enterprise deals closing faster than forecasted.\n\n"
+            "  > ⚠️ EMEA pipeline coverage at 1.8x (target: 3x)—need to accelerate prospecting.\n\n"
+            '  Should I break down the enterprise pipeline?"\n\n'
+            "The goal: **Make it feel designed, not templated.** Vary your formatting. Group related info. Use whitespace. Mix inline summaries with tables. Let the content breathe and flow."
         )
     elif primary_medium == "SMS":
         return (
@@ -3655,10 +3670,10 @@ def _get_system_instruction(
         "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
 
         "### When to use kanban cards:\n"
-        "**USE CARDS** for your multi-step work: research, investigations, anything 3+ tool calls or spanning multiple turns.\n"
-        "**SKIP CARDS** for: simple tasks (lookups, greetings, 1-2 tool calls), awaiting instructions, and user-requested tracking (if user wants 'a todo list' or 'track X for me', that's their data in a custom table—not your kanban).\n\n"
-        "NO cards: 'What's Bitcoin?' / 'Hi!' / 'Summarize this' → just do it.\n"
-        "YES cards: 'Research competitors' / 'Monitor daily' / 'Compare X, Y, Z' → multi-step work.\n\n"
+        "**USE CARDS** for work with multiple independent phases—research across several sources, multi-part investigations, tasks where you'd lose your place without tracking.\n"
+        "**SKIP CARDS** when the work is one logical thing, even if it takes several tool calls. Also skip for: greetings, awaiting instructions, and user-requested tracking (if user wants 'a todo list' or 'track X for me', that's their data in a custom table—not your kanban).\n\n"
+        "NO cards: 'What's Bitcoin?' / 'Hi!' / 'Summarize this' / 'Look up X and tell me about it' / 'Find the best Y' → just do it.\n"
+        "YES cards: 'Research competitors and compare pricing across 5 companies' / 'Monitor daily' / 'Analyze X, then Y, then synthesize' → distinct phases.\n\n"
 
         "### Charter + Kanban work together (for multi-step work):\n"
         "- Charter = what you're doing (your purpose)\n"

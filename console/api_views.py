@@ -152,6 +152,10 @@ from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.agent_settings_resume import (
+    queue_owner_task_pack_resume,
+    queue_settings_change_resume,
+)
 from api.services.system_settings import (
     clear_setting_value,
     get_setting_definition,
@@ -4752,9 +4756,18 @@ class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):
         if error:
             return JsonResponse({"error": error}, status=400)
 
+        previous_daily_limit = agent.daily_credit_limit
+        daily_limit_changed = previous_daily_limit != new_daily_limit
         if agent.daily_credit_limit != new_daily_limit:
             agent.daily_credit_limit = new_daily_limit
             agent.save(update_fields=["daily_credit_limit"])
+        if daily_limit_changed:
+            queue_settings_change_resume(
+                agent,
+                daily_credit_limit_changed=True,
+                previous_daily_credit_limit=previous_daily_limit,
+                source="agent_daily_credits_api",
+            )
 
         context = build_agent_daily_credit_context(agent, owner)
         return JsonResponse(
@@ -4783,6 +4796,8 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         daily_payload = payload.get("dailyCredits")
+        previous_daily_limit = agent.daily_credit_limit
+        daily_limit_changed = False
         if daily_payload is not None:
             if not isinstance(daily_payload, dict):
                 return HttpResponseBadRequest("dailyCredits must be an object")
@@ -4793,9 +4808,17 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
             )
             if error:
                 return JsonResponse({"error": error}, status=400)
-            if agent.daily_credit_limit != new_daily_limit:
+            daily_limit_changed = previous_daily_limit != new_daily_limit
+            if daily_limit_changed:
                 agent.daily_credit_limit = new_daily_limit
                 agent.save(update_fields=["daily_credit_limit"])
+        if daily_limit_changed:
+            queue_settings_change_resume(
+                agent,
+                daily_credit_limit_changed=True,
+                previous_daily_credit_limit=previous_daily_limit,
+                source="agent_quick_settings_api",
+            )
 
         payload = build_agent_quick_settings_payload(agent, owner)
         return JsonResponse(payload)
@@ -4845,10 +4868,13 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
         ]
         owner_type = "organization" if agent.organization_id else "user"
         plan_id = (plan_payload or {}).get("id")
+        task_packs_submitted = False
 
         for label, pack_payload, update_func in packs_to_process:
             if pack_payload is None:
                 continue
+            if label == "taskPacks":
+                task_packs_submitted = True
             quantities = _validate_pack_payload(pack_payload, label)
             if isinstance(quantities, HttpResponseBadRequest):
                 return quantities
@@ -4860,6 +4886,19 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
             )
             if not success:
                 return JsonResponse({"error": error}, status=status)
+
+        if task_packs_submitted:
+            resumed_count = queue_owner_task_pack_resume(
+                owner_id=getattr(owner, "id", None),
+                owner_type=owner_type,
+                source="agent_addons_api_owner_resume",
+            )
+            if resumed_count == 0:
+                queue_settings_change_resume(
+                    agent,
+                    task_pack_changed=True,
+                    source="agent_addons_api",
+                )
 
         payload = build_agent_addons_payload(agent, owner, can_manage_billing=can_manage_billing)
         return JsonResponse(payload)

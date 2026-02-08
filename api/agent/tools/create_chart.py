@@ -6,9 +6,10 @@ Tightly integrated with SQLite - just pass a SELECT statement and column names
 become chart data keys. Outputs SVG saved in filespace and returns variable
 placeholders for embedding in chat, email, or PDFs.
 """
-import base64
+from datetime import datetime
 import io
 import logging
+import uuid
 from typing import Any, Dict, List, Optional, Union
 
 from api.models import PersistentAgent
@@ -373,6 +374,13 @@ def get_create_chart_tool() -> Dict[str, Any]:
     }
 
 
+def _build_chart_save_path(chart_type: str) -> str:
+    """Generate a unique chart path so rapid tool calls never overwrite each other."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_suffix = uuid.uuid4().hex[:8]
+    return f"/charts/{chart_type}_{timestamp}_{unique_suffix}.svg"
+
+
 def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the create_chart tool."""
     chart_type = params.get("type")
@@ -424,13 +432,10 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     # Save to filespace - this is the source of truth
     try:
-        from datetime import datetime
         from api.agent.files.filespace_service import write_bytes_to_dir
         from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 
-        # Auto-generate path: /charts/{type}_{timestamp}.svg
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = f"/charts/{chart_type}_{timestamp}.svg"
+        save_path = _build_chart_save_path(chart_type)
 
         save_result = write_bytes_to_dir(
             agent=agent,

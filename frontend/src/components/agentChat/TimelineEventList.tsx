@@ -1,15 +1,25 @@
 import { memo } from 'react'
+import { Loader2 } from 'lucide-react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
-import { ToolDetailProvider } from './tooling/ToolDetailContext'
 import { KanbanEventCard } from './KanbanEventCard'
 import type { TimelineEvent, ToolClusterEvent } from './types'
+
+// Derive a stable key for a cluster based on its first entry, so React
+// doesn't unmount/remount when the cluster cursor shifts.
+function stableEventKey(event: TimelineEvent): string {
+  if (event.kind === 'steps' && event.entries.length > 0) {
+    return `cluster:${event.entries[0].id}`
+  }
+  return event.cursor
+}
 
 type TimelineEventListProps = {
   agentFirstName: string
   events: TimelineEvent[]
   initialLoading?: boolean
   agentColorHex?: string
+  agentAvatarUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
   suppressedThinkingCursor?: string | null
@@ -20,15 +30,20 @@ export const TimelineEventList = memo(function TimelineEventList({
   events,
   initialLoading = false,
   agentColorHex,
+  agentAvatarUrl,
   viewerUserId,
   viewerEmail,
   suppressedThinkingCursor,
 }: TimelineEventListProps) {
   if (initialLoading) {
     return (
-      <div className="timeline-loading-state flex items-center justify-center gap-3.5 rounded-[1.25rem] border border-indigo-100/80 bg-gradient-to-br from-white via-indigo-50/60 to-purple-50/40 px-7 py-9 shadow-sm">
-        <span className="loading-pip" aria-hidden="true" />
-        <span className="text-sm font-medium tracking-tight text-indigo-800/75">Loading conversation…</span>
+      <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Loading conversation…</p>
+          </div>
+        </div>
       </div>
     )
   }
@@ -38,16 +53,19 @@ export const TimelineEventList = memo(function TimelineEventList({
   }
 
   return (
-    <ToolDetailProvider>
-      {events.map((event) => {
+    <>
+      {events.map((event, index) => {
+        const isLatestEvent = index === events.length - 1
+        const key = stableEventKey(event)
         if (event.kind === 'message') {
           return (
             <MessageEventCard
-              key={event.cursor}
+              key={key}
               eventCursor={event.cursor}
               message={event.message}
               agentFirstName={agentFirstName}
               agentColorHex={agentColorHex}
+              agentAvatarUrl={agentAvatarUrl}
               viewerUserId={viewerUserId ?? null}
               viewerEmail={viewerEmail ?? null}
             />
@@ -67,23 +85,25 @@ export const TimelineEventList = memo(function TimelineEventList({
           }
           return (
             <ToolClusterCard
-              key={event.cursor}
+              key={key}
               cluster={cluster}
+              isLatestEvent={isLatestEvent}
               suppressedThinkingCursor={suppressedThinkingCursor}
             />
           )
         }
         if (event.kind === 'kanban') {
-          return <KanbanEventCard key={event.cursor} event={event} />
+          return <KanbanEventCard key={key} event={event} />
         }
         return (
           <ToolClusterCard
-            key={event.cursor}
+            key={key}
             cluster={event}
+            isLatestEvent={isLatestEvent}
             suppressedThinkingCursor={suppressedThinkingCursor}
           />
         )
       })}
-    </ToolDetailProvider>
+    </>
   )
 })

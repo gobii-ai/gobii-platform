@@ -127,6 +127,8 @@ type AgentComposerProps = {
   intelligenceError?: string | null
   onOpenTaskPacks?: () => void
   canManageAgent?: boolean
+  submitError?: string | null
+  showSubmitErrorUpgrade?: boolean
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -155,6 +157,8 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceError = null,
   onOpenTaskPacks,
   canManageAgent = true,
+  submitError = null,
+  showSubmitErrorUpgrade = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -233,6 +237,14 @@ export const AgentComposer = memo(function AgentComposer({
       window.open(appendReturnTo(intelligenceConfig.upgradeUrl), '_top')
     }
   }, [ensureAuthenticated, intelligenceConfig?.upgradeUrl, isProprietaryMode, openUpgradeModal])
+
+  const handleSubmitErrorUpgrade = useCallback(async () => {
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
+    openUpgradeModal('agent_limit_error')
+  }, [ensureAuthenticated, openUpgradeModal])
 
   // Insight carousel logic
   const totalInsights = insights.length
@@ -767,6 +779,20 @@ export const AgentComposer = memo(function AgentComposer({
                     </button>
                   </span>
                 ))}
+              </div>
+            ) : null}
+            {submitError ? (
+              <div className="composer-submit-error" role="alert" aria-live="polite">
+                <span className="composer-submit-error-text">{submitError}</span>
+                {showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
+                  <button
+                    type="button"
+                    className="composer-submit-error-upgrade"
+                    onClick={() => void handleSubmitErrorUpgrade()}
+                  >
+                    Upgrade plan
+                  </button>
+                ) : null}
               </div>
             ) : null}
           </div>

@@ -52,6 +52,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
         )
 
     @tag("batch_email")
+    @override_settings(PUBLIC_SITE_URL="https://example.com")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
     def test_reply_sent_and_processing_skipped_when_out_of_credits(self, mock_calc, mock_delay):
@@ -75,6 +76,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(sender, mail.outbox[0].to)
         self.assertIn(self.owner.email, mail.outbox[0].to)
+        self.assertIn("https://example.com/console/billing/", mail.outbox[0].body)
         mock_delay.assert_not_called()
 
     @tag("batch_email")
@@ -150,6 +152,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
         mock_delay.assert_not_called()
 
     @tag("batch_email")
+    @override_settings(PUBLIC_SITE_URL="https://example.com")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
     def test_org_owned_reply_sent_to_sender_and_owner_when_out_of_credits(self, mock_calc, mock_delay):
@@ -202,6 +205,8 @@ class InboundOutOfCreditsReplyTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(set(mail.outbox[0].to), {member.email, self.owner.email})
         self.assertNotIn(agent_creator.email, mail.outbox[0].to)
+        self.assertIn("https://example.com/console/billing/?context_type=organization", mail.outbox[0].body)
+        self.assertIn(str(org.id), mail.outbox[0].body)
         mock_delay.assert_not_called()
         mock_calc.assert_called_once()
 

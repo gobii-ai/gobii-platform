@@ -1,4 +1,4 @@
-import { AlertTriangle, ExternalLink, Settings } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Settings, Zap } from 'lucide-react'
 
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -6,12 +6,18 @@ import { appendReturnTo } from '../../util/returnTo'
 
 type HardLimitCalloutCardProps = {
   onOpenSettings: () => void
+  onQuickIncrease?: () => void
+  quickIncreaseLabel?: string
+  quickIncreaseBusy?: boolean
   showUpsell?: boolean
   upgradeUrl?: string | null
 }
 
 export function HardLimitCalloutCard({
   onOpenSettings,
+  onQuickIncrease,
+  quickIncreaseLabel = 'Increase daily limit',
+  quickIncreaseBusy = false,
   showUpsell = false,
   upgradeUrl,
 }: HardLimitCalloutCardProps) {
@@ -29,6 +35,17 @@ export function HardLimitCalloutCard({
         </div>
       </div>
       <div className="hard-limit-callout-actions">
+        {onQuickIncrease ? (
+          <button
+            type="button"
+            className="hard-limit-callout-button hard-limit-callout-button--secondary"
+            onClick={onQuickIncrease}
+            disabled={quickIncreaseBusy}
+          >
+            <Zap size={16} />
+            {quickIncreaseBusy ? 'Increasing…' : quickIncreaseLabel}
+          </button>
+        ) : null}
         <button type="button" className="hard-limit-callout-button" onClick={onOpenSettings}>
           <Settings size={16} />
           Open settings

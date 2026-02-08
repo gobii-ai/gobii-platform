@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
+from django.urls import reverse
 
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
@@ -181,6 +184,20 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(response.json().get("error"), "Invalid context override.")
 
     @tag("batch_agent_chat")
+    def test_quick_create_ignores_unsupported_tier_selection(self):
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": "Create with stale tier", "preferred_llm_tier": "lite"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertIsNotNone(created_agent.preferred_llm_tier)
+        self.assertEqual(created_agent.preferred_llm_tier.key, "standard")
+
+    @tag("batch_agent_chat")
     def test_timeline_endpoint_returns_expected_events(self):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
@@ -208,6 +225,46 @@ class AgentChatAPITests(TestCase):
         self.assertIsInstance(snapshot.get("webTasks"), list)
 
     @tag("batch_agent_chat")
+    def test_timeline_includes_create_image_preview_url(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Create hero image",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="create_image",
+            tool_params={
+                "prompt": "Minimal poster art",
+                "file_path": "/exports/generated-image.png",
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "file": "$[/exports/generated-image.png]",
+                }
+            ),
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        entries = [
+            entry
+            for event in payload.get("events", [])
+            if event.get("kind") == "steps"
+            for entry in event.get("entries", [])
+        ]
+        image_entry = next(entry for entry in entries if entry.get("toolName") == "create_image")
+
+        preview_url = image_entry.get("createImageUrl")
+        self.assertIsInstance(preview_url, str)
+        parsed = urlparse(preview_url)
+        expected_path = reverse("console_agent_fs_download", kwargs={"agent_id": self.agent.id})
+        self.assertEqual(parsed.path, expected_path)
+        self.assertEqual(parse_qs(parsed.query).get("path"), ["/exports/generated-image.png"])
+
+    @tag("batch_agent_chat")
     def test_timeline_has_no_older_when_under_limit(self):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
@@ -223,6 +280,18 @@ class AgentChatAPITests(TestCase):
         snapshot = build_processing_snapshot(self.agent)
 
         self.assertTrue(snapshot.active)
+
+    @tag("batch_agent_chat")
+    def test_processing_snapshot_includes_next_scheduled_at_when_idle(self):
+        self.agent.schedule = "@hourly"
+        self.agent.execution_environment = getattr(settings, "GOBII_RELEASE_ENV", "local")
+        self.agent.is_active = True
+        self.agent.life_state = PersistentAgent.LifeState.ACTIVE
+        self.agent.save(update_fields=["schedule", "execution_environment", "is_active", "life_state"])
+
+        snapshot = build_processing_snapshot(self.agent)
+
+        self.assertIsNotNone(snapshot.next_scheduled_at)
 
     @tag("batch_agent_chat")
     def test_timeline_includes_thinking_events(self):
@@ -493,6 +562,22 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(web_task.get("status"), BrowserUseAgentTask.StatusChoices.IN_PROGRESS)
         self.assertEqual(web_task.get("statusLabel"), task.get_status_display())
         self.assertEqual(web_task.get("promptPreview"), "Visit example.com")
+        self.assertIn("nextScheduledAt", snapshot)
+
+    @tag("batch_agent_chat")
+    def test_processing_status_endpoint_includes_next_scheduled_at(self):
+        self.agent.schedule = "@hourly"
+        self.agent.execution_environment = getattr(settings, "GOBII_RELEASE_ENV", "local")
+        self.agent.is_active = True
+        self.agent.life_state = PersistentAgent.LifeState.ACTIVE
+        self.agent.save(update_fields=["schedule", "execution_environment", "is_active", "life_state"])
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/processing/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        snapshot = payload.get("processing_snapshot") or {}
+
+        self.assertIsInstance(snapshot.get("nextScheduledAt"), str)
 
     @tag("batch_agent_chat")
     def test_processing_status_reports_active_when_only_queued(self):

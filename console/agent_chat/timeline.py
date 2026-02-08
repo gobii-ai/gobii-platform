@@ -21,6 +21,7 @@ from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
 from bleach.sanitizer import Cleaner
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
+from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.models import (
     BrowserUseAgentTask,
@@ -161,6 +162,7 @@ class KanbanEnvelope:
 class ProcessingSnapshot:
     active: bool
     web_tasks: list[dict]
+    next_scheduled_at: datetime | None = None
 
 
 @dataclass(slots=True)
@@ -489,6 +491,78 @@ def _serialize_thinking(env: ThinkingEnvelope) -> dict:
     }
 
 
+_FILE_REF_RE = re.compile(r"^\$\[(.+)\]$")
+_INLINE_IMG_SRC_RE = re.compile(r"<img[^>]+src=['\"]([^'\"]+)['\"]", re.IGNORECASE)
+_MARKDOWN_IMG_RE = re.compile(r"!\[[^\]]*]\(([^)]+)\)")
+
+
+def _resolve_tool_image_candidate(
+    tool_call: PersistentAgentToolCall,
+    candidate: str | Mapping[str, object] | None,
+) -> str | None:
+    if isinstance(candidate, Mapping):
+        raw_candidate = candidate.get("url") or candidate.get("image_url")
+        candidate = str(raw_candidate).strip() if raw_candidate is not None else None
+    if not isinstance(candidate, str):
+        return None
+    normalized = candidate.strip()
+    if not normalized:
+        return None
+
+    inline_match = _INLINE_IMG_SRC_RE.search(normalized)
+    if inline_match:
+        normalized = inline_match.group(1).strip()
+    else:
+        markdown_match = _MARKDOWN_IMG_RE.search(normalized)
+        if markdown_match:
+            normalized = markdown_match.group(1).strip()
+
+    match = _FILE_REF_RE.match(normalized)
+    file_path = match.group(1).strip() if match else None
+    if not file_path and normalized.startswith("/"):
+        file_path = normalized
+
+    if file_path:
+        agent_id = tool_call.step.agent_id
+        query = urlencode({"path": file_path})
+        return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
+
+    if normalized.startswith(("http://", "https://", "data:image/")):
+        return normalized
+
+    return None
+
+
+def _extract_tool_image_url(tool_call: PersistentAgentToolCall) -> str | None:
+    """Resolve chart/image tool outputs to an image URL suitable for timeline previews."""
+    import json as _json
+
+    tool_name = (tool_call.tool_name or "").lower()
+    if tool_name not in {"create_chart", "create_image"}:
+        return None
+    if (getattr(tool_call, "status", None) or "complete") != "complete":
+        return None
+    raw = tool_call.result
+    if not raw:
+        return None
+    try:
+        result = _json.loads(raw) if isinstance(raw, str) else raw
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(result, dict) or result.get("status") == "error":
+        return None
+    if tool_name == "create_chart":
+        candidate_keys = ("file", "chart_url", "image_url", "url", "inline_html", "inline")
+    else:
+        candidate_keys = ("file", "image_url", "url", "inline_html", "inline")
+
+    for key in candidate_keys:
+        resolved = _resolve_tool_image_candidate(tool_call, result.get(key))
+        if resolved:
+            return resolved
+    return None
+
+
 def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     step = env.step
     tool_call = env.tool_call
@@ -496,7 +570,7 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     meta = _tool_icon_for(tool_name)
     meta["label"] = _friendly_tool_label(tool_name, labels)
     status = getattr(tool_call, "status", None) or "complete"
-    return {
+    entry: dict = {
         "id": str(step.id),
         "cursor": env.cursor.encode(),
         "timestamp": _format_timestamp(step.created_at),
@@ -507,6 +581,14 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         "result": tool_call.result,
         "status": status,
     }
+    preview_image_url = _extract_tool_image_url(tool_call)
+    if preview_image_url:
+        lowered_tool_name = tool_name.lower()
+        if lowered_tool_name == "create_chart":
+            entry["chartImageUrl"] = preview_image_url
+        elif lowered_tool_name == "create_image":
+            entry["createImageUrl"] = preview_image_url
+    return entry
 
 
 def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -> dict:
@@ -927,6 +1009,52 @@ def _build_web_task_payload(task: BrowserUseAgentTask, *, now: datetime | None =
     }
 
 
+def _coerce_schedule_eta_to_timedelta(eta: object) -> timedelta | None:
+    if eta is None:
+        return None
+    if isinstance(eta, timedelta):
+        return eta
+    if isinstance(eta, (int, float)):
+        return timedelta(seconds=float(eta))
+    return None
+
+
+def _compute_next_scheduled_run(agent: PersistentAgent, *, now: datetime | None = None) -> datetime | None:
+    """Return the next known scheduled wake-up for an agent."""
+
+    if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
+        return None
+
+    current_env = getattr(settings, "GOBII_RELEASE_ENV", "local")
+    if (agent.execution_environment or "local") != current_env:
+        return None
+
+    schedule_value = (agent.schedule or "").strip()
+    if not schedule_value:
+        return None
+
+    try:
+        schedule_obj = ScheduleParser.parse(schedule_value)
+    except ValueError:
+        return None
+
+    if schedule_obj is None:
+        return None
+
+    current_time = now or timezone.now()
+    try:
+        eta = schedule_obj.remaining_estimate(current_time)
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+    delay = _coerce_schedule_eta_to_timedelta(eta)
+    if delay is None:
+        return None
+    if delay.total_seconds() < 0:
+        delay = timedelta(seconds=0)
+    return current_time + delay
+
+
 def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
     """Compute current processing activity and active web tasks for an agent."""
 
@@ -964,13 +1092,15 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
         web_tasks = [_build_web_task_payload(task, now=now) for task in active_tasks]
 
     active = bool(heartbeat_active or lock_active or queued_flag or web_tasks)
-    return ProcessingSnapshot(active=active, web_tasks=web_tasks)
+    next_scheduled_at = _compute_next_scheduled_run(agent)
+    return ProcessingSnapshot(active=active, web_tasks=web_tasks, next_scheduled_at=next_scheduled_at)
 
 
 def serialize_processing_snapshot(snapshot: ProcessingSnapshot) -> dict:
     return {
         "active": snapshot.active,
         "webTasks": snapshot.web_tasks,
+        "nextScheduledAt": _format_timestamp(snapshot.next_scheduled_at),
     }
 
 

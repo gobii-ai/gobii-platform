@@ -31,6 +31,7 @@ export type ToolEntryDisplay = {
     toolId: string
     toolLabel: string
   }
+  separateFromPreview?: boolean
 }
 
 export type ToolClusterDisplay = {
@@ -63,6 +64,8 @@ export type ToolDescriptorTransform = {
   detailComponent?: ToolDetailComponent
   /** If true, this tool entry should be hidden from the timeline */
   skip?: boolean
+  /** If true, this entry should render outside the live preview stream */
+  separateFromPreview?: boolean
 }
 
 export type ToolDescriptor = {

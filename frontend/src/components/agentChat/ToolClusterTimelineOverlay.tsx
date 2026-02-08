@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
@@ -7,48 +7,19 @@ import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { ToolIconSlot } from './ToolIconSlot'
 import { ToolProviderBadge } from './ToolProviderBadge'
-import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
+import { deriveEntryCaption, deriveThinkingPreview } from './tooling/clusterPreviewText'
+import type { ToolClusterTransform } from './tooling/types'
 
 type ToolClusterTimelineOverlayProps = {
   open: boolean
   cluster: ToolClusterTransform
+  initialOpenEntryId?: string | null
   onClose: () => void
 }
 
-function deriveCaption(entry: ToolEntryDisplay): string | null {
-  if (entry.caption && entry.caption !== entry.label) {
-    return entry.caption
-  }
-  if (entry.summary && entry.summary !== entry.label) {
-    return entry.summary
-  }
-  return null
-}
-
-function deriveThinkingPreview(entry: ToolEntryDisplay): string | null {
-  if (entry.toolName !== 'thinking') {
-    return null
-  }
-  const reasoning = typeof entry.result === 'string' ? entry.result : ''
-  if (!reasoning.trim()) {
-    return null
-  }
-  const lines = reasoning.split(/\r?\n/)
-  const firstLineIndex = lines.findIndex((line) => line.trim().length > 0)
-  if (firstLineIndex === -1) {
-    return null
-  }
-  const firstLine = lines[firstLineIndex]
-    .trimEnd()
-    .replace(/\*\*(.*?)\*\*/g, '$1')
-    .replace(/__(.*?)__/g, '$1')
-  const remainder = lines.slice(firstLineIndex + 1).join('\n')
-  const hasMore = remainder.trim().length > 0
-  return hasMore ? `${firstLine}…` : firstLine
-}
-
-export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClusterTimelineOverlayProps) {
+export function ToolClusterTimelineOverlay({ open, cluster, initialOpenEntryId = null, onClose }: ToolClusterTimelineOverlayProps) {
   const [openEntryId, setOpenEntryId] = useState<string | null>(null)
+  const entryRowRefs = useRef<Record<string, HTMLLIElement | null>>({})
   const titleId = useMemo(() => `tool-cluster-timeline-title-${slugify(cluster.cursor)}`, [cluster.cursor])
   const dialogId = useMemo(() => `tool-cluster-timeline-dialog-${slugify(cluster.cursor)}`, [cluster.cursor])
 
@@ -72,6 +43,31 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
       document.body.style.overflow = originalOverflow
     }
   }, [onClose, open])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    if (!initialOpenEntryId) {
+      setOpenEntryId(null)
+      return
+    }
+    const hasTarget = cluster.entries.some((entry) => entry.id === initialOpenEntryId)
+    if (hasTarget) {
+      setOpenEntryId(initialOpenEntryId)
+    }
+  }, [cluster.entries, initialOpenEntryId, open])
+
+  useEffect(() => {
+    if (!open || !openEntryId) {
+      return
+    }
+    const row = entryRowRefs.current[openEntryId]
+    if (!row) {
+      return
+    }
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [open, openEntryId])
 
   const handleToggleEntry = useCallback((entryId: string) => {
     setOpenEntryId((current) => (current === entryId ? null : entryId))
@@ -102,12 +98,20 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
               const detailId = `tool-cluster-timeline-detail-${slugify(entry.id)}`
               const isOpen = openEntryId === entry.id
               const relativeTime = formatRelativeTimestamp(entry.timestamp)
-              const caption = deriveCaption(entry)
+              const caption = deriveEntryCaption(entry)
               const thinkingPreview = deriveThinkingPreview(entry)
               const kind = entry.toolName === 'thinking' ? 'thinking' : entry.toolName === 'kanban' ? 'kanban' : 'tool'
               const DetailComponent = entry.detailComponent
               return (
-                <li key={entry.id} className="tool-cluster-timeline-item" data-kind={kind}>
+                <li
+                  key={entry.id}
+                  className="tool-cluster-timeline-item"
+                  data-kind={kind}
+                  data-entry-id={entry.id}
+                  ref={(node) => {
+                    entryRowRefs.current[entry.id] = node
+                  }}
+                >
                   <button
                     type="button"
                     className="tool-cluster-timeline-row"

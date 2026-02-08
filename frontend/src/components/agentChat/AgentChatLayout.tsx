@@ -1,13 +1,14 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
+import { motion } from 'framer-motion'
 import '../../styles/agentChatLegacy.css'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
-import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
+import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
@@ -17,6 +18,7 @@ import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
+import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
@@ -109,11 +111,10 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   loadingNewer?: boolean
   initialLoading?: boolean
   processingWebTasks?: ProcessingWebTask[]
+  nextScheduledAt?: string | null
   processingStartedAt?: number | null
   awaitingResponse?: boolean
   streaming?: StreamState | null
-  streamingThinkingCollapsed?: boolean
-  onToggleStreamingThinking?: () => void
   insights?: InsightEvent[]
   currentInsightIndex?: number
   onDismissInsight?: (insightId: string) => void
@@ -129,6 +130,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
+  composerError?: string | null
+  composerErrorShowUpgrade?: boolean
 }
 
 export function AgentChatLayout({
@@ -194,9 +197,8 @@ export function AgentChatLayout({
   processingStartedAt,
   awaitingResponse = false,
   processingWebTasks = [],
+  nextScheduledAt = null,
   streaming,
-  streamingThinkingCollapsed = false,
-  onToggleStreamingThinking,
   onLoadOlder,
   onLoadNewer,
   onJumpToLatest,
@@ -226,6 +228,8 @@ export function AgentChatLayout({
   llmTierError = null,
   onOpenTaskPacks,
   spawnIntentLoading = false,
+  composerError = null,
+  composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
@@ -240,6 +244,8 @@ export function AgentChatLayout({
     upgradeModalSource,
     upgradeModalDismissible,
     isProprietaryMode,
+    openUpgradeModal,
+    ensureAuthenticated,
   } = useSubscriptionStore()
   const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -249,6 +255,8 @@ export function AgentChatLayout({
   const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
+  const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
+  const [scheduledLimitBusy, setScheduledLimitBusy] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -437,15 +445,12 @@ export function AgentChatLayout({
   }, [agentId, contactCapStatus?.limitReached, contactCapDismissed, contactPackShowUpgrade])
 
   const isStreaming = Boolean(streaming && !streaming.done)
-  const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
-  const suppressedThinkingCursor = streaming?.cursor ?? null
-  // Show streaming reasoning while streaming, or briefly after done to allow collapse animation
-  // (streaming is cleared when historical thinking event arrives)
-  const showStreamingReasoning = hasStreamingReasoning && (isStreaming || streaming?.done)
-
-  // Streaming slot shows while actively streaming content, or briefly after done for reasoning collapse
-  const showStreamingSlot = showStreamingReasoning || (hasStreamingContent && isStreaming)
+  // Un-suppress the static thinking entry once streaming completes so it appears in its chronological position
+  const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
+  const showStreamingSlot = hasStreamingContent && isStreaming
+  // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
+  const showStreamingThinking = isStreaming && Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -454,17 +459,157 @@ export function AgentChatLayout({
   const hideResponseSkeleton = isActivelyStreamingContent || hasMoreNewer
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
+  const showScheduledResumeEvent = Boolean(
+    !initialLoading
+    && !processingActive
+    && !awaitingResponse
+    && !isStreaming
+    && !hasMoreNewer
+    && nextScheduledAt,
+  )
+  const showScheduledCreditActions = Boolean(
+    showScheduledResumeEvent
+    && (
+      showTaskCreditsWarning
+      || dailyCredits?.low
+      || dailyCreditsStatus?.softTargetExceeded
+      || dailyCreditsStatus?.hardLimitReached
+      || dailyCreditsStatus?.hardLimitBlocked
+    ),
+  )
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const hasTimelineEvents = events.length > 0
   const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
-  const showLoadNewerButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || loadingNewer)
-  const showJumpButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || hasUnseenActivity || (!autoScrollPinned && !isNearBottom))
+  const showJumpButton = !initialLoading
+    && hasTimelineEvents
+    && (
+      hasMoreNewer
+      || (!autoScrollPinned && (hasUnseenActivity || !isNearBottom))
+    )
+  // "Load newer" only shows when jump button is hidden — jump-to-latest handles the hasMoreNewer case
+  const showLoadNewerButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || loadingNewer) && !showJumpButton
 
   const showBanner = Boolean(agentName)
   const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
   const showHardLimitCallout = Boolean(
     (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
   )
+  const quickIncreaseTarget = useMemo(() => {
+    if (!dailyCredits || !onUpdateDailyCredits || dailyCredits.unlimited) {
+      return null
+    }
+    if (!Number.isFinite(dailyCredits.limit ?? NaN) || !Number.isFinite(dailyCredits.sliderLimitMax)) {
+      return null
+    }
+
+    const currentLimit = Math.round(dailyCredits.limit as number)
+    const maxLimit = Math.round(dailyCredits.sliderLimitMax)
+    const step = Number.isFinite(dailyCredits.sliderStep) && dailyCredits.sliderStep > 0
+      ? Math.round(dailyCredits.sliderStep)
+      : 1
+    const standardLimit = Number.isFinite(dailyCredits.standardSliderLimit)
+      ? Math.round(dailyCredits.standardSliderLimit)
+      : currentLimit + step
+    const target = Math.min(maxLimit, Math.max(currentLimit + step, standardLimit))
+
+    if (target <= currentLimit) {
+      return null
+    }
+    return target
+  }, [dailyCredits, onUpdateDailyCredits])
+  const quickIncreaseLabel = useMemo(() => {
+    if (quickIncreaseTarget === null) {
+      return null
+    }
+    return `Increase to ${quickIncreaseTarget}/day`
+  }, [quickIncreaseTarget])
+  const handleQuickIncreaseLimit = useCallback(async () => {
+    if (!onUpdateDailyCredits || quickIncreaseTarget === null || quickIncreaseBusy) {
+      return
+    }
+    setQuickIncreaseBusy(true)
+    try {
+      await onUpdateDailyCredits({ daily_credit_limit: quickIncreaseTarget })
+      onRefreshDailyCredits?.()
+    } finally {
+      setQuickIncreaseBusy(false)
+    }
+  }, [onUpdateDailyCredits, quickIncreaseTarget, quickIncreaseBusy, onRefreshDailyCredits])
+  const scheduledDoubleLimitTarget = useMemo(() => {
+    if (!showScheduledCreditActions || !dailyCredits || !onUpdateDailyCredits || dailyCredits.unlimited) {
+      return null
+    }
+    if (!Number.isFinite(dailyCredits.limit ?? NaN) || !Number.isFinite(dailyCredits.sliderLimitMax)) {
+      return null
+    }
+    const currentLimit = Math.round(dailyCredits.limit as number)
+    const maxLimit = Math.round(dailyCredits.sliderLimitMax)
+    const target = Math.min(maxLimit, currentLimit * 2)
+    if (target <= currentLimit) {
+      return null
+    }
+    return target
+  }, [showScheduledCreditActions, dailyCredits, onUpdateDailyCredits])
+  const scheduledDoubleLimitLabel = useMemo(() => {
+    if (scheduledDoubleLimitTarget === null) {
+      return null
+    }
+    return `Double to ${scheduledDoubleLimitTarget}/day`
+  }, [scheduledDoubleLimitTarget])
+  const handleScheduledDoubleLimit = useCallback(async () => {
+    if (!onUpdateDailyCredits || scheduledDoubleLimitTarget === null || scheduledLimitBusy || quickIncreaseBusy) {
+      return
+    }
+    setScheduledLimitBusy(true)
+    try {
+      await onUpdateDailyCredits({ daily_credit_limit: scheduledDoubleLimitTarget })
+      onRefreshDailyCredits?.()
+    } finally {
+      setScheduledLimitBusy(false)
+    }
+  }, [
+    onUpdateDailyCredits,
+    scheduledDoubleLimitTarget,
+    scheduledLimitBusy,
+    quickIncreaseBusy,
+    onRefreshDailyCredits,
+  ])
+  const canSetUnlimitedFromSchedule = Boolean(
+    showScheduledCreditActions
+    && onUpdateDailyCredits
+    && dailyCredits
+    && !dailyCredits.unlimited,
+  )
+  const handleScheduledSetUnlimited = useCallback(async () => {
+    if (!onUpdateDailyCredits || !canSetUnlimitedFromSchedule || scheduledLimitBusy || quickIncreaseBusy) {
+      return
+    }
+    setScheduledLimitBusy(true)
+    try {
+      await onUpdateDailyCredits({ daily_credit_limit: null })
+      onRefreshDailyCredits?.()
+    } finally {
+      setScheduledLimitBusy(false)
+    }
+  }, [
+    onUpdateDailyCredits,
+    canSetUnlimitedFromSchedule,
+    scheduledLimitBusy,
+    quickIncreaseBusy,
+    onRefreshDailyCredits,
+  ])
+  const canShowScheduledUpgrade = Boolean(showScheduledCreditActions && isProprietaryMode && !isCollaborator)
+  const handleScheduledUpgrade = useCallback(async () => {
+    if (!canShowScheduledUpgrade) {
+      return
+    }
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
+    openUpgradeModal('task_credits_callout')
+  }, [canShowScheduledUpgrade, ensureAuthenticated, openUpgradeModal])
+  const scheduledActionBusy = quickIncreaseBusy || scheduledLimitBusy
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
   const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
 
@@ -576,12 +721,14 @@ export function AgentChatLayout({
           id="agent-workspace-root"
           style={composerPalette.cssVars}
         >
-          {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          {/* Scrollable timeline container — layoutScroll tells framer-motion
+              to account for scroll offset so layout animations inside don't
+              re-trigger when the user scrolls. */}
+          <motion.div ref={timelineRef} id="timeline-shell" layoutScroll data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
-              <div id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
+              <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
                 <div
                   id="timeline-load-older"
                   className="timeline-load-control"
@@ -601,20 +748,36 @@ export function AgentChatLayout({
                   </button>
                 </div>
 
-                <div id="timeline-event-list" className="flex flex-col gap-3">
+                <div id="timeline-event-list" className="flex flex-col">
                   <TimelineEventList
                     agentFirstName={agentFirstName}
                     events={events}
                     agentColorHex={agentColorHex || undefined}
+                    agentAvatarUrl={agentAvatarUrl}
                     viewerUserId={viewerUserId ?? null}
                     viewerEmail={viewerEmail ?? null}
                     initialLoading={initialLoading}
                     suppressedThinkingCursor={suppressedThinkingCursor}
                   />
                 </div>
+                {showScheduledResumeEvent ? (
+                  <ScheduledResumeCard
+                    nextScheduledAt={nextScheduledAt}
+                    onDoubleLimit={scheduledDoubleLimitTarget !== null ? handleScheduledDoubleLimit : undefined}
+                    doubleLimitLabel={scheduledDoubleLimitLabel ?? undefined}
+                    onSetUnlimited={canSetUnlimitedFromSchedule ? handleScheduledSetUnlimited : undefined}
+                    onOpenSettings={showScheduledCreditActions && onUpdateDailyCredits ? handleSettingsOpen : undefined}
+                    onOpenTaskPacks={showScheduledCreditActions ? resolvedOpenTaskPacks : undefined}
+                    onUpgrade={canShowScheduledUpgrade ? handleScheduledUpgrade : undefined}
+                    actionBusy={scheduledActionBusy}
+                  />
+                ) : null}
                 {showHardLimitCallout ? (
                   <HardLimitCalloutCard
                     onOpenSettings={handleSettingsOpen}
+                    onQuickIncrease={quickIncreaseTarget !== null ? handleQuickIncreaseLimit : undefined}
+                    quickIncreaseLabel={quickIncreaseLabel ?? undefined}
+                    quickIncreaseBusy={quickIncreaseBusy}
                     upgradeUrl={hardLimitUpgradeUrl}
                     showUpsell={hardLimitShowUpsell}
                   />
@@ -639,20 +802,21 @@ export function AgentChatLayout({
                   />
                 ) : null}
 
+                {showStreamingThinking ? (
+                  <StreamingThinkingCard
+                    reasoning={streaming?.reasoning || ''}
+                    isStreaming={isStreaming}
+                  />
+                ) : null}
+
                 {showStreamingSlot && !hasMoreNewer ? (
-                  <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
-                    {showStreamingReasoning && onToggleStreamingThinking ? (
-                      <ThinkingBubble
-                        reasoning={streaming?.reasoning || ''}
-                        isStreaming={isStreaming}
-                        collapsed={streamingThinkingCollapsed}
-                        onToggle={onToggleStreamingThinking}
-                      />
-                    ) : null}
+                  <div id="streaming-response-slot" className="streaming-response-slot flex flex-col">
                     {hasStreamingContent ? (
                       <StreamingReplyCard
                         content={streaming?.content || ''}
                         agentFirstName={agentFirstName}
+                        agentAvatarUrl={agentAvatarUrl}
+                        agentColorHex={agentColorHex}
                         isStreaming={isStreaming}
                       />
                     ) : null}
@@ -688,32 +852,32 @@ export function AgentChatLayout({
               </div>
             </div>
 
-            {/* Jump button positioned within scroll container */}
-            <button
-              id="jump-to-latest"
-              className="jump-to-latest"
-              type="button"
-              aria-label="Jump to latest"
-              aria-hidden={showJumpButton ? 'false' : 'true'}
-              onClick={onJumpToLatest}
-              data-has-activity={hasUnseenActivity ? 'true' : 'false'}
-              data-visible={showJumpButton ? 'true' : 'false'}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
-              </svg>
-              <span className="sr-only">Jump to latest</span>
-            </button>
-          </div>
+          </motion.div>
+
+          {/* Jump button outside scroll container so position:fixed works on iOS Safari */}
+          <button
+            id="jump-to-latest"
+            className="jump-to-latest"
+            type="button"
+            aria-label="Jump to latest"
+            aria-hidden={showJumpButton ? 'false' : 'true'}
+            onClick={onJumpToLatest}
+            data-has-activity={hasUnseenActivity ? 'true' : 'false'}
+            data-visible={showJumpButton ? 'true' : 'false'}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
+            </svg>
+            <span className="sr-only">Jump to latest</span>
+          </button>
 
           {/* Composer at bottom of flex layout */}
           {spawnIntentLoading ? (
             <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
               <div className="flex flex-col items-center gap-3 text-center">
-                <Loader2 className="app-loading__spinner" aria-hidden="true" />
+                <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Preparing your agent…</p>
-                  <p className="text-xs text-slate-500">Checking plan access and usage.</p>
                 </div>
               </div>
             </div>
@@ -743,6 +907,8 @@ export function AgentChatLayout({
               intelligenceError={llmTierError}
               onOpenTaskPacks={resolvedOpenTaskPacks}
               canManageAgent={canManageAgent}
+              submitError={composerError}
+              showSubmitErrorUpgrade={composerErrorShowUpgrade}
             />
           )}
         </div>

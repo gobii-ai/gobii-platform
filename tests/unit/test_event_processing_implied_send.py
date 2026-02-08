@@ -13,6 +13,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -278,7 +279,7 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_requires_canonical_continuation_phrase(
+    def test_implied_send_allows_natural_progress_continuation_without_canonical_phrase(
         self,
         mock_completion,
         mock_build_prompt,
@@ -305,9 +306,109 @@ class ImpliedSendTests(TestCase):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertTrue(mock_send_chat.called)
+        self.assertGreaterEqual(len(mock_send_chat.call_args_list), 1)
+        first_params = mock_send_chat.call_args_list[0][0][1]
+        self.assertTrue(first_params.get("will_continue_work"))
+        if len(mock_send_chat.call_args_list) > 1:
+            second_params = mock_send_chat.call_args_list[1][0][1]
+            self.assertIsNone(second_params.get("will_continue_work"))
+        self.assertEqual(mock_completion.call_count, 2)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_uses_natural_continuation_when_open_kanban_work(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Continue researching portfolio companies",
+            status=PersistentAgentKanbanCard.Status.TODO,
+        )
+
+        resp = self._mock_completion("I've scraped the sites. Let me extract key details next.")
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
         params = mock_send_chat.call_args[0][1]
-        self.assertNotIn("will_continue_work", params)
-        self.assertEqual(mock_completion.call_count, 1)
+        self.assertTrue(params.get("will_continue_work"))
+
+    @patch("api.agent.core.event_processing._should_imply_continue", return_value=False)
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_rechecks_open_kanban_before_sleep(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+        _mock_should_imply_continue,
+    ):
+        """A conservative implied-stop decision should still continue on clear progress language."""
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Continue researching portfolio companies",
+            status=PersistentAgentKanbanCard.Status.TODO,
+        )
+
+        first_resp = self._mock_completion("I've scraped the profiles. Let me extract key details next.")
+        second_resp = self._mock_completion(None)
+
+        mock_completion.side_effect = [
+            (
+                first_resp,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+            (
+                second_resp,
+                {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+        ]
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+        params = mock_send_chat.call_args[0][1]
+        self.assertTrue(params.get("will_continue_work"))
+        self.assertEqual(mock_completion.call_count, 2)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
@@ -471,14 +572,14 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_explicit_send_defaults_to_stop(
+    def test_explicit_send_infers_continue_for_progress_update_without_flag(
         self,
         mock_completion,
         mock_build_prompt,
         mock_send_chat,
         _mock_credit,
     ):
-        """Explicit send_chat_message without will_continue_work defaults to STOP."""
+        """Progress-update explicit sends should continue even if the flag is omitted."""
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
 
         tool_call = MagicMock()
@@ -488,7 +589,7 @@ class ImpliedSendTests(TestCase):
         tool_call.function.arguments = json.dumps(
             {
                 "to_address": build_web_user_address(self.user.id, self.agent.id),
-                "body": "Working on it now.",
+                "body": "Great question! Let me dig into the most-discussed stories and find some standout comments.",
             }
         )
 
@@ -516,7 +617,156 @@ class ImpliedSendTests(TestCase):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         params = mock_send_chat.call_args[0][1]
-        # Explicit sends without will_continue_work default to STOP (no key set)
+        self.assertTrue(params.get("will_continue_work"))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_explicit_send_keeps_stop_for_defer_language_without_flag(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_send_defer_1"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "send_chat_message"
+        tool_call.function.arguments = json.dumps(
+            {
+                "to_address": build_web_user_address(self.user.id, self.agent.id),
+                "body": "I'll wait here. Let me know if you need anything else.",
+            }
+        )
+
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        params = mock_send_chat.call_args[0][1]
+        self.assertIsNone(params.get("will_continue_work"))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_explicit_send_keeps_stop_for_completion_language_without_flag(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_send_done_1"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "send_chat_message"
+        tool_call.function.arguments = json.dumps(
+            {
+                "to_address": build_web_user_address(self.user.id, self.agent.id),
+                "body": "All done. Here's what I found.",
+            }
+        )
+
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        params = mock_send_chat.call_args[0][1]
+        self.assertIsNone(params.get("will_continue_work"))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_explicit_send_keeps_stop_when_message_asks_user_question_without_flag(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_send_q_1"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "send_chat_message"
+        tool_call.function.arguments = json.dumps(
+            {
+                "to_address": build_web_user_address(self.user.id, self.agent.id),
+                "body": "Can you share which thread you care about most?",
+            }
+        )
+
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        params = mock_send_chat.call_args[0][1]
         self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
@@ -827,3 +1077,40 @@ class CompletionSignalTests(TestCase):
 
     def test_has_completion_signal_with_this_completes(self):
         self.assertTrue(ep._has_completion_signal("This completes your request."))
+
+
+@tag("batch_event_processing")
+class MessageContinuationInferenceTests(TestCase):
+    """Unit tests for omitted will_continue_work inference on message tools."""
+
+    def test_infer_continuation_true_for_progress_update(self):
+        self.assertTrue(
+            ep._should_infer_message_tool_continuation(
+                "Great question! Let me dig into the most-discussed stories first."
+            )
+        )
+
+    def test_infer_continuation_false_for_completion_signal(self):
+        self.assertFalse(
+            ep._should_infer_message_tool_continuation(
+                "All done. Here's what I found."
+            )
+        )
+
+    def test_infer_continuation_false_for_stop_hint(self):
+        self.assertFalse(
+            ep._should_infer_message_tool_continuation(
+                "I'll wait here. Let me know if you need anything else."
+            )
+        )
+
+    def test_infer_continuation_false_when_question_present(self):
+        self.assertFalse(
+            ep._should_infer_message_tool_continuation(
+                "Can you share which story you want me to prioritize?"
+            )
+        )
+
+    def test_infer_continuation_false_for_empty(self):
+        self.assertFalse(ep._should_infer_message_tool_continuation(""))
+        self.assertFalse(ep._should_infer_message_tool_continuation(None))

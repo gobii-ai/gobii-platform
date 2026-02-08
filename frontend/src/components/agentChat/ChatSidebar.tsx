@@ -1,8 +1,9 @@
 import { memo, useState, useCallback, useEffect, useMemo } from 'react'
-import { PanelLeft, PanelLeftClose, Menu, Plus } from 'lucide-react'
+import { PanelLeft, PanelLeftClose, Plus, ArrowLeftRight } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentEmptyState, AgentListItem, AgentSearchInput } from './ChatSidebarParts'
@@ -35,7 +36,12 @@ export const ChatSidebar = memo(function ChatSidebar({
   contextSwitcher,
 }: ChatSidebarProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
-  const [isMobile, setIsMobile] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+    return window.innerWidth < 768
+  })
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -57,6 +63,10 @@ export const ChatSidebar = memo(function ChatSidebar({
       setSearchQuery('')
     }
   }, [drawerOpen])
+
+  useEffect(() => {
+    setCollapsed((current) => (current === defaultCollapsed ? current : defaultCollapsed))
+  }, [defaultCollapsed])
 
   // Detect mobile breakpoint
   useEffect(() => {
@@ -93,6 +103,11 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const hasAgents = agents.length > 0
 
+  const activeAgent = useMemo(
+    () => agents.find((a) => a.id === activeAgentId) ?? null,
+    [agents, activeAgentId],
+  )
+
   // Mobile FAB and drawer
   if (isMobile) {
     const mobileContextSwitcher = contextSwitcher
@@ -105,17 +120,30 @@ export const ChatSidebar = memo(function ChatSidebar({
         }
       : null
 
+    const fabAccent = activeAgent?.displayColorHex || '#6366f1'
+    const fabStyle = { '--agent-fab-accent': fabAccent } as React.CSSProperties
+
     return (
       <>
-        {/* FAB button */}
+        {/* FAB button — shows active agent avatar */}
         <button
           type="button"
           className="agent-fab"
           onClick={() => setDrawerOpen(true)}
-          aria-label="Open menu"
+          aria-label="Switch agent"
           aria-expanded={drawerOpen}
+          style={fabStyle}
         >
-          <Menu className="h-5 w-5" />
+          <AgentAvatarBadge
+            name={activeAgent?.name || 'Agent'}
+            avatarUrl={activeAgent?.avatarUrl}
+            className="agent-fab-avatar"
+            imageClassName="agent-fab-avatar-image"
+            textClassName="agent-fab-avatar-text"
+          />
+          <span className="agent-fab-switch-badge" aria-hidden="true">
+            <ArrowLeftRight className="h-2.5 w-2.5" />
+          </span>
         </button>
 
         <AgentChatMobileSheet
@@ -188,22 +216,29 @@ export const ChatSidebar = memo(function ChatSidebar({
       data-collapsed={collapsed}
     >
       <div className="chat-sidebar-inner">
-        <div className="chat-sidebar-controls" data-collapsed={collapsed ? 'true' : 'false'}>
-          {contextSwitcher ? (
-            <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
+        <div className="chat-sidebar-header" data-collapsed={collapsed ? 'true' : 'false'}>
+          {!collapsed ? (
+            <a href="/" className="chat-sidebar-logo-link">
+              <img src="/static/images/noBgWhite.png" alt="Gobii" className="chat-sidebar-logo" />
+            </a>
           ) : null}
-          <button
-            type="button"
-            className="chat-sidebar-toggle"
-            onClick={handleToggle}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? (
-              <PanelLeft className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
-          </button>
+          <div className="chat-sidebar-header-actions">
+            {contextSwitcher ? (
+              <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
+            ) : null}
+            <button
+              type="button"
+              className="chat-sidebar-toggle"
+              onClick={handleToggle}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            >
+              {collapsed ? (
+                <PanelLeft className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="chat-sidebar-section">

@@ -150,21 +150,27 @@ def create_persistent_agent_from_charter(
     preferred_llm_tier = None
     if preferred_llm_tier_key:
         tier_key = preferred_llm_tier_key.strip().lower()
+        tier: AgentLLMTier | None = None
         try:
             tier = AgentLLMTier(tier_key)
-        except ValueError as exc:
-            raise ValidationError("Unsupported intelligence tier selection.") from exc
+        except ValueError:
+            logger.warning(
+                "Ignoring unsupported intelligence tier '%s' during agent creation for user %s",
+                tier_key,
+                request.user.id,
+            )
 
-        if settings.GOBII_PROPRIETARY_MODE:
-            owner = organization or request.user
-            plan = get_owner_plan(owner) if owner else None
-            allowed = max_allowed_tier_for_plan(plan, is_organization=organization is not None)
-            if TIER_ORDER[tier] > TIER_ORDER[allowed]:
-                raise ValidationError("Upgrade your plan to choose this intelligence tier.")
+        if tier is not None:
+            if settings.GOBII_PROPRIETARY_MODE:
+                owner = organization or request.user
+                plan = get_owner_plan(owner) if owner else None
+                allowed = max_allowed_tier_for_plan(plan, is_organization=organization is not None)
+                if TIER_ORDER[tier] > TIER_ORDER[allowed]:
+                    raise ValidationError("Upgrade your plan to choose this intelligence tier.")
 
-        preferred_llm_tier = IntelligenceTier.objects.filter(key=tier.value).first()
-        if preferred_llm_tier is None:
-            raise ValidationError("Unsupported intelligence tier selection.")
+            preferred_llm_tier = IntelligenceTier.objects.filter(key=tier.value).first()
+            if preferred_llm_tier is None:
+                raise ValidationError("Unsupported intelligence tier selection.")
 
     with transaction.atomic():
         try:

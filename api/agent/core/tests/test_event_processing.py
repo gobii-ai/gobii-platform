@@ -42,3 +42,25 @@ class ImpliedContinuationDecisionTests(SimpleTestCase):
         )
 
         self.assertFalse(result)
+
+    def test_open_kanban_with_natural_continuation_keeps_going(self):
+        result = _should_imply_continue(
+            has_canonical_continuation=False,
+            has_other_tool_calls=False,
+            has_explicit_sleep=False,
+            has_open_kanban_work=True,
+            has_natural_continuation_signal=True,
+        )
+
+        self.assertTrue(result)
+
+    def test_open_kanban_without_continuation_signal_stops(self):
+        result = _should_imply_continue(
+            has_canonical_continuation=False,
+            has_other_tool_calls=False,
+            has_explicit_sleep=False,
+            has_open_kanban_work=True,
+            has_natural_continuation_signal=False,
+        )
+
+        self.assertFalse(result)

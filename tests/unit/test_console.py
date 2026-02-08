@@ -13,7 +13,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.urls import reverse
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 from bs4 import BeautifulSoup
 from api.services.daily_credit_settings import get_daily_credit_settings_for_plan
 from constants.plans import PlanNames
@@ -331,9 +331,10 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)
 
     @tag("batch_console_agents")
+    @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
     @patch('util.analytics.Analytics.track_event')
-    def test_agent_detail_updates_daily_credit_limit(self, mock_track_event):
-        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+    def test_agent_detail_updates_daily_credit_limit(self, mock_track_event, mock_resume_delay):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep, PersistentAgentSystemStep
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -348,18 +349,29 @@ class ConsoleViewsTest(TestCase):
 
         url = reverse('agent_detail', kwargs={'pk': agent.id})
 
-        response = self.client.post(url, {
-            'name': agent.name,
-            'charter': agent.charter,
-            'is_active': 'on',
-            'daily_credit_limit': '2',
-        })
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url, {
+                'name': agent.name,
+                'charter': agent.charter,
+                'is_active': 'on',
+                'daily_credit_limit': '2',
+            })
         self.assertEqual(response.status_code, 302)
+        mock_resume_delay.assert_called_once_with(str(agent.id))
 
         agent.refresh_from_db()
         self.assertEqual(agent.daily_credit_limit, 2)
         self.assertEqual(agent.get_daily_credit_soft_target(), Decimal('2'))
         self.assertEqual(agent.get_daily_credit_hard_limit(), Decimal('4.00'))
+        latest_system_step = (
+            PersistentAgentSystemStep.objects
+            .filter(step__agent=agent, code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE)
+            .select_related('step')
+            .order_by('-step__created_at')
+            .first()
+        )
+        self.assertIsNotNone(latest_system_step)
+        self.assertIn("Daily credit soft target changed", latest_system_step.step.description)
 
         with patch('tasks.services.TaskCreditService.check_and_consume_credit_for_owner', return_value={'success': True, 'credit': None}):
             PersistentAgentStep.objects.create(
@@ -374,13 +386,15 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.context['daily_credit_usage'], Decimal('4.3'))
         self.assertTrue(response.context['daily_credit_low'])
 
-        response = self.client.post(url, {
-            'name': agent.name,
-            'charter': agent.charter,
-            'is_active': 'on',
-            'daily_credit_limit': '',
-        })
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url, {
+                'name': agent.name,
+                'charter': agent.charter,
+                'is_active': 'on',
+                'daily_credit_limit': '',
+            })
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(mock_resume_delay.call_count, 2)
 
         agent.refresh_from_db()
         self.assertIsNone(agent.daily_credit_limit)
@@ -417,8 +431,9 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
 
     @tag("batch_console_agents")
-    def test_agent_quick_settings_api_updates_limit(self):
-        from api.models import PersistentAgent, BrowserUseAgent
+    @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
+    def test_agent_quick_settings_api_updates_limit(self, mock_resume_delay):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentSystemStep
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -432,15 +447,26 @@ class ConsoleViewsTest(TestCase):
         )
 
         url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
-        response = self.client.post(
-            url,
-            data=json.dumps({'dailyCredits': {'daily_credit_limit': 7}}),
-            content_type='application/json',
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=json.dumps({'dailyCredits': {'daily_credit_limit': 7}}),
+                content_type='application/json',
+            )
         self.assertEqual(response.status_code, 200)
 
         agent.refresh_from_db()
         self.assertEqual(agent.daily_credit_limit, 7)
+        mock_resume_delay.assert_called_once_with(str(agent.id))
+        latest_system_step = (
+            PersistentAgentSystemStep.objects
+            .filter(step__agent=agent, code=PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE)
+            .select_related('step')
+            .order_by('-step__created_at')
+            .first()
+        )
+        self.assertIsNotNone(latest_system_step)
+        self.assertIn("Daily credit soft target changed", latest_system_step.step.description)
 
     @tag("batch_console_agents")
     def test_agent_quick_settings_api_hard_limit_blocked(self):
@@ -489,6 +515,85 @@ class ConsoleViewsTest(TestCase):
         status = payload.get('status', {}).get('dailyCredits', {})
         self.assertFalse(status.get('hardLimitBlocked'))
         self.assertFalse(status.get('hardLimitReached'))
+
+    @tag("batch_console_agents")
+    def test_agent_addons_api_task_pack_update_queues_owner_resume(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Addons API Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Addons API Agent",
+            charter="Task pack resume flow",
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+        body = {"taskPacks": {"quantities": {"price_task_pack": 1}}}
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.api_views.update_task_pack_quantities", return_value=(True, None, 200)) as mock_update_task, \
+             patch("console.api_views.build_agent_addons_payload", return_value={"status": {}}), \
+             patch("console.api_views.queue_owner_task_pack_resume", return_value=1) as mock_owner_resume, \
+             patch("console.api_views.queue_settings_change_resume") as mock_agent_resume:
+            response = self.client.post(
+                url,
+                data=json.dumps(body),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_update_task.assert_called_once_with(
+            owner=self.user,
+            owner_type="user",
+            plan_id=ANY,
+            quantities={"price_task_pack": 1},
+        )
+        mock_owner_resume.assert_called_once_with(
+            owner_id=self.user.id,
+            owner_type="user",
+            source="agent_addons_api_owner_resume",
+        )
+        mock_agent_resume.assert_not_called()
+
+    @tag("batch_console_agents")
+    def test_agent_addons_api_falls_back_to_agent_resume_when_owner_resume_noops(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Addons API Fallback Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Addons API Fallback Agent",
+            charter="Task pack fallback resume flow",
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+        body = {"taskPacks": {"quantities": {"price_task_pack": 1}}}
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.api_views.update_task_pack_quantities", return_value=(True, None, 200)), \
+             patch("console.api_views.build_agent_addons_payload", return_value={"status": {}}), \
+             patch("console.api_views.queue_owner_task_pack_resume", return_value=0), \
+             patch("console.api_views.queue_settings_change_resume", return_value=True) as mock_agent_resume:
+            response = self.client.post(
+                url,
+                data=json.dumps(body),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        mock_agent_resume.assert_called_once_with(
+            agent,
+            task_pack_changed=True,
+            source="agent_addons_api",
+        )
 
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')

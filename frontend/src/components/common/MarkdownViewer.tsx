@@ -114,7 +114,7 @@ const markdownComponents = {
   },
 }
 
-export function MarkdownViewer({ content, className, enableHighlight = true }: MarkdownViewerProps) {
+export const MarkdownViewer = memo(function MarkdownViewer({ content, className, enableHighlight = true }: MarkdownViewerProps) {
   const hasCodeFence = useMemo(
     () => /(^|\n)\s*```/.test(content) || /(^|\n)\s*~~~/.test(content) || /(^|\n)( {4}|\t)\S/.test(content),
     [content],
@@ -134,4 +134,4 @@ export function MarkdownViewer({ content, className, enableHighlight = true }: M
       </ReactMarkdown>
     </div>
   )
-}
+}, (prev, next) => prev.content === next.content && prev.className === next.className && prev.enableHighlight === next.enableHighlight)

@@ -58,6 +58,8 @@ export type ToolCallEntry = {
   charterText?: string | null
   status?: ToolCallStatus | null
   cursor?: string
+  chartImageUrl?: string | null
+  createImageUrl?: string | null
 }
 
 export type ToolClusterEvent = {
@@ -87,6 +89,7 @@ export type ProcessingWebTask = {
 export type ProcessingSnapshot = {
   active: boolean
   webTasks: ProcessingWebTask[]
+  nextScheduledAt?: string | null
 }
 
 export type MessageEvent = {

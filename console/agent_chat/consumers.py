@@ -7,7 +7,7 @@ from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.core.exceptions import PermissionDenied
 
 from console.agent_chat.access import resolve_agent
-from console.agent_chat.realtime import user_stream_group_name
+from console.agent_chat.realtime import user_profile_group_name, user_stream_group_name
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
             await self.close(code=4404)
             return
         self.agent_id = str(agent_id)
+        self.profile_group_name = user_profile_group_name(user.id)
 
         try:
             self.agent = await self._resolve_agent(user, session, self.agent_id)
@@ -47,6 +48,7 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
         try:
             await self.channel_layer.group_add(self.group_name, self.channel_name)
             await self.channel_layer.group_add(self.user_group_name, self.channel_name)
+            await self.channel_layer.group_add(self.profile_group_name, self.channel_name)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception(
                 "AgentChatConsumer failed to join group; channel layer unavailable (agent=%s): %s",
@@ -64,6 +66,8 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
             try:
                 await self.channel_layer.group_discard(self.group_name, self.channel_name)
                 await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
+                if hasattr(self, "profile_group_name"):
+                    await self.channel_layer.group_discard(self.profile_group_name, self.channel_name)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("AgentChatConsumer failed removing channel from group: %s", exc)
 
@@ -108,9 +112,21 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
         self.agent_id = None
         self.group_name = None
         self.user_group_name = None
+        self.profile_group_name = user_profile_group_name(user.id)
 
         if self.channel_layer is None:
             logger.error("AgentChatSessionConsumer cannot attach to channel layer (not configured)")
+            await self.close(code=1011)
+            return
+
+        try:
+            await self.channel_layer.group_add(self.profile_group_name, self.channel_name)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception(
+                "AgentChatSessionConsumer failed to join profile group; channel layer unavailable (user=%s): %s",
+                user,
+                exc,
+            )
             await self.close(code=1011)
             return
 
@@ -119,6 +135,11 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
     async def disconnect(self, code):
         await self._clear_subscription()
+        if getattr(self, "profile_group_name", None) and self.channel_layer is not None:
+            try:
+                await self.channel_layer.group_discard(self.profile_group_name, self.channel_name)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("AgentChatSessionConsumer failed removing profile channel from group: %s", exc)
         logger.info(
             "AgentChatSessionConsumer disconnect user=%s channel=%s code=%s",
             getattr(self, "user", None),

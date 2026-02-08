@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
+import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { formatRelativeTimestamp } from '../../util/time'
 import { buildUserChatPalette } from '../../util/color'
 
@@ -24,6 +25,7 @@ type MessageEventCardProps = {
   message: AgentMessage
   agentFirstName: string
   agentColorHex?: string
+  agentAvatarUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
 }
@@ -36,7 +38,7 @@ function isRecentMessage(timestamp?: string | null): boolean {
   return Date.now() - messageTime < 3000
 }
 
-export const MessageEventCard = memo(function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex, viewerUserId, viewerEmail }: MessageEventCardProps) {
+export const MessageEventCard = memo(function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex, agentAvatarUrl, viewerUserId, viewerEmail }: MessageEventCardProps) {
   const isAgent = Boolean(message.isOutbound)
   const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
@@ -113,6 +115,16 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
     >
       <div className={`chat-bubble ${bubbleTheme}`} style={bubbleStyle}>
         <div className={`chat-author ${authorTheme}`}>
+          {isAgent && !isPeer ? (
+            <AgentAvatarBadge
+              name={agentFirstName || 'Agent'}
+              avatarUrl={agentAvatarUrl}
+              className="chat-author-avatar"
+              imageClassName="chat-author-avatar-image"
+              textClassName="chat-author-avatar-text"
+              style={{ background: agentColorHex || '#6366f1' }}
+            />
+          ) : null}
           <span className="chat-author-name">{authorLabel}</span>
           {showChannelTag ? <span className={channelTagClass}>{channelLabel}</span> : null}
           <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>

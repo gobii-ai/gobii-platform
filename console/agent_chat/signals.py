@@ -8,8 +8,10 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from api.models import (
+    AgentCollaborator,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentMessage,
@@ -25,6 +27,7 @@ from console.agent_audit.serializers import (
     serialize_step,
     serialize_tool_call,
 )
+from console.agent_chat.realtime import user_profile_group_name
 
 from .kanban_events import persist_kanban_event
 from .timeline import (
@@ -72,7 +75,29 @@ def emit_agent_profile_update(agent: PersistentAgent) -> None:
         "short_description": agent.short_description or "",
         "timestamp": timezone.now().isoformat(),
     }
-    _send(_group_name(agent.id), "agent_profile_event", payload)
+    for user_id in _resolve_profile_listener_user_ids(agent):
+        _send(user_profile_group_name(user_id), "agent_profile_event", payload)
+
+
+def _resolve_profile_listener_user_ids(agent: PersistentAgent) -> set[int]:
+    user_ids: set[int] = set()
+
+    if agent.organization_id:
+        user_ids.update(
+            OrganizationMembership.objects.filter(
+                org_id=agent.organization_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).values_list("user_id", flat=True)
+        )
+    else:
+        owner_user_id = getattr(agent, "user_id", None)
+        if owner_user_id is not None:
+            user_ids.add(owner_user_id)
+
+    user_ids.update(
+        AgentCollaborator.objects.filter(agent_id=agent.id).values_list("user_id", flat=True)
+    )
+    return user_ids
 
 
 def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:

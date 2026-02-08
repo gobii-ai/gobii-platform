@@ -1,45 +1,48 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import { getEstimatedResponseTime, recordResponseTime } from '../../util/responseTimeTracker'
 
 // Progress tuning constants
-const BASE_TARGET_PCT = 88 // Where we aim to be around the estimated time
-const TAIL_TARGET_PCT = 100 // Slow creep upper bound
-const TAIL_DURATION_MULTIPLIER = 2.5 // Extra time (multiplied by estimate) to reach the tail target
-const MAX_INITIAL_ELAPSED_MS = 15000 // Cap how old a start time can be for the visual display
-const INITIAL_PROGRESS_CAP = 12 // Keep the initial visual start low to avoid jumpy entrances
-const SMOOTHING_FACTOR = 0.08 // Fraction of remaining gap to move per frame
-const MAX_STEP_PER_FRAME = 1.5 // Clamp per-frame movement to stay steady
+const BASE_TARGET_PCT = 88
+const TAIL_TARGET_PCT = 100
+const TAIL_DURATION_MULTIPLIER = 2.5
+const MAX_INITIAL_ELAPSED_MS = 15000
+const INITIAL_PROGRESS_CAP = 12
+const SMOOTHING_FACTOR = 0.08
+const MAX_STEP_PER_FRAME = 1.5
+
+// Visual constants
+const RING_R = 16
+const CIRC = 2 * Math.PI * RING_R // ≈ 100.53
+const MIN_ARC = 0.12 // always show at least 12% of the ring
+const MAX_ARC = 0.88 // leave a small gap at full progress
 
 function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3)
 }
 
-// Smooth curve that keeps moving: fast early, then slow creep toward 100%
 function calculateProgress(elapsed: number, estimated: number): number {
   const safeEstimated = Math.max(estimated, 1000)
   const clampedElapsed = Math.max(0, elapsed)
   const normalized = Math.min(1, clampedElapsed / safeEstimated)
-
-  // Front half: ease-out up to BASE_TARGET_PCT by the estimated time
   const baseProgress = easeOutCubic(normalized) * BASE_TARGET_PCT
 
-  if (normalized < 1) {
-    return Math.min(baseProgress, TAIL_TARGET_PCT)
-  }
+  if (normalized < 1) return Math.min(baseProgress, TAIL_TARGET_PCT)
 
-  // Tail: gentle linear creep toward 100% over an additional window
   const tailDuration = safeEstimated * TAIL_DURATION_MULTIPLIER
   const overtime = clampedElapsed - safeEstimated
   const tailProgress = Math.min(overtime / tailDuration, 1) * (TAIL_TARGET_PCT - BASE_TARGET_PCT)
-
   return Math.min(baseProgress + tailProgress, TAIL_TARGET_PCT)
 }
 
 function getDisplayStartTime(startTime?: number | null): number {
   const now = Date.now()
   if (!startTime) return now
-  const lowerBound = now - MAX_INITIAL_ELAPSED_MS
-  return Math.max(startTime, lowerBound)
+  return Math.max(startTime, now - MAX_INITIAL_ELAPSED_MS)
+}
+
+function arcDashArray(progress: number): string {
+  const frac = MIN_ARC + (progress / 100) * (MAX_ARC - MIN_ARC)
+  return `${frac * CIRC} ${CIRC}`
 }
 
 type ResponseSkeletonProps = {
@@ -48,86 +51,92 @@ type ResponseSkeletonProps = {
 }
 
 export function ResponseSkeleton({ startTime, hidden }: ResponseSkeletonProps) {
-  // Separate the real start (for metrics) from the display start (for the visual cap)
-  const displayStartTime = getDisplayStartTime(startTime)
-  const initialTargetProgress = calculateProgress(Date.now() - displayStartTime, getEstimatedResponseTime())
-  const initialProgress = Math.min(initialTargetProgress, INITIAL_PROGRESS_CAP)
-
-  const [progress, setProgress] = useState(initialProgress)
-  const progressRef = useRef(initialProgress)
-  const displayStartTimeRef = useRef(displayStartTime)
-  const actualStartTimeRef = useRef(startTime ?? Date.now())
-  const estimatedTimeRef = useRef(getEstimatedResponseTime())
+  const arcRef = useRef<SVGCircleElement>(null)
+  const progressRef = useRef(0)
+  const displayStartRef = useRef(getDisplayStartTime(startTime))
+  const actualStartRef = useRef(startTime ?? Date.now())
+  const estimateRef = useRef(getEstimatedResponseTime())
   const rafRef = useRef<number | null>(null)
 
-  // Reset when startTime changes (e.g., new tool call, thinking, or message)
-  useEffect(() => {
-    const newActualStartTime = startTime ?? Date.now()
-    const newDisplayStartTime = getDisplayStartTime(startTime)
-    actualStartTimeRef.current = newActualStartTime
-    displayStartTimeRef.current = newDisplayStartTime
-    estimatedTimeRef.current = getEstimatedResponseTime()
-    const nextTarget = calculateProgress(Date.now() - newDisplayStartTime, estimatedTimeRef.current)
-    const nextProgress = Math.min(nextTarget, INITIAL_PROGRESS_CAP)
-    progressRef.current = nextProgress
-    setProgress(nextProgress)
-  }, [startTime])
-
-  const animate = useCallback(() => {
-    const elapsed = Date.now() - displayStartTimeRef.current
-    const targetProgress = calculateProgress(elapsed, estimatedTimeRef.current)
-
-    setProgress((current) => {
-      const delta = targetProgress - current
-      if (Math.abs(delta) < 0.05) {
-        progressRef.current = current
-        return current
-      }
-      const step = Math.sign(delta) * Math.min(Math.abs(delta) * SMOOTHING_FACTOR, MAX_STEP_PER_FRAME)
-      const next = current + step
-      progressRef.current = next
-      return next
-    })
-
-    rafRef.current = requestAnimationFrame(animate)
+  const syncArc = useCallback(() => {
+    if (arcRef.current) {
+      arcRef.current.style.strokeDasharray = arcDashArray(progressRef.current)
+    }
   }, [])
 
-  useEffect(() => {
-    const startTimeValue = actualStartTimeRef.current
+  // Reset on startTime change — useLayoutEffect prevents flash
+  useLayoutEffect(() => {
+    displayStartRef.current = getDisplayStartTime(startTime)
+    actualStartRef.current = startTime ?? Date.now()
+    estimateRef.current = getEstimatedResponseTime()
+    const target = calculateProgress(Date.now() - displayStartRef.current, estimateRef.current)
+    progressRef.current = Math.min(target, INITIAL_PROGRESS_CAP)
+    syncArc()
+  }, [startTime, syncArc])
 
-    // Small delay for smoother entrance (only if starting fresh)
+  const animate = useCallback(() => {
+    const target = calculateProgress(Date.now() - displayStartRef.current, estimateRef.current)
+    const cur = progressRef.current
+    const delta = target - cur
+    if (Math.abs(delta) >= 0.05) {
+      const step = Math.sign(delta) * Math.min(Math.abs(delta) * SMOOTHING_FACTOR, MAX_STEP_PER_FRAME)
+      progressRef.current = cur + step
+      syncArc()
+    }
+    rafRef.current = requestAnimationFrame(animate)
+  }, [syncArc])
+
+  useEffect(() => {
+    const startVal = actualStartRef.current
     const delay = startTime ? 0 : 80
     const timer = setTimeout(() => {
       rafRef.current = requestAnimationFrame(animate)
     }, delay)
-
     return () => {
       clearTimeout(timer)
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current)
-      }
-      // Record the actual response time when component unmounts
-      const duration = Date.now() - startTimeValue
-      // Only record reasonable durations (between 200ms and 60s)
-      if (duration >= 200 && duration <= 60000) {
-        recordResponseTime(duration)
-      }
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      const dur = Date.now() - startVal
+      if (dur >= 200 && dur <= 60000) recordResponseTime(dur)
     }
   }, [animate, startTime])
 
   return (
     <div
-      className="response-progress-container"
+      className="response-throbber-container"
       hidden={hidden}
       aria-hidden={hidden ? 'true' : undefined}
     >
-      <div className="response-progress-track">
-        <div
-          className="response-progress-fill"
-          style={{ width: `${progress}%` }}
-        >
-          <div className="response-progress-glow" />
-        </div>
+      <div className="response-throbber" role="status" aria-label="Processing">
+        <svg viewBox="0 0 44 44" className="throbber-svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="throbber-grad" gradientUnits="userSpaceOnUse" x1="0" y1="44" x2="44" y2="0">
+              <stop offset="0%" stopColor="#8b5cf6" />
+              <stop offset="100%" stopColor="#7c3aed" />
+            </linearGradient>
+          </defs>
+
+          {/* Faint track ring */}
+          <circle cx="22" cy="22" r={RING_R} className="throbber-track" />
+
+          {/* Progress arc — length driven by JS, rotation by CSS */}
+          <circle
+            ref={arcRef}
+            cx="22"
+            cy="22"
+            r={RING_R}
+            className="throbber-arc"
+            strokeDasharray={`${MIN_ARC * CIRC} ${CIRC}`}
+          />
+
+          {/* Inner dashed decorative ring */}
+          <circle cx="22" cy="22" r="10" className="throbber-inner" />
+
+          {/* Outer fine decorative ring */}
+          <circle cx="22" cy="22" r="19.5" className="throbber-outer" />
+        </svg>
+
+        {/* Breathing center core */}
+        <div className="throbber-core" />
       </div>
     </div>
   )

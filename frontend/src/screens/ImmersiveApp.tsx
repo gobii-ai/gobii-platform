@@ -8,6 +8,7 @@ import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
 const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
+const DEFAULT_CLOSE_PATH = '/console/agents/'
 
 type AppRoute =
   | { kind: 'command-center' }
@@ -89,6 +90,10 @@ function parseBooleanFlag(value: string | null): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
 }
 
+function isAppPath(pathname: string): boolean {
+  return pathname === APP_BASE || pathname.startsWith(`${APP_BASE}/`)
+}
+
 function buildCleanPath(pathname: string, search: string): string {
   const params = new URLSearchParams(search)
   params.delete('embed')
@@ -97,7 +102,7 @@ function buildCleanPath(pathname: string, search: string): string {
   return cleaned ? `${pathname}?${cleaned}` : pathname
 }
 
-function sanitizeReturnTo(value: string | null): string | null {
+function sanitizeSameOriginPath(value: string | null): string | null {
   if (!value) {
     return null
   }
@@ -112,29 +117,48 @@ function sanitizeReturnTo(value: string | null): string | null {
   }
 }
 
+function normalizeClosePath(value: string): string {
+  const url = new URL(value, window.location.origin)
+  if (!isAppPath(url.pathname)) {
+    return `${url.pathname}${url.search}${url.hash}`
+  }
+  return DEFAULT_CLOSE_PATH
+}
+
 function readReturnToFromSearch(search: string): string | null {
   const params = new URLSearchParams(search)
-  return sanitizeReturnTo(params.get('return_to'))
+  return sanitizeSameOriginPath(params.get('return_to'))
 }
 
 function resolveReturnTo(search: string): string {
   const fromQuery = readReturnToFromSearch(search)
   if (fromQuery) {
-    sessionStorage.setItem(RETURN_TO_STORAGE_KEY, fromQuery)
-    return fromQuery
+    const normalizedQuery = normalizeClosePath(fromQuery)
+    if (normalizedQuery !== DEFAULT_CLOSE_PATH) {
+      sessionStorage.setItem(RETURN_TO_STORAGE_KEY, normalizedQuery)
+      return normalizedQuery
+    }
   }
 
-  const stored = sanitizeReturnTo(sessionStorage.getItem(RETURN_TO_STORAGE_KEY))
-  if (stored) {
-    return stored
-  }
-
-  const fromReferrer = sanitizeReturnTo(document.referrer)
+  const fromReferrer = sanitizeSameOriginPath(document.referrer)
   if (fromReferrer) {
-    return fromReferrer
+    const normalizedReferrer = normalizeClosePath(fromReferrer)
+    if (normalizedReferrer !== DEFAULT_CLOSE_PATH) {
+      sessionStorage.setItem(RETURN_TO_STORAGE_KEY, normalizedReferrer)
+      return normalizedReferrer
+    }
   }
 
-  return '/'
+  const stored = sanitizeSameOriginPath(sessionStorage.getItem(RETURN_TO_STORAGE_KEY))
+  if (stored) {
+    const normalizedStored = normalizeClosePath(stored)
+    if (normalizedStored !== DEFAULT_CLOSE_PATH) {
+      return normalizedStored
+    }
+    sessionStorage.removeItem(RETURN_TO_STORAGE_KEY)
+  }
+
+  return DEFAULT_CLOSE_PATH
 }
 
 type CommandCenterProps = {
@@ -229,11 +253,7 @@ export function ImmersiveApp() {
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
   useEffect(() => {
-    const fromQuery = readReturnToFromSearch(location.search)
-    if (fromQuery) {
-      sessionStorage.setItem(RETURN_TO_STORAGE_KEY, fromQuery)
-      setReturnTo(fromQuery)
-    }
+    setReturnTo(resolveReturnTo(location.search))
   }, [location.search])
 
   useEffect(() => {
@@ -281,7 +301,8 @@ export function ImmersiveApp() {
   }, [])
 
   const handleClose = useCallback(() => {
-    window.location.assign(returnTo)
+    const destination = normalizeClosePath(returnTo)
+    window.location.assign(destination)
   }, [returnTo])
 
   const handleEmbeddedClose = useCallback(() => {
