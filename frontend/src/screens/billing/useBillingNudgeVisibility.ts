@@ -12,66 +12,40 @@ export function useBillingNudgeVisibility({
   const [summaryActionsVisible, setSummaryActionsVisible] = useState(false)
   const [nearTop, setNearTop] = useState(true)
 
-  // Hide the bottom "Review and update" nudge once the user can see the real Update button.
+  // Show the bottom nudge only while the real Update button area is still below the viewport.
   useEffect(() => {
     if (!enabled) {
       setSummaryActionsVisible(false)
+      setNearTop(true)
       return
     }
-    if (typeof document === 'undefined' || typeof window === 'undefined') {
-      return
-    }
+    if (typeof document === 'undefined' || typeof window === 'undefined') return
 
     const el = document.getElementById(actionsElementId)
     if (!el) {
       setSummaryActionsVisible(false)
-      return
-    }
-
-    if (typeof window.IntersectionObserver !== 'function') {
-      const check = () => {
-        const rect = el.getBoundingClientRect()
-        const inView = rect.top < window.innerHeight && rect.bottom > 0
-        setSummaryActionsVisible(inView)
-      }
-      check()
-      window.addEventListener('scroll', check, { passive: true })
-      window.addEventListener('resize', check)
-      return () => {
-        window.removeEventListener('scroll', check)
-        window.removeEventListener('resize', check)
-      }
-    }
-
-    const observer = new window.IntersectionObserver(
-      (entries) => {
-        const entry = entries[0]
-        setSummaryActionsVisible(Boolean(entry?.isIntersecting))
-      },
-      { threshold: 0.05 },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [actionsElementId, enabled])
-
-  // If the user is already deep in the page, the nudge adds noise.
-  useEffect(() => {
-    if (!enabled) {
       setNearTop(true)
       return
     }
-    if (typeof window === 'undefined') {
-      return
+
+    const check = () => {
+      const rect = el.getBoundingClientRect()
+      const inView = rect.top < window.innerHeight && rect.bottom > 0
+      const belowFold = rect.top >= window.innerHeight
+      setSummaryActionsVisible(inView)
+      // Repurpose nearTop as "actions are still below the fold" so the nudge doesn't
+      // disappear just because the user scrolled a bit within the page.
+      setNearTop(belowFold)
     }
 
-    const update = () => {
-      setNearTop(window.scrollY < 240)
+    check()
+    window.addEventListener('scroll', check, { passive: true })
+    window.addEventListener('resize', check)
+    return () => {
+      window.removeEventListener('scroll', check)
+      window.removeEventListener('resize', check)
     }
-    update()
-    window.addEventListener('scroll', update, { passive: true })
-    return () => window.removeEventListener('scroll', update)
-  }, [enabled])
+  }, [actionsElementId, enabled])
 
   return { summaryActionsVisible, nearTop }
 }
-
