@@ -2,57 +2,6 @@
 {% load nav %}
 {% load waffle_tags %}
 
-{% block head_extras %}
-	{% if subscribe_notification %}
-  <script type="text/javascript">
-    {% if settings.META_PIXEL_ID %}
-    if (typeof fbq !== "undefined") {
-      var payload = {'value': {{ sub_price }} * parseFloat({{ settings.CAPI_LTV_MULTIPLE|default:5 }}), 'currency': 'USD'};
-      {% if subscribe_plan %}
-      payload.plan = '{{ subscribe_plan|escapejs }}';
-      {% endif %}
-      {% if subscribe_event_id %}
-      fbq('track', 'Subscribe', payload, {eventID: '{{ subscribe_event_id|escapejs }}'});
-      {% else %}
-      fbq('track', 'Subscribe', payload);
-      {% endif %}
-    }
-    {% endif %}
-    {% if settings.REDDIT_PIXEL_ID %}
-    if (typeof rdt !== "undefined") {
-      var redditPayload = {value: {{ sub_price }} * parseFloat({{ settings.CAPI_LTV_MULTIPLE|default:5 }}), currency: 'USD'};
-      {% if subscribe_plan %}
-      redditPayload.plan = '{{ subscribe_plan|escapejs }}';
-      {% endif %}
-      {% if subscribe_event_id %}
-      redditPayload.conversionId = '{{ subscribe_event_id|escapejs }}';
-      {% endif %}
-      rdt('track', 'Purchase', redditPayload);
-    }
-    {% endif %}
-    {% if settings.TIKTOK_PIXEL_ID %}
-    if (typeof ttq !== 'undefined') {
-      var ttPayload = {
-        "contents": [
-          {
-            "content_id": "{{ subscribe_plan|escapejs }}",
-            "content_type": "product",
-            "content_name": "{{ subscribe_plan|escapejs }}"
-          }
-        ],
-        "value": {{ sub_price }} * parseFloat({{ settings.CAPI_LTV_MULTIPLE|default:5 }}),
-        "currency": "USD"
-        {% if subscribe_event_id %}
-        ,"event_id": "{{ subscribe_event_id|escapejs }}"
-        {% endif %}
-      };
-      ttq.track('Subscribe', ttPayload);
-    }
-    {% endif %}
-  </script>
-  {% endif %}
-{% endblock %}
-
 {% block content %}
 <div class="flex flex-col md:flex-row min-h-screen relative">
   <!-- Removed gradient and decorative blobs for cleaner background -->
