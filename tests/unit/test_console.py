@@ -239,7 +239,7 @@ class ConsoleViewsTest(TestCase):
     @tag("batch_console_agents")
     def test_delete_persistent_agent_invalidates_account_info_cache(self):
         from api.models import PersistentAgent, BrowserUseAgent
-        from pages.context_processors import _account_info_cache_key
+        from pages.account_info_cache import account_info_cache_key
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -252,7 +252,7 @@ class ConsoleViewsTest(TestCase):
             browser_use_agent=browser_agent,
         )
 
-        cache_key = _account_info_cache_key(self.user.id)
+        cache_key = account_info_cache_key(self.user.id)
         cache.set(
             cache_key,
             {
