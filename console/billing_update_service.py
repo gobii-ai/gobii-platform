@@ -152,7 +152,15 @@ def apply_addon_price_quantities(
 
     subscription = get_active_subscription(owner, preferred_plan_id=plan_id)
     if not subscription:
-        raise BillingUpdateError("no_active_subscription", status=400)
+        # This is unexpected from the console UI perspective (billing state desync),
+        # so surface the generic support message rather than a raw error code.
+        logger.warning(
+            "Billing update requested but no active subscription found for %s %s (plan=%s)",
+            owner_type,
+            getattr(owner, "id", None),
+            plan_id,
+        )
+        raise BillingUpdateError("no_active_subscription", status=400, detail=SUPPORT_DETAIL)
 
     try:
         _assign_stripe_api_key()
@@ -745,7 +753,13 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                 create_if_missing=False,
             )
             if action == "absent" or not updated:
-                raise BillingUpdateError("no_active_subscription", status=400)
+                logger.warning(
+                    "Plan change requested but no active subscription found for user %s (target=%s, action=%s)",
+                    getattr(owner_obj, "id", None),
+                    plan_target,
+                    action,
+                )
+                raise BillingUpdateError("no_active_subscription", status=400, detail=SUPPORT_DETAIL)
 
             updated_id = updated.get("id") if isinstance(updated, Mapping) else None
             if not updated_id:
@@ -834,4 +848,3 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
             getattr(getattr(request, "user", None), "id", None),
         )
         return {"ok": False, "error": "server_error", "detail": SUPPORT_DETAIL}, 500
-

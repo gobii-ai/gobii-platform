@@ -130,6 +130,39 @@ class ConsoleBillingUpdateApiTests(TestCase):
         _, kwargs = mock_modify.call_args
         self.assertEqual(kwargs.get("trial_end"), "now")
 
+    @patch("console.billing_update_service.AddonEntitlementService.get_price_options", return_value=[SimpleNamespace(price_id="price_task_pack")])
+    @patch("console.billing_update_service._get_owner_plan_id", return_value="startup")
+    @patch("console.billing_update_service.get_active_subscription", return_value=None)
+    @patch("console.billing_update_service.stripe_status")
+    def test_no_active_subscription_returns_support_detail(
+        self,
+        mock_stripe_status,
+        _mock_get_active_subscription,
+        _mock_get_plan_id,
+        _mock_get_price_options,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["context_name"] = self.user.get_full_name() or self.user.email
+        session.save()
+
+        resp = self.client.post(
+            self.url,
+            data=json.dumps({
+                "ownerType": "user",
+                "addonQuantities": {"price_task_pack": 1},
+            }),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        payload = resp.json()
+        self.assertEqual(payload.get("error"), "no_active_subscription")
+        self.assertIn("support@gobii.ai", payload.get("detail", ""))
+
     @patch("console.billing_update_service.stripe_status")
     def test_org_addons_rejected_without_seats(self, mock_stripe_status):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
