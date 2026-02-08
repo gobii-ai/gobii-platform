@@ -122,7 +122,7 @@ from api.models import (
 from console.mixins import ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
-from pages.context_processors import invalidate_account_info_cache
+from pages.account_info_cache import invalidate_account_info_cache
 
 from .context_helpers import build_console_context
 from .org_billing_helpers import build_org_billing_overview

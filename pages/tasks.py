@@ -5,10 +5,12 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.utils import timezone
 
+from pages.account_info_cache import (
+    account_info_cache_key,
+    account_info_cache_lock_key,
+)
 from pages.context_processors import (
     ACCOUNT_INFO_CACHE_STALE_SECONDS,
-    _account_info_cache_key,
-    _account_info_cache_lock_key,
     _build_account_info,
 )
 from pages.homepage_cache import (
@@ -24,7 +26,7 @@ logger = logging.getLogger(__name__)
 @shared_task(name="pages.refresh_account_info_cache")
 def refresh_account_info_cache(user_id: str) -> None:
     User = get_user_model()
-    lock_key = _account_info_cache_lock_key(user_id)
+    lock_key = account_info_cache_lock_key(user_id)
     try:
         user = User.objects.get(pk=user_id)
     except User.DoesNotExist:
@@ -35,7 +37,7 @@ def refresh_account_info_cache(user_id: str) -> None:
     try:
         acct_info = _build_account_info(user)
         cache.set(
-            _account_info_cache_key(user.id),
+            account_info_cache_key(user.id),
             {"data": acct_info, "refreshed_at": timezone.now().timestamp()},
             timeout=ACCOUNT_INFO_CACHE_STALE_SECONDS,
         )

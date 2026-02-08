@@ -11,6 +11,10 @@ from api.agent.core.llm_config import is_llm_bootstrap_required
 from config import settings
 from config.plans import AGENTS_UNLIMITED
 from constants.plans import PlanNames
+from pages.account_info_cache import (
+    account_info_cache_key,
+    account_info_cache_lock_key,
+)
 from pages.mini_mode import is_mini_mode_enabled
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
@@ -34,26 +38,9 @@ def _enum_to_dict(enum_cls):
 
 logger = logging.getLogger(__name__)
 
-ACCOUNT_INFO_CACHE_VERSION = 1
 ACCOUNT_INFO_CACHE_FRESH_SECONDS = 45
 ACCOUNT_INFO_CACHE_STALE_SECONDS = 600
 ACCOUNT_INFO_CACHE_LOCK_SECONDS = 60
-
-
-def _account_info_cache_key(user_id: object) -> str:
-    return f"pages:account_info:v{ACCOUNT_INFO_CACHE_VERSION}:{user_id}"
-
-
-def _account_info_cache_lock_key(user_id: object) -> str:
-    return f"{_account_info_cache_key(user_id)}:refresh_lock"
-
-
-def invalidate_account_info_cache(user_id: object) -> None:
-    """Drop cached account usage payload for a user so next request recomputes it."""
-    if user_id in (None, ""):
-        return
-    cache.delete(_account_info_cache_key(user_id))
-    cache.delete(_account_info_cache_lock_key(user_id))
 
 
 def sha256_hex(value: str | None) -> str:
@@ -126,7 +113,7 @@ def _build_account_info(user):
 
 
 def _enqueue_account_info_refresh(user_id: object) -> None:
-    lock_key = _account_info_cache_lock_key(user_id)
+    lock_key = account_info_cache_lock_key(user_id)
     if not cache.add(lock_key, "1", timeout=ACCOUNT_INFO_CACHE_LOCK_SECONDS):
         return
 
@@ -148,7 +135,7 @@ def account_info(request):
         return {}  # skip work for anonymous users
 
     user = request.user
-    cache_key = _account_info_cache_key(user.id)
+    cache_key = account_info_cache_key(user.id)
     cached = cache.get(cache_key)
     now_ts = timezone.now().timestamp()
 
