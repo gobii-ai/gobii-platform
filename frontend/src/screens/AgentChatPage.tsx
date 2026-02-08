@@ -413,8 +413,6 @@ export type AgentChatPageProps = {
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
-// Threshold for detecting intentional scroll-up gesture on touch devices
-const TOUCH_SCROLL_UNPIN_THRESHOLD = 40
 const AUTO_SCROLL_REPIN_SUPPRESSION_MS = 1500
 const BOTTOM_REPIN_THRESHOLD_PX = 50
 const NEAR_BOTTOM_THRESHOLD_PX = 100
@@ -763,6 +761,8 @@ export function AgentChatPage({
   isNearBottomRef.current = isNearBottom
   const autoRepinTimeoutRef = useRef<number | null>(null)
   const composerFocusNudgeTimeoutRef = useRef<number | null>(null)
+  const userTouchActiveRef = useRef(false)
+  const touchEndTimerRef = useRef<number | null>(null)
 
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
@@ -931,27 +931,22 @@ export function AgentChatPage({
       }
     }
 
-    // Detect scroll-up via touch gesture
-    let touchStartY = 0
-    let touchStartTime = 0
-    const handleTouchStart = (e: TouchEvent) => {
-      touchStartY = e.touches[0]?.clientY ?? 0
-      touchStartTime = Date.now()
-    }
-    const handleTouchMove = (e: TouchEvent) => {
-      if (!autoScrollPinnedRef.current) return
-      const touchY = e.touches[0]?.clientY ?? 0
-      const deltaY = touchY - touchStartY
-      const elapsed = Date.now() - touchStartTime
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      // Require intentional gesture: larger movement AND not too fast (avoid accidental taps)
-      if (
-        deltaY > TOUCH_SCROLL_UNPIN_THRESHOLD
-        && elapsed > 50
-        && distanceFromBottom > UNPIN_DISTANCE_FROM_BOTTOM_PX
-      ) {
-        unpinAutoScrollFromUserGesture()
+    // Track touch lifecycle to suppress programmatic scrolls while user is touching
+    const handleTouchStart = () => {
+      if (touchEndTimerRef.current !== null) {
+        window.clearTimeout(touchEndTimerRef.current)
+        touchEndTimerRef.current = null
       }
+      userTouchActiveRef.current = true
+    }
+    const handleTouchEnd = () => {
+      if (touchEndTimerRef.current !== null) {
+        window.clearTimeout(touchEndTimerRef.current)
+      }
+      touchEndTimerRef.current = window.setTimeout(() => {
+        userTouchActiveRef.current = false
+        touchEndTimerRef.current = null
+      }, 200)
     }
 
     // Detect scroll-up via keyboard
@@ -970,14 +965,16 @@ export function AgentChatPage({
     container.addEventListener('scroll', handleScroll, { passive: true })
     container.addEventListener('wheel', handleWheel, { passive: true })
     container.addEventListener('touchstart', handleTouchStart, { passive: true })
-    container.addEventListener('touchmove', handleTouchMove, { passive: true })
+    container.addEventListener('touchend', handleTouchEnd, { passive: true })
+    container.addEventListener('touchcancel', handleTouchEnd, { passive: true })
     window.addEventListener('keydown', handleKeyDown) // Keyboard stays on window
 
     return () => {
       container.removeEventListener('scroll', handleScroll)
       container.removeEventListener('wheel', handleWheel)
       container.removeEventListener('touchstart', handleTouchStart)
-      container.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('touchend', handleTouchEnd)
+      container.removeEventListener('touchcancel', handleTouchEnd)
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [repinAutoScrollIfAtBottom, syncNearBottomState, unpinAutoScrollFromUserGesture])
@@ -1008,13 +1005,18 @@ export function AgentChatPage({
     // Container scrolling: scroll the timeline-shell, not the window
     const container = document.getElementById('timeline-shell')
     const sentinel = document.getElementById('timeline-bottom-sentinel')
+    if (!container) return
     lastProgrammaticScrollAtRef.current = Date.now()
+    // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
+    container.style.overflowY = 'hidden'
     if (sentinel) {
       // scrollIntoView is more reliable across browsers
       sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
-    } else if (container) {
+    } else {
       container.scrollTop = container.scrollHeight + 10000
     }
+    // Restore on next frame so the container remains scrollable
+    requestAnimationFrame(() => { container.style.overflowY = '' })
     // Immediately mark as at-bottom (IntersectionObserver will confirm, but this avoids race conditions)
     isNearBottomRef.current = true
     setIsNearBottom(true)
@@ -1044,7 +1046,7 @@ export function AgentChatPage({
       if (prevComposerHeight.current !== null) {
         const delta = height - prevComposerHeight.current
         // If composer grew and we're at the bottom, scroll down to keep content visible
-        if (delta > 0 && autoScrollPinnedRef.current) {
+        if (delta > 0 && autoScrollPinnedRef.current && !userTouchActiveRef.current) {
           container.scrollTop += delta
         }
       }
@@ -1052,7 +1054,7 @@ export function AgentChatPage({
       prevComposerHeight.current = height
 
       // If pinned, ensure we stay at the bottom
-      if (autoScrollPinnedRef.current) {
+      if (autoScrollPinnedRef.current && !userTouchActiveRef.current) {
         jumpToBottom()
       }
       syncNearBottomState(container)
@@ -1076,7 +1078,8 @@ export function AgentChatPage({
 
     const observer = new ResizeObserver(() => {
       // If pinned, ensure we stay at the bottom when content changes
-      if (autoScrollPinnedRef.current) {
+      // Skip while user is actively touching to prevent scroll fighting on mobile
+      if (autoScrollPinnedRef.current && !userTouchActiveRef.current) {
         jumpToBottom()
       }
       syncNearBottomState(timelineNode)
@@ -1096,14 +1099,11 @@ export function AgentChatPage({
   }, [])
 
   useEffect(() => () => {
-    if (autoRepinTimeoutRef.current !== null) {
-      window.clearTimeout(autoRepinTimeoutRef.current)
-    }
-  }, [])
-
-  useEffect(() => () => {
     if (composerFocusNudgeTimeoutRef.current !== null) {
       window.clearTimeout(composerFocusNudgeTimeoutRef.current)
+    }
+    if (touchEndTimerRef.current !== null) {
+      window.clearTimeout(touchEndTimerRef.current)
     }
   }, [])
 
@@ -1126,11 +1126,17 @@ export function AgentChatPage({
   }, [events.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
 
   useLayoutEffect(() => {
-    if (shouldScrollOnNextUpdateRef.current || forceScrollOnNextUpdateRef.current) {
-      shouldScrollOnNextUpdateRef.current = false
+    if (forceScrollOnNextUpdateRef.current) {
+      // Force scroll (user-initiated actions like send, jump-to-latest) — always honor
       forceScrollOnNextUpdateRef.current = false
-      // Scroll synchronously in layout effect to avoid visual flash
+      shouldScrollOnNextUpdateRef.current = false
       jumpToBottom()
+    } else if (shouldScrollOnNextUpdateRef.current) {
+      // Auto scroll (new content while pinned) — skip while user is touching
+      shouldScrollOnNextUpdateRef.current = false
+      if (!userTouchActiveRef.current) {
+        jumpToBottom()
+      }
     }
     // IntersectionObserver handles isNearBottom updates automatically
   }, [

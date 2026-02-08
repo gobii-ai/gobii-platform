@@ -466,13 +466,14 @@ export function AgentChatLayout({
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const hasTimelineEvents = events.length > 0
   const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
-  const showLoadNewerButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || loadingNewer)
   const showJumpButton = !initialLoading
     && hasTimelineEvents
     && (
       hasMoreNewer
       || (!autoScrollPinned && (hasUnseenActivity || !isNearBottom))
     )
+  // "Load newer" only shows when jump button is hidden — jump-to-latest handles the hasMoreNewer case
+  const showLoadNewerButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || loadingNewer) && !showJumpButton
 
   const showBanner = Boolean(agentName)
   const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
@@ -751,23 +752,24 @@ export function AgentChatLayout({
               </div>
             </div>
 
-            {/* Jump button positioned within scroll container */}
-            <button
-              id="jump-to-latest"
-              className="jump-to-latest"
-              type="button"
-              aria-label="Jump to latest"
-              aria-hidden={showJumpButton ? 'false' : 'true'}
-              onClick={onJumpToLatest}
-              data-has-activity={hasUnseenActivity ? 'true' : 'false'}
-              data-visible={showJumpButton ? 'true' : 'false'}
-            >
-              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
-              </svg>
-              <span className="sr-only">Jump to latest</span>
-            </button>
           </div>
+
+          {/* Jump button outside scroll container so position:fixed works on iOS Safari */}
+          <button
+            id="jump-to-latest"
+            className="jump-to-latest"
+            type="button"
+            aria-label="Jump to latest"
+            aria-hidden={showJumpButton ? 'false' : 'true'}
+            onClick={onJumpToLatest}
+            data-has-activity={hasUnseenActivity ? 'true' : 'false'}
+            data-visible={showJumpButton ? 'true' : 'false'}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
+            </svg>
+            <span className="sr-only">Jump to latest</span>
+          </button>
 
           {/* Composer at bottom of flex layout */}
           {spawnIntentLoading ? (
