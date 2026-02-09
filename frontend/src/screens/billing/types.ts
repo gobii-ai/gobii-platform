@@ -58,12 +58,25 @@ export type BillingTrial = {
   trialEndsAtIso: string | null
 }
 
+export type BillingExtraTasksSettings = {
+  enabled: boolean
+  infinite: boolean
+  maxTasks: number
+  configuredLimit: number
+  canModify: boolean
+  endpoints: {
+    loadUrl: string
+    updateUrl: string
+  }
+}
+
 export type BillingPersonalData = {
   contextType: 'personal'
   canManageBilling: boolean
   paidSubscriber: boolean
   plan: BillingPlan
   trial: BillingTrial
+  extraTasks: BillingExtraTasksSettings
   periodStartDate?: string | null
   periodEndDate?: string | null
   cancelAt?: string | null
@@ -80,6 +93,7 @@ export type BillingOrgData = {
   canManageBilling: boolean
   plan: BillingPlan
   trial: BillingTrial
+  extraTasks: BillingExtraTasksSettings
   seats: {
     purchased: number
     reserved: number

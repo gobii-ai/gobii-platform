@@ -1453,6 +1453,17 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                         "isTrialing": False,
                         "trialEndsAtIso": None,
                     },
+                    "extraTasks": {
+                        "enabled": bool(auto_purchase_state.get("enabled")),
+                        "infinite": bool(auto_purchase_state.get("infinite")),
+                        "maxTasks": int(auto_purchase_state.get("max_tasks") or 0),
+                        "configuredLimit": int(configured_limit),
+                        "canModify": bool(can_manage_billing),
+                        "endpoints": {
+                            "loadUrl": reverse("get_billing_settings"),
+                            "updateUrl": reverse("update_billing_settings"),
+                        },
+                    },
                     "seats": {
                         "purchased": overview.get("seats", {}).get("purchased", 0),
                         "reserved": overview.get("seats", {}).get("reserved", 0),
@@ -1578,6 +1589,14 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         trial_end = getattr(sub, "trial_end", None) if sub is not None else None
         is_trialing = bool(sub is not None and getattr(sub, "status", "") == "trialing")
+        user_billing, _ = UserBilling.objects.get_or_create(
+            user=request.user,
+            defaults={"max_extra_tasks": 0},
+        )
+        personal_extra_limit = int(getattr(user_billing, "max_extra_tasks", 0) or 0)
+        personal_extra_enabled = personal_extra_limit != 0
+        personal_extra_infinite = personal_extra_limit == -1
+        personal_extra_max_tasks = personal_extra_limit if personal_extra_limit > 0 else 1000
 
         billing_props = {
             "contextType": "personal",
@@ -1587,6 +1606,17 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             "trial": {
                 "isTrialing": bool(is_trialing),
                 "trialEndsAtIso": trial_end.isoformat() if trial_end else None,
+            },
+            "extraTasks": {
+                "enabled": bool(personal_extra_enabled),
+                "infinite": bool(personal_extra_infinite),
+                "maxTasks": int(personal_extra_max_tasks),
+                "configuredLimit": int(personal_extra_limit),
+                "canModify": True,
+                "endpoints": {
+                    "loadUrl": reverse("get_billing_settings"),
+                    "updateUrl": reverse("update_billing_settings"),
+                },
             },
             "periodStartDate": context.get("period_start_date"),
             "periodEndDate": context.get("period_end_date"),

@@ -13,6 +13,7 @@ import { billingDraftReducer, initialDraftState, type BillingDraftState } from '
 import { buildInitialAddonQuantityMap } from './utils'
 import { BillingHeader } from './BillingHeader'
 import { AddonSections } from './AddonSections'
+import { ExtraTasksSection } from './ExtraTasksSection'
 import { DedicatedIpSection } from './DedicatedIpSection'
 import { SubscriptionSummary } from './SubscriptionSummary'
 import { ConfirmDialog } from './ConfirmDialog'
@@ -313,6 +314,8 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           onSave={handleSave}
           onCancel={resetDraft}
         />
+
+        <ExtraTasksSection initialData={initialData} />
       </main>
 
       {hasAnyChanges && !summaryActionsVisible && nearTop ? (
