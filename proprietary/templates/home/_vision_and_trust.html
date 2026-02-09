@@ -7,21 +7,21 @@
     <!-- Team illustration with human/AI badges overlaid -->
     <div class="flex justify-center mb-10">
       <div class="relative inline-block w-full max-w-xs sm:max-w-sm">
-        <img src="{% static 'images/undraw/team.svg' %}" alt="A team of humans and AI agents" class="w-full" loading="lazy">
+        <img src="{% static 'images/undraw/team.svg' %}" alt="A team of humans and AI agents" class="block w-full" loading="lazy">
 
         <!-- Row 1 badges (3 avatars) -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 0%; left: 14.7%; transform: translateX(-50%);">Human</span>
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 0%; left: 49.2%; transform: translateX(-50%);">AI</span>
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 0%; left: 84.9%; transform: translateX(-50%);">Human</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 23.9%; left: 14.7%; transform: translate(-50%, -50%);">Human</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 23.9%; left: 49.2%; transform: translate(-50%, -50%);">AI</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 23.9%; left: 84.9%; transform: translate(-50%, -50%);">Human</span>
 
         <!-- Row 2 badges (3 avatars) -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 34.1%; left: 14.6%; transform: translateX(-50%);">AI</span>
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 34.1%; left: 49.3%; transform: translateX(-50%);">Human</span>
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 34.1%; left: 85.4%; transform: translateX(-50%);">AI</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 58%; left: 14.6%; transform: translate(-50%, -50%);">AI</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 58%; left: 49.3%; transform: translate(-50%, -50%);">Human</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 58%; left: 85.4%; transform: translate(-50%, -50%);">AI</span>
 
         <!-- Row 3 badges (2 avatars) -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 70.3%; left: 14.7%; transform: translateX(-50%);">Human</span>
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 70.3%; left: 50.2%; transform: translateX(-50%);">AI</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 94.2%; left: 14.7%; transform: translate(-50%, -50%);">Human</span>
+        <span class="absolute text-[10px] sm:text-[11px] font-bold text-white drop-shadow" style="top: 94.2%; left: 50.2%; transform: translate(-50%, -50%);">AI</span>
       </div>
     </div>
 
@@ -29,10 +29,17 @@
     <h2 class="mt-3 text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">The team of the&nbsp;future</h2>
     <p class="mt-4 text-base text-slate-500 max-w-xl mx-auto leading-relaxed">Humans and AI agents, working together &mdash; each doing what they do best. Gobii is the platform that makes that&nbsp;real.</p>
     <div class="mt-8">
+      {% if user.is_authenticated and account.usage.agents_unlimited is not True and account.usage.agents_available <= 0 %}
+      <a href="{% url 'proprietary:startup_checkout' %}" class="inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-6 shadow-lg hover:shadow-xl transition-all duration-300">
+        Upgrade Your Plan
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+      </a>
+      {% else %}
       <a href="#create-agent-form" class="inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-6 shadow-lg hover:shadow-xl transition-all duration-300">
-        Start Free Trial
+        {% if user.is_authenticated %}Create an Agent{% else %}Start Free Trial{% endif %}
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7l7 7-7 7"></path></svg>
       </a>
+      {% endif %}
     </div>
   </div>
 </section>
