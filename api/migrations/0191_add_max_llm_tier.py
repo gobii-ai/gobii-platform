@@ -69,7 +69,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="persistentllmtier",
             constraint=models.CheckConstraint(
-                check=~Q(is_max=True, is_premium=True),
+                condition=~Q(is_max=True, is_premium=True),
                 name="persistentllmtier_max_excludes_premium",
             ),
         ),

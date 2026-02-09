@@ -363,7 +363,7 @@ class ApiKey(models.Model):
                 condition=models.Q(organization__isnull=False),
             ),
             models.CheckConstraint(
-                check=(
+                condition=(
                     (models.Q(user__isnull=False, organization__isnull=True))
                     | (models.Q(user__isnull=True, organization__isnull=False))
                 ),
@@ -697,7 +697,7 @@ class TaskCredit(models.Model):
             ),
             # Enforce exactly one owner: user XOR organization
             models.CheckConstraint(
-                check=(
+                condition=(
                     (
                         models.Q(user__isnull=False, organization__isnull=True)
                     ) | (
@@ -2436,7 +2436,7 @@ class DedicatedProxyAllocation(models.Model):
         ordering = ['-allocated_at']
         constraints = [
             models.CheckConstraint(
-                check=(
+                condition=(
                     (models.Q(owner_user__isnull=False) & models.Q(owner_organization__isnull=True))
                     |
                     (models.Q(owner_user__isnull=True) & models.Q(owner_organization__isnull=False))
@@ -3634,7 +3634,7 @@ class AddonEntitlement(models.Model):
         verbose_name_plural = "Add-on entitlements"
         constraints = [
             models.CheckConstraint(
-                check=(
+                condition=(
                     (
                         (models.Q(user__isnull=False) & models.Q(organization__isnull=True))
                         | (models.Q(user__isnull=True) & models.Q(organization__isnull=False))
@@ -3989,7 +3989,7 @@ class UserPhoneNumber(models.Model):
                 name="uniq_primary_phone_per_user",
             ),
             models.CheckConstraint(
-                check=models.Q(phone_number__regex=E164_PHONE_REGEX),
+                condition=models.Q(phone_number__regex=E164_PHONE_REGEX),
                 name="chk_e164_user_phone",
             ),
         ]
@@ -4682,7 +4682,7 @@ class MeteringBatch(models.Model):
         constraints = [
             models.CheckConstraint(
                 name="metering_batch_owner_xor",
-                check=(
+                condition=(
                     (
                         models.Q(user__isnull=False, organization__isnull=True)
                     ) | (

@@ -883,10 +883,10 @@ def ingest_inbound_message(
                                     )
 
                                 send_mail(
-                                    subject,
-                                    text_body,
-                                    None,  # use DEFAULT_FROM_EMAIL
-                                    list(recipients),
+                                    subject=subject,
+                                    message=text_body,
+                                    from_email=None,  # use DEFAULT_FROM_EMAIL
+                                    recipient_list=list(recipients),
                                     html_message=html_body,
                                     fail_silently=True,
                                 )

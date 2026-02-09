@@ -427,10 +427,10 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
         # Send email
         try:
             send_mail(
-                f"Support Request: {cleaned['subject']}",
-                plain_message,
-                settings.DEFAULT_FROM_EMAIL,
-                [settings.SUPPORT_EMAIL],  # Use a support email address
+                subject=f"Support Request: {cleaned['subject']}",
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[settings.SUPPORT_EMAIL],  # Use a support email address
                 html_message=html_message,
                 fail_silently=False,
             )

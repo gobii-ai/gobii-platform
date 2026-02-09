@@ -69,7 +69,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="addonentitlement",
             constraint=models.CheckConstraint(
-                check=(
+                condition=(
                     (
                         models.Q(("user__isnull", False), ("organization__isnull", True))
                         | models.Q(("user__isnull", True), ("organization__isnull", False))

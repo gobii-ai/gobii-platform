@@ -61,10 +61,10 @@ def maybe_send_decodo_low_inventory_alert(*, reason: str | None = None) -> bool:
     body = "\n".join(body_lines)
 
     sent_count = send_mail(
-        subject,
-        body,
-        None,
-        [recipient],
+        subject=subject,
+        message=body,
+        from_email=None,
+        recipient_list=[recipient],
         fail_silently=True,
     )
     if sent_count:
