@@ -1794,6 +1794,7 @@ export function AgentChatPage({
   const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
   const taskPackOptions = addonsPayload?.taskPacks?.options ?? []
   const taskPackCanManageBilling = Boolean(addonsPayload?.taskPacks?.canManageBilling)
+  const addonsTrial = addonsPayload?.trial ?? null
   const contactPackShowUpgrade = true
   const taskPackShowUpgrade = true
   const contactPackManageUrl = addonsPayload?.manageBillingUrl ?? null
@@ -2203,6 +2204,7 @@ export function AgentChatPage({
         taskPackCanManageBilling={taskPackCanManageBilling}
         taskPackUpdating={addonsUpdating}
         onUpdateTaskPacks={taskPackCanManageBilling ? handleUpdateTaskPacks : undefined}
+        addonsTrial={addonsTrial}
         taskQuota={taskQuota}
         showTaskCreditsWarning={showTaskCreditsWarning}
         taskCreditsWarningVariant={taskCreditsWarningVariant}

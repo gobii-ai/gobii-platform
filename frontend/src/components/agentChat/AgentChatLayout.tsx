@@ -29,7 +29,7 @@ import type { AgentRosterEntry } from '../../types/agentRoster'
 import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
-import type { AddonPackOption, ContactCapInfo, ContactCapStatus } from '../../types/agentAddons'
+import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
 type TaskQuotaInfo = {
@@ -91,6 +91,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskPackCanManageBilling?: boolean
   taskPackUpdating?: boolean
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
+  addonsTrial?: TrialInfo | null
   taskQuota?: TaskQuotaInfo | null
   showTaskCreditsWarning?: boolean
   taskCreditsWarningVariant?: 'low' | 'out' | null
@@ -186,6 +187,7 @@ export function AgentChatLayout({
   taskPackCanManageBilling = false,
   taskPackUpdating = false,
   onUpdateTaskPacks,
+  addonsTrial = null,
   taskQuota = null,
   showTaskCreditsWarning = false,
   taskCreditsWarningVariant = null,
@@ -706,6 +708,7 @@ export function AgentChatLayout({
         open={addonsOpen}
         mode={addonsMode ?? 'contacts'}
         onClose={handleAddonsClose}
+        trial={addonsTrial}
         contactCap={contactCap}
         contactPackOptions={contactPackOptions}
         contactPackUpdating={contactPackUpdating}

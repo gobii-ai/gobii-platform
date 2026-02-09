@@ -157,11 +157,15 @@ def _update_pack_quantities(
                 existing_qty[pid] = 0
 
         changes_made = False
+        is_purchase = False
+        is_trialing = (stripe_subscription.get("status") or "") == "trialing" if isinstance(stripe_subscription, Mapping) else False
         items_payload: list[dict[str, object]] = []
         for price_id, desired_qty in desired_quantities.items():
             current_qty = existing_qty.get(price_id, 0)
             if desired_qty == current_qty:
                 continue
+            if desired_qty > current_qty:
+                is_purchase = True
             if desired_qty > 0:
                 if price_id in item_id_by_price:
                     items_payload.append({"id": item_id_by_price[price_id], "quantity": desired_qty})
@@ -181,6 +185,9 @@ def _update_pack_quantities(
             }
             if not any(item.get("deleted") for item in items_payload):
                 modify_kwargs["payment_behavior"] = "pending_if_incomplete"
+            # Match billing page behavior: purchasing add-ons while trialing ends the trial immediately.
+            if is_trialing and is_purchase:
+                modify_kwargs["trial_end"] = "now"
             updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             if not isinstance(updated_items, list):
@@ -300,6 +307,10 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
         else []
     )
 
+    subscription = get_active_subscription(owner, preferred_plan_id=plan_payload.get("id") if plan_payload else None)
+    trial_end = getattr(subscription, "trial_end", None) if subscription is not None else None
+    is_trialing = bool(subscription is not None and getattr(subscription, "status", "") == "trialing")
+
     return {
         "contactCap": contact_cap_payload,
         "status": {
@@ -314,6 +325,10 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
         "taskPacks": {
             "options": task_pack_options,
             "canManageBilling": bool(can_manage_billing),
+        },
+        "trial": {
+            "isTrialing": bool(is_trialing),
+            "trialEndsAtIso": trial_end.isoformat() if trial_end else None,
         },
         "plan": {
             "id": plan_id,

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ExternalLink, PlusSquare } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ExternalLink, PlusSquare, ShieldAlert } from 'lucide-react'
 
 import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
-import type { AddonPackOption, ContactCapInfo } from '../../types/agentAddons'
+import { ConfirmDialog } from '../../screens/billing/ConfirmDialog'
+import type { AddonPackOption, ContactCapInfo, TrialInfo } from '../../types/agentAddons'
 
 const MAX_ADDON_PACK_QUANTITY = 999
 
@@ -18,6 +19,7 @@ type TaskQuotaInfo = {
 type AgentChatAddonsPanelProps = {
   open: boolean
   mode?: AddonsMode | null
+  trial?: TrialInfo | null
   contactCap?: ContactCapInfo | null
   contactPackOptions?: AddonPackOption[]
   contactPackUpdating?: boolean
@@ -33,6 +35,7 @@ type AgentChatAddonsPanelProps = {
 export function AgentChatAddonsPanel({
   open,
   mode = 'contacts',
+  trial = null,
   contactCap,
   contactPackOptions = [],
   contactPackUpdating = false,
@@ -47,8 +50,26 @@ export function AgentChatAddonsPanel({
   const [isMobile, setIsMobile] = useState(false)
   const [packQuantities, setPackQuantities] = useState<Record<string, number>>({})
   const [packError, setPackError] = useState<string | null>(null)
+  const [trialConfirmOpen, setTrialConfirmOpen] = useState(false)
+  const [trialConfirmBusy, setTrialConfirmBusy] = useState(false)
+  const mountedRef = useRef(true)
   const resolvedMode = mode ?? 'contacts'
   const isTaskMode = resolvedMode === 'tasks'
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  const trialEndsLabel = useMemo(() => {
+    const iso = trial?.trialEndsAtIso
+    if (!iso) return null
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(d)
+  }, [trial?.trialEndsAtIso])
 
   useEffect(() => {
     const checkMobile = () => {
@@ -70,6 +91,13 @@ export function AgentChatAddonsPanel({
     setPackError(null)
   }, [contactPackOptions, isTaskMode, open, taskPackOptions])
 
+  useEffect(() => {
+    if (!open) {
+      setTrialConfirmOpen(false)
+      setTrialConfirmBusy(false)
+    }
+  }, [open])
+
   const handlePackAdjust = useCallback((priceId: string, delta: number) => {
     setPackQuantities((prev) => {
       const current = prev[priceId] ?? 0
@@ -84,19 +112,40 @@ export function AgentChatAddonsPanel({
     })
   }, [])
 
-  const handlePackSave = useCallback(async () => {
+  const activeOptions = isTaskMode ? taskPackOptions : contactPackOptions
+  const isTrialAddonPurchase = useMemo(() => {
+    if (!trial?.isTrialing) return false
+    return activeOptions.some((option) => {
+      const nextQty = packQuantities[option.priceId] ?? 0
+      const currentQty = option.quantity ?? 0
+      return nextQty > currentQty
+    })
+  }, [activeOptions, packQuantities, trial?.isTrialing])
+
+  const performPackUpdate = useCallback(async (): Promise<boolean> => {
     const update = isTaskMode ? onUpdateTaskPacks : onUpdateContactPacks
-    if (!update) return
+    if (!update) return false
     setPackError(null)
     try {
       await update(packQuantities)
-      onClose()
+      return true
     } catch (err) {
       setPackError(`Unable to update ${isTaskMode ? 'task' : 'contact'} packs. Try again.`)
+      return false
     }
   }, [isTaskMode, onClose, onUpdateContactPacks, onUpdateTaskPacks, packQuantities])
 
-  const activeOptions = isTaskMode ? taskPackOptions : contactPackOptions
+  const handlePackSave = useCallback(async () => {
+    if (isTrialAddonPurchase) {
+      setTrialConfirmOpen(true)
+      return
+    }
+    const ok = await performPackUpdate()
+    if (ok) {
+      onClose()
+    }
+  }, [isTrialAddonPurchase, onClose, performPackUpdate])
+
   const packUpdating = isTaskMode ? taskPackUpdating : contactPackUpdating
   const canUpdatePacks = isTaskMode ? Boolean(onUpdateTaskPacks) : Boolean(onUpdateContactPacks)
   const packHasChanges = activeOptions.some((option) => {
@@ -260,32 +309,75 @@ export function AgentChatAddonsPanel({
     ? 'Add task credits for this billing period.'
     : 'Increase contact limits for all agents.'
 
+  const trialConfirmationDialog = (
+    <ConfirmDialog
+      open={trialConfirmOpen}
+      title="End free trial and charge now?"
+      description={
+        <>
+          You are currently in a free trial{trialEndsLabel ? ` (scheduled to end ${trialEndsLabel})` : ''}. Purchasing
+          add-ons ends your trial immediately and you will be charged today.
+        </>
+      }
+      confirmLabel="Confirm"
+      icon={<ShieldAlert className="h-5 w-5" />}
+      busy={trialConfirmBusy || packUpdating}
+      onConfirm={async () => {
+        if (trialConfirmBusy || packUpdating) return
+        setTrialConfirmBusy(true)
+        try {
+          const ok = await performPackUpdate()
+          if (mountedRef.current) {
+            setTrialConfirmOpen(false)
+          }
+          if (ok) {
+            onClose()
+          }
+        } finally {
+          if (mountedRef.current) {
+            setTrialConfirmBusy(false)
+          }
+        }
+      }}
+      onClose={() => {
+        if (trialConfirmBusy || packUpdating) return
+        setTrialConfirmOpen(false)
+      }}
+    />
+  )
+
   if (!isMobile) {
     return (
-      <Modal
-        title="Add-ons"
-        subtitle={subtitle}
-        onClose={onClose}
-        icon={PlusSquare}
-        iconBgClass="bg-blue-100"
-        iconColorClass="text-blue-600"
-        bodyClassName="agent-settings-modal-body"
-      >
-        {body}
-      </Modal>
+      <>
+        {trialConfirmationDialog}
+        <Modal
+          title="Add-ons"
+          subtitle={subtitle}
+          onClose={onClose}
+          icon={PlusSquare}
+          iconBgClass="bg-blue-100"
+          iconColorClass="text-blue-600"
+          bodyClassName="agent-settings-modal-body"
+        >
+          {body}
+        </Modal>
+      </>
     )
   }
 
   return (
-    <AgentChatMobileSheet
-      open={open}
-      onClose={onClose}
-      title="Add-ons"
-      subtitle={subtitle}
-      icon={PlusSquare}
-      ariaLabel="Add-ons"
-    >
-      {body}
-    </AgentChatMobileSheet>
+    <>
+      {trialConfirmationDialog}
+      <AgentChatMobileSheet
+        open={open}
+        onClose={onClose}
+        title="Add-ons"
+        subtitle={subtitle}
+        icon={PlusSquare}
+        ariaLabel="Add-ons"
+      >
+        {body}
+      </AgentChatMobileSheet>
+    </>
   )
 }
