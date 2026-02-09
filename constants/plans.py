@@ -1,5 +1,9 @@
 from django.db import models
 
+# When auto-purchase is disabled (0) or unlimited (-1), we still need a sane UI
+# value for "Up to N additional tasks" inputs.
+EXTRA_TASKS_DEFAULT_MAX_TASKS = 1000
+
 class PlanNames:
     FREE = "free"
     STARTUP = "startup"

@@ -30,9 +30,9 @@ export function DedicatedIpSection({
   const inferredCurrency = normalizeCurrency(initialData.dedicatedIps.currency || planCurrency)
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-6">
-      <div className="flex items-start gap-3 sm:w-72">
-        <div className="mt-0.5 grid h-11 w-11 place-items-center rounded-2xl bg-indigo-50 text-indigo-700">
+    <div className="rounded-2xl border border-slate-200 p-5">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 grid h-11 w-11 place-items-center rounded-2xl bg-blue-50 text-blue-700">
           <GlobeLock className="h-5 w-5" />
         </div>
         <div className="min-w-0">
@@ -41,7 +41,7 @@ export function DedicatedIpSection({
         </div>
       </div>
 
-      <div className="min-w-0 flex-1 space-y-4">
+      <div className="mt-5 space-y-4">
         <div className="flex flex-col gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="font-semibold text-slate-900">{effective} reserved</div>
@@ -63,11 +63,6 @@ export function DedicatedIpSection({
                 <StagedRow
                   key={proxy.id}
                   title={label}
-                  subtitle={
-                    proxy.assignedAgents.length
-                      ? `In use by ${proxy.assignedAgents.map((a) => a.name).join(', ')}`
-                      : 'Not assigned to any agents.'
-                  }
                   actions={
                     stagedRemove ? (
                       <button
@@ -105,19 +100,19 @@ export function DedicatedIpSection({
               type="button"
               onClick={() => dispatch({ type: 'dedicated.setAddQty', value: Math.max(0, draft.dedicatedAddQty - 1) })}
               disabled={!dedicatedInteractable || saving || draft.dedicatedAddQty <= 0}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 disabled:opacity-50"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:text-slate-900 disabled:opacity-60"
               aria-label="Decrease dedicated IP quantity to add"
             >
               <Minus className="h-4 w-4" strokeWidth={3} />
             </button>
-            <div className="min-w-[5.5rem] rounded-xl border border-slate-200 bg-white px-4 py-2 text-center text-lg font-bold text-slate-900 tabular-nums">
+            <div className="min-w-[3.25rem] rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-center text-sm font-bold text-slate-900 tabular-nums">
               {draft.dedicatedAddQty}
             </div>
             <button
               type="button"
               onClick={() => dispatch({ type: 'dedicated.setAddQty', value: Math.min(99, draft.dedicatedAddQty + 1) })}
               disabled={!dedicatedInteractable || saving}
-              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 disabled:opacity-50"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-60"
               aria-label="Increase dedicated IP quantity to add"
             >
               <Plus className="h-4 w-4" strokeWidth={3} />

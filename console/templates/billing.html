@@ -613,40 +613,49 @@
   {% endif %}
 {% endblock %}
 
-{% block extra_js %}
-  {{ block.super }}
-  <script>
-    function billingSettings(initialState) {
-      const state = {
-        enabled: false,
-        infinite: false,
-        maxTasks: 1000,
-        canModify: true,
-        showCancelModal: false,
-        cancellationInProgress: false,
+  {% block extra_js %}
+	  {{ block.super }}
+	  <script>
+	    const DEFAULT_MAX_TASKS = {{ extra_tasks_default_max_tasks }};
+	    function billingSettings(initialState) {
+	      const state = {
+	        enabled: false,
+	        infinite: false,
+	        maxTasks: DEFAULT_MAX_TASKS,
+	        canModify: true,
+	        showCancelModal: false,
+	        cancellationInProgress: false,
 
-        loadSettings() {
-          fetch('/api/v1/user/billing-settings/')
-            .then(response => response.json())
-            .then(data => {
-              this.canModify = data.can_modify !== undefined ? data.can_modify : true;
-              if (data.max_extra_tasks === -1) {
-                this.enabled = true;
-                this.infinite = true;
-              } else if (data.max_extra_tasks > 0) {
-                this.enabled = true;
-                this.infinite = false;
-                this.maxTasks = data.max_extra_tasks;
-              } else {
-                this.enabled = false;
-                this.infinite = false;
-                this.maxTasks = 1000;
-              }
-            })
-            .catch(error => {
-              console.error('Error loading billing settings:', error);
-            });
-        },
+	        loadSettings() {
+	          fetch('/api/v1/user/billing-settings/')
+	            .then(response => response.json())
+	            .then(data => {
+	              this.canModify = data.can_modify !== undefined ? data.can_modify : true;
+	              if (data.extra_tasks && typeof data.extra_tasks === 'object') {
+	                this.enabled = Boolean(data.extra_tasks.enabled);
+	                this.infinite = Boolean(data.extra_tasks.infinite);
+	                this.maxTasks = Number.isFinite(data.extra_tasks.maxTasks) ? data.extra_tasks.maxTasks : DEFAULT_MAX_TASKS;
+	                return;
+	              }
+
+	              if (data.max_extra_tasks === -1) {
+	                this.enabled = true;
+	                this.infinite = true;
+	                this.maxTasks = DEFAULT_MAX_TASKS;
+	              } else if (data.max_extra_tasks > 0) {
+	                this.enabled = true;
+	                this.infinite = false;
+	                this.maxTasks = data.max_extra_tasks;
+	              } else {
+	                this.enabled = false;
+	                this.infinite = false;
+	                this.maxTasks = DEFAULT_MAX_TASKS;
+	              }
+	            })
+	            .catch(error => {
+	              console.error('Error loading billing settings:', error);
+	            });
+	        },
 
         saveSettings() {
           if (!this.canModify) {
