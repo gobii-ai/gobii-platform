@@ -30,6 +30,11 @@ export type TaskPackSettings = {
   canManageBilling?: boolean
 }
 
+export type TrialInfo = {
+  isTrialing: boolean
+  trialEndsAtIso: string | null
+}
+
 export type AgentAddonsResponse = {
   contactCap?: ContactCapInfo | null
   status?: {
@@ -37,6 +42,7 @@ export type AgentAddonsResponse = {
   }
   contactPacks?: ContactPackSettings | null
   taskPacks?: TaskPackSettings | null
+  trial?: TrialInfo | null
   plan?: {
     id?: string | null
     name?: string | null
