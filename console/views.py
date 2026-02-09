@@ -4205,10 +4205,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 html_body = render_to_string('emails/agent_collaborator_invite.html', context)
                 try:
                     send_mail(
-                        subject,
-                        text_body,
-                        None,
-                        [email],
+                        subject=subject,
+                        message=text_body,
+                        from_email=None,
+                        recipient_list=[email],
                         html_message=html_body,
                         fail_silently=True,
                     )
@@ -4384,10 +4384,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     html_body = render_to_string('emails/agent_transfer_invite.html', context)
                     subject = f"{initiator_name} wants to transfer {agent.name} to you"
                     send_mail(
-                        subject,
-                        text_body,
-                        None,
-                        [invite.to_email],
+                        subject=subject,
+                        message=text_body,
+                        from_email=None,
+                        recipient_list=[invite.to_email],
                         html_message=html_body,
                         fail_silently=True,
                     )
@@ -7030,10 +7030,10 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                                             html_body = render_to_string('emails/agent_allowlist_invite.html', context)
                                             
                                             send_mail(
-                                                subject,
-                                                text_body,
-                                                None,  # Use default from email
-                                                [address],
+                                                subject=subject,
+                                                message=text_body,
+                                                from_email=None,  # Use default from email
+                                                recipient_list=[address],
                                                 html_message=html_body,
                                                 fail_silently=True,  # Don't fail the whole process if email fails
                                             )
@@ -7653,10 +7653,10 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 text_body = render_to_string("emails/organization_invite.txt", context)
                 subject = f"You're invited to join {self.org.name} on Gobii"
                 send_mail(
-                    subject,
-                    text_body,
-                    None,
-                    [invite.email],
+                    subject=subject,
+                    message=text_body,
+                    from_email=None,
+                    recipient_list=[invite.email],
                     html_message=html_body,
                     fail_silently=False,
                 )
@@ -8726,10 +8726,10 @@ class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             text_body = render_to_string("emails/organization_invite.txt", context)
             subject = f"You're invited to join {org.name} on Gobii"
             send_mail(
-                subject,
-                text_body,
-                None,
-                [invite.email],
+                subject=subject,
+                message=text_body,
+                from_email=None,
+                recipient_list=[invite.email],
                 html_message=html_body,
                 fail_silently=False,
             )
@@ -9056,10 +9056,10 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
                         text_body = render_to_string('emails/agent_transfer_owner_accepted.txt', context)
                         html_body = render_to_string('emails/agent_transfer_owner_accepted.html', context)
                         send_mail(
-                            subject,
-                            text_body,
-                            None,
-                            [original_owner_email],
+                            subject=subject,
+                            message=text_body,
+                            from_email=None,
+                            recipient_list=[original_owner_email],
                             html_message=html_body,
                             fail_silently=True,
                         )
@@ -9086,10 +9086,10 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
                         text_body = render_to_string('emails/agent_transfer_owner_declined.txt', context)
                         html_body = render_to_string('emails/agent_transfer_owner_declined.html', context)
                         send_mail(
-                            subject,
-                            text_body,
-                            None,
-                            [original_owner_email],
+                            subject=subject,
+                            message=text_body,
+                            from_email=None,
+                            recipient_list=[original_owner_email],
                             html_message=html_body,
                             fail_silently=True,
                         )

@@ -1607,10 +1607,10 @@ class MarketingContactRequestView(View):
 
         try:
             send_mail(
-                source_config["subject"],
-                plain_message,
-                settings.DEFAULT_FROM_EMAIL,
-                [recipient_email],
+                subject=source_config["subject"],
+                message=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[recipient_email],
                 html_message=html_message,
                 fail_silently=False,
             )
