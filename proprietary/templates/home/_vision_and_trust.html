@@ -1,7 +1,7 @@
 {% load static %}
 
 <!-- Vision Closer: The Team of the Future -->
-<section class="py-16 sm:py-24">
+<section class="pt-16 sm:pt-20 pb-0">
   <div class="max-w-4xl mx-auto px-6 text-center" data-animate>
 
     <!-- Team illustration with human/AI badges overlaid -->
@@ -9,47 +9,19 @@
       <div class="relative inline-block w-full max-w-xs sm:max-w-sm">
         <img src="{% static 'images/undraw/team.svg' %}" alt="A team of humans and AI agents" class="w-full" loading="lazy">
 
-        <!-- Row 1 badges (3 avatars across the top) -->
-        <!-- Top-left: Human -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 8%; left: 18%;">
-          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
-        </span>
-        <!-- Top-center: AI -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 8%; left: 47%;">
-          AI
-        </span>
-        <!-- Top-right: Human -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 8%; right: 18%;">
-          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
-        </span>
+        <!-- Row 1 badges (3 avatars) -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 0%; left: 14.7%; transform: translateX(-50%);">Human</span>
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 0%; left: 49.2%; transform: translateX(-50%);">AI</span>
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 0%; left: 84.9%; transform: translateX(-50%);">Human</span>
 
-        <!-- Row 2 badges (3 avatars across the middle) -->
-        <!-- Mid-left: AI -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 38%; left: 18%;">
-          AI
-        </span>
-        <!-- Mid-center: Human -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 38%; left: 47%;">
-          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
-        </span>
-        <!-- Mid-right: AI -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 38%; right: 18%;">
-          AI
-        </span>
+        <!-- Row 2 badges (3 avatars) -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 34.1%; left: 14.6%; transform: translateX(-50%);">AI</span>
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 34.1%; left: 49.3%; transform: translateX(-50%);">Human</span>
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 34.1%; left: 85.4%; transform: translateX(-50%);">AI</span>
 
-        <!-- Row 3 badges (3 avatars across the bottom) -->
-        <!-- Bottom-left: Human -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 68%; left: 18%;">
-          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
-        </span>
-        <!-- Bottom-center: AI -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 68%; left: 47%;">
-          AI
-        </span>
-        <!-- Bottom-right: Human -->
-        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 68%; right: 18%;">
-          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
-        </span>
+        <!-- Row 3 badges (2 avatars) -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 70.3%; left: 14.7%; transform: translateX(-50%);">Human</span>
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow-sm" style="top: 70.3%; left: 50.2%; transform: translateX(-50%);">AI</span>
       </div>
     </div>
 
@@ -66,7 +38,12 @@
 </section>
 
 <!-- Trust Bar -->
-<section class="py-10 sm:py-12 border-t border-slate-100">
+<section class="relative">
+  <div class="max-w-5xl mx-auto px-6">
+    <div class="relative flex justify-center pt-10 sm:pt-12 pb-8 sm:pb-10">
+      <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
+    </div>
+  </div>
   <div class="max-w-5xl mx-auto px-6" data-animate>
     <div class="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 sm:gap-x-12">
       <div class="flex items-center gap-2 text-slate-400">

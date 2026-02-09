@@ -16,7 +16,7 @@
   <style>
     .game-of-life-panel {
       position: relative;
-      overflow: hidden;
+      overflow: clip;
       isolation: isolate;
     }
 
@@ -178,7 +178,7 @@
   </style>
 {% endblock %}
 {% block content %}
-<div class="relative game-of-life-panel -mt-16 min-h-[500px] sm:min-h-[700px]">
+<div class="relative game-of-life-panel -mt-16 min-h-[420px] sm:min-h-[520px]">
   <div class="game-of-life-gradient-bg" aria-hidden="true"></div>
   
   <!-- Grid pattern overlay -->
@@ -189,10 +189,10 @@
 
   <!-- ========================================================= -->
   <!-- Agent Spawn Hero -->
-  <section class="relative pb-0 game-of-life-content z-20">
-    
+  <section class="relative pb-8 game-of-life-content z-20">
+
     <!-- Content container with enhanced styling -->
-    <div class="relative max-w-5xl mx-auto px-6 pt-24 sm:pt-40 pb-0">
+    <div class="relative max-w-5xl mx-auto px-6 pt-20 sm:pt-28 pb-0">
       
       <!-- Ambient Glow centered on hero + input -->
       <div class="absolute top-16 sm:top-24 left-1/2 -translate-x-1/2 w-[600px] sm:w-[1000px] h-[500px] sm:h-[800px] bg-white blur-[80px] sm:blur-[100px] opacity-90 rounded-full pointer-events-none -z-10"></div>
@@ -202,7 +202,7 @@
 
       <!-- Task Usage Warning for logged in users -->
       {% if user.is_authenticated %}
-        <div class="max-w-4xl mx-auto mb-8">
+        <div class="max-w-4xl mx-auto mb-4">
           {% include "partials/_task_usage.html" %}
       </div>
       {% endif %}
@@ -218,10 +218,9 @@
             <input type="hidden" name="trial_onboarding_target" value="agent_ui">
             
             <!-- Charter Input with inline CTA button -->
-            <div class="space-y-4">
-              <p class="text-center text-sm text-slate-400">Describe what you need &mdash; your agent will figure out the rest</p>
+            <div>
               <!-- Unified input + button container -->
-              <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-3xl overflow-visible relative shadow-2xl transition-all duration-300">
+              <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-2xl overflow-visible relative shadow-xl transition-all duration-300">
                 <!-- Typing prompt overlay -->
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
@@ -537,7 +536,7 @@
   <!-- OR Divider -->
   <section class="relative">
     <div class="max-w-5xl mx-auto px-6">
-      <div class="relative flex items-center justify-center pt-12 pb-12 sm:pt-16 sm:pb-16">
+      <div class="relative flex items-center justify-center py-8 sm:py-10">
         <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
         <span class="flex-shrink-0 mx-6 text-xs font-bold tracking-[0.25em] uppercase text-indigo-400">OR</span>
         <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>

@@ -1,3 +1,23 @@
+{% load static %}
+
+{% if settings.GOBII_PROPRIETARY_MODE %}
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-6 mb-6 lg:max-w-3xl mx-auto">
+  <div class="text-center md:text-left">
+    <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.08]">
+      {% if landing_hero_text %}
+        <span class="font-light">{{ landing_hero_text|safe }}</span>
+      {% else %}
+        Your AI team,<br class="hidden sm:inline">
+        <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">always on</span>
+      {% endif %}
+    </h1>
+    <p class="mt-4 text-lg text-gray-500 md:max-w-md">Email&nbsp;them <i data-lucide="mail" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. Text&nbsp;them <i data-lucide="message-square" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. They work <span class="font-medium text-violet-600">24/7</span>.</p>
+  </div>
+  <div class="flex justify-center md:block flex-shrink-0 order-first md:order-last">
+    <img src="{% static 'images/undraw/texting.svg' %}" alt="A person texting their AI agent" class="w-[140px] sm:w-[180px] md:w-[220px] lg:w-[280px]" loading="lazy">
+  </div>
+</div>
+{% else %}
 <div class="text-center mb-8">
   <h1 class="text-4xl sm:text-5xl md:text-6xl tracking-tight font-light text-gray-900 max-w-3xl mx-auto leading-[1.15]">
     {% if landing_hero_text %}
@@ -8,10 +28,5 @@
     {% endif %}
   </h1>
   <p class="mt-5 text-base sm:text-lg text-gray-500 max-w-2xl mx-auto leading-relaxed">Gobii agents are virtual coworkers with their own identity, memory, and&nbsp;tools. Email&nbsp;them <i data-lucide="mail" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. Text&nbsp;them <i data-lucide="message-square" class="inline-block w-[0.9em] h-[0.9em] text-violet-500 -translate-y-[1px]"></i>. They work <span class="font-medium text-violet-600">24/7</span>.</p>
-  {% if settings.GOBII_PROPRIETARY_MODE %}
-  <a href="#how-it-works" class="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-indigo-500 hover:text-indigo-700 transition-colors">
-    How it works
-    <i data-lucide="arrow-down" class="w-3.5 h-3.5"></i>
-  </a>
-  {% endif %}
 </div>
+{% endif %}
