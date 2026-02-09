@@ -909,14 +909,18 @@ export function AgentChatPage({
     const handleScroll = () => {
       const nextScrollTop = container.scrollTop
       const distanceFromBottom = syncNearBottomState(container)
-      repinAutoScrollIfAtBottom(container)
+      // Don't try to re-pin while user is actively touching — let their scroll intent take priority
+      if (!userTouchActiveRef.current) {
+        repinAutoScrollIfAtBottom(container)
+      }
       const movedAwayFromBottom = typeof distanceFromBottom === 'number'
         && distanceFromBottom > UNPIN_DISTANCE_FROM_BOTTOM_PX
-      // Guard against false unpins from programmatic scrolls (scrollIntoView can cause transient scrollTop decreases)
+      // Guard against false unpins from programmatic scrolls (scrollIntoView can cause transient scrollTop decreases).
+      // Bypass the guard when the user is actively touching — touch scroll is always user-initiated.
       if (
         movedAwayFromBottom
         && nextScrollTop < lastScrollTop - 2
-        && Date.now() - lastProgrammaticScrollAtRef.current > PROGRAMMATIC_SCROLL_GUARD_MS
+        && (userTouchActiveRef.current || Date.now() - lastProgrammaticScrollAtRef.current > PROGRAMMATIC_SCROLL_GUARD_MS)
       ) {
         unpinAutoScrollFromUserGesture()
       }
@@ -932,14 +936,31 @@ export function AgentChatPage({
     }
 
     // Track touch lifecycle to suppress programmatic scrolls while user is touching
-    const handleTouchStart = () => {
+    let touchStartY: number | null = null
+    const handleTouchStart = (e: TouchEvent) => {
       if (touchEndTimerRef.current !== null) {
         window.clearTimeout(touchEndTimerRef.current)
         touchEndTimerRef.current = null
       }
       userTouchActiveRef.current = true
+      touchStartY = e.touches[0]?.clientY ?? null
+    }
+    // Detect upward swipe directly via touch movement — more reliable than waiting
+    // for scroll events on mobile, which can be blocked by the programmatic scroll guard.
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!autoScrollPinnedRef.current || touchStartY === null) return
+      const currentY = e.touches[0]?.clientY
+      if (currentY === undefined) return
+      // Finger moving down on screen = scrolling up (revealing older content)
+      if (currentY - touchStartY > 10) {
+        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+        if (distanceFromBottom > UNPIN_DISTANCE_FROM_BOTTOM_PX) {
+          unpinAutoScrollFromUserGesture()
+        }
+      }
     }
     const handleTouchEnd = () => {
+      touchStartY = null
       if (touchEndTimerRef.current !== null) {
         window.clearTimeout(touchEndTimerRef.current)
       }
@@ -965,6 +986,7 @@ export function AgentChatPage({
     container.addEventListener('scroll', handleScroll, { passive: true })
     container.addEventListener('wheel', handleWheel, { passive: true })
     container.addEventListener('touchstart', handleTouchStart, { passive: true })
+    container.addEventListener('touchmove', handleTouchMove, { passive: true })
     container.addEventListener('touchend', handleTouchEnd, { passive: true })
     container.addEventListener('touchcancel', handleTouchEnd, { passive: true })
     window.addEventListener('keydown', handleKeyDown) // Keyboard stays on window
@@ -973,6 +995,7 @@ export function AgentChatPage({
       container.removeEventListener('scroll', handleScroll)
       container.removeEventListener('wheel', handleWheel)
       container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('touchmove', handleTouchMove)
       container.removeEventListener('touchend', handleTouchEnd)
       container.removeEventListener('touchcancel', handleTouchEnd)
       window.removeEventListener('keydown', handleKeyDown)
