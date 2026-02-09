@@ -44,7 +44,7 @@ def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any
         },
         {
             "role": "user",
-            "content": charter.strip(),
+            "content": f"Charter: {charter.strip()}",
         },
     ]
 
