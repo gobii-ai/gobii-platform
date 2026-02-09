@@ -556,7 +556,20 @@ export function AgentChatPage({
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const suppressAutoScrollPin = useAgentChatStore((state) => state.suppressAutoScrollPin)
   const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
-  const initialLoading = !isNewAgent && loading && events.length === 0
+  const isStoreSynced = storeAgentId === activeAgentId
+  const timelineEvents = !isNewAgent && isStoreSynced ? events : []
+  const timelineHasMoreOlder = !isNewAgent && isStoreSynced ? hasMoreOlder : false
+  const timelineHasMoreNewer = !isNewAgent && isStoreSynced ? hasMoreNewer : false
+  const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
+  const timelineProcessingActive = !isNewAgent && isStoreSynced ? processingActive : false
+  const timelineProcessingStartedAt = !isNewAgent && isStoreSynced ? processingStartedAt : null
+  const timelineAwaitingResponse = !isNewAgent && isStoreSynced ? awaitingResponse : false
+  const timelineProcessingWebTasks = !isNewAgent && isStoreSynced ? processingWebTasks : []
+  const timelineNextScheduledAt = !isNewAgent && isStoreSynced ? nextScheduledAt : null
+  const timelineStreaming = !isNewAgent && isStoreSynced ? streaming : null
+  const timelineLoadingOlder = !isNewAgent && isStoreSynced ? loadingOlder : false
+  const timelineLoadingNewer = !isNewAgent && isStoreSynced ? loadingNewer : false
+  const initialLoading = !isNewAgent && (!isStoreSynced || (loading && timelineEvents.length === 0))
 
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
@@ -858,7 +871,7 @@ export function AgentChatPage({
   // IntersectionObserver-based bottom detection - simpler and more reliable than scroll math
   const bottomSentinelRef = useRef<HTMLElement | null>(null)
   // Track whether sentinel exists to re-run effect when it appears
-  const hasSentinel = !initialLoading && !hasMoreNewer
+  const hasSentinel = !initialLoading && !timelineHasMoreNewer
   useEffect(() => {
     // Find the bottom sentinel element and scroll container
     const sentinel = document.getElementById('timeline-bottom-sentinel')
@@ -1003,23 +1016,23 @@ export function AgentChatPage({
   }, [repinAutoScrollIfAtBottom, syncNearBottomState, unpinAutoScrollFromUserGesture])
 
   // Unpin auto-scroll when processing ends so user's reading position is preserved
-  const prevProcessingRef = useRef(processingActive)
+  const prevProcessingRef = useRef(timelineProcessingActive)
   useEffect(() => {
     const wasProcessing = prevProcessingRef.current
-    prevProcessingRef.current = processingActive
-    if (wasProcessing && !processingActive && !isNearBottomRef.current && !autoScrollPinnedRef.current) {
+    prevProcessingRef.current = timelineProcessingActive
+    if (wasProcessing && !timelineProcessingActive && !isNearBottomRef.current && !autoScrollPinnedRef.current) {
       setAutoScrollPinned(false)
     }
-  }, [processingActive, setAutoScrollPinned])
+  }, [timelineProcessingActive, setAutoScrollPinned])
 
   // Capture scroll decision BEFORE content changes to avoid race with scroll handler
-  const prevEventsRef = useRef(events)
-  const prevStreamingRef = useRef(streaming)
+  const prevEventsRef = useRef(timelineEvents)
+  const prevStreamingRef = useRef(timelineStreaming)
 
-  if (events !== prevEventsRef.current || streaming !== prevStreamingRef.current) {
+  if (timelineEvents !== prevEventsRef.current || timelineStreaming !== prevStreamingRef.current) {
     shouldScrollOnNextUpdateRef.current = autoScrollPinned
-    prevEventsRef.current = events
-    prevStreamingRef.current = streaming
+    prevEventsRef.current = timelineEvents
+    prevStreamingRef.current = timelineStreaming
   }
 
   const pendingScrollFrameRef = useRef<number | null>(null)
@@ -1137,7 +1150,7 @@ export function AgentChatPage({
       setAutoScrollPinned(true)
       return
     }
-    if (!initialLoading && events.length && !didInitialScrollRef.current) {
+    if (!initialLoading && timelineEvents.length && !didInitialScrollRef.current) {
       didInitialScrollRef.current = true
       setAutoScrollPinned(true)
       // Immediate scroll attempt
@@ -1146,7 +1159,7 @@ export function AgentChatPage({
       const timeout = setTimeout(() => jumpToBottom(), 50)
       return () => clearTimeout(timeout)
     }
-  }, [events.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
+  }, [timelineEvents.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
 
   useLayoutEffect(() => {
     if (forceScrollOnNextUpdateRef.current) {
@@ -1164,15 +1177,15 @@ export function AgentChatPage({
     // IntersectionObserver handles isNearBottom updates automatically
   }, [
     jumpToBottom,
-    events,
-    streaming,
-    loadingOlder,
-    loadingNewer,
-    hasMoreNewer,
-    hasUnseenActivity,
+    timelineEvents,
+    timelineStreaming,
+    timelineLoadingOlder,
+    timelineLoadingNewer,
+    timelineHasMoreNewer,
+    timelineHasUnseenActivity,
     initialLoading,
-    processingActive,
-    awaitingResponse,
+    timelineProcessingActive,
+    timelineAwaitingResponse,
   ])
 
   const rosterAgents = useMemo(
@@ -1183,7 +1196,6 @@ export function AgentChatPage({
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
   )
-  const isStoreSynced = storeAgentId === activeAgentId
   const storeAgentName = isStoreSynced ? storedAgentName : null
   const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null
   const storeAgentColor = isStoreSynced ? agentColorHex : null
@@ -1197,7 +1209,7 @@ export function AgentChatPage({
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
-  const hasAgentReply = useMemo(() => hasAgentResponse(events), [events])
+  const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
   useEffect(() => {
     if (!activeAgentId || !activeRosterMeta?.email) {
       return
@@ -1264,7 +1276,7 @@ export function AgentChatPage({
   const spawnIntentAutoSubmittedRef = useRef(false)
   const spawnIntentRequestIdRef = useRef(0)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
-  const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
+  const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(timelineEvents), [timelineEvents])
   const hasSelectedAgent = Boolean(activeAgentId)
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady
   const rosterLoading = rosterQuery.isLoading || !agentContextReady
@@ -1503,9 +1515,9 @@ export function AgentChatPage({
     // Also consider not found if roster loaded but agent isn't there and we have an error
     if (!agentInRoster && error) return true
     // If roster loaded, agent isn't in roster, and we have no events (failed to load), mark as not found
-    if (!agentInRoster && !loading && events.length === 0) return true
+    if (!agentInRoster && !loading && timelineEvents.length === 0) return true
     return false
-  }, [contextReady, isNewAgent, rosterQuery.isLoading, initialLoading, rosterAgents, activeAgentId, error, loading, events.length])
+  }, [contextReady, isNewAgent, rosterQuery.isLoading, initialLoading, rosterAgents, activeAgentId, error, loading, timelineEvents.length])
 
   useEffect(() => {
     if (!switchingAgentId) {
@@ -1682,7 +1694,7 @@ export function AgentChatPage({
   )
 
   // Start/stop insight rotation based on processing state
-  const isProcessing = allowAgentRefresh && (processingActive || awaitingResponse || (streaming && !streaming.done))
+  const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
   useEffect(() => {
     if (isProcessing) {
       startInsightRotation()
@@ -1726,14 +1738,14 @@ export function AgentChatPage({
   }, [availableInsights, resolvedAgentEmail, resolvedAgentSms])
 
   useEffect(() => {
-    if (!allowAgentRefresh || !streaming || streaming.done) {
+    if (!allowAgentRefresh || !timelineStreaming || timelineStreaming.done) {
       return () => undefined
     }
     const interval = window.setInterval(() => {
       void refreshProcessing()
     }, STREAMING_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(interval)
-  }, [allowAgentRefresh, refreshProcessing, streaming])
+  }, [allowAgentRefresh, refreshProcessing, timelineStreaming])
 
   useEffect(() => {
     if (
@@ -1759,10 +1771,10 @@ export function AgentChatPage({
   ])
 
   useEffect(() => {
-    if (!allowAgentRefresh || !streaming || streaming.done) {
+    if (!allowAgentRefresh || !timelineStreaming || timelineStreaming.done) {
       return () => undefined
     }
-    if (processingActive) {
+    if (timelineProcessingActive) {
       return () => undefined
     }
     const lastUpdated = streamingLastUpdatedAt ?? Date.now()
@@ -1770,7 +1782,7 @@ export function AgentChatPage({
     const timeoutMs = Math.max(0, STREAMING_STALE_MS - elapsed)
     const handleTimeout = () => {
       finalizeStreaming()
-      if (streaming.reasoning && !streaming.content) {
+      if (timelineStreaming.reasoning && !timelineStreaming.content) {
         void refreshLatest()
       }
     }
@@ -1783,9 +1795,9 @@ export function AgentChatPage({
   }, [
     allowAgentRefresh,
     finalizeStreaming,
-    processingActive,
+    timelineProcessingActive,
     refreshLatest,
-    streaming,
+    timelineStreaming,
     streamingLastUpdatedAt,
   ])
 
@@ -2119,7 +2131,7 @@ export function AgentChatPage({
     spawnFlow && isNewAgent && (spawnIntentStatus === 'loading' || spawnIntentStatus === 'ready'),
   )
 
-  const topLevelError = error || (sessionStatus === 'error' ? sessionError : null)
+  const topLevelError = (isStoreSynced ? error : null) || (sessionStatus === 'error' ? sessionError : null)
 
   if (isSelectionView) {
     if (!contextReady || rosterLoading) {
@@ -2238,28 +2250,28 @@ export function AgentChatPage({
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
         composerError={createAgentError?.message ?? null}
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
-        events={isNewAgent ? [] : events}
-        hasMoreOlder={isNewAgent ? false : hasMoreOlder}
-        hasMoreNewer={isNewAgent ? false : hasMoreNewer}
-        oldestCursor={isNewAgent ? null : (events.length ? events[0].cursor : null)}
-        newestCursor={isNewAgent ? null : (events.length ? events[events.length - 1].cursor : null)}
-        processingActive={isNewAgent ? false : processingActive}
-        processingStartedAt={isNewAgent ? null : processingStartedAt}
-        awaitingResponse={isNewAgent ? false : awaitingResponse}
-        processingWebTasks={isNewAgent ? [] : processingWebTasks}
-        nextScheduledAt={isNewAgent ? null : nextScheduledAt}
-        streaming={isNewAgent ? null : streaming}
-        onLoadOlder={isNewAgent ? undefined : (hasMoreOlder ? loadOlder : undefined)}
-        onLoadNewer={isNewAgent ? undefined : (hasMoreNewer ? loadNewer : undefined)}
+        events={timelineEvents}
+        hasMoreOlder={timelineHasMoreOlder}
+        hasMoreNewer={timelineHasMoreNewer}
+        oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
+        newestCursor={timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : null}
+        processingActive={timelineProcessingActive}
+        processingStartedAt={timelineProcessingStartedAt}
+        awaitingResponse={timelineAwaitingResponse}
+        processingWebTasks={timelineProcessingWebTasks}
+        nextScheduledAt={timelineNextScheduledAt}
+        streaming={timelineStreaming}
+        onLoadOlder={timelineHasMoreOlder ? loadOlder : undefined}
+        onLoadNewer={timelineHasMoreNewer ? loadNewer : undefined}
         onSendMessage={handleSend}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer
         autoScrollPinned={autoScrollPinned}
         isNearBottom={isNearBottom}
-        hasUnseenActivity={isNewAgent ? false : hasUnseenActivity}
+        hasUnseenActivity={timelineHasUnseenActivity}
         timelineRef={captureTimelineRef}
-        loadingOlder={isNewAgent ? false : loadingOlder}
-        loadingNewer={isNewAgent ? false : loadingNewer}
+        loadingOlder={timelineLoadingOlder}
+        loadingNewer={timelineLoadingNewer}
         initialLoading={initialLoading}
         insights={isNewAgent ? [] : hydratedInsights}
         currentInsightIndex={currentInsightIndex}
