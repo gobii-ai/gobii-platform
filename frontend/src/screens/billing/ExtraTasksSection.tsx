@@ -9,21 +9,6 @@ type ExtraTasksSectionProps = {
   initialData: BillingInitialData
 }
 
-function deriveSettings(maxExtraTasks: number, canModify: boolean, endpoints: BillingExtraTasksSettings['endpoints']): BillingExtraTasksSettings {
-  const configuredLimit = Number.isFinite(maxExtraTasks) ? maxExtraTasks : 0
-  const enabled = configuredLimit !== 0
-  const infinite = configuredLimit === -1
-  const maxTasks = configuredLimit > 0 ? configuredLimit : 1000
-  return {
-    enabled,
-    infinite,
-    maxTasks,
-    configuredLimit,
-    canModify,
-    endpoints,
-  }
-}
-
 export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
   const initial = initialData.extraTasks
   const isTrialing = Boolean(initialData.trial?.isTrialing)
@@ -44,13 +29,13 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
   }, [])
 
   const [settings, setSettings] = useState<BillingExtraTasksSettings>(initial)
-  const [maxTasksDraft, setMaxTasksDraft] = useState(() => String(initial.maxTasks ?? 1000))
+  const [maxTasksDraft, setMaxTasksDraft] = useState(() => String(initial.maxTasks))
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setSettings(initial)
-    setMaxTasksDraft(String(initial.maxTasks ?? 1000))
+    setMaxTasksDraft(String(initial.maxTasks))
     setError(null)
   }, [initial])
 
@@ -60,7 +45,7 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
     setBusy(true)
     setError(null)
     try {
-      const result = await jsonRequest<{ success: boolean; max_extra_tasks?: number; error?: string }>(
+      const result = await jsonRequest<{ success: boolean; extra_tasks?: BillingExtraTasksSettings; max_extra_tasks?: number; error?: string }>(
         settings.endpoints.updateUrl,
         {
           method: 'POST',
@@ -74,8 +59,10 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
         console.error('Failed to update extra tasks settings:', result?.error)
         throw new Error(result?.error || 'Update failed')
       }
-      const nextLimit = typeof result.max_extra_tasks === 'number' ? result.max_extra_tasks : 0
-      const next = deriveSettings(nextLimit, settings.canModify, settings.endpoints)
+      const next = result.extra_tasks
+      if (!next) {
+        throw new Error('Update succeeded but response was missing extra_tasks')
+      }
       if (mountedRef.current) {
         setSettings(next)
         setMaxTasksDraft(String(next.maxTasks))

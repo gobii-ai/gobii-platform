@@ -417,7 +417,7 @@ from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import ORGANIZATIONS
 from constants.grant_types import GrantTypeChoices
-from constants.plans import PlanNames, PlanNamesChoices
+from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
@@ -428,6 +428,7 @@ from api.agent.tasks import process_agent_events_task
 from api.services import mcp_servers as mcp_server_service
 from console.agent_creation import create_persistent_agent_from_charter, enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
+from console.extra_tasks_settings import derive_extra_tasks_settings
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
@@ -1220,6 +1221,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
     @tracer.start_as_current_span("CONSOLE Billing View")
     def get(self, request, *args, **kwargs):
         context = super().get_context_data(**kwargs)
+        context["extra_tasks_default_max_tasks"] = EXTRA_TASKS_DEFAULT_MAX_TASKS
 
         def _serialize_addon_context(addon_context: dict) -> dict[str, object]:
             if not addon_context:
@@ -1381,11 +1383,20 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 membership = context.get('current_membership')
                 can_manage_billing = bool(membership and membership.role in BILLING_MANAGE_ROLES)
 
-                configured_limit = overview['extra_tasks']['configured_limit'] or 0
+                configured_limit = int(overview['extra_tasks']['configured_limit'] or 0)
+                extra_tasks_endpoints = {
+                    "loadUrl": reverse("get_billing_settings"),
+                    "updateUrl": reverse("update_billing_settings"),
+                }
+                extra_tasks_settings = derive_extra_tasks_settings(
+                    configured_limit,
+                    can_modify=can_manage_billing,
+                    endpoints=extra_tasks_endpoints,
+                )
                 auto_purchase_state = {
-                    'enabled': configured_limit not in (0,),
-                    'infinite': configured_limit == -1,
-                    'max_tasks': configured_limit if configured_limit not in (0, -1) else 1000,
+                    "enabled": extra_tasks_settings["enabled"],
+                    "infinite": extra_tasks_settings["infinite"],
+                    "max_tasks": extra_tasks_settings["maxTasks"],
                 }
 
                 billing = getattr(organization, "billing", None)
@@ -1453,17 +1464,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                         "isTrialing": False,
                         "trialEndsAtIso": None,
                     },
-                    "extraTasks": {
-                        "enabled": bool(auto_purchase_state.get("enabled")),
-                        "infinite": bool(auto_purchase_state.get("infinite")),
-                        "maxTasks": int(auto_purchase_state.get("max_tasks") or 0),
-                        "configuredLimit": int(configured_limit),
-                        "canModify": bool(can_manage_billing),
-                        "endpoints": {
-                            "loadUrl": reverse("get_billing_settings"),
-                            "updateUrl": reverse("update_billing_settings"),
-                        },
-                    },
+                    "extraTasks": extra_tasks_settings,
                     "seats": {
                         "purchased": overview.get("seats", {}).get("purchased", 0),
                         "reserved": overview.get("seats", {}).get("reserved", 0),
@@ -1594,9 +1595,14 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             defaults={"max_extra_tasks": 0},
         )
         personal_extra_limit = int(getattr(user_billing, "max_extra_tasks", 0) or 0)
-        personal_extra_enabled = personal_extra_limit != 0
-        personal_extra_infinite = personal_extra_limit == -1
-        personal_extra_max_tasks = personal_extra_limit if personal_extra_limit > 0 else 1000
+        personal_extra_settings = derive_extra_tasks_settings(
+            personal_extra_limit,
+            can_modify=True,
+            endpoints={
+                "loadUrl": reverse("get_billing_settings"),
+                "updateUrl": reverse("update_billing_settings"),
+            },
+        )
 
         billing_props = {
             "contextType": "personal",
@@ -1607,17 +1613,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 "isTrialing": bool(is_trialing),
                 "trialEndsAtIso": trial_end.isoformat() if trial_end else None,
             },
-            "extraTasks": {
-                "enabled": bool(personal_extra_enabled),
-                "infinite": bool(personal_extra_infinite),
-                "maxTasks": int(personal_extra_max_tasks),
-                "configuredLimit": int(personal_extra_limit),
-                "canModify": True,
-                "endpoints": {
-                    "loadUrl": reverse("get_billing_settings"),
-                    "updateUrl": reverse("update_billing_settings"),
-                },
-            },
+            "extraTasks": personal_extra_settings,
             "periodStartDate": context.get("period_start_date"),
             "periodEndDate": context.get("period_end_date"),
             "cancelAt": context.get("cancel_at"),
@@ -1727,130 +1723,190 @@ class ProfileView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
 @tracer.start_as_current_span("BILLING Update Billing Settings")
 def update_billing_settings(request):
     try:
-        data = json.loads(request.body)
-        auto_purchase = data.get('enabled', False)
-        infinite = data.get('infinite', False)
-        max_tasks = data.get('maxTasks', 5)
-        resolved = build_console_context(request)
+        data = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"success": False, "error": "invalid_json"}, status=400)
 
-        if resolved.current_context.type == 'organization' and resolved.current_membership:
-            membership = resolved.current_membership
-            if membership.role not in BILLING_MANAGE_ROLES:
-                return JsonResponse({'success': False, 'error': 'Not permitted'}, status=403)
+    if not isinstance(data, dict):
+        return JsonResponse({"success": False, "error": "invalid_payload"}, status=400)
 
-            OrgBilling = apps.get_model('api', 'OrganizationBilling')
-            defaults = {'max_extra_tasks': 0, 'billing_cycle_anchor': timezone.now().day}
-            org_billing, _ = OrgBilling.objects.get_or_create(
-                organization=membership.org,
-                defaults=defaults,
-            )
+    enabled_raw = data.get("enabled", False)
+    infinite_raw = data.get("infinite", False)
+    max_tasks_raw = data.get("maxTasks", 5)
 
-            if not auto_purchase:
-                org_billing.max_extra_tasks = 0
-            elif infinite:
-                org_billing.max_extra_tasks = -1
-            else:
-                org_billing.max_extra_tasks = max(1, int(max_tasks))
+    def _coerce_bool(value, field_name: str) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        raise ValueError(field_name)
 
-            org_billing.save(update_fields=['max_extra_tasks', 'updated_at'])
+    try:
+        auto_purchase = _coerce_bool(enabled_raw, "enabled")
+        infinite = _coerce_bool(infinite_raw, "infinite")
+    except ValueError as exc:
+        field = str(exc)
+        return JsonResponse({"success": False, "error": f"invalid_{field}"}, status=400)
 
-            transaction.on_commit(lambda: Analytics.track_event(
+    try:
+        max_tasks = int(max_tasks_raw)
+    except (TypeError, ValueError):
+        return JsonResponse({"success": False, "error": "invalid_maxTasks"}, status=400)
+
+    extra_tasks_endpoints = {
+        "loadUrl": reverse("get_billing_settings"),
+        "updateUrl": reverse("update_billing_settings"),
+    }
+    resolved = build_console_context(request)
+
+    if resolved.current_context.type == "organization" and resolved.current_membership:
+        membership = resolved.current_membership
+        if membership.role not in BILLING_MANAGE_ROLES:
+            return JsonResponse({"success": False, "error": "not_permitted"}, status=403)
+
+        OrgBilling = apps.get_model("api", "OrganizationBilling")
+        defaults = {"max_extra_tasks": 0, "billing_cycle_anchor": timezone.now().day}
+        org_billing, _ = OrgBilling.objects.get_or_create(
+            organization=membership.org,
+            defaults=defaults,
+        )
+
+        if not auto_purchase:
+            org_billing.max_extra_tasks = 0
+        elif infinite:
+            org_billing.max_extra_tasks = -1
+        else:
+            org_billing.max_extra_tasks = max(1, max_tasks)
+
+        org_billing.save(update_fields=["max_extra_tasks", "updated_at"])
+
+        configured_limit = int(org_billing.max_extra_tasks or 0)
+        extra_tasks = derive_extra_tasks_settings(
+            configured_limit,
+            can_modify=True,
+            endpoints=extra_tasks_endpoints,
+        )
+
+        transaction.on_commit(
+            lambda: Analytics.track_event(
                 user_id=request.user.id,
                 event=AnalyticsEvent.BILLING_UPDATED,
                 source=AnalyticsSource.WEB,
                 properties={
-                    'max_extra_tasks': org_billing.max_extra_tasks,
-                    'auto_purchase': auto_purchase,
-                    'infinite': infinite,
-                    'owner_type': 'organization',
-                    'organization_id': str(membership.org.id),
-                }
-            ))
-
-            return JsonResponse({
-                'success': True,
-                'max_extra_tasks': org_billing.max_extra_tasks,
-                'owner_type': 'organization',
-            })
-
-        user_billing, _ = UserBilling.objects.get_or_create(
-            user=request.user,
-            defaults={'max_extra_tasks': 0}
+                    "max_extra_tasks": configured_limit,
+                    "auto_purchase": auto_purchase,
+                    "infinite": infinite,
+                    "owner_type": "organization",
+                    "organization_id": str(membership.org.id),
+                },
+            )
         )
 
-        if not auto_purchase:
-            user_billing.max_extra_tasks = 0
-        elif infinite:
-            user_billing.max_extra_tasks = -1
-        else:
-            user_billing.max_extra_tasks = max(1, int(max_tasks))
+        return JsonResponse(
+            {
+                "success": True,
+                "max_extra_tasks": configured_limit,
+                "owner_type": "organization",
+                "extra_tasks": extra_tasks,
+            }
+        )
 
-        user_billing.save(update_fields=['max_extra_tasks'])
+    user_billing, _ = UserBilling.objects.get_or_create(
+        user=request.user,
+        defaults={"max_extra_tasks": 0},
+    )
 
-        transaction.on_commit(lambda: Analytics.track_event(
+    if not auto_purchase:
+        user_billing.max_extra_tasks = 0
+    elif infinite:
+        user_billing.max_extra_tasks = -1
+    else:
+        user_billing.max_extra_tasks = max(1, max_tasks)
+
+    user_billing.save(update_fields=["max_extra_tasks"])
+
+    configured_limit = int(user_billing.max_extra_tasks or 0)
+    extra_tasks = derive_extra_tasks_settings(
+        configured_limit,
+        can_modify=True,
+        endpoints=extra_tasks_endpoints,
+    )
+
+    transaction.on_commit(
+        lambda: Analytics.track_event(
             user_id=request.user.id,
             event=AnalyticsEvent.BILLING_UPDATED,
             source=AnalyticsSource.WEB,
             properties={
-                'max_extra_tasks': user_billing.max_extra_tasks,
-                'auto_purchase': auto_purchase,
-                'infinite': infinite,
-                'owner_type': 'user',
-            }
-        ))
+                "max_extra_tasks": configured_limit,
+                "auto_purchase": auto_purchase,
+                "infinite": infinite,
+                "owner_type": "user",
+            },
+        )
+    )
 
-        return JsonResponse({
-            'success': True,
-            'max_extra_tasks': user_billing.max_extra_tasks,
-            'owner_type': 'user',
-        })
-    except Exception as e:
-        return JsonResponse({
-            'success': False,
-            'error': str(e)
-        }, status=400)
+    return JsonResponse(
+        {
+            "success": True,
+            "max_extra_tasks": configured_limit,
+            "owner_type": "user",
+            "extra_tasks": extra_tasks,
+        }
+    )
 
 @login_required
 @tracer.start_as_current_span("BILLING Get Billing Settings")
 def get_billing_settings(request):
-    try:
-        resolved = build_console_context(request)
+    resolved = build_console_context(request)
+    extra_tasks_endpoints = {
+        "loadUrl": reverse("get_billing_settings"),
+        "updateUrl": reverse("update_billing_settings"),
+    }
 
-        if resolved.current_context.type == 'organization' and resolved.current_membership:
-            membership = resolved.current_membership
-            if membership.role not in BILLING_MANAGE_ROLES and membership is not None:
-                # Allow read-only access even without manage role, but disable editing client side
-                permitted = False
-            else:
-                permitted = True
+    if resolved.current_context.type == "organization" and resolved.current_membership:
+        membership = resolved.current_membership
+        permitted = bool(membership and membership.role in BILLING_MANAGE_ROLES)
 
-            OrgBilling = apps.get_model('api', 'OrganizationBilling')
-            defaults = {'max_extra_tasks': 0, 'billing_cycle_anchor': timezone.now().day}
-            org_billing, _ = OrgBilling.objects.get_or_create(
-                organization=membership.org,
-                defaults=defaults,
-            )
+        OrgBilling = apps.get_model("api", "OrganizationBilling")
+        defaults = {"max_extra_tasks": 0, "billing_cycle_anchor": timezone.now().day}
+        org_billing, _ = OrgBilling.objects.get_or_create(
+            organization=membership.org,
+            defaults=defaults,
+        )
+        configured_limit = int(org_billing.max_extra_tasks or 0)
 
-            return JsonResponse({
-                'max_extra_tasks': org_billing.max_extra_tasks,
-                'owner_type': 'organization',
-                'can_modify': permitted,
-            })
-
-        user_billing, _ = UserBilling.objects.get_or_create(
-            user=request.user,
-            defaults={'max_extra_tasks': 0}
+        return JsonResponse(
+            {
+                "max_extra_tasks": configured_limit,
+                "owner_type": "organization",
+                "can_modify": permitted,
+                "extra_tasks": derive_extra_tasks_settings(
+                    configured_limit,
+                    can_modify=permitted,
+                    endpoints=extra_tasks_endpoints,
+                ),
+            }
         )
 
-        return JsonResponse({
-            'max_extra_tasks': user_billing.max_extra_tasks,
-            'owner_type': 'user',
-            'can_modify': True,
-        })
-    except Exception as e:
-        return JsonResponse({
-            'error': str(e)
-        }, status=400)
+    user_billing, _ = UserBilling.objects.get_or_create(
+        user=request.user,
+        defaults={"max_extra_tasks": 0},
+    )
+    configured_limit = int(user_billing.max_extra_tasks or 0)
+
+    return JsonResponse(
+        {
+            "max_extra_tasks": configured_limit,
+            "owner_type": "user",
+            "can_modify": True,
+            "extra_tasks": derive_extra_tasks_settings(
+                configured_limit,
+                can_modify=True,
+                endpoints=extra_tasks_endpoints,
+            ),
+        }
+    )
 
 
 @login_required
