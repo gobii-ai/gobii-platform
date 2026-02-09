@@ -1,0 +1,90 @@
+{% load static %}
+
+<!-- Vision Closer: The Team of the Future -->
+<section class="py-16 sm:py-24">
+  <div class="max-w-4xl mx-auto px-6 text-center" data-animate>
+
+    <!-- Team illustration with human/AI badges overlaid -->
+    <div class="flex justify-center mb-10">
+      <div class="relative inline-block w-full max-w-xs sm:max-w-sm">
+        <img src="{% static 'images/undraw/team.svg' %}" alt="A team of humans and AI agents" class="w-full" loading="lazy">
+
+        <!-- Row 1 badges (3 avatars across the top) -->
+        <!-- Top-left: Human -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 8%; left: 18%;">
+          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
+        </span>
+        <!-- Top-center: AI -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 8%; left: 47%;">
+          AI
+        </span>
+        <!-- Top-right: Human -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 8%; right: 18%;">
+          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
+        </span>
+
+        <!-- Row 2 badges (3 avatars across the middle) -->
+        <!-- Mid-left: AI -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 38%; left: 18%;">
+          AI
+        </span>
+        <!-- Mid-center: Human -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 38%; left: 47%;">
+          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
+        </span>
+        <!-- Mid-right: AI -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 38%; right: 18%;">
+          AI
+        </span>
+
+        <!-- Row 3 badges (3 avatars across the bottom) -->
+        <!-- Bottom-left: Human -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 68%; left: 18%;">
+          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
+        </span>
+        <!-- Bottom-center: AI -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-violet-600 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 68%; left: 47%;">
+          AI
+        </span>
+        <!-- Bottom-right: Human -->
+        <span class="absolute inline-flex items-center justify-center px-1.5 py-0.5 rounded-full bg-slate-500 text-[8px] sm:text-[9px] font-bold text-white shadow" style="top: 68%; right: 18%;">
+          <i data-lucide="user" class="w-2.5 h-2.5 mr-0.5"></i>
+        </span>
+      </div>
+    </div>
+
+    <span class="inline-flex items-center text-xs font-bold tracking-[0.25em] uppercase text-indigo-500">The vision</span>
+    <h2 class="mt-3 text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">The team of the&nbsp;future</h2>
+    <p class="mt-4 text-base text-slate-500 max-w-xl mx-auto leading-relaxed">Humans and AI agents, working together &mdash; each doing what they do best. Gobii is the platform that makes that&nbsp;real.</p>
+    <div class="mt-8">
+      <a href="#create-agent-form" class="inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-6 shadow-lg hover:shadow-xl transition-all duration-300">
+        Start Free Trial
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m-7-7l7 7-7 7"></path></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- Trust Bar -->
+<section class="py-10 sm:py-12 border-t border-slate-100">
+  <div class="max-w-5xl mx-auto px-6" data-animate>
+    <div class="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 sm:gap-x-12">
+      <div class="flex items-center gap-2 text-slate-400">
+        <i data-lucide="git-branch" class="w-4 h-4"></i>
+        <span class="text-xs font-medium tracking-wide uppercase">Open Source (MIT)</span>
+      </div>
+      <div class="flex items-center gap-2 text-slate-400">
+        <i data-lucide="building" class="w-4 h-4"></i>
+        <span class="text-xs font-medium tracking-wide uppercase">Backed by Open Core Ventures</span>
+      </div>
+      <div class="flex items-center gap-2 text-slate-400">
+        <i data-lucide="trending-up" class="w-4 h-4"></i>
+        <span class="text-xs font-medium tracking-wide uppercase">#1 on OpenRouter</span>
+      </div>
+      <div class="flex items-center gap-2 text-slate-400">
+        <i data-lucide="shield" class="w-4 h-4"></i>
+        <span class="text-xs font-medium tracking-wide uppercase">Production-grade security</span>
+      </div>
+    </div>
+  </div>
+</section>

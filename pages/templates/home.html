@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 {% load static %}
 {% load waffle_tags %}
-{% block title %}Gobii | Create 24/7 Digital Workers That Automate Your Web Tasks{% endblock %}
+{% block title %}Gobii | Your AI Team, Always On — Virtual Coworkers That Automate Web Work 24/7{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Create your own Gobii digital worker to automate prospecting, research, and repetitive web browsing tasks around the clock so you can focus on strategy.">
+  <meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">
   {% if immersive_app_assets %}
     {% for href in immersive_app_assets.styles %}
       <link rel="preload" as="style" href="{{ href }}">
@@ -156,6 +156,24 @@
       }
     }
 
+    /* Scroll-triggered fade-in animation */
+    [data-animate] {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    [data-animate].is-visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      [data-animate] {
+        opacity: 1;
+        transform: none;
+        transition: none;
+      }
+    }
+
     {% include "partials/_immersive_overlay_styles.html" %}
   </style>
 {% endblock %}
@@ -201,6 +219,7 @@
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
+              <p class="text-center text-sm text-slate-400">Describe what you need &mdash; your agent will figure out the rest</p>
               <!-- Unified input + button container -->
               <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-3xl overflow-visible relative shadow-2xl transition-all duration-300">
                 <!-- Typing prompt overlay -->
@@ -505,8 +524,20 @@
       {% endif %}
       {% endif %}
 
-      <!-- OR Divider -->
-      <div class="relative flex items-center justify-center pt-20 pb-12 sm:pt-24 sm:pb-16">
+    </div>
+  </section>
+
+  <!-- Value proposition sections (proprietary only) -->
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+    {% include "home/_flow_strip.html" %}
+    {% include "home/_value_sections.html" %}
+    {% include "home/_vision_and_trust.html" %}
+  {% endif %}
+
+  <!-- OR Divider -->
+  <section class="relative">
+    <div class="max-w-5xl mx-auto px-6">
+      <div class="relative flex items-center justify-center pt-12 pb-12 sm:pt-16 sm:pb-16">
         <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
         <span class="flex-shrink-0 mx-6 text-xs font-bold tracking-[0.25em] uppercase text-indigo-400">OR</span>
         <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
@@ -1037,5 +1068,22 @@
     </script>
 
     {% include "partials/_immersive_overlay_script.html" %}
+
+    <!-- Scroll-triggered fade-in -->
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        var observer = new IntersectionObserver(function (entries) {
+          entries.forEach(function (entry) {
+            if (entry.isIntersecting) {
+              entry.target.classList.add('is-visible');
+              observer.unobserve(entry.target);
+            }
+          });
+        }, { threshold: 0.15 });
+        document.querySelectorAll('[data-animate]').forEach(function (el) {
+          observer.observe(el);
+        });
+      });
+    </script>
 </div> <!-- New closing div for the main wrapper -->
 {% endblock %}
