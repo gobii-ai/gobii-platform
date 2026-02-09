@@ -823,7 +823,8 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const captionParts: string[] = []
 
       if (query) {
-        captionParts.push(`“${truncate(query, 52)}”`)
+        const cleanedQuery = query.replace(/\bsite:[^\s]+/gi, ' ').replace(/\s+/g, ' ').trim()
+        captionParts.push(`“${truncate(cleanedQuery || query, 52)}”`)
       }
       if (resultCount !== null) {
         captionParts.push(`${resultCount} result${resultCount === 1 ? '' : 's'}`)
