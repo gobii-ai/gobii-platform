@@ -43,7 +43,7 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertContains(
             response,
-            '<meta name="description" content="Create your own Gobii digital worker to automate prospecting, research, and repetitive web browsing tasks around the clock so you can focus on strategy.">',
+            '<meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
         )
 
     @tag("batch_pages")

@@ -361,9 +361,9 @@ class PersistentAgentCharterForm(forms.Form):
     
     charter = forms.CharField(
         widget=forms.Textarea(attrs={
-            'rows': 5,
+            'rows': 2,
             'placeholder': '',
-            'class': 'block w-full bg-transparent border-none focus:ring-0 text-base px-5 py-4 resize-none placeholder:text-gray-400 min-h-32',
+            'class': 'block w-full bg-transparent border-none focus:ring-0 text-base px-5 py-3.5 resize-none placeholder:text-gray-400',
             'oninput': 'textareaAutoResize(this)',
             'data-max-height': '400',
             'style': 'height:auto;overflow:hidden;'
