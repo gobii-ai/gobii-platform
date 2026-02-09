@@ -89,7 +89,7 @@ def ensure_kanban_baseline_event(agent: PersistentAgent) -> PersistentAgentKanba
     event_time = last_updated or timezone.now()
     cursor_value = _cursor_value_from_timestamp(event_time)
     cursor_identifier = uuid.uuid5(uuid.NAMESPACE_URL, f"kanban-baseline:{agent.id}")
-    display_text = f"{_agent_first_name(agent)} updated kanban"
+    display_text = f"{_agent_first_name(agent)} updated tasks"
 
     try:
         with transaction.atomic():
