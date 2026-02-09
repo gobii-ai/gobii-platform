@@ -8,7 +8,7 @@ import { type PlanTier, useSubscriptionStore } from '../../stores/subscriptionSt
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 
-import type { BillingInitialData, BillingScreenProps, DedicatedIpAssignedAgent, DedicatedIpProxy } from './types'
+import type { BillingInitialData, BillingScreenProps, DedicatedIpProxy } from './types'
 import { billingDraftReducer, initialDraftState, type BillingDraftState } from './draft'
 import { buildInitialAddonQuantityMap } from './utils'
 import { BillingHeader } from './BillingHeader'
