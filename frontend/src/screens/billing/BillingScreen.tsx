@@ -14,7 +14,6 @@ import { buildInitialAddonQuantityMap } from './utils'
 import { BillingHeader } from './BillingHeader'
 import { AddonSections } from './AddonSections'
 import { ExtraTasksSection } from './ExtraTasksSection'
-import { DedicatedIpSection } from './DedicatedIpSection'
 import { SubscriptionSummary } from './SubscriptionSummary'
 import { ConfirmDialog } from './ConfirmDialog'
 import { useBillingNudgeVisibility } from './useBillingNudgeVisibility'
@@ -23,8 +22,6 @@ import { useConfirmPostAction } from './useConfirmPostAction'
 type DedicatedRemovePrompt = {
   proxyId: string
   proxyLabel: string
-  assignedAgents: DedicatedIpAssignedAgent[]
-  unassign: boolean
 }
 
 function computeAddonsDisabledReason(initialData: BillingInitialData): string | null {
@@ -128,20 +125,18 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       setDedicatedPrompt({
         proxyId: proxy.id,
         proxyLabel: proxy.label || proxy.staticIp || proxy.host,
-        assignedAgents: proxy.assignedAgents,
-        unassign: true,
       })
       return
     }
 
-    dispatch({ type: 'dedicated.stageRemove', proxy, unassign: false })
+    dispatch({ type: 'dedicated.stageRemove', proxy })
   }, [dedicatedInteractable, draft.dedicatedRemoveIds, dispatch])
 
   const confirmDedicatedRemove = useCallback(() => {
     if (!dedicatedPrompt) return
     const proxy = initialData.dedicatedIps.proxies.find((p) => p.id === dedicatedPrompt.proxyId)
     if (proxy) {
-      dispatch({ type: 'dedicated.stageRemove', proxy, unassign: dedicatedPrompt.unassign })
+      dispatch({ type: 'dedicated.stageRemove', proxy })
     }
     setDedicatedPrompt(null)
   }, [dedicatedPrompt, dispatch, initialData.dedicatedIps.proxies])
@@ -223,7 +218,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       payload.dedicatedIps = {
         addQuantity: draft.dedicatedAddQty,
         removeProxyIds: draft.dedicatedRemoveIds,
-        unassignProxyIds: draft.dedicatedUnassignIds,
       }
     }
 
@@ -292,18 +286,9 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           saving={saving}
           addonsInteractable={addonsInteractable}
           addonsDisabledReason={addonsDisabledReason}
+          dedicatedInteractable={dedicatedInteractable}
+          onRequestDedicatedRemove={requestDedicatedRemove}
         />
-
-        <section className="card" data-section="billing-dedicated">
-          <DedicatedIpSection
-            initialData={initialData}
-            draft={draft}
-            dispatch={dispatch}
-            saving={saving}
-            dedicatedInteractable={dedicatedInteractable}
-            onRequestRemove={requestDedicatedRemove}
-          />
-        </section>
 
         <SubscriptionSummary
           initialData={initialData}
@@ -387,7 +372,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         description={
           dedicatedPrompt ? (
             <>
-              This IP is currently assigned to agents. Removing it can break workflows unless you unassign first.
+              This IP is currently assigned to agents. Removing it will automatically unassign it from all of your agents.
               <div className="mt-2 text-sm font-semibold text-slate-900">{dedicatedPrompt.proxyLabel}</div>
             </>
           ) : null
@@ -398,26 +383,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         onConfirm={confirmDedicatedRemove}
         onClose={() => setDedicatedPrompt(null)}
         footerNote="Changes apply when you click Save."
-      >
-        {dedicatedPrompt ? (
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-            <div className="font-semibold text-slate-900">Assigned agents</div>
-            <div className="mt-1 text-sm text-slate-700">
-              {dedicatedPrompt.assignedAgents.map((a) => a.name).join(', ')}
-            </div>
-            <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-slate-800">
-              <input
-                type="checkbox"
-                checked={dedicatedPrompt.unassign}
-                onChange={(event) =>
-                  setDedicatedPrompt((prev) => (prev ? { ...prev, unassign: event.target.checked } : prev))
-                }
-              />
-              Unassign from these agents
-            </label>
-          </div>
-        ) : null}
-      </ConfirmDialog>
+      />
 
       <ConfirmDialog
         open={trialConfirmOpen}

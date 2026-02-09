@@ -25,7 +25,7 @@ from util.subscription_helper import (
     get_user_plan,
 )
 
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import BrowserUseAgent
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
@@ -288,6 +288,10 @@ def apply_dedicated_ip_changes(
             normalized_remove.append(pid)
 
     if normalized_remove:
+        # Dedicated IP removal should be safe by default: if an IP is being removed,
+        # automatically clear any agent assignments for this owner.
+        unassign_proxy_ids = set(unassign_proxy_ids or set()).union(set(normalized_remove))
+
         owned_ids = {
             str(pid)
             for pid in (
@@ -303,33 +307,6 @@ def apply_dedicated_ip_changes(
                     status=400,
                     extra={"proxyId": proxy_id},
                 )
-
-        assigned_qs = PersistentAgent.objects.filter(browser_use_agent__preferred_proxy_id__in=normalized_remove)
-        if owner_type == "organization":
-            assigned_qs = assigned_qs.filter(organization=owner)
-        else:
-            assigned_qs = assigned_qs.filter(user=owner, organization__isnull=True)
-        assigned_pairs = list(assigned_qs.values_list("browser_use_agent__preferred_proxy_id", "name"))
-        assigned_by_proxy: dict[str, list[str]] = {}
-        for proxy_id, agent_name in assigned_pairs:
-            pid = str(proxy_id)
-            assigned_by_proxy.setdefault(pid, []).append(agent_name)
-
-        requires_unassign = [
-            proxy_id
-            for proxy_id in normalized_remove
-            if proxy_id not in unassign_proxy_ids and assigned_by_proxy.get(proxy_id)
-        ]
-        if requires_unassign:
-            first = requires_unassign[0]
-            raise BillingUpdateError(
-                "dedicated_ip_unassign_required",
-                status=400,
-                extra={
-                    "proxyId": first,
-                    "assignedAgents": assigned_by_proxy.get(first, []),
-                },
-            )
 
         with transaction.atomic():
             if unassign_proxy_ids:

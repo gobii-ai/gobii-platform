@@ -185,10 +185,17 @@ class ConsoleBillingUpdateApiTests(TestCase):
         payload = resp.json()
         self.assertEqual(payload.get("error"), "seats_required")
 
+    @patch("console.billing_update_service._update_stripe_dedicated_ip_quantity")
     @patch("console.billing_update_service.stripe_status")
     @patch("console.billing_update_service._get_owner_plan_id", return_value="org_team")
-    def test_dedicated_ip_removal_requires_unassign_and_is_scoped(self, mock_get_plan_id, mock_stripe_status):
+    def test_dedicated_ip_removal_auto_unassigns_and_is_scoped(
+        self,
+        mock_get_plan_id,
+        mock_stripe_status,
+        mock_update_dedicated_qty,
+    ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_update_dedicated_qty.return_value = None
 
         # Give the org seats so dedicated IP changes are allowed past the seat gate.
         self.org.billing.purchased_seats = 1
@@ -239,17 +246,20 @@ class ConsoleBillingUpdateApiTests(TestCase):
             content_type="application/json",
         )
 
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.status_code, 200)
         payload = resp.json()
-        self.assertEqual(payload.get("error"), "dedicated_ip_unassign_required")
-        self.assertEqual(payload.get("proxyId"), str(proxy.id))
-        self.assertIn("Org Agent", payload.get("assignedAgents", []))
-        self.assertNotIn("Other Org Agent", payload.get("assignedAgents", []))
+        self.assertTrue(payload.get("ok"))
+
+        org_agent.browser_use_agent.refresh_from_db()
+        self.assertIsNone(org_agent.browser_use_agent.preferred_proxy_id)
+
+        other_agent.browser_use_agent.refresh_from_db()
+        self.assertEqual(other_agent.browser_use_agent.preferred_proxy_id, proxy.id)
 
     @patch("console.billing_update_service._update_stripe_dedicated_ip_quantity")
     @patch("console.billing_update_service.stripe_status")
     @patch("console.billing_update_service._get_owner_plan_id", return_value="org_team")
-    def test_dedicated_ip_removal_with_unassign_only_clears_owner_agents(
+    def test_dedicated_ip_removal_only_clears_owner_agents(
         self,
         mock_get_plan_id,
         mock_stripe_status,
@@ -299,7 +309,6 @@ class ConsoleBillingUpdateApiTests(TestCase):
                 "dedicatedIps": {
                     "addQuantity": 0,
                     "removeProxyIds": [str(proxy.id)],
-                    "unassignProxyIds": [str(proxy.id)],
                 },
             }),
             content_type="application/json",

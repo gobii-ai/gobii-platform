@@ -1,10 +1,11 @@
 import type { ReactNode } from 'react'
 import { BadgeCheck, GlobeLock, Layers3, Minus, Plus, Users } from 'lucide-react'
 
-import type { BillingAddonKindKey, BillingInitialData } from './types'
+import type { BillingAddonKindKey, BillingInitialData, DedicatedIpProxy } from './types'
 import type { BillingDraftAction, BillingDraftState } from './draft'
 import { buildAddonOptionLabel, formatCents, normalizeCurrency } from './utils'
 import { ToggleSwitch } from './ToggleSwitch'
+import { DedicatedIpSection } from './DedicatedIpSection'
 
 type AddonSectionsProps = {
   initialData: BillingInitialData
@@ -13,6 +14,8 @@ type AddonSectionsProps = {
   saving: boolean
   addonsInteractable: boolean
   addonsDisabledReason: string | null
+  dedicatedInteractable: boolean
+  onRequestDedicatedRemove: (proxy: DedicatedIpProxy) => void
 }
 
 type AddonSectionMeta = {
@@ -56,6 +59,8 @@ export function AddonSections({
   saving,
   addonsInteractable,
   addonsDisabledReason,
+  dedicatedInteractable,
+  onRequestDedicatedRemove,
 }: AddonSectionsProps) {
   const captchaOptions = initialData.addons.kinds.advancedCaptcha?.options ?? []
   const captchaPriceIds = captchaOptions.map((opt) => opt.priceId).filter(Boolean)
@@ -205,6 +210,15 @@ export function AddonSections({
             </div>
           )
         })}
+
+        <DedicatedIpSection
+          initialData={initialData}
+          draft={draft}
+          dispatch={dispatch}
+          saving={saving}
+          dedicatedInteractable={dedicatedInteractable}
+          onRequestRemove={onRequestDedicatedRemove}
+        />
       </div>
     </section>
   )

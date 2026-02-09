@@ -7,7 +7,6 @@ export type BillingDraftState = {
   addonQuantities: Record<string, number>
   dedicatedAddQty: number
   dedicatedRemoveIds: string[]
-  dedicatedUnassignIds: string[]
 }
 
 export type BillingDraftAction =
@@ -18,7 +17,7 @@ export type BillingDraftAction =
   | { type: 'addon.adjust'; priceId: string; delta: number }
   | { type: 'captcha.setEnabled'; enabled: boolean; priceIds: string[]; activePriceId: string }
   | { type: 'dedicated.setAddQty'; value: number }
-  | { type: 'dedicated.stageRemove'; proxy: DedicatedIpProxy; unassign: boolean }
+  | { type: 'dedicated.stageRemove'; proxy: DedicatedIpProxy }
   | { type: 'dedicated.undoRemove'; proxyId: string }
 
 function clampInt(value: number, min: number, max: number): number {
@@ -35,7 +34,6 @@ export function initialDraftState(initialData: BillingInitialData): BillingDraft
     addonQuantities: buildInitialAddonQuantityMap(initialData.addons),
     dedicatedAddQty: 0,
     dedicatedRemoveIds: [],
-    dedicatedUnassignIds: [],
   }
 }
 
@@ -81,17 +79,13 @@ export function billingDraftReducer(state: BillingDraftState, action: BillingDra
         return state
       }
       const nextRemove = [...state.dedicatedRemoveIds, proxyId]
-      const nextUnassign = action.unassign && !state.dedicatedUnassignIds.includes(proxyId)
-        ? [...state.dedicatedUnassignIds, proxyId]
-        : state.dedicatedUnassignIds
-      return { ...state, dedicatedRemoveIds: nextRemove, dedicatedUnassignIds: nextUnassign }
+      return { ...state, dedicatedRemoveIds: nextRemove }
     }
     case 'dedicated.undoRemove': {
       const proxyId = action.proxyId
       return {
         ...state,
         dedicatedRemoveIds: state.dedicatedRemoveIds.filter((id) => id !== proxyId),
-        dedicatedUnassignIds: state.dedicatedUnassignIds.filter((id) => id !== proxyId),
       }
     }
     default:
