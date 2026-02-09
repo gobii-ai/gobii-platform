@@ -309,43 +309,47 @@ export function AgentChatAddonsPanel({
     ? 'Add task credits for this billing period.'
     : 'Increase contact limits for all agents.'
 
+  const trialConfirmationDialog = (
+    <ConfirmDialog
+      open={trialConfirmOpen}
+      title="End free trial and charge now?"
+      description={
+        <>
+          You are currently in a free trial{trialEndsLabel ? ` (scheduled to end ${trialEndsLabel})` : ''}. Purchasing
+          add-ons ends your trial immediately and you will be charged today.
+        </>
+      }
+      confirmLabel="Confirm"
+      icon={<ShieldAlert className="h-5 w-5" />}
+      busy={trialConfirmBusy || packUpdating}
+      onConfirm={async () => {
+        if (trialConfirmBusy || packUpdating) return
+        setTrialConfirmBusy(true)
+        try {
+          const ok = await performPackUpdate()
+          if (mountedRef.current) {
+            setTrialConfirmOpen(false)
+          }
+          if (ok) {
+            onClose()
+          }
+        } finally {
+          if (mountedRef.current) {
+            setTrialConfirmBusy(false)
+          }
+        }
+      }}
+      onClose={() => {
+        if (trialConfirmBusy || packUpdating) return
+        setTrialConfirmOpen(false)
+      }}
+    />
+  )
+
   if (!isMobile) {
     return (
       <>
-        <ConfirmDialog
-          open={trialConfirmOpen}
-          title="End free trial and charge now?"
-          description={
-            <>
-              You are currently in a free trial{trialEndsLabel ? ` (scheduled to end ${trialEndsLabel})` : ''}. Purchasing
-              add-ons ends your trial immediately and you will be charged today.
-            </>
-          }
-          confirmLabel="Confirm"
-          icon={<ShieldAlert className="h-5 w-5" />}
-          busy={trialConfirmBusy || packUpdating}
-          onConfirm={async () => {
-            if (trialConfirmBusy || packUpdating) return
-            setTrialConfirmBusy(true)
-            try {
-              const ok = await performPackUpdate()
-              if (mountedRef.current) {
-                setTrialConfirmOpen(false)
-              }
-              if (ok) {
-                onClose()
-              }
-            } finally {
-              if (mountedRef.current) {
-                setTrialConfirmBusy(false)
-              }
-            }
-          }}
-          onClose={() => {
-            if (trialConfirmBusy || packUpdating) return
-            setTrialConfirmOpen(false)
-          }}
-        />
+        {trialConfirmationDialog}
         <Modal
           title="Add-ons"
           subtitle={subtitle}
@@ -363,40 +367,7 @@ export function AgentChatAddonsPanel({
 
   return (
     <>
-      <ConfirmDialog
-        open={trialConfirmOpen}
-        title="End free trial and charge now?"
-        description={
-          <>
-            You are currently in a free trial{trialEndsLabel ? ` (scheduled to end ${trialEndsLabel})` : ''}. Purchasing
-            add-ons ends your trial immediately and you will be charged today.
-          </>
-        }
-        confirmLabel="Confirm"
-        icon={<ShieldAlert className="h-5 w-5" />}
-        busy={trialConfirmBusy || packUpdating}
-        onConfirm={async () => {
-          if (trialConfirmBusy || packUpdating) return
-          setTrialConfirmBusy(true)
-          try {
-            const ok = await performPackUpdate()
-            if (mountedRef.current) {
-              setTrialConfirmOpen(false)
-            }
-            if (ok) {
-              onClose()
-            }
-          } finally {
-            if (mountedRef.current) {
-              setTrialConfirmBusy(false)
-            }
-          }
-        }}
-        onClose={() => {
-          if (trialConfirmBusy || packUpdating) return
-          setTrialConfirmOpen(false)
-        }}
-      />
+      {trialConfirmationDialog}
       <AgentChatMobileSheet
         open={open}
         onClose={onClose}
