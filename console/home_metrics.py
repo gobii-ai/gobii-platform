@@ -189,3 +189,18 @@ def load_console_home_owner(owner_type: str, owner_id: str):
         return User.objects.get(pk=owner_id), False
     except User.DoesNotExist:
         return None, False
+
+
+def invalidate_console_home_metrics_cache(owner_type: str, owner_id: object) -> None:
+    """
+    Invalidate the cached console home metrics payload for a specific owner.
+
+    This is used by signals so the home page doesn't show stale quotas after
+    credits or billing state changes.
+    """
+    if owner_type not in {"user", "organization"}:
+        return
+    if owner_id in (None, ""):
+        return
+    cache.delete(_console_home_cache_key(owner_type, owner_id))
+    cache.delete(_console_home_cache_lock_key(owner_type, owner_id))

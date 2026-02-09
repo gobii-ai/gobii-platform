@@ -42,3 +42,12 @@ class ApiConfig(AppConfig):
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to import system_setting_signals: {e}")
+
+        try:
+            from . import task_credit_signals  # pragma: no cover
+
+            task_credit_signals.register_task_credit_cache_invalidation()
+        except Exception as e:  # pragma: no cover - optional dependency
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to register task_credit_signals: {e}")

@@ -58,7 +58,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.core.schedule_parser import ScheduleParser
 from agents.services import PretrainedWorkerTemplateService
-from pages.context_processors import invalidate_account_info_cache
+from pages.account_info_cache import invalidate_account_info_cache
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 

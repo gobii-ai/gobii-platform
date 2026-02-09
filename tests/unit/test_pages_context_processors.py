@@ -8,10 +8,11 @@ from django.utils import timezone
 from pages.context_processors import (
     ACCOUNT_INFO_CACHE_FRESH_SECONDS,
     ACCOUNT_INFO_CACHE_STALE_SECONDS,
-    _account_info_cache_key,
     account_info,
     mini_mode,
 )
+
+from pages.account_info_cache import account_info_cache_key
 
 User = get_user_model()
 
@@ -45,7 +46,7 @@ class AccountInfoCacheTests(TestCase):
         self.assertEqual(result, mock_build.return_value)
         mock_enqueue.assert_not_called()
 
-        cache_entry = cache.get(_account_info_cache_key(self.user.id))
+        cache_entry = cache.get(account_info_cache_key(self.user.id))
         self.assertIsNotNone(cache_entry)
         self.assertEqual(cache_entry["data"], mock_build.return_value)
 
@@ -54,7 +55,7 @@ class AccountInfoCacheTests(TestCase):
     def test_fresh_cache_hit_skips_refresh(self, mock_enqueue, mock_build):
         cached_data = {"account": {"paid": True}}
         cache.set(
-            _account_info_cache_key(self.user.id),
+            account_info_cache_key(self.user.id),
             {"data": cached_data, "refreshed_at": timezone.now().timestamp()},
             timeout=ACCOUNT_INFO_CACHE_STALE_SECONDS,
         )
@@ -74,7 +75,7 @@ class AccountInfoCacheTests(TestCase):
         )
         cached_data = {"account": {"paid": True}}
         cache.set(
-            _account_info_cache_key(self.user.id),
+            account_info_cache_key(self.user.id),
             {
                 "data": cached_data,
                 "refreshed_at": timezone.now().timestamp()
