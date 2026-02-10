@@ -2009,6 +2009,7 @@ export function AgentChatPage({
       const isLocked = typeof allowedRank === 'number' && typeof selectedRank === 'number'
         ? selectedRank > allowedRank
         : Boolean(llmIntelligence && !llmIntelligence.canEdit && selectedTier !== allowedTier)
+      void isLocked
       const multiplier = option?.multiplier ?? 1
       let estimatedDaysRemaining: number | null = null
       let burnRatePerDay: number | null = null
@@ -2033,10 +2034,11 @@ export function AgentChatPage({
         estimatedDaysRemaining = projectedDays
         lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
       }
-      if (isLocked || lowCredits) {
-        const gateReason: IntelligenceGateReason = isLocked && lowCredits ? 'both' : isLocked ? 'plan' : 'credits'
+      // Option 1: never block/coerce by plan tier before the agent exists.
+      // The backend clamps the tier at persistence time and at runtime routing.
+      if (lowCredits) {
         track(AnalyticsEvent.INTELLIGENCE_GATE_SHOWN, {
-          reason: gateReason,
+          reason: 'credits',
           selectedTier,
           allowedTier,
           multiplier: Number.isFinite(multiplier) ? multiplier : null,
@@ -2046,7 +2048,7 @@ export function AgentChatPage({
         })
         pendingCreateRef.current = { body, attachments, tier: selectedTier, charterOverride }
         setIntelligenceGate({
-          reason: gateReason,
+          reason: 'credits',
           selectedTier,
           allowedTier,
           multiplier: Number.isFinite(multiplier) ? multiplier : null,

@@ -397,10 +397,12 @@ class HomePage(TemplateView):
                 owner_type = 'organization'
 
         preferred_llm_tier_raw = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
-        preferred_llm_tier = resolve_preferred_tier_for_owner(owner, preferred_llm_tier_raw).value
-        if preferred_llm_tier_raw and preferred_llm_tier_raw != preferred_llm_tier:
-            self.request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier
-            self.request.session.modified = True
+        # Never plan-clamp in the homepage selector. Clamping happens when the agent is
+        # persisted and at runtime.
+        preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
+        # Do not write back the clamped tier into the session.
+        # We want to preserve the user's requested tier so it can take effect automatically
+        # after a plan upgrade (e.g., returning from Stripe before webhooks settle).
         context['preferred_llm_tier'] = preferred_llm_tier
         context['preferred_llm_tier_label'] = get_llm_tier_label(preferred_llm_tier)
 
@@ -555,7 +557,8 @@ class HomeAgentSpawnView(TemplateView):
                             owner = request.user
                     except Exception:
                         owner = request.user
-                preferred_llm_tier = resolve_preferred_tier_for_owner(owner, preferred_llm_tier_raw).value
+                # Never plan-clamp session preference here; clamping happens at persistence/runtime.
+                preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
                 request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier
                 request.session.modified = True
 

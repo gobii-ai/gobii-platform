@@ -258,11 +258,8 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:
-            resolved = resolve_preferred_tier_for_owner(owner, preferred_llm_tier_raw).value
-            preferred_llm_tier = resolved
-            if preferred_llm_tier_raw != resolved:
-                request.session[PREFERRED_LLM_TIER_SESSION_KEY] = resolved
-                request.session.modified = True
+            # Do not plan-clamp here; plan clamping happens when the agent is persisted and at runtime.
+            preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
 
         payload = {
             "charter": request.session.get("agent_charter"),
@@ -1682,7 +1679,12 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 owner = organization
                 owner_type = "organization"
 
-        llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
+        llm_intelligence = build_llm_intelligence_props(
+            owner,
+            owner_type,
+            organization,
+            upgrade_url,
+        )
 
         # Prefetch primary email and SMS endpoints for header display
         email_prefetch = models.Prefetch(

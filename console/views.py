@@ -287,7 +287,12 @@ def _coerce_decimal_to_float(value) -> float | None:
         return None
 
 
-def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_url: str | None) -> dict[str, Any]:
+def build_llm_intelligence_props(
+    owner,
+    owner_type: str,
+    organization,
+    upgrade_url: str | None,
+) -> dict[str, Any]:
     plan = None
     if owner is not None:
         if owner_type == 'organization':
