@@ -1810,8 +1810,16 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             self.agent.id,
             ttl=123,
         )
+        expected_delay_seconds = max(
+            int(ep.MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
+            int(mock_get_pending_settings.return_value.pending_drain_delay_seconds),
+        )
+        expected_schedule_ttl_seconds = max(
+            int(mock_get_pending_settings.return_value.pending_drain_schedule_ttl_seconds),
+            max(30, expected_delay_seconds * 6),
+        )
         mock_schedule_pending.assert_called_once_with(
-            delay_seconds=60,
-            schedule_ttl_seconds=360,
+            delay_seconds=expected_delay_seconds,
+            schedule_ttl_seconds=expected_schedule_ttl_seconds,
             span=ANY,
         )
