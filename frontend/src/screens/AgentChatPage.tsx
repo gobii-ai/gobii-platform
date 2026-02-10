@@ -40,6 +40,7 @@ const LOW_CREDIT_DAY_THRESHOLD = 2
 const ROSTER_REFRESH_INTERVAL_MS = 20_000
 const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
 const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
+const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -437,7 +438,6 @@ export function AgentChatPage({
   agentEmail,
   agentSms,
   collaboratorInviteUrl,
-  isStaff = false,
   auditUrl,
   auditUrlTemplate,
   viewerUserId,
@@ -2164,7 +2164,7 @@ export function AgentChatPage({
       return rosterAuditUrl
     }
     if (auditUrlTemplate) {
-      return auditUrlTemplate.replace('00000000-0000-0000-0000-000000000000', activeAgentId)
+      return auditUrlTemplate.replace(AUDIT_URL_TEMPLATE_PLACEHOLDER, activeAgentId)
     }
     // Fall back to the mount node audit URL for the initially-loaded agent (console shell path).
     // Non-staff users will not be served audit URLs, so this still stays staff-only.
