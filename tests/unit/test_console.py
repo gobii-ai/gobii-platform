@@ -734,7 +734,8 @@ class ConsoleViewsTest(TestCase):
 
         url = reverse("agent_detail", kwargs={"pk": agent.id})
         # Make this deterministic in CI: force proprietary mode + free plan + max tier == STANDARD.
-        with override_settings(GOBII_PROPRIETARY_MODE=True), \
+        import console.views as console_views
+        with patch.object(console_views.settings, "GOBII_PROPRIETARY_MODE", True), \
              patch("console.views.get_user_plan", return_value=PLAN_CONFIG["free"]), \
              patch("console.views.max_allowed_tier_for_plan", return_value=AgentLLMTier.STANDARD), \
              patch("util.subscription_helper.get_user_plan", return_value=PLAN_CONFIG["free"]):
