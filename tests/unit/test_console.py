@@ -701,7 +701,7 @@ class ConsoleViewsTest(TestCase):
     def test_agent_detail_ajax_clamps_intelligence_tier_and_returns_warning(self):
         from django.db.models import Max
 
-        from api.agent.core.llm_config import AgentLLMTier
+        from config.plans import PLAN_CONFIG
         from api.models import BrowserUseAgent, IntelligenceTier, PersistentAgent
 
         standard = IntelligenceTier.objects.filter(key="standard").first()
@@ -733,7 +733,8 @@ class ConsoleViewsTest(TestCase):
         )
 
         url = reverse("agent_detail", kwargs={"pk": agent.id})
-        with patch("console.views.max_allowed_tier_for_plan", return_value=AgentLLMTier.STANDARD):
+        # Force a free plan so the view should clamp any paid-tier selection.
+        with patch("console.views.get_user_plan", return_value=PLAN_CONFIG["free"]):
             response = self.client.post(
                 url,
                 {
