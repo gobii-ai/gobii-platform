@@ -545,18 +545,6 @@ class HomeAgentSpawnView(TemplateView):
             request.session['agent_charter_source'] = 'user'
             preferred_llm_tier_raw = (request.POST.get("preferred_llm_tier") or "").strip()
             if preferred_llm_tier_raw:
-                owner = None
-                if request.user.is_authenticated:
-                    try:
-                        from console.context_helpers import build_console_context
-
-                        resolved = build_console_context(request)
-                        if resolved.current_context.type == "organization" and resolved.current_membership is not None:
-                            owner = resolved.current_membership.org
-                        else:
-                            owner = request.user
-                    except Exception:
-                        owner = request.user
                 # Never plan-clamp session preference here; clamping happens at persistence/runtime.
                 preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
                 request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier

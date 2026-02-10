@@ -245,16 +245,6 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
                     logger.debug("Invalid or expired OAuth charter cookie")
 
         pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
-        owner = request.user
-        try:
-            from console.context_helpers import build_console_context
-
-            resolved = build_console_context(request)
-            if resolved.current_context.type == "organization" and resolved.current_membership is not None:
-                owner = resolved.current_membership.org
-        except Exception:
-            owner = request.user
-
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:

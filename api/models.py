@@ -156,12 +156,8 @@ class IntelligenceTier(models.Model):
 
 
 def _get_default_intelligence_tier_id() -> uuid.UUID | None:
-    tier = (
-        IntelligenceTier.objects.filter(is_default=True)
-        .only("id", "rank")
-        .order_by("-rank", "key")
-        .first()
-    )
+    # A conditional unique constraint enforces at most one default tier.
+    tier = IntelligenceTier.objects.filter(is_default=True).only("id").first()
     if tier is None:
         tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
     return tier.id if tier else None

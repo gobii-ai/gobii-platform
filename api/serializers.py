@@ -7,10 +7,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 from api.agent.core.llm_config import (
-    AgentLLMTier,
-    TIER_ORDER,
-    max_allowed_tier_for_plan,
-    resolve_preferred_tier_for_owner,
+    resolve_intelligence_tier_for_owner,
 )
 from api.agent.short_description import build_listing_description, build_mini_description
 from api.services.daily_credit_limits import (
@@ -30,8 +27,6 @@ from .models import (
 )
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 from util.analytics import AnalyticsSource
-from util.subscription_helper import get_owner_plan
-
 # Serializer for Listing Agents (id, name, created_at)
 class BrowserUseAgentListSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
@@ -488,11 +483,10 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
     def validate_preferred_llm_tier(self, value):
         owner, _is_org = self._resolve_preference_owner(getattr(self, "instance", None))
         tier_key = None if value in (None, "") else (getattr(value, "key", None) or str(value))
-        resolved_enum = resolve_preferred_tier_for_owner(owner, tier_key)
-        resolved_tier = IntelligenceTier.objects.filter(key=resolved_enum.value).first()
-        if resolved_tier is None:
+        try:
+            return resolve_intelligence_tier_for_owner(owner, tier_key)
+        except ValueError:
             raise serializers.ValidationError("Unsupported intelligence tier selection.")
-        return resolved_tier
 
     def _apply_personal_servers(self, agent: PersistentAgent, server_ids):
         from .services import mcp_servers as server_service
@@ -577,11 +571,13 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         preferred_channel = preferred_input if isinstance(preferred_input, str) else None
         preferred_tier = validated_data.get('preferred_llm_tier')
         if not preferred_tier:
-            resolved_enum = resolve_preferred_tier_for_owner(organization or request.user, None)
-            resolved_default = IntelligenceTier.objects.filter(key=resolved_enum.value).first()
-            if resolved_default is None:
+            try:
+                validated_data['preferred_llm_tier'] = resolve_intelligence_tier_for_owner(
+                    organization or request.user,
+                    None,
+                )
+            except ValueError:
                 raise serializers.ValidationError({'preferred_llm_tier': ['Unsupported intelligence tier selection.']})
-            validated_data['preferred_llm_tier'] = resolved_default
 
         with transaction.atomic():
             provision_kwargs = {

@@ -16,9 +16,11 @@ from enum import Enum
 from typing import Dict, List, Tuple, Any, Optional
 
 from django.apps import apps
+from django.core.exceptions import AppRegistryNotReady
 from django.core.cache import cache
 from django.db import connection
 from django.db.models import Q
+from django.db.utils import DatabaseError
 from django.conf import settings
 from django.utils import timezone
 
@@ -135,14 +137,12 @@ def _load_system_default_tier_key() -> str | None:
 
     try:
         IntelligenceTier = apps.get_model("api", "IntelligenceTier")
-        tier = (
+        return (
             IntelligenceTier.objects.filter(is_default=True)
-            .only("key", "rank")
-            .order_by("-rank", "key")
+            .values_list("key", flat=True)
             .first()
         )
-        return getattr(tier, "key", None) if tier else None
-    except Exception:
+    except (AppRegistryNotReady, DatabaseError, LookupError):
         logger.debug("Failed to load system default intelligence tier", exc_info=True)
         return None
 
@@ -191,11 +191,32 @@ def resolve_preferred_tier_for_owner(owner: Any | None, tier_key: str | None) ->
     plan = None
     try:
         plan = get_owner_plan(owner)
-    except Exception:
+    except (AppRegistryNotReady, DatabaseError, TypeError, ValueError):
         plan = None
 
     allowed = max_allowed_tier_for_plan(plan, is_organization=_is_org_owner(owner))
     return _clamp_tier(resolved, allowed)
+
+
+def resolve_intelligence_tier_for_owner(owner: Any | None, tier_key: str | None):
+    """
+    Return the IntelligenceTier model for the given owner + requested tier key.
+
+    This resolves:
+    - invalid/blank input -> system default
+    - plan clamping (in proprietary mode)
+    and then returns the matching IntelligenceTier row.
+    """
+    resolved = resolve_preferred_tier_for_owner(owner, tier_key)
+    try:
+        IntelligenceTier = apps.get_model("api", "IntelligenceTier")
+        tier = IntelligenceTier.objects.filter(key=resolved.value).first()
+    except (AppRegistryNotReady, DatabaseError, LookupError):
+        tier = None
+
+    if tier is None:
+        raise ValueError("Unsupported intelligence tier selection.")
+    return tier
 
 
 def get_llm_tier_label(tier_key: str | None, fallback: str | None = None) -> str:

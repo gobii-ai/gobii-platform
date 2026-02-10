@@ -12,7 +12,7 @@ from agents.services import PretrainedWorkerTemplateService
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
 from api.agent.tasks import process_agent_events_task
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
-from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, max_allowed_tier_for_plan
+from api.agent.core.llm_config import AgentLLMTier, resolve_intelligence_tier_for_owner
 from api.models import (
     CommsChannel,
     IntelligenceTier,
@@ -33,8 +33,6 @@ from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import clear_trial_onboarding_intent
 from util.sms import find_unused_number, get_user_primary_sms_number
-from util.subscription_helper import get_owner_plan
-
 logger = logging.getLogger(__name__)
 
 
@@ -161,15 +159,10 @@ def create_persistent_agent_from_charter(
             )
 
         if tier is not None:
-            if settings.GOBII_PROPRIETARY_MODE:
-                owner = organization or request.user
-                plan = get_owner_plan(owner) if owner else None
-                allowed = max_allowed_tier_for_plan(plan, is_organization=organization is not None)
-                if TIER_ORDER[tier] > TIER_ORDER[allowed]:
-                    tier = allowed
-
-            preferred_llm_tier = IntelligenceTier.objects.filter(key=tier.value).first()
-            if preferred_llm_tier is None:
+            owner = organization or request.user
+            try:
+                preferred_llm_tier = resolve_intelligence_tier_for_owner(owner, tier.value)
+            except ValueError:
                 raise ValidationError("Unsupported intelligence tier selection.")
 
     with transaction.atomic():

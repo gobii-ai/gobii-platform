@@ -2004,12 +2004,6 @@ export function AgentChatPage({
       const selectedTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
       const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
       const allowedTier = (llmIntelligence?.maxAllowedTier || 'standard') as IntelligenceTierKey
-      const allowedRank = llmIntelligence?.maxAllowedTierRank ?? null
-      const selectedRank = option?.rank ?? null
-      const isLocked = typeof allowedRank === 'number' && typeof selectedRank === 'number'
-        ? selectedRank > allowedRank
-        : Boolean(llmIntelligence && !llmIntelligence.canEdit && selectedTier !== allowedTier)
-      void isLocked
       const multiplier = option?.multiplier ?? 1
       let estimatedDaysRemaining: number | null = null
       let burnRatePerDay: number | null = null

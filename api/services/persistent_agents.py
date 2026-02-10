@@ -9,7 +9,7 @@ from django.db import IntegrityError, transaction
 from agent_namer import AgentNameGenerator
 from agents.services import PretrainedWorkerTemplateService, AgentService
 
-from api.agent.core.llm_config import resolve_preferred_tier_for_owner
+from api.agent.core.llm_config import resolve_intelligence_tier_for_owner
 from api.agent.avatar import maybe_schedule_agent_avatar
 from api.agent.short_description import (
     maybe_schedule_mini_description,
@@ -120,9 +120,9 @@ class PersistentAgentProvisioningService:
 
             owner = organization or user
             preferred_key = getattr(preferred_llm_tier, "key", None) if preferred_llm_tier is not None else None
-            resolved_enum = resolve_preferred_tier_for_owner(owner, preferred_key)
-            computed_tier = IntelligenceTier.objects.filter(key=resolved_enum.value).first()
-            if computed_tier is None:
+            try:
+                computed_tier = resolve_intelligence_tier_for_owner(owner, preferred_key)
+            except ValueError:
                 raise PersistentAgentProvisioningError("Unsupported intelligence tier selection.")
 
             persistent_agent = PersistentAgent(
