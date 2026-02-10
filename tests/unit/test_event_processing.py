@@ -1734,8 +1734,7 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
-    @patch("api.agent.core.event_processing._schedule_pending_drain")
-    @patch("api.agent.core.event_processing.enqueue_pending_agent")
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing.should_pause_for_burn_rate", return_value=False)
     @patch("api.agent.core.event_processing.get_redis_client")
@@ -1744,8 +1743,7 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
         mock_get_redis,
         _mock_pause,
         mock_get_pending_settings,
-        mock_enqueue_pending,
-        mock_schedule_pending,
+        mock_apply_async,
     ):
         enable_tools(self.agent, ["sqlite_batch"])
 
@@ -1806,20 +1804,11 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
         self.assertTrue(
             self.agent.steps.filter(description__icontains="max iterations").exists()
         )
-        mock_enqueue_pending.assert_called_once_with(
-            self.agent.id,
-            ttl=123,
-        )
         expected_delay_seconds = max(
             int(ep.MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
             int(mock_get_pending_settings.return_value.pending_drain_delay_seconds),
         )
-        expected_schedule_ttl_seconds = max(
-            int(mock_get_pending_settings.return_value.pending_drain_schedule_ttl_seconds),
-            max(30, expected_delay_seconds * 6),
-        )
-        mock_schedule_pending.assert_called_once_with(
-            delay_seconds=expected_delay_seconds,
-            schedule_ttl_seconds=expected_schedule_ttl_seconds,
-            span=ANY,
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=expected_delay_seconds,
         )
