@@ -4260,12 +4260,43 @@ class FileHandlerLLMTierAdmin(admin.ModelAdmin):
     inlines = [FileHandlerTierEndpointInline]
 
 
+class IntelligenceTierAdminForm(forms.ModelForm):
+    class Meta:
+        model = IntelligenceTier
+        fields = "__all__"
+
+    def validate_constraints(self):
+        # IntelligenceTier enforces a single default tier via a DB UniqueConstraint.
+        # When an admin flips a different tier to default, we clear the prior default
+        # in IntelligenceTierAdmin.save_model() (transactionally) after validation.
+        #
+        # Django validates model constraints during form validation; that would raise
+        # a validation error before save_model() can clear the old default. Avoid the
+        # false-positive by skipping constraint validation for the "is_default=True"
+        # path; the DB constraint still protects integrity at save time.
+        if self.cleaned_data.get("is_default"):
+            return
+        return super().validate_constraints()
+
+
 @admin.register(IntelligenceTier)
 class IntelligenceTierAdmin(admin.ModelAdmin):
-    list_display = ("display_name", "key", "rank", "credit_multiplier", "updated_at")
-    list_filter = ("key",)
+    form = IntelligenceTierAdminForm
+    list_display = ("display_name", "key", "rank", "credit_multiplier", "is_default", "updated_at")
+    list_filter = ("key", "is_default")
     search_fields = ("display_name", "key")
     ordering = ("rank", "key")
+
+    def save_model(self, request, obj, form, change):
+        # Keep "default tier" selection unique without relying solely on constraint errors.
+        if getattr(obj, "is_default", False):
+            with transaction.atomic():
+                qs = IntelligenceTier.objects.filter(is_default=True)
+                if getattr(obj, "pk", None):
+                    qs = qs.exclude(pk=obj.pk)
+                qs.update(is_default=False)
+                return super().save_model(request, obj, form, change)
+        return super().save_model(request, obj, form, change)
 
 
 class PersistentTierEndpointInline(admin.TabularInline):

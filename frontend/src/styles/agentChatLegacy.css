@@ -1112,7 +1112,7 @@
 }
 
 .composer-intelligence-popover {
-  width: 11rem;
+  width: 15rem;
   z-index: 60;
 }
 
@@ -1134,9 +1134,10 @@
 }
 
 .composer-intelligence-option {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1.25rem 1fr 2.75rem 4.75rem;
   align-items: center;
-  gap: 0.5rem;
+  column-gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   transition: background 0.1s ease;
   border: none;
@@ -1146,7 +1147,7 @@
 
 .composer-intelligence-option:hover,
 .composer-intelligence-option[data-focused="true"] {
-  background: rgba(248, 250, 252, 1);
+  background: rgba(99, 102, 241, 0.04);
 }
 
 .composer-intelligence-option[data-selected="true"] {
@@ -1167,23 +1168,35 @@
   opacity: 0.6;
 }
 
+.composer-intelligence-option-icon {
+  width: 1.25rem;
+  text-align: center;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+
 .composer-intelligence-option-label {
-  flex: 1;
+  min-width: 0;
   font-size: 0.8125rem;
   font-weight: 500;
   color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composer-intelligence-option-multiplier {
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   color: rgba(148, 163, 184, 0.9);
+  text-align: right;
 }
 
 .composer-intelligence-option-lock {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
+  justify-content: center;
   padding: 0.1rem 0.35rem;
   border-radius: 999px;
   border: 1px solid rgba(251, 146, 60, 0.35);
@@ -1191,6 +1204,10 @@
   color: #f97316;
   font-size: 0.6rem;
   font-weight: 600;
+}
+
+.composer-intelligence-option-lock--placeholder {
+  visibility: hidden;
 }
 
 .composer-intelligence-option-indicator {

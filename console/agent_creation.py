@@ -166,7 +166,7 @@ def create_persistent_agent_from_charter(
                 plan = get_owner_plan(owner) if owner else None
                 allowed = max_allowed_tier_for_plan(plan, is_organization=organization is not None)
                 if TIER_ORDER[tier] > TIER_ORDER[allowed]:
-                    raise ValidationError("Upgrade your plan to choose this intelligence tier.")
+                    tier = allowed
 
             preferred_llm_tier = IntelligenceTier.objects.filter(key=tier.value).first()
             if preferred_llm_tier is None:

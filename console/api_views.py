@@ -227,6 +227,9 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        from api.agent.core.llm_config import resolve_preferred_tier_for_owner
+        PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
+
         restored_cookie = False
         if "agent_charter" not in request.session:
             cookie_value = request.COOKIES.get(OAUTH_CHARTER_COOKIE)
@@ -242,10 +245,29 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
                     logger.debug("Invalid or expired OAuth charter cookie")
 
         pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
+        owner = request.user
+        try:
+            from console.context_helpers import build_console_context
+
+            resolved = build_console_context(request)
+            if resolved.current_context.type == "organization" and resolved.current_membership is not None:
+                owner = resolved.current_membership.org
+        except Exception:
+            owner = request.user
+
+        preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
+        preferred_llm_tier = None
+        if preferred_llm_tier_raw:
+            resolved = resolve_preferred_tier_for_owner(owner, preferred_llm_tier_raw).value
+            preferred_llm_tier = resolved
+            if preferred_llm_tier_raw != resolved:
+                request.session[PREFERRED_LLM_TIER_SESSION_KEY] = resolved
+                request.session.modified = True
+
         payload = {
             "charter": request.session.get("agent_charter"),
             "charter_override": request.session.get("agent_charter_override"),
-            "preferred_llm_tier": request.session.get("agent_preferred_llm_tier"),
+            "preferred_llm_tier": preferred_llm_tier,
             "onboarding_target": onboarding_target if pending_onboarding else None,
             "requires_plan_selection": bool(pending_onboarding and requires_plan_selection),
         }

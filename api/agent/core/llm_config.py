@@ -31,6 +31,7 @@ from constants.plans import PlanNames, PlanSlugs
 logger = logging.getLogger(__name__)
 
 _TIER_MULTIPLIER_CACHE_KEY = "intelligence_tier_multipliers:v1"
+_TIER_DEFAULT_CACHE_KEY = "intelligence_tier_default:v1"
 _DEFAULT_TIER_MULTIPLIERS: Dict[str, Decimal] = {
     "standard": Decimal("1.00"),
     "premium": Decimal("2.00"),
@@ -125,6 +126,78 @@ _DEFAULT_TIER_RANKS: Dict[str, int] = {
 }
 
 
+def invalidate_llm_tier_default_cache() -> None:
+    cache.delete(_TIER_DEFAULT_CACHE_KEY)
+
+
+def _load_system_default_tier_key() -> str | None:
+    """Return the system default tier key from the DB, if configured."""
+
+    try:
+        IntelligenceTier = apps.get_model("api", "IntelligenceTier")
+        tier = (
+            IntelligenceTier.objects.filter(is_default=True)
+            .only("key", "rank")
+            .order_by("-rank", "key")
+            .first()
+        )
+        return getattr(tier, "key", None) if tier else None
+    except Exception:
+        logger.debug("Failed to load system default intelligence tier", exc_info=True)
+        return None
+
+
+def get_system_default_tier(*, force_refresh: bool = False) -> "AgentLLMTier":
+    """Return the globally configured default intelligence tier (not owner-clamped)."""
+
+    cached = None if force_refresh else cache.get(_TIER_DEFAULT_CACHE_KEY)
+    if cached:
+        try:
+            return AgentLLMTier(str(cached))
+        except ValueError:
+            pass
+
+    tier_key = _load_system_default_tier_key() or AgentLLMTier.STANDARD.value
+    try:
+        tier = AgentLLMTier(tier_key)
+    except ValueError:
+        tier = AgentLLMTier.STANDARD
+
+    cache.set(_TIER_DEFAULT_CACHE_KEY, tier.value, timeout=300)
+    return tier
+
+
+def _is_org_owner(owner: Any) -> bool:
+    owner_meta = getattr(owner, "_meta", None)
+    return bool(owner_meta and owner_meta.app_label == "api" and owner_meta.model_name == "organization")
+
+
+def resolve_preferred_tier_for_owner(owner: Any | None, tier_key: str | None) -> "AgentLLMTier":
+    """Resolve a requested tier (or None) to an allowed tier for the given owner."""
+
+    requested: AgentLLMTier | None = None
+    if tier_key:
+        try:
+            requested = AgentLLMTier(str(tier_key).strip().lower())
+        except ValueError:
+            requested = None
+
+    resolved = requested or get_system_default_tier()
+    if owner is None:
+        return resolved
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        return resolved
+
+    plan = None
+    try:
+        plan = get_owner_plan(owner)
+    except Exception:
+        plan = None
+
+    allowed = max_allowed_tier_for_plan(plan, is_organization=_is_org_owner(owner))
+    return _clamp_tier(resolved, allowed)
+
+
 def get_llm_tier_label(tier_key: str | None, fallback: str | None = None) -> str:
     if not tier_key:
         return fallback or ""
@@ -170,23 +243,7 @@ def _clamp_tier(target: AgentLLMTier, max_allowed: AgentLLMTier) -> AgentLLMTier
 
 def default_preferred_tier_for_owner(owner: Any | None) -> AgentLLMTier:
     """Return the default preferred tier for a given owner."""
-
-    if owner is None:
-        return AgentLLMTier.STANDARD
-
-    try:
-        plan = get_owner_plan(owner)
-    except Exception:
-        plan = None
-
-    owner_meta = getattr(owner, "_meta", None)
-    is_organization = bool(
-        owner_meta and owner_meta.app_label == "api" and owner_meta.model_name == "organization"
-    )
-    allowed = max_allowed_tier_for_plan(plan, is_organization=is_organization)
-    if allowed in (AgentLLMTier.PREMIUM, AgentLLMTier.MAX, AgentLLMTier.ULTRA, AgentLLMTier.ULTRA_MAX):
-        return AgentLLMTier.PREMIUM
-    return AgentLLMTier.STANDARD
+    return resolve_preferred_tier_for_owner(owner, None)
 
 
 def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:
@@ -227,6 +284,10 @@ def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:
 
 def invalidate_llm_tier_multiplier_cache() -> None:
     cache.delete(_TIER_MULTIPLIER_CACHE_KEY)
+
+
+def invalidate_llm_tier_rank_cache() -> None:
+    cache.delete(_TIER_RANK_CACHE_KEY)
 
 
 def get_llm_tier_ranks(force_refresh: bool = False) -> Dict[str, int]:

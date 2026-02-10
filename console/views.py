@@ -54,6 +54,7 @@ from api.services.persistent_agents import maybe_sync_agent_email_display_name
 from api.agent.core.llm_config import (
     AgentLLMTier,
     TIER_ORDER,
+    get_system_default_tier,
     get_llm_tier_description,
     get_llm_tier_label,
     get_llm_tier_multipliers,
@@ -295,6 +296,7 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
             plan = get_user_plan(owner)
 
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
+    system_default_tier = get_system_default_tier().value
     tier_ranks = get_llm_tier_ranks()
     allowed_rank = tier_ranks.get(allowed_tier.value)
     if allowed_rank is None:
@@ -365,6 +367,7 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
         "upgradeUrl": upgrade_url,
         "maxAllowedTier": max_allowed_tier_key,
         "maxAllowedTierRank": max_allowed_rank,
+        "systemDefaultTier": system_default_tier,
     }
 
 
@@ -4655,12 +4658,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         except ValueError:
             return _general_error("Select a valid intelligence level.")
 
+        if settings.GOBII_PROPRIETARY_MODE and TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
+            requested_preferred_tier = allowed_llm_tier
+
         preferred_tier_changed = requested_preferred_tier.value != current_preferred_tier_value
-        if preferred_tier_changed:
-            if not can_edit_intelligence:
-                return _general_error("Upgrade your plan to adjust intelligence levels.")
-            if settings.GOBII_PROPRIETARY_MODE and TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
-                return _general_error("That intelligence level isn't available for this plan.")
 
         resolved_preferred_tier = IntelligenceTier.objects.filter(key=requested_preferred_tier.value).first()
         if resolved_preferred_tier is None:

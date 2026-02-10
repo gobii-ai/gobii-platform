@@ -60,7 +60,7 @@ from .homepage_cache import get_homepage_pretrained_payload
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
 from console.views import build_llm_intelligence_props
-from api.agent.core.llm_config import default_preferred_tier_for_owner, get_llm_tier_label
+from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
@@ -396,9 +396,11 @@ class HomePage(TemplateView):
                 owner = organization
                 owner_type = 'organization'
 
-        preferred_llm_tier = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
-        if not preferred_llm_tier:
-            preferred_llm_tier = default_preferred_tier_for_owner(owner).value
+        preferred_llm_tier_raw = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
+        preferred_llm_tier = resolve_preferred_tier_for_owner(owner, preferred_llm_tier_raw).value
+        if preferred_llm_tier_raw and preferred_llm_tier_raw != preferred_llm_tier:
+            self.request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier
+            self.request.session.modified = True
         context['preferred_llm_tier'] = preferred_llm_tier
         context['preferred_llm_tier_label'] = get_llm_tier_label(preferred_llm_tier)
 
@@ -539,8 +541,21 @@ class HomeAgentSpawnView(TemplateView):
                 request.session['agent_charter'] = "Hello"
                 request.session['agent_charter_override'] = PersistentAgentCharterForm.DEFAULT_CHARTER
             request.session['agent_charter_source'] = 'user'
-            preferred_llm_tier = (request.POST.get("preferred_llm_tier") or "").strip()
-            if preferred_llm_tier:
+            preferred_llm_tier_raw = (request.POST.get("preferred_llm_tier") or "").strip()
+            if preferred_llm_tier_raw:
+                owner = None
+                if request.user.is_authenticated:
+                    try:
+                        from console.context_helpers import build_console_context
+
+                        resolved = build_console_context(request)
+                        if resolved.current_context.type == "organization" and resolved.current_membership is not None:
+                            owner = resolved.current_membership.org
+                        else:
+                            owner = request.user
+                    except Exception:
+                        owner = request.user
+                preferred_llm_tier = resolve_preferred_tier_for_owner(owner, preferred_llm_tier_raw).value
                 request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier
                 request.session.modified = True
 

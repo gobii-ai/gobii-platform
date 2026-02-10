@@ -14,11 +14,11 @@
     {% endfor %}
   {% endif %}
   <style>
-    .game-of-life-panel {
-      position: relative;
-      overflow: clip;
-      isolation: isolate;
-    }
+	    .game-of-life-panel {
+	      position: relative;
+	      overflow: clip;
+	      isolation: isolate;
+	    }
 
     .game-of-life-panel::before {
       content: "";
@@ -269,36 +269,54 @@
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                       </svg>
                     </button>
-                    <div
-                      class="absolute top-full right-0 z-[100] mt-1.5 hidden w-44 origin-top-right rounded-lg border border-slate-200/60 bg-white py-1 shadow-xl shadow-slate-900/10"
-                      data-intelligence-menu
-                    >
+		                    <div
+	                      class="absolute top-full right-0 z-[100] mt-1.5 hidden w-56 origin-top-right rounded-lg border border-slate-200/60 bg-white py-1 shadow-xl shadow-slate-900/10"
+		                      data-intelligence-menu
+		                    >
                       {% for option in llm_intelligence.options %}
-                      <button
-                        type="button"
-                        class="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-slate-50 {% if option.key == preferred_llm_tier %}bg-indigo-50/50{% endif %}"
-                        data-intelligence-option
-                        data-tier="{{ option.key }}"
-                        data-label="{{ option.label }}"
-                        data-multiplier="{{ option.multiplier|floatformat:-1 }}"
+	                      <button
+	                        type="button"
+	                        class="grid w-full grid-cols-[20px_1fr_42px_76px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-indigo-50/30 {% if option.key == preferred_llm_tier %}bg-indigo-50/40{% endif %}"
+	                        data-intelligence-option
+	                        data-tier="{{ option.key }}"
+	                        data-label="{{ option.label }}"
+	                        data-multiplier="{{ option.multiplier|floatformat:-1 }}"
                         data-rank="{{ option.rank|default_if_none:'' }}"
                         {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
                           data-locked="{% if option.rank > llm_intelligence.maxAllowedTierRank %}true{% else %}false{% endif %}"
                         {% else %}
                           data-locked="{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}true{% else %}false{% endif %}"
-                        {% endif %}
-                      >
-                        <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
-                        <span class="flex-1 text-[13px] font-medium {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{{ option.label }}</span>
-                        <span class="text-[11px] tabular-nums {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
-                        <span class="ml-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}{% if option.rank > llm_intelligence.maxAllowedTierRank %}{% else %}hidden{% endif %}{% else %}{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}{% else %}hidden{% endif %}{% endif %}" data-intelligence-lock>
-                          <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                            <rect x="3" y="11" width="18" height="11" rx="2"></rect>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                          </svg>
-                          Unlock
-                        </span>
-                      </button>
+	                        {% endif %}
+	                      >
+	                        <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
+	                        <span class="min-w-0 truncate text-[13px] font-medium whitespace-nowrap {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{{ option.label }}</span>
+	                        <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
+	                        {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
+	                          {% if option.rank > llm_intelligence.maxAllowedTierRank %}
+	                            <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
+	                              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+	                                <rect x="3" y="11" width="18" height="11" rx="2"></rect>
+	                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+	                              </svg>
+	                              Unlock
+	                            </span>
+	                          {% else %}
+	                            <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
+	                          {% endif %}
+	                        {% else %}
+	                          {% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
+	                            <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
+	                              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+	                                <rect x="3" y="11" width="18" height="11" rx="2"></rect>
+	                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+	                              </svg>
+	                              Unlock
+	                            </span>
+	                          {% else %}
+	                            <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
+	                          {% endif %}
+	                        {% endif %}
+	                      </button>
                       {% endfor %}
                     </div>
                   </div>
@@ -661,21 +679,21 @@
     });
   </script>
 
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      const selector = document.querySelector('[data-intelligence-selector]')
-      if (!selector) {
-        return
-      }
-      const trigger = selector.querySelector('[data-intelligence-trigger]')
-      const menu = selector.querySelector('[data-intelligence-menu]')
-      const input = selector.querySelector('input[name="preferred_llm_tier"]')
-      const currentLabel = selector.querySelector('[data-intelligence-current]')
-      const options = Array.from(selector.querySelectorAll('[data-intelligence-option]'))
+	  <script>
+	    document.addEventListener('DOMContentLoaded', function () {
+	      const selector = document.querySelector('[data-intelligence-selector]')
+	      if (!selector) {
+	        return
+	      }
+	      const trigger = selector.querySelector('[data-intelligence-trigger]')
+	      const menu = selector.querySelector('[data-intelligence-menu]')
+	      const input = selector.querySelector('input[name="preferred_llm_tier"]')
+	      const currentLabel = selector.querySelector('[data-intelligence-current]')
+	      const options = Array.from(selector.querySelectorAll('[data-intelligence-option]'))
 
-      if (!trigger || !menu || !input || options.length === 0) {
-        return
-      }
+	      if (!trigger || !menu || !input || options.length === 0) {
+	        return
+	      }
 
       const resolveLabel = (tier, fallback = 'this tier') => {
         if (!tier) {
@@ -691,67 +709,135 @@
           .join(' ')
       }
 
-      const applySelection = (tier) => {
-        const label = resolveLabel(tier)
-        currentLabel.textContent = label
-        options.forEach((item) => {
-          const isSelected = item.dataset.tier === tier
-          const checkIcon = item.querySelector('[data-intelligence-check]')
-          if (checkIcon) {
-            checkIcon.classList.toggle('hidden', !isSelected)
-          }
-          item.classList.toggle('bg-indigo-50/70', isSelected)
-          item.classList.remove('bg-indigo-50')
-        })
-      }
+	      const applySelection = (tier) => {
+	        const label = resolveLabel(tier)
+	        currentLabel.textContent = label
+	        options.forEach((item) => {
+	          const isSelected = item.dataset.tier === tier
+	          const checkIcon = item.querySelector('[data-intelligence-check]')
+	          if (checkIcon) {
+	            checkIcon.classList.toggle('hidden', !isSelected)
+	          }
+	          item.classList.toggle('bg-indigo-50/40', isSelected)
+	        })
+	      }
 
-      const chevron = selector.querySelector('[data-intelligence-chevron]')
+	      const chevron = selector.querySelector('[data-intelligence-chevron]')
 
-      const openMenu = () => {
-        menu.classList.remove('hidden')
-        trigger.setAttribute('aria-expanded', 'true')
-        if (chevron) chevron.style.transform = 'rotate(180deg)'
-      }
+	      // Portal the menu to <body> when opened so it isn't clipped/hidden by sibling stacking contexts.
+	      const originalParent = menu.parentNode
+	      const originalNextSibling = menu.nextSibling
+	      let isOpen = false
+	      let rafId = null
 
-      const closeMenu = () => {
-        menu.classList.add('hidden')
-        trigger.setAttribute('aria-expanded', 'false')
-        if (chevron) chevron.style.transform = ''
-      }
+	      const positionMenu = () => {
+	        if (!isOpen) return
+	        const anchorRect = selector.getBoundingClientRect()
+	        // Temporarily ensure menu is measurable.
+	        const prevVisibility = menu.style.visibility
+	        menu.style.visibility = 'hidden'
+	        menu.classList.remove('hidden')
+	        const menuRect = menu.getBoundingClientRect()
+	        menu.style.visibility = prevVisibility
 
-      trigger.addEventListener('click', (event) => {
-        event.preventDefault()
-        if (menu.classList.contains('hidden')) {
-          openMenu()
-        } else {
-          closeMenu()
-        }
-      })
+	        const gap = 6 // ~mt-1.5
+	        let top = anchorRect.bottom + gap
+	        let left = anchorRect.right - menuRect.width
 
-      document.addEventListener('click', (event) => {
-        if (!selector.contains(event.target)) {
-          closeMenu()
-        }
-      })
+	        const padding = 8
+	        const maxLeft = Math.max(padding, window.innerWidth - menuRect.width - padding)
+	        left = Math.min(Math.max(padding, left), maxLeft)
 
-      document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-          closeMenu()
-        }
-      })
+	        // If it would go below the viewport, try positioning above.
+	        const bottomOverflow = top + menuRect.height + padding - window.innerHeight
+	        if (bottomOverflow > 0) {
+	          const aboveTop = anchorRect.top - gap - menuRect.height
+	          if (aboveTop >= padding) {
+	            top = aboveTop
+	          }
+	        }
 
-      options.forEach((option) => {
-        option.addEventListener('click', (event) => {
-          event.preventDefault()
-          const tier = option.dataset.tier
-          if (!tier) {
-            return
-          }
-          input.value = tier
-          applySelection(tier)
-          closeMenu()
-        })
-      })
+	        menu.style.position = 'fixed'
+	        menu.style.top = `${Math.round(top)}px`
+	        menu.style.left = `${Math.round(left)}px`
+	        menu.style.right = 'auto'
+	        menu.style.bottom = 'auto'
+	        menu.style.marginTop = '0px'
+	        menu.style.zIndex = '1000'
+	      }
+
+	      const schedulePosition = () => {
+	        if (rafId) return
+	        rafId = window.requestAnimationFrame(() => {
+	          rafId = null
+	          positionMenu()
+	        })
+	      }
+
+	      const openMenu = () => {
+	        if (originalParent && menu.parentNode !== document.body) {
+	          document.body.appendChild(menu)
+	        }
+	        isOpen = true
+	        positionMenu()
+	        menu.classList.remove('hidden')
+	        trigger.setAttribute('aria-expanded', 'true')
+	        if (chevron) chevron.style.transform = 'rotate(180deg)'
+	      }
+
+	      const closeMenu = () => {
+	        isOpen = false
+	        menu.classList.add('hidden')
+	        trigger.setAttribute('aria-expanded', 'false')
+	        if (chevron) chevron.style.transform = ''
+	        if (originalParent && menu.parentNode === document.body) {
+	          if (originalNextSibling) {
+	            originalParent.insertBefore(menu, originalNextSibling)
+	          } else {
+	            originalParent.appendChild(menu)
+	          }
+	        }
+	      }
+
+	      trigger.addEventListener('click', (event) => {
+	        event.preventDefault()
+	        if (menu.classList.contains('hidden')) {
+	          openMenu()
+	        } else {
+	          closeMenu()
+	        }
+	      })
+
+	      document.addEventListener('click', (event) => {
+	        if (!isOpen) return
+	        const target = event.target
+	        if (trigger.contains(target) || menu.contains(target)) {
+	          return
+	        }
+	        closeMenu()
+	      })
+
+	      document.addEventListener('keydown', (event) => {
+	        if (event.key === 'Escape') {
+	          closeMenu()
+	        }
+	      })
+
+	      window.addEventListener('resize', schedulePosition)
+	      window.addEventListener('scroll', schedulePosition, { passive: true })
+
+	      options.forEach((option) => {
+	        option.addEventListener('click', (event) => {
+	          event.preventDefault()
+	          const tier = option.dataset.tier
+	          if (!tier) {
+	            return
+	          }
+	          input.value = tier
+	          applySelection(tier)
+	          closeMenu()
+	        })
+	      })
 
       const form = document.getElementById('create-agent-form')
       const gateModal = document.getElementById('intelligence-gate-modal')

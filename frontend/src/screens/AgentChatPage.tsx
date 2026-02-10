@@ -1317,6 +1317,26 @@ export function AgentChatPage({
     setCreateAgentError(null)
   }, [isNewAgent, activeAgentId])
 
+  useEffect(() => {
+    if (!isNewAgent) {
+      return
+    }
+    if (!llmIntelligence?.systemDefaultTier) {
+      return
+    }
+    // Only auto-apply the system default when the draft is still at the initial value,
+    // so we don't overwrite a user selection.
+    if (draftIntelligenceTier !== 'standard') {
+      return
+    }
+    const systemDefault = llmIntelligence.systemDefaultTier
+    const isKnownTier = llmIntelligence.options.some((option) => option.key === systemDefault)
+    const resolvedTier = isKnownTier ? systemDefault : 'standard'
+    if (resolvedTier !== draftIntelligenceTier) {
+      setDraftIntelligenceTier(resolvedTier)
+    }
+  }, [draftIntelligenceTier, isNewAgent, llmIntelligence?.options, llmIntelligence?.systemDefaultTier])
+
   const spawnFlow = useMemo(() => {
     if (!isNewAgent || typeof window === 'undefined') {
       return false
@@ -2099,11 +2119,12 @@ export function AgentChatPage({
     }
 
     const preferredTierRaw = spawnIntent.preferred_llm_tier?.trim() || null
-    if (preferredTierRaw) {
-      let resolvedTier = preferredTierRaw
+    const desiredTierRaw = preferredTierRaw || llmIntelligence?.systemDefaultTier || null
+    if (desiredTierRaw) {
+      let resolvedTier = desiredTierRaw
       if (llmIntelligence) {
-        const isKnownTier = llmIntelligence.options.some((option) => option.key === preferredTierRaw)
-        resolvedTier = isKnownTier ? preferredTierRaw : 'standard'
+        const isKnownTier = llmIntelligence.options.some((option) => option.key === desiredTierRaw)
+        resolvedTier = isKnownTier ? desiredTierRaw : 'standard'
       }
       if (resolvedTier !== draftIntelligenceTier) {
         setDraftIntelligenceTier(resolvedTier)
