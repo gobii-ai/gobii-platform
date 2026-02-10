@@ -33,8 +33,72 @@ OAUTH_CHARTER_SESSION_KEYS = (
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
 )
 
+OAUTH_ATTRIBUTION_SESSION_KEYS = (
+    "utm_first_touch",
+    "utm_last_touch",
+    "click_ids_first",
+    "click_ids_last",
+    "fbclid_first",
+    "fbclid_last",
+    "utm_querystring",
+)
+
 # Cookie name for stashing charter data during OAuth
 OAUTH_CHARTER_COOKIE = "gobii_oauth_charter"
+OAUTH_ATTRIBUTION_COOKIE = "gobii_oauth_attribution"
+
+
+def _restore_session_keys_from_cookie(
+    request: HttpRequest,
+    *,
+    cookie_name: str,
+    keys: tuple[str, ...],
+    overwrite_existing: bool = False,
+) -> bool:
+    cookie_value = request.COOKIES.get(cookie_name)
+    if not cookie_value:
+        return False
+
+    try:
+        stashed = signing.loads(cookie_value, max_age=3600)  # 1 hour max
+    except (signing.BadSignature, signing.SignatureExpired):
+        logger.debug("Invalid or expired OAuth cookie: %s", cookie_name)
+        return False
+
+    restored_any = False
+    for key in keys:
+        if key not in stashed:
+            continue
+        if not overwrite_existing and key in request.session:
+            continue
+        request.session[key] = stashed[key]
+        restored_any = True
+
+    if restored_any:
+        request.session.modified = True
+
+    return restored_any
+
+
+def restore_oauth_session_state(
+    request: HttpRequest,
+    *,
+    overwrite_existing: bool = False,
+) -> bool:
+    """Restore charter and attribution session keys from OAuth fallback cookies."""
+    charter_restored = _restore_session_keys_from_cookie(
+        request,
+        cookie_name=OAUTH_CHARTER_COOKIE,
+        keys=OAUTH_CHARTER_SESSION_KEYS,
+        overwrite_existing=overwrite_existing,
+    )
+    attribution_restored = _restore_session_keys_from_cookie(
+        request,
+        cookie_name=OAUTH_ATTRIBUTION_COOKIE,
+        keys=OAUTH_ATTRIBUTION_SESSION_KEYS,
+        overwrite_existing=overwrite_existing,
+    )
+    return charter_restored or attribution_restored
 
 
 class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
@@ -46,22 +110,11 @@ class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
     def pre_social_login(self, request: HttpRequest, social_login: SocialLogin) -> None:
         """Stop Google (or other) logins from hijacking password accounts.
 
-        Also restore agent charter data from cookie if missing from session
-        (can happen during OAuth flow).
+        Also restore stashed OAuth session state (charter + attribution)
+        when available.
         """
-        # Restore agent charter data from signed cookie if missing from session
-        if "agent_charter" not in request.session:
-            cookie_value = request.COOKIES.get(OAUTH_CHARTER_COOKIE)
-            if cookie_value:
-                try:
-                    stashed = signing.loads(cookie_value, max_age=3600)  # 1 hour max
-                    for key in OAUTH_CHARTER_SESSION_KEYS:
-                        if key in stashed and key not in request.session:
-                            request.session[key] = stashed[key]
-                    request.session.modified = True
-                    logger.info("Restored agent charter from OAuth cookie during social login")
-                except (signing.BadSignature, signing.SignatureExpired):
-                    logger.debug("Invalid or expired OAuth charter cookie")
+        if restore_oauth_session_state(request):
+            logger.info("Restored OAuth session state during social login")
 
         # Allow normal processing when the social account already exists or the
         # user is connecting a provider while authenticated.

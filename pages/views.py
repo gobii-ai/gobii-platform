@@ -21,7 +21,12 @@ from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
+from config.socialaccount_adapter import (
+    OAUTH_ATTRIBUTION_COOKIE,
+    OAUTH_ATTRIBUTION_SESSION_KEYS,
+    OAUTH_CHARTER_COOKIE,
+    OAUTH_CHARTER_SESSION_KEYS,
+)
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -193,6 +198,36 @@ def _build_oauth_charter_cookie_payload(
         if key in request.session:
             payload[key] = request.session.get(key)
     return payload
+
+
+def _build_oauth_attribution_cookie_payload(request) -> dict[str, str | dict]:
+    payload: dict[str, str | dict] = {}
+    for key in OAUTH_ATTRIBUTION_SESSION_KEYS:
+        if key in request.session:
+            payload[key] = request.session.get(key)
+    return payload
+
+
+def _set_oauth_stash_cookies(response, request, *, charter_data: dict, attribution_data: dict) -> None:
+    cookie_common = {
+        "max_age": 3600,  # 1 hour
+        "httponly": True,
+        "samesite": "Lax",
+        "secure": request.is_secure(),
+    }
+    response.set_cookie(
+        OAUTH_CHARTER_COOKIE,
+        signing.dumps(charter_data, compress=True),
+        **cookie_common,
+    )
+    if attribution_data:
+        response.set_cookie(
+            OAUTH_ATTRIBUTION_COOKIE,
+            signing.dumps(attribution_data, compress=True),
+            **cookie_common,
+        )
+    else:
+        response.delete_cookie(OAUTH_ATTRIBUTION_COOKIE)
 
 
 POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
@@ -741,13 +776,12 @@ class PretrainedWorkerHireView(View):
             charter=template.charter,
             template_code=template.code,
         )
-        response.set_cookie(
-            OAUTH_CHARTER_COOKIE,
-            signing.dumps(charter_data, compress=True),
-            max_age=3600,  # 1 hour
-            httponly=True,
-            samesite="Lax",
-            secure=request.is_secure(),
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
         )
 
         return response
@@ -889,13 +923,12 @@ class PublicTemplateHireView(View):
             charter=template.charter,
             template_code=template.code,
         )
-        response.set_cookie(
-            OAUTH_CHARTER_COOKIE,
-            signing.dumps(charter_data, compress=True),
-            max_age=3600,  # 1 hour
-            httponly=True,
-            samesite="Lax",
-            secure=request.is_secure(),
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
         )
 
         return response
