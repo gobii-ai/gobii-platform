@@ -59,7 +59,7 @@
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
         <button type="submit" class="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-blue-500 transition">
-          {% if user.is_authenticated %}Spawn This Worker{% else %}Start Free Trial{% endif %}
+          {% if not user.is_authenticated or home_spawn_requires_trial %}Start Free Trial{% else %}Spawn This Worker{% endif %}
           <span aria-hidden="true">→</span>
         </button>
       </form>

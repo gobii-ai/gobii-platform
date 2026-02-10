@@ -48,6 +48,7 @@ from util.onboarding import (
     normalize_trial_onboarding_target,
     set_trial_onboarding_intent,
 )
+from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
@@ -431,6 +432,19 @@ class HomePage(TemplateView):
                 organization = resolved.current_membership.org
                 owner = organization
                 owner_type = 'organization'
+
+        home_spawn_requires_trial = False
+        if self.request.user.is_authenticated:
+            in_organization_context = bool(
+                resolved
+                and resolved.current_context.type == 'organization'
+                and resolved.current_membership is not None
+            )
+            home_spawn_requires_trial = (
+                not in_organization_context
+                and not can_user_use_personal_agents_and_api(self.request.user)
+            )
+        context["home_spawn_requires_trial"] = home_spawn_requires_trial
 
         preferred_llm_tier_raw = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
         # Never plan-clamp in the homepage selector. Clamping happens when the agent is
@@ -1776,10 +1790,15 @@ class SolutionView(TemplateView):
             'description': 'Tailored AI agents and automation to help you scale.'
         })
 
+        solution_spawn_requires_trial = False
+        if self.request.user.is_authenticated:
+            solution_spawn_requires_trial = not can_user_use_personal_agents_and_api(self.request.user)
+
         context.update({
             'solution_title': data['title'],
             'solution_tagline': data['tagline'],
             'solution_description': data['description'],
+            'solution_spawn_requires_trial': solution_spawn_requires_trial,
         })
         if slug in {"health-care", "defense"}:
             context["marketing_contact_form"] = MarketingContactForm()

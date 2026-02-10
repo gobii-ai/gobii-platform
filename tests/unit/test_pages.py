@@ -9,7 +9,7 @@ from django.contrib.auth import get_user_model
 from django.core import signing
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import BrowserUseAgent, PersistentAgent, UserFlags
 from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_CHARTER_COOKIE
 from pages import views as page_views
 from pages.models import LandingPage
@@ -182,6 +182,69 @@ class HomePageTests(TestCase):
         auth_card_button = auth_card_form.find("button", {"type": "submit"})
         self.assertIsNotNone(auth_card_button)
         self.assertEqual(self._normalized_button_text(auth_card_button), "Spawn This Worker")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_pages")
+    def test_home_cta_text_shows_trial_when_authenticated_user_requires_trial(self):
+        user = get_user_model().objects.create_user(
+            username="home_cta_trial_required@example.com",
+            email="home_cta_trial_required@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        hero_form = soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(hero_form)
+        hero_button = hero_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(hero_button)
+        self.assertEqual(self._normalized_button_text(hero_button), "Start Free Trial")
+
+        card_source = soup.find(
+            "input",
+            {"name": "source_page", "value": "home_pretrained_workers"},
+        )
+        self.assertIsNotNone(card_source)
+        card_form = card_source.find_parent("form")
+        self.assertIsNotNone(card_form)
+        card_button = card_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(card_button)
+        self.assertEqual(self._normalized_button_text(card_button), "Start Free Trial")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_pages")
+    def test_home_cta_text_stays_spawn_for_grandfathered_user(self):
+        user = get_user_model().objects.create_user(
+            username="home_cta_grandfathered@example.com",
+            email="home_cta_grandfathered@example.com",
+            password="password123",
+        )
+        UserFlags.objects.create(user=user, is_freemium_grandfathered=True)
+        self.client.force_login(user)
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        hero_form = soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(hero_form)
+        hero_button = hero_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(hero_button)
+        self.assertEqual(self._normalized_button_text(hero_button), "Spawn Agent")
+
+        card_source = soup.find(
+            "input",
+            {"name": "source_page", "value": "home_pretrained_workers"},
+        )
+        self.assertIsNotNone(card_source)
+        card_form = card_source.find_parent("form")
+        self.assertIsNotNone(card_form)
+        card_button = card_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(card_button)
+        self.assertEqual(self._normalized_button_text(card_button), "Spawn This Worker")
 
     @tag("batch_pages")
     def test_home_pretrained_worker_cards_include_trial_onboarding_fields(self):
@@ -632,6 +695,77 @@ class SolutionCtaCopyTests(TestCase):
         auth_engineering_button = auth_engineering_form.find("button", {"type": "submit"})
         self.assertIsNotNone(auth_engineering_button)
         self.assertEqual(self._normalized_button_text(auth_engineering_button), "Get API Keys")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_pages")
+    def test_solution_cta_text_shows_trial_when_authenticated_user_requires_trial(self):
+        user = get_user_model().objects.create_user(
+            username="solution_cta_trial_required@example.com",
+            email="solution_cta_trial_required@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        recruiting_response = self.client.get("/solutions/recruiting/")
+        self.assertEqual(recruiting_response.status_code, 200)
+        recruiting_soup = BeautifulSoup(recruiting_response.content, "html.parser")
+        recruiting_source = recruiting_soup.find(
+            "input",
+            {"name": "source_page", "value": "recruiting_hero"},
+        )
+        self.assertIsNotNone(recruiting_source)
+        recruiting_form = recruiting_source.find_parent("form")
+        self.assertIsNotNone(recruiting_form)
+        recruiting_button = recruiting_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(recruiting_button)
+        self.assertEqual(self._normalized_button_text(recruiting_button), "Start Free Trial")
+
+        sales_response = self.client.get("/solutions/sales/")
+        self.assertEqual(sales_response.status_code, 200)
+        sales_soup = BeautifulSoup(sales_response.content, "html.parser")
+        sales_source = sales_soup.find("input", {"name": "source_page", "value": "sales_hero"})
+        self.assertIsNotNone(sales_source)
+        sales_form = sales_source.find_parent("form")
+        self.assertIsNotNone(sales_form)
+        sales_button = sales_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(sales_button)
+        self.assertEqual(self._normalized_button_text(sales_button), "Start Free Trial")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_pages")
+    def test_solution_cta_text_stays_spawn_for_grandfathered_user(self):
+        user = get_user_model().objects.create_user(
+            username="solution_cta_grandfathered@example.com",
+            email="solution_cta_grandfathered@example.com",
+            password="password123",
+        )
+        UserFlags.objects.create(user=user, is_freemium_grandfathered=True)
+        self.client.force_login(user)
+
+        recruiting_response = self.client.get("/solutions/recruiting/")
+        self.assertEqual(recruiting_response.status_code, 200)
+        recruiting_soup = BeautifulSoup(recruiting_response.content, "html.parser")
+        recruiting_source = recruiting_soup.find(
+            "input",
+            {"name": "source_page", "value": "recruiting_hero"},
+        )
+        self.assertIsNotNone(recruiting_source)
+        recruiting_form = recruiting_source.find_parent("form")
+        self.assertIsNotNone(recruiting_form)
+        recruiting_button = recruiting_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(recruiting_button)
+        self.assertEqual(self._normalized_button_text(recruiting_button), "Spawn Agent")
+
+        sales_response = self.client.get("/solutions/sales/")
+        self.assertEqual(sales_response.status_code, 200)
+        sales_soup = BeautifulSoup(sales_response.content, "html.parser")
+        sales_source = sales_soup.find("input", {"name": "source_page", "value": "sales_hero"})
+        self.assertIsNotNone(sales_source)
+        sales_form = sales_source.find_parent("form")
+        self.assertIsNotNone(sales_form)
+        sales_button = sales_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(sales_button)
+        self.assertEqual(self._normalized_button_text(sales_button), "Spawn Agent")
 
 
 @tag("batch_pages")
