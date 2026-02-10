@@ -173,7 +173,7 @@ class UTMTrackingMiddleware:
         combined.update(session.get(self.SESSION_UTM_FIRST) or {})
         combined.update(session.get(self.SESSION_UTM_LAST) or {})
 
-        click_values = session.get(self.SESSION_CLICK_FIRST) or {}
+        click_values = dict(session.get(self.SESSION_CLICK_FIRST) or {})
         click_values.update(session.get(self.SESSION_CLICK_LAST) or {})
         combined.update(click_values)
 
