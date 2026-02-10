@@ -5624,6 +5624,15 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
         return agent
 
     def _can_manage(self, user, agent: PersistentAgent) -> bool:
+        if user.is_staff:
+            return True
+        if agent.organization_id:
+            return OrganizationMembership.objects.filter(
+                org=agent.organization,
+                user=user,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                role__in=MEMBER_MANAGE_ROLES,
+            ).exists()
         return user_can_manage_agent(user, agent)
 
     def get_context_data(self, **kwargs):
