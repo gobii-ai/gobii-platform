@@ -1317,6 +1317,26 @@ export function AgentChatPage({
     setCreateAgentError(null)
   }, [isNewAgent, activeAgentId])
 
+  useEffect(() => {
+    if (!isNewAgent) {
+      return
+    }
+    if (!llmIntelligence?.systemDefaultTier) {
+      return
+    }
+    // Only auto-apply the system default when the draft is still at the initial value,
+    // so we don't overwrite a user selection.
+    if (draftIntelligenceTier !== 'standard') {
+      return
+    }
+    const systemDefault = llmIntelligence.systemDefaultTier
+    const isKnownTier = llmIntelligence.options.some((option) => option.key === systemDefault)
+    const resolvedTier = isKnownTier ? systemDefault : 'standard'
+    if (resolvedTier !== draftIntelligenceTier) {
+      setDraftIntelligenceTier(resolvedTier)
+    }
+  }, [draftIntelligenceTier, isNewAgent, llmIntelligence?.options, llmIntelligence?.systemDefaultTier])
+
   const spawnFlow = useMemo(() => {
     if (!isNewAgent || typeof window === 'undefined') {
       return false
@@ -1984,11 +2004,6 @@ export function AgentChatPage({
       const selectedTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
       const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
       const allowedTier = (llmIntelligence?.maxAllowedTier || 'standard') as IntelligenceTierKey
-      const allowedRank = llmIntelligence?.maxAllowedTierRank ?? null
-      const selectedRank = option?.rank ?? null
-      const isLocked = typeof allowedRank === 'number' && typeof selectedRank === 'number'
-        ? selectedRank > allowedRank
-        : Boolean(llmIntelligence && !llmIntelligence.canEdit && selectedTier !== allowedTier)
       const multiplier = option?.multiplier ?? 1
       let estimatedDaysRemaining: number | null = null
       let burnRatePerDay: number | null = null
@@ -2013,10 +2028,11 @@ export function AgentChatPage({
         estimatedDaysRemaining = projectedDays
         lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
       }
-      if (isLocked || lowCredits) {
-        const gateReason: IntelligenceGateReason = isLocked && lowCredits ? 'both' : isLocked ? 'plan' : 'credits'
+      // Option 1: never block/coerce by plan tier before the agent exists.
+      // The backend clamps the tier at persistence time and at runtime routing.
+      if (lowCredits) {
         track(AnalyticsEvent.INTELLIGENCE_GATE_SHOWN, {
-          reason: gateReason,
+          reason: 'credits',
           selectedTier,
           allowedTier,
           multiplier: Number.isFinite(multiplier) ? multiplier : null,
@@ -2026,7 +2042,7 @@ export function AgentChatPage({
         })
         pendingCreateRef.current = { body, attachments, tier: selectedTier, charterOverride }
         setIntelligenceGate({
-          reason: gateReason,
+          reason: 'credits',
           selectedTier,
           allowedTier,
           multiplier: Number.isFinite(multiplier) ? multiplier : null,
@@ -2099,11 +2115,12 @@ export function AgentChatPage({
     }
 
     const preferredTierRaw = spawnIntent.preferred_llm_tier?.trim() || null
-    if (preferredTierRaw) {
-      let resolvedTier = preferredTierRaw
+    const desiredTierRaw = preferredTierRaw || llmIntelligence?.systemDefaultTier || null
+    if (desiredTierRaw) {
+      let resolvedTier = desiredTierRaw
       if (llmIntelligence) {
-        const isKnownTier = llmIntelligence.options.some((option) => option.key === preferredTierRaw)
-        resolvedTier = isKnownTier ? preferredTierRaw : 'standard'
+        const isKnownTier = llmIntelligence.options.some((option) => option.key === desiredTierRaw)
+        resolvedTier = isKnownTier ? desiredTierRaw : 'standard'
       }
       if (resolvedTier !== draftIntelligenceTier) {
         setDraftIntelligenceTier(resolvedTier)

@@ -60,7 +60,7 @@ from .homepage_cache import get_homepage_pretrained_payload
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
 from console.views import build_llm_intelligence_props
-from api.agent.core.llm_config import default_preferred_tier_for_owner, get_llm_tier_label
+from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
@@ -396,9 +396,13 @@ class HomePage(TemplateView):
                 owner = organization
                 owner_type = 'organization'
 
-        preferred_llm_tier = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
-        if not preferred_llm_tier:
-            preferred_llm_tier = default_preferred_tier_for_owner(owner).value
+        preferred_llm_tier_raw = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
+        # Never plan-clamp in the homepage selector. Clamping happens when the agent is
+        # persisted and at runtime.
+        preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
+        # Do not write back the clamped tier into the session.
+        # We want to preserve the user's requested tier so it can take effect automatically
+        # after a plan upgrade (e.g., returning from Stripe before webhooks settle).
         context['preferred_llm_tier'] = preferred_llm_tier
         context['preferred_llm_tier_label'] = get_llm_tier_label(preferred_llm_tier)
 
@@ -539,8 +543,10 @@ class HomeAgentSpawnView(TemplateView):
                 request.session['agent_charter'] = "Hello"
                 request.session['agent_charter_override'] = PersistentAgentCharterForm.DEFAULT_CHARTER
             request.session['agent_charter_source'] = 'user'
-            preferred_llm_tier = (request.POST.get("preferred_llm_tier") or "").strip()
-            if preferred_llm_tier:
+            preferred_llm_tier_raw = (request.POST.get("preferred_llm_tier") or "").strip()
+            if preferred_llm_tier_raw:
+                # Never plan-clamp session preference here; clamping happens at persistence/runtime.
+                preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
                 request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier
                 request.session.modified = True
 

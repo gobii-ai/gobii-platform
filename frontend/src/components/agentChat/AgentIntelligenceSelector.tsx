@@ -141,19 +141,22 @@ export function AgentIntelligenceSelector({
               >
                 {() => (
                   <>
-                    <span className="composer-intelligence-option-label">
-                      {EMOJI_MAP[option.key] ? `${EMOJI_MAP[option.key]} ` : ''}
-                      {option.label}
+                    <span className="composer-intelligence-option-icon" aria-hidden="true">
+                      {EMOJI_MAP[option.key] ?? ''}
                     </span>
+                    <span className="composer-intelligence-option-label">{option.label}</span>
                     <span className="composer-intelligence-option-multiplier">
                       {option.multiplier ? `${option.multiplier}×` : ''}
                     </span>
-                    {option.locked ? (
-                      <span className="composer-intelligence-option-lock">
-                        <Lock size={12} strokeWidth={2} />
-                        <span>Upgrade</span>
-                      </span>
-                    ) : null}
+                    <span
+                      className={`composer-intelligence-option-lock${
+                        option.locked ? '' : ' composer-intelligence-option-lock--placeholder'
+                      }`}
+                      aria-hidden={option.locked ? undefined : 'true'}
+                    >
+                      <Lock size={12} strokeWidth={2} />
+                      <span>Unlock</span>
+                    </span>
                   </>
                 )}
               </ListBoxItem>

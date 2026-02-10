@@ -53,6 +53,37 @@ class PersistentAgentModelTests(TestCase):
         self.assertEqual(agent.name, "test-agent")
         self.assertEqual(agent.user, self.user)
 
+    def test_get_default_intelligence_tier_id_falls_back_when_is_default_column_missing(self):
+        """Keep `_get_default_intelligence_tier_id` compatible with pre-0286 schemas (no `is_default`)."""
+        from django.db.models import Max
+        from django.db.utils import ProgrammingError
+
+        from api.models import (
+            DEFAULT_INTELLIGENCE_TIER_KEY,
+            IntelligenceTier,
+            _get_default_intelligence_tier_id,
+        )
+
+        default_tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id", "rank").first()
+        if default_tier is None:
+            max_rank = IntelligenceTier.objects.aggregate(Max("rank")).get("rank__max") or 0
+            default_tier = IntelligenceTier.objects.create(
+                key=DEFAULT_INTELLIGENCE_TIER_KEY,
+                display_name="Standard",
+                rank=max_rank + 1,
+                credit_multiplier="1.00",
+            )
+
+        orig_filter = IntelligenceTier.objects.filter
+
+        def filter_side_effect(*args, **kwargs):
+            if kwargs.get("is_default") is True:
+                raise ProgrammingError('column "is_default" does not exist')
+            return orig_filter(*args, **kwargs)
+
+        with patch.object(IntelligenceTier.objects, "filter", side_effect=filter_side_effect):
+            self.assertEqual(_get_default_intelligence_tier_id(), default_tier.id)
+
     def test_persistent_agent_blank_charter_allowed(self):
         """PersistentAgent should allow an empty charter during validation."""
         browser_agent = create_browser_agent_without_proxy(self.user, "browser-agent-blank-charter")

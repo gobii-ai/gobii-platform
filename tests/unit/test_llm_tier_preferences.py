@@ -5,8 +5,15 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
 from django.utils import timezone
+from django.core.cache import cache
 
-from api.agent.core.llm_config import AgentLLMTier, get_agent_llm_tier, apply_tier_credit_multiplier
+from api.agent.core.llm_config import (
+    AgentLLMTier,
+    apply_tier_credit_multiplier,
+    get_agent_llm_tier,
+    get_system_default_tier,
+    resolve_preferred_tier_for_owner,
+)
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -51,6 +58,33 @@ class AgentTierPreferenceTests(TestCase):
         amount = Decimal("1.000")
         discounted = apply_tier_credit_multiplier(self.agent, amount)
         self.assertEqual(discounted, Decimal("1.000"))
+
+
+@tag("batch_llm_intelligence")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
+class SystemDefaultTierTests(TestCase):
+    def setUp(self):
+        cache.clear()
+        self.user = User.objects.create_user(
+            username="default-tier@example.com",
+            email="default-tier@example.com",
+            password="test123",
+        )
+        self.standard = get_intelligence_tier("standard")
+        self.max_tier = get_intelligence_tier("max")
+        self.standard.__class__.objects.update(is_default=False)
+        self.max_tier.is_default = True
+        self.max_tier.save(update_fields=["is_default"])
+        cache.clear()
+
+    def test_system_default_tier_used_when_owner_unknown(self):
+        self.assertEqual(get_system_default_tier(force_refresh=True), AgentLLMTier.MAX)
+        self.assertEqual(resolve_preferred_tier_for_owner(None, None), AgentLLMTier.MAX)
+
+    def test_system_default_tier_is_clamped_for_free_users(self):
+        # Free plan users are limited to STANDARD; preferences/defaults should be clamped.
+        self.assertEqual(resolve_preferred_tier_for_owner(self.user, None), AgentLLMTier.STANDARD)
+        self.assertEqual(resolve_preferred_tier_for_owner(self.user, "max"), AgentLLMTier.STANDARD)
 
 
 @tag("batch_llm_intelligence")

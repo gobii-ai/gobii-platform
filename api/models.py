@@ -124,28 +124,54 @@ class IntelligenceTier(models.Model):
         validators=[MinValueValidator(Decimal("0.01"))],
         help_text="Multiplier applied to credit consumption for this intelligence tier.",
     )
+    is_default = models.BooleanField(
+        default=False,
+        help_text="When enabled, this tier is used as the system default for new agents (clamped per plan).",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["rank", "key"]
+        constraints = [
+            UniqueConstraint(
+                fields=("is_default",),
+                condition=Q(is_default=True),
+                name="unique_default_intelligence_tier",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.display_name} ({self.key})"
 
     def save(self, *args, **kwargs):
         result = super().save(*args, **kwargs)
-        _invalidate_tier_multiplier_cache()
+        _invalidate_intelligence_tier_caches()
         return result
 
     def delete(self, *args, **kwargs):
         result = super().delete(*args, **kwargs)
-        _invalidate_tier_multiplier_cache()
+        _invalidate_intelligence_tier_caches()
         return result
 
 
 def _get_default_intelligence_tier_id() -> uuid.UUID | None:
-    tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
+    # NOTE: This callable is referenced as a field default in historical migrations (e.g. 0257),
+    # so it must remain compatible with schemas that predate the `is_default` column (added in 0286).
+    tier = None
+    try:
+        # A conditional unique constraint enforces at most one default tier.
+        tier = IntelligenceTier.objects.filter(is_default=True).only("id").first()
+    except (OperationalError, ProgrammingError):
+        # Older schemas won't have `is_default`; fall back to the legacy key-based default.
+        tier = None
+
+    if tier is None:
+        try:
+            tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
+        except (OperationalError, ProgrammingError):
+            tier = None
+
     return tier.id if tier else None
 
 
@@ -155,10 +181,12 @@ def _apply_tier_multiplier(agent, amount):
     return llm_config.apply_tier_credit_multiplier(agent, amount)
 
 
-def _invalidate_tier_multiplier_cache() -> None:
+def _invalidate_intelligence_tier_caches() -> None:
     from api.agent.core import llm_config
 
     llm_config.invalidate_llm_tier_multiplier_cache()
+    llm_config.invalidate_llm_tier_rank_cache()
+    llm_config.invalidate_llm_tier_default_cache()
 
 
 class AgentColor(models.Model):
@@ -2665,12 +2693,12 @@ class PersistentLLMTier(models.Model):
 
     def save(self, *args, **kwargs):
         result = super().save(*args, **kwargs)
-        _invalidate_tier_multiplier_cache()
+        _invalidate_intelligence_tier_caches()
         return result
 
     def delete(self, *args, **kwargs):
         result = super().delete(*args, **kwargs)
-        _invalidate_tier_multiplier_cache()
+        _invalidate_intelligence_tier_caches()
         return result
 
 
