@@ -35,6 +35,7 @@ from tasks.services import TaskCreditService
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from marketing_events.api import capi
 from marketing_events.context import extract_click_context
+from marketing_events.telemetry import record_fbc_synthesized
 import logging
 import stripe
 
@@ -563,6 +564,7 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     elif fbclid:
         # Synthesize fbc from fbclid if fbc is missing (improves Meta Event Match Quality)
         click_ids["fbc"] = f"fb.1.{int(timezone.now().timestamp() * 1000)}.{fbclid}"
+        record_fbc_synthesized(source="pages.signals.build_marketing_context_from_user")
     if fbclid:
         click_ids["fbclid"] = fbclid
     if fbp:
@@ -1139,6 +1141,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     click_ids['fbc'] = f"fb.1.{event_timestamp_ms}.{stored_fbclid}"
                     click_ids['fbclid'] = stored_fbclid
                     marketing_context['click_ids'] = click_ids
+                    record_fbc_synthesized(source="pages.signals.handle_user_signed_up")
             elif fbc_cookie and not click_ids.get('fbc'):
                 # fbc exists in cookie but wasn't captured by extract_click_context
                 click_ids['fbc'] = fbc_cookie

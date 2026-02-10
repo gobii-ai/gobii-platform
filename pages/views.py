@@ -72,6 +72,7 @@ from django.utils import timezone as dj_timezone
 from django.utils.html import escape, strip_tags
 from opentelemetry import trace
 from marketing_events.api import capi
+from marketing_events.telemetry import record_fbc_synthesized
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -1077,6 +1078,7 @@ class LandingRedirectView(View):
                 if existing_fbclid != fbclid:
                     fbc = f"fb.1.{int(datetime.now(timezone.utc).timestamp() * 1000)}.{fbclid}"
                     response.set_cookie("_fbc", fbc, max_age=60 * 60 * 24 * 90)
+                    record_fbc_synthesized(source="pages.views.landing_page_redirect")
                 response.set_cookie("fbclid", fbclid, max_age=60 * 60 * 24 * 90)
         except Exception as e:
             logger.error(f"Error setting fbclid cookie: {e}")
