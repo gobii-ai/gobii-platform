@@ -6,13 +6,13 @@ import '../../styles/agentChatLegacy.css'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
-import { TimelineEventList } from './TimelineEventList'
+import { ConversationActivityTimeline } from './ConversationActivityTimeline'
 import { StreamingReplyCard } from './StreamingReplyCard'
-import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
+import { MobileTracePeek } from './MobileTracePeek'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
@@ -31,6 +31,8 @@ import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
+import type { TimelineEvent, ThinkingEvent } from './types'
+import { TraceEntryList } from './TraceEntryList'
 
 type TaskQuotaInfo = {
   available: number
@@ -40,6 +42,7 @@ type TaskQuotaInfo = {
 }
 
 const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
+const TRACE_DESKTOP_BREAKPOINT_PX = 1024
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentId?: string | null
@@ -253,8 +256,13 @@ export function AgentChatLayout({
     if (typeof window === 'undefined') return false
     return window.innerWidth < 768
   })
+  const [isTraceDesktopLayout, setIsTraceDesktopLayout] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth >= TRACE_DESKTOP_BREAKPOINT_PX
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
+  const [traceSheetOpen, setTraceSheetOpen] = useState(false)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
@@ -297,6 +305,7 @@ export function AgentChatLayout({
   useEffect(() => {
     const checkMobile = () => {
       setIsMobileUpgrade(window.innerWidth < 768)
+      setIsTraceDesktopLayout(window.innerWidth >= TRACE_DESKTOP_BREAKPOINT_PX)
     }
     checkMobile()
     window.addEventListener('resize', checkMobile)
@@ -453,6 +462,17 @@ export function AgentChatLayout({
   const showStreamingSlot = hasStreamingContent && isStreaming
   // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
   const showStreamingThinking = isStreaming && Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
+  const streamingThinkingEvent: ThinkingEvent | null = useMemo(() => {
+    if (!showStreamingThinking) return null
+    const cursor = streaming?.cursor ?? `streaming-thinking:${Date.now()}`
+    return {
+      kind: 'thinking',
+      cursor,
+      timestamp: null,
+      reasoning: streaming?.reasoning || '',
+      completionId: null,
+    }
+  }, [showStreamingThinking, streaming?.cursor, streaming?.reasoning])
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -650,6 +670,8 @@ export function AgentChatLayout({
   }, [taskCreditsStorageKey, agentId, taskCreditsWarningVariant])
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
+  const traceSheetScrollRef = useRef<HTMLDivElement | null>(null)
+  const allTraceEvents = useMemo(() => events.filter((event): event is TimelineEvent => event.kind !== 'message'), [events])
 
   return (
     <>
@@ -752,7 +774,7 @@ export function AgentChatLayout({
                 </div>
 
                 <div id="timeline-event-list" className="flex flex-col">
-                  <TimelineEventList
+                  <ConversationActivityTimeline
                     agentFirstName={agentFirstName}
                     events={events}
                     agentColorHex={agentColorHex || undefined}
@@ -761,8 +783,30 @@ export function AgentChatLayout({
                     viewerEmail={viewerEmail ?? null}
                     initialLoading={initialLoading}
                     suppressedThinkingCursor={suppressedThinkingCursor}
+                    showTraceColumn={isTraceDesktopLayout}
+                    streamingThinkingEvent={streamingThinkingEvent}
                   />
                 </div>
+
+                {showStreamingSlot && !hasMoreNewer ? (
+                  <div id="streaming-response-slot" className="streaming-response-slot flex flex-col">
+                    {hasStreamingContent ? (
+                      <StreamingReplyCard
+                        content={streaming?.content || ''}
+                        agentFirstName={agentFirstName}
+                        agentAvatarUrl={agentAvatarUrl}
+                        agentColorHex={agentColorHex}
+                        isStreaming={isStreaming}
+                      />
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {shouldRenderResponseSkeleton ? (
+                  <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
+                ) : null}
+
+                {/* Streaming thinking is appended to the latest message's activity list when present. */}
                 {showScheduledResumeEvent ? (
                   <ScheduledResumeCard
                     nextScheduledAt={nextScheduledAt}
@@ -805,30 +849,10 @@ export function AgentChatLayout({
                   />
                 ) : null}
 
-                {showStreamingThinking ? (
-                  <StreamingThinkingCard
-                    reasoning={streaming?.reasoning || ''}
-                    isStreaming={isStreaming}
-                  />
-                ) : null}
-
-                {showStreamingSlot && !hasMoreNewer ? (
-                  <div id="streaming-response-slot" className="streaming-response-slot flex flex-col">
-                    {hasStreamingContent ? (
-                      <StreamingReplyCard
-                        content={streaming?.content || ''}
-                        agentFirstName={agentFirstName}
-                        agentAvatarUrl={agentAvatarUrl}
-                        agentColorHex={agentColorHex}
-                        isStreaming={isStreaming}
-                      />
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {shouldRenderResponseSkeleton ? (
-                  <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
-                ) : null}
+                {/*
+                  Streaming thinking + skeleton now live in the trace panel.
+                  Streaming reply now lives in the conversation panel.
+                */}
 
                 {showBottomSentinel ? (
                   <div id="timeline-bottom-sentinel" className="timeline-bottom-sentinel" aria-hidden="true" />
@@ -875,6 +899,28 @@ export function AgentChatLayout({
           </button>
 
           {/* Composer at bottom of flex layout */}
+          {!isTraceDesktopLayout ? (
+            <>
+              <MobileTracePeek
+                events={events}
+                suppressedThinkingCursor={suppressedThinkingCursor}
+                onOpen={() => setTraceSheetOpen(true)}
+              />
+              <AgentChatMobileSheet
+                open={traceSheetOpen}
+                onClose={() => setTraceSheetOpen(false)}
+                title="Activity"
+                subtitle="Tool calls, thinking, and kanban updates"
+                keepMounted
+                bodyPadding
+                bodyRef={traceSheetScrollRef}
+              >
+                <div className="mobile-trace-sheet">
+                  <TraceEntryList traceEvents={allTraceEvents} suppressedThinkingCursor={suppressedThinkingCursor} />
+                </div>
+              </AgentChatMobileSheet>
+            </>
+          ) : null}
           {spawnIntentLoading ? (
             <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
               <div className="flex flex-col items-center gap-3 text-center">

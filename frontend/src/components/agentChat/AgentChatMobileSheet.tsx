@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { CSSProperties, PointerEvent, ReactNode } from 'react'
+import type { CSSProperties, PointerEvent, ReactNode, Ref } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { X } from 'lucide-react'
 
@@ -15,6 +15,7 @@ type AgentChatMobileSheetProps = {
   ariaLabel?: string
   keepMounted?: boolean
   bodyPadding?: boolean
+  bodyRef?: Ref<HTMLDivElement>
 }
 
 export function AgentChatMobileSheet({
@@ -28,6 +29,7 @@ export function AgentChatMobileSheet({
   ariaLabel,
   keepMounted = false,
   bodyPadding = true,
+  bodyRef,
 }: AgentChatMobileSheetProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -193,7 +195,7 @@ export function AgentChatMobileSheet({
             <X size={18} />
           </button>
         </div>
-        <div className={`agent-mobile-sheet-body${bodyPadding ? ' agent-mobile-sheet-body--padded' : ''}`}>
+        <div ref={bodyRef} className={`agent-mobile-sheet-body${bodyPadding ? ' agent-mobile-sheet-body--padded' : ''}`}>
           {children}
         </div>
       </div>

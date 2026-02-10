@@ -8,6 +8,7 @@ import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
+import { MiniKanbanDock } from './MiniKanbanDock'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
@@ -215,6 +216,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <div className="banner-task banner-task--complete">
                 <Check size={12} className="banner-task-check" strokeWidth={2.5} />
                 <span className="banner-task-title">All tasks complete</span>
+              </div>
+            ) : null}
+            {hasKanban && kanbanSnapshot ? (
+              <div className={`banner-kanban-dock ${animate ? 'banner-kanban-dock--animate' : ''}`}>
+                <MiniKanbanDock snapshot={kanbanSnapshot} />
               </div>
             ) : null}
           </div>
