@@ -2681,12 +2681,12 @@ class PersistentLLMTier(models.Model):
 
     def save(self, *args, **kwargs):
         result = super().save(*args, **kwargs)
-        _invalidate_tier_multiplier_cache()
+        _invalidate_intelligence_tier_caches()
         return result
 
     def delete(self, *args, **kwargs):
         result = super().delete(*args, **kwargs)
-        _invalidate_tier_multiplier_cache()
+        _invalidate_intelligence_tier_caches()
         return result
 
 
