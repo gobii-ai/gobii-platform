@@ -320,6 +320,32 @@ class LandingPageRedirectTests(TestCase):
         self.assertEqual(params.get("utm_medium"), ["email"])
         self.assertEqual(params.get("fbclid"), ["abc123"])
 
+    @tag("batch_pages")
+    def test_landing_redirect_refreshes_fbc_when_fbclid_changes(self):
+        lp = LandingPage.objects.create(charter="x")
+        self.client.cookies["_fbc"] = "fb.1.1111111111111.old-click"
+
+        resp = self.client.get(f"/g/{lp.code}/", {"fbclid": "new-click"})
+        self.assertEqual(resp.status_code, 302)
+
+        self.assertIn("_fbc", resp.cookies)
+        self.assertIn("fbclid", resp.cookies)
+        self.assertTrue(resp.cookies["_fbc"].value.startswith("fb.1."))
+        self.assertTrue(resp.cookies["_fbc"].value.endswith(".new-click"))
+        self.assertEqual(resp.cookies["fbclid"].value, "new-click")
+
+    @tag("batch_pages")
+    def test_landing_redirect_does_not_rotate_fbc_for_same_fbclid(self):
+        lp = LandingPage.objects.create(charter="x")
+        self.client.cookies["_fbc"] = "fb.1.1111111111111.same-click"
+
+        resp = self.client.get(f"/g/{lp.code}/", {"fbclid": "same-click"})
+        self.assertEqual(resp.status_code, 302)
+
+        self.assertNotIn("_fbc", resp.cookies)
+        self.assertIn("fbclid", resp.cookies)
+        self.assertEqual(resp.cookies["fbclid"].value, "same-click")
+
 
 @tag("batch_pages")
 class RobotsTxtTests(TestCase):

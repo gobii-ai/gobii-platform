@@ -1037,10 +1037,14 @@ class LandingRedirectView(View):
 
         # Store the fbclid cookie if it exists
         try:
-            if 'fbclid' in request.GET and request.COOKIES.get('_fbc') is None:
-                fbc = f"fb.1.{int(datetime.now(timezone.utc).timestamp() * 1000)}.{request.GET['fbclid']}"
-                response.set_cookie('_fbc', fbc, max_age=60*60*24*90)
-                response.set_cookie('fbclid', request.GET['fbclid'], max_age=60*60*24*90)
+            fbclid = (request.GET.get("fbclid") or "").strip()
+            if fbclid:
+                existing_fbc = request.COOKIES.get("_fbc") or ""
+                existing_fbclid = existing_fbc.rsplit(".", 1)[-1] if existing_fbc.startswith("fb.1.") else ""
+                if existing_fbclid != fbclid:
+                    fbc = f"fb.1.{int(datetime.now(timezone.utc).timestamp() * 1000)}.{fbclid}"
+                    response.set_cookie("_fbc", fbc, max_age=60 * 60 * 24 * 90)
+                response.set_cookie("fbclid", fbclid, max_age=60 * 60 * 24 * 90)
         except Exception as e:
             logger.error(f"Error setting fbclid cookie: {e}")
 
