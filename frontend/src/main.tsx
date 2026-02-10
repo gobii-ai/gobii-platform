@@ -201,7 +201,14 @@ switch (appName) {
     if (!agentId) {
       throw new Error('Agent identifier is required for audit screen')
     }
-    screen = <AgentAuditScreen agentId={agentId} agentName={agentName} agentColor={agentColor} />
+    screen = (
+      <AgentAuditScreen
+        agentId={agentId}
+        agentName={agentName}
+        agentColor={agentColor}
+        adminAgentUrl={mountNode.dataset.adminAgentUrl}
+      />
+    )
     break
   case 'immersive-app':
     screen = <ImmersiveApp />

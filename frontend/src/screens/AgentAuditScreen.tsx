@@ -7,6 +7,7 @@ import {
   Megaphone,
   RefreshCcw,
   Search,
+  Settings,
   Stethoscope,
 } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
@@ -25,6 +26,7 @@ type AgentAuditScreenProps = {
   agentId: string
   agentName?: string | null
   agentColor?: string | null
+  adminAgentUrl?: string | null
 }
 
 function eventKeyFor(event: AuditEvent): string {
@@ -103,7 +105,7 @@ const COMPLETION_TYPE_FILTERS: {
   { key: 'shortDescription', label: 'Short description', matches: (completionType) => completionType === 'short_description' },
 ]
 
-export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) {
+export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAuditScreenProps) {
   const {
     initialize,
     events,
@@ -622,6 +624,18 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               />
               {processingActive ? 'Processing…' : processQueueing ? 'Queueing…' : 'Process events'}
             </button>
+            {adminAgentUrl ? (
+              <a
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                href={adminAgentUrl}
+                target="_blank"
+                rel="noreferrer"
+                title="Open agent settings in Django admin"
+                aria-label="Open agent settings in Django admin"
+              >
+                <Settings className="h-4 w-4" aria-hidden />
+              </a>
+            ) : null}
             <button
               type="button"
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"

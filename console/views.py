@@ -5379,6 +5379,7 @@ class StaffAgentAuditView(SystemAdminRequiredMixin, TemplateView):
         agent_id = kwargs.get("agent_id")
         agent = get_object_or_404(PersistentAgent, pk=agent_id)
         context["agent"] = agent
+        context["admin_agent_url"] = reverse("admin:api_persistentagent_change", args=[agent.id])
         return context
 
 
