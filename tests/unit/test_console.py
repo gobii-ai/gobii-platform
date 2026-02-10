@@ -4,6 +4,7 @@ from datetime import timedelta
 import shutil
 import tempfile
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from django.utils import timezone
 
@@ -18,6 +19,12 @@ from bs4 import BeautifulSoup
 from api.services.daily_credit_settings import get_daily_credit_settings_for_plan
 from constants.plans import PlanNames
 from django.core.files.uploadedfile import SimpleUploadedFile
+from util.onboarding import (
+    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+)
 
 
 @tag("batch_console_agents")
@@ -431,6 +438,29 @@ class ConsoleViewsTest(TestCase):
             PersistentAgent.objects.filter(user=self.user, organization__isnull=True).count(),
             0,
         )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_console_agents")
+    def test_quick_spawn_trial_requirement_redirects_to_trial_onboarding_modal(self):
+        session = self.client.session
+        session["agent_charter"] = "Help with tasks"
+        session.save()
+
+        response = self.client.get(reverse("agent_quick_spawn"))
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        query = parse_qs(parsed.query)
+        self.assertEqual(query.get("spawn"), ["1"])
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
     @tag("batch_console_agents")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')

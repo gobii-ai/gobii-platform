@@ -135,7 +135,12 @@ from billing.addons import AddonEntitlementService
 from util import sms
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
-from util.onboarding import clear_trial_onboarding_intent
+from util.onboarding import (
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    clear_trial_onboarding_intent,
+    set_trial_onboarding_intent,
+    set_trial_onboarding_requires_plan_selection,
+)
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import (
     get_user_plan,
@@ -157,7 +162,9 @@ from util.trial_enforcement import (
     can_user_use_personal_agents_and_api,
 )
 from util.urls import (
+    IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
+    append_query_params,
     append_context_query,
     build_immersive_chat_url,
     load_daily_limit_action_payload,
@@ -2854,6 +2861,20 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             error_messages.extend(getattr(exc, 'messages', []))
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
+
+            if any(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE in str(message) for message in error_messages):
+                set_trial_onboarding_intent(
+                    request,
+                    target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                )
+                set_trial_onboarding_requires_plan_selection(request, required=True)
+                return redirect(
+                    append_query_params(
+                        f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                        {"spawn": "1"},
+                    )
+                )
+
             for message_text in error_messages:
                 messages.error(request, message_text)
             return redirect('agents')
