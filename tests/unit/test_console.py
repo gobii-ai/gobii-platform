@@ -697,6 +697,65 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(agent.daily_credit_limit)
 
     @tag("batch_console_agents")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_agent_detail_ajax_clamps_intelligence_tier_and_returns_warning(self):
+        from django.db.models import Max
+
+        from api.agent.core.llm_config import AgentLLMTier
+        from api.models import BrowserUseAgent, IntelligenceTier, PersistentAgent
+
+        standard = IntelligenceTier.objects.filter(key="standard").first()
+        premium = IntelligenceTier.objects.filter(key="premium").first()
+        max_rank = IntelligenceTier.objects.aggregate(Max("rank")).get("rank__max") or 0
+        if standard is None:
+            standard = IntelligenceTier.objects.create(
+                key="standard",
+                display_name="Standard",
+                rank=max_rank + 1,
+                credit_multiplier="1.00",
+            )
+            max_rank = standard.rank
+        if premium is None:
+            premium = IntelligenceTier.objects.create(
+                key="premium",
+                display_name="Premium",
+                rank=max_rank + 1,
+                credit_multiplier="1.50",
+            )
+
+        browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Clamp Tier Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Clamp Tier Agent",
+            charter="Use only allowed intelligence",
+            browser_use_agent=browser_agent,
+            preferred_llm_tier=standard,
+        )
+
+        url = reverse("agent_detail", kwargs={"pk": agent.id})
+        with patch("console.views.max_allowed_tier_for_plan", return_value=AgentLLMTier.STANDARD):
+            response = self.client.post(
+                url,
+                {
+                    "name": agent.name,
+                    "charter": agent.charter,
+                    "is_active": "on",
+                    "daily_credit_limit": "",
+                    "preferred_llm_tier": premium.key,
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload.get("success"))
+        self.assertEqual(payload.get("preferredLlmTier"), "standard")
+        self.assertTrue(payload.get("warning"))
+
+        agent.refresh_from_db()
+        self.assertEqual(getattr(agent.preferred_llm_tier, "key", None), "standard")
+
+    @tag("batch_console_agents")
     def test_agent_detail_uploads_avatar_and_surfaces_urls(self):
         from api.models import PersistentAgent, BrowserUseAgent
 

@@ -156,10 +156,22 @@ class IntelligenceTier(models.Model):
 
 
 def _get_default_intelligence_tier_id() -> uuid.UUID | None:
-    # A conditional unique constraint enforces at most one default tier.
-    tier = IntelligenceTier.objects.filter(is_default=True).only("id").first()
+    # NOTE: This callable is referenced as a field default in historical migrations (e.g. 0257),
+    # so it must remain compatible with schemas that predate the `is_default` column (added in 0286).
+    tier = None
+    try:
+        # A conditional unique constraint enforces at most one default tier.
+        tier = IntelligenceTier.objects.filter(is_default=True).only("id").first()
+    except (OperationalError, ProgrammingError):
+        # Older schemas won't have `is_default`; fall back to the legacy key-based default.
+        tier = None
+
     if tier is None:
-        tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
+        try:
+            tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
+        except (OperationalError, ProgrammingError):
+            tier = None
+
     return tier.id if tier else None
 
 

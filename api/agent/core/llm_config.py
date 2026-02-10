@@ -264,7 +264,23 @@ def _clamp_tier(target: AgentLLMTier, max_allowed: AgentLLMTier) -> AgentLLMTier
 
 def default_preferred_tier_for_owner(owner: Any | None) -> AgentLLMTier:
     """Return the default preferred tier for a given owner."""
-    return resolve_preferred_tier_for_owner(owner, None)
+    resolved = resolve_preferred_tier_for_owner(owner, None)
+
+    # In proprietary mode, paid plans should prefer premium-or-better tiers by default
+    # unless the system default is already higher (or the user explicitly chose otherwise).
+    if owner is None or not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        return resolved
+
+    try:
+        plan = get_owner_plan(owner)
+    except (AppRegistryNotReady, DatabaseError, TypeError, ValueError):
+        plan = None
+
+    allowed = max_allowed_tier_for_plan(plan, is_organization=_is_org_owner(owner))
+    if allowed != AgentLLMTier.STANDARD and resolved == AgentLLMTier.STANDARD:
+        resolved = AgentLLMTier.PREMIUM
+
+    return _clamp_tier(resolved, allowed)
 
 
 def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:

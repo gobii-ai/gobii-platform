@@ -4663,7 +4663,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         except ValueError:
             return _general_error("Select a valid intelligence level.")
 
+        preferred_tier_warning = None
         if settings.GOBII_PROPRIETARY_MODE and TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
+            requested_label = get_llm_tier_label(requested_preferred_tier.value)
+            allowed_label = get_llm_tier_label(allowed_llm_tier.value)
+            preferred_tier_warning = (
+                f"Your plan allows up to {allowed_label}. "
+                f"Your selection ({requested_label}) was adjusted to {allowed_label}."
+            )
             requested_preferred_tier = allowed_llm_tier
 
         preferred_tier_changed = requested_preferred_tier.value != current_preferred_tier_value
@@ -4886,6 +4893,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     agent.save(update_fields=fields)
 
                 if not is_ajax:
+                    if preferred_tier_warning:
+                        messages.warning(request, preferred_tier_warning)
                     messages.success(request, "Agent updated successfully.")
 
                 soft_value = float(new_daily_limit) if new_daily_limit is not None else None
@@ -4950,6 +4959,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'success': True,
                 'message': "Agent updated successfully.",
                 'avatarUrl': agent.get_avatar_url(),
+                'preferredLlmTier': getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
+                'warning': preferred_tier_warning,
             })
 
         return redirect('agent_detail', pk=agent.pk)

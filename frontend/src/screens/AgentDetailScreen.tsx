@@ -393,6 +393,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const generalFormRef = useRef<HTMLFormElement | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [saveNotice, setSaveNotice] = useState<string | null>(null)
   const [savedWebhooks, setSavedWebhooks] = useState<AgentWebhook[]>(initialData.webhooks)
   const [webhooksState, setWebhooksState] = useState<DisplayWebhook[]>(() => normalizeWebhooks(initialData.webhooks))
   const [pendingWebhookActions, setPendingWebhookActions] = useState<PendingWebhookAction[]>([])
@@ -772,6 +773,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setPeerLinkCandidates(savedPeerLinks.candidates)
     setPeerLinkDefaults(savedPeerLinks.defaults)
     setSaveError(null)
+    setSaveNotice(null)
     resetAvatarState()
   }, [resetAvatarState, resetForm, savedOrgServers, savedPeerLinks, savedPersonalServers, savedWebhooks])
 
@@ -781,12 +783,32 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     }
     setSaving(true)
     setSaveError(null)
+    setSaveNotice(null)
     let processedWebhookActions = 0
     let processedPeerActions = 0
     try {
       if (generalHasChanges && generalFormRef.current) {
         const data = await submitFormData(new FormData(generalFormRef.current))
-        setSavedFormState({ ...formState })
+        const warning = typeof data?.warning === 'string' && data.warning.trim() ? String(data.warning) : null
+        const serverTierRaw =
+          typeof data?.preferredLlmTier === 'string' && data.preferredLlmTier.trim() ? String(data.preferredLlmTier) : null
+
+        const nextFormState: FormState = { ...formState }
+        if (serverTierRaw && (initialData.llmIntelligence?.options ?? []).some((option) => option.key === serverTierRaw)) {
+          const serverTier = serverTierRaw as IntelligenceTierKey
+          if (serverTier !== nextFormState.preferredTier) {
+            const wasUnlimited = nextFormState.sliderValue === sliderEmptyValue
+            const { max: nextMax, emptyValue: nextEmptyValue } = getSliderMetrics(serverTier)
+            nextFormState.preferredTier = serverTier
+            nextFormState.sliderValue = wasUnlimited ? nextEmptyValue : Math.min(nextFormState.sliderValue, nextMax)
+          }
+        }
+
+        setFormState(nextFormState)
+        setSavedFormState(nextFormState)
+        if (warning) {
+          setSaveNotice(warning)
+        }
         const nextAvatar = (data?.avatarUrl as string | null | undefined) ?? savedAvatarUrl
         clearAvatarPreviewUrl()
         setSavedAvatarUrl(nextAvatar ?? null)
@@ -891,13 +913,16 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     formState,
     generalFormRef,
     generalHasChanges,
+    getSliderMetrics,
     hasAnyChanges,
+    initialData.llmIntelligence?.options,
     mcpHasChanges,
     pendingPeerActions,
     pendingWebhookActions,
     savedAvatarUrl,
     selectedOrgServers,
     selectedPersonalServers,
+    sliderEmptyValue,
     submitFormData,
   ])
   const [allowlistState, setAllowlistState] = useState(initialData.allowlist)
@@ -1361,6 +1386,23 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
             This agent is awaiting acceptance from <strong>{initialData.agent.pendingTransfer.toEmail}</strong> (sent {initialData.agent.pendingTransfer.createdAtDisplay}).
             You can continue editing settings, but keep in mind the new owner will take control once they accept.
           </p>
+        </div>
+      )}
+
+      {saveNotice && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl px-5 py-4 flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 mt-0.5" aria-hidden="true" />
+            <div className="text-sm leading-5">{saveNotice}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSaveNotice(null)}
+            className="shrink-0 inline-flex items-center justify-center rounded-lg border border-amber-200 bg-white px-2 py-2 text-amber-900 hover:bg-amber-100/40 transition-colors"
+            aria-label="Dismiss notice"
+          >
+            <XCircle className="w-5 h-5" aria-hidden="true" />
+          </button>
         </div>
       )}
 
