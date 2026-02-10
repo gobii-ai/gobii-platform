@@ -111,21 +111,38 @@ function parseSearchQuery(value: string | null): string | null {
     return null
   }
 
+  const stripSiteOperators = (raw: string): { cleaned: string; sites: string[] } => {
+    const sites: string[] = []
+    const cleaned = raw.replace(/\bsite:([^\s]+)/gi, (_match, site: string) => {
+      const normalized = String(site || '').trim()
+      if (normalized) {
+        sites.push(normalized)
+      }
+      return ' '
+    })
+    return { cleaned: cleaned.replace(/\s+/g, ' ').trim(), sites }
+  }
+
+  const processQuery = (query: string): string | null => {
+    const { cleaned: stripped } = stripSiteOperators(query)
+    return stripped ? clampText(stripped, 64) : null
+  }
+
   // Strip only the known trailing counter we append in captions (e.g., ` • 12 results`).
   const cleaned = value.replace(/\s+•\s+\d[\d,]*\s+results?$/i, '').trim()
   const wrappedWithCurlyQuotes = cleaned.startsWith('“') && cleaned.endsWith('”')
   if (wrappedWithCurlyQuotes && cleaned.length > 2) {
-    return clampText(cleaned.slice(1, -1).trim(), 64)
+    return processQuery(cleaned.slice(1, -1).trim())
   }
 
   const wrappedWithStraightQuotes = cleaned.startsWith('"') && cleaned.endsWith('"')
   if (wrappedWithStraightQuotes && cleaned.length > 2) {
-    return clampText(cleaned.slice(1, -1).trim(), 64)
+    return processQuery(cleaned.slice(1, -1).trim())
   }
 
   const quoteMatch = cleaned.match(/“(.+)”/)
   if (quoteMatch?.[1]) {
-    return clampText(quoteMatch[1].trim(), 64)
+    return processQuery(quoteMatch[1].trim())
   }
 
   // Only unwrap straight quotes when there is exactly one quoted segment.
@@ -133,10 +150,27 @@ function parseSearchQuery(value: string | null): string | null {
   // site:github.com "foo" OR "bar" — we should preserve the full expression.
   const straightQuoteMatches = [...cleaned.matchAll(/"([^"]+)"/g)]
   if (straightQuoteMatches.length === 1 && straightQuoteMatches[0]?.[1]) {
-    return clampText(straightQuoteMatches[0][1].trim(), 64)
+    return processQuery(straightQuoteMatches[0][1].trim())
   }
 
-  return clampText(cleaned, 64)
+  return processQuery(cleaned)
+}
+
+function deriveSearchLabel(raw: string | null, fallback: string): string {
+  if (!raw) {
+    return fallback
+  }
+  const sites = [...raw.matchAll(/\bsite:([^\s]+)/gi)].map((match) => (match?.[1] || '').toLowerCase())
+  if (!sites.length) {
+    return fallback
+  }
+  if (sites.some((site) => site.includes('linkedin.com'))) {
+    return 'Searching LinkedIn'
+  }
+  if (sites.some((site) => site.includes('github.com'))) {
+    return 'Searching GitHub'
+  }
+  return fallback
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -841,9 +875,10 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
 
   if (kind === 'search') {
     const parameterQuery = extractBrightDataSearchQuery(entry.parameters)
-    const query = parseSearchQuery(parameterQuery ?? semantic ?? entry.caption ?? entry.summary ?? null)
+    const rawQuery = parameterQuery ?? semantic ?? entry.caption ?? entry.summary ?? null
+    const query = parseSearchQuery(rawQuery)
     const isToolSearch = TOOL_SEARCH_TOOL_NAMES.has(toolName) || entry.label.toLowerCase() === 'tool search'
-    const label = isToolSearch ? 'Searching tools' : 'Searching web'
+    const label = isToolSearch ? 'Searching tools' : deriveSearchLabel(rawQuery, 'Searching web')
     return {
       kind,
       label,

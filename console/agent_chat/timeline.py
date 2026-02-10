@@ -1321,7 +1321,7 @@ def serialize_kanban_event(
             display_text = f"{agent_name} updated {updated_count} tasks"
         primary_action = "updated"
     else:
-        display_text = f"{agent_name} updated kanban"
+        display_text = f"{agent_name} updated tasks"
         primary_action = "updated"
 
     # Serialize changes for animation

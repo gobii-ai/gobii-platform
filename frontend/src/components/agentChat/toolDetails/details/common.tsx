@@ -62,7 +62,7 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList
         items={[
-          entry.toolName ? { label: 'Tool', value: entry.toolName } : null,
+          entry.label ? { label: 'Action', value: entry.label } : null,
           entry.summary ? { label: 'Summary', value: entry.summary } : null,
         ]}
       />

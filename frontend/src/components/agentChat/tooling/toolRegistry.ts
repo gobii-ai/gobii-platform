@@ -114,8 +114,7 @@ function descriptorFor(toolName: string | null | undefined): ToolDescriptor {
   return TOOL_DESCRIPTORS.get(normalized) || TOOL_DESCRIPTORS.get('default')!
 }
 
-function deriveCaptionFallback(entry: ToolCallEntry, parameters: Record<string, unknown> | null): string | null {
-  if (entry.caption) return entry.caption
+function deriveCaptionFallback(parameters: Record<string, unknown> | null): string | null {
   if (!parameters) return null
   const summary = coerceString((parameters as Record<string, unknown>).summary)
   if (summary) return truncate(summary, 60)
@@ -135,16 +134,27 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
   }
 
   const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
-  const transform = descriptor.derive?.(entry, parameters) || {}
+  // Timeline captions come from backend step descriptions and are often debug-oriented.
+  // For the end-user chat UI, derive captions from structured fields and known tool metadata instead.
+  const entryForDerive: ToolCallEntry = {
+    ...entry,
+    caption: null,
+    summary: undefined,
+  }
+  const transform = descriptor.derive?.(entryForDerive, parameters) || {}
 
   // Check if the derive function requested this entry be skipped (e.g., kanban-only SQL)
   if (transform.skip) {
     return null
   }
 
-  const caption = transform.caption ?? deriveCaptionFallback(entry, parameters)
-  const mcpInfo = deriveMcpInfo(toolName, entry.result)
   const isDefaultDescriptor = descriptor.name === 'default'
+  const derivedCaption = transform.caption ?? deriveCaptionFallback(parameters)
+  // Backend captions are often debug-oriented; only use them as a last-resort fallback when
+  // we don't recognize the tool (default descriptor) or don't have structured parameters.
+  const backendCaption = pickString(entry.caption)
+  const caption = derivedCaption ?? ((isDefaultDescriptor || !parameters) ? backendCaption : null)
+  const mcpInfo = deriveMcpInfo(toolName, entry.result)
 
   const baseLabel = transform.label ?? descriptor.label
   const baseCaption = caption ?? descriptor.label
