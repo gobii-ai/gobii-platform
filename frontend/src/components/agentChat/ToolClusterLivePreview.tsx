@@ -123,24 +123,26 @@ function parseSearchQuery(value: string | null): string | null {
     return { cleaned: cleaned.replace(/\s+/g, ' ').trim(), sites }
   }
 
+  const processQuery = (query: string): string | null => {
+    const { cleaned: stripped } = stripSiteOperators(query)
+    return stripped ? clampText(stripped, 64) : null
+  }
+
   // Strip only the known trailing counter we append in captions (e.g., ` • 12 results`).
   const cleaned = value.replace(/\s+•\s+\d[\d,]*\s+results?$/i, '').trim()
   const wrappedWithCurlyQuotes = cleaned.startsWith('“') && cleaned.endsWith('”')
   if (wrappedWithCurlyQuotes && cleaned.length > 2) {
-    const stripped = stripSiteOperators(cleaned.slice(1, -1).trim()).cleaned
-    return stripped ? clampText(stripped, 64) : null
+    return processQuery(cleaned.slice(1, -1).trim())
   }
 
   const wrappedWithStraightQuotes = cleaned.startsWith('"') && cleaned.endsWith('"')
   if (wrappedWithStraightQuotes && cleaned.length > 2) {
-    const stripped = stripSiteOperators(cleaned.slice(1, -1).trim()).cleaned
-    return stripped ? clampText(stripped, 64) : null
+    return processQuery(cleaned.slice(1, -1).trim())
   }
 
   const quoteMatch = cleaned.match(/“(.+)”/)
   if (quoteMatch?.[1]) {
-    const stripped = stripSiteOperators(quoteMatch[1].trim()).cleaned
-    return stripped ? clampText(stripped, 64) : null
+    return processQuery(quoteMatch[1].trim())
   }
 
   // Only unwrap straight quotes when there is exactly one quoted segment.
@@ -148,12 +150,10 @@ function parseSearchQuery(value: string | null): string | null {
   // site:github.com "foo" OR "bar" — we should preserve the full expression.
   const straightQuoteMatches = [...cleaned.matchAll(/"([^"]+)"/g)]
   if (straightQuoteMatches.length === 1 && straightQuoteMatches[0]?.[1]) {
-    const stripped = stripSiteOperators(straightQuoteMatches[0][1].trim()).cleaned
-    return stripped ? clampText(stripped, 64) : null
+    return processQuery(straightQuoteMatches[0][1].trim())
   }
 
-  const { cleaned: stripped } = stripSiteOperators(cleaned)
-  return stripped ? clampText(stripped, 64) : null
+  return processQuery(cleaned)
 }
 
 function deriveSearchLabel(raw: string | null, fallback: string): string {

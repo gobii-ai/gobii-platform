@@ -148,9 +148,13 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
     return null
   }
 
-  const caption = transform.caption ?? deriveCaptionFallback(parameters)
-  const mcpInfo = deriveMcpInfo(toolName, entry.result)
   const isDefaultDescriptor = descriptor.name === 'default'
+  const derivedCaption = transform.caption ?? deriveCaptionFallback(parameters)
+  // Backend captions are often debug-oriented; only use them as a last-resort fallback when
+  // we don't recognize the tool (default descriptor) or don't have structured parameters.
+  const backendCaption = pickString(entry.caption)
+  const caption = derivedCaption ?? ((isDefaultDescriptor || !parameters) ? backendCaption : null)
+  const mcpInfo = deriveMcpInfo(toolName, entry.result)
 
   const baseLabel = transform.label ?? descriptor.label
   const baseCaption = caption ?? descriptor.label
