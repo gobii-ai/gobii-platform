@@ -1754,6 +1754,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     or agent.user_id == user.id
                     or (agent.organization_id and agent.organization_id in admin_org_ids)
                 ),
+                "audit_url": reverse("console-agent-audit", kwargs={"agent_id": agent.id}) if is_staff else None,
                 "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
                 "email": get_primary_email(agent),
                 "sms": get_primary_sms(agent),

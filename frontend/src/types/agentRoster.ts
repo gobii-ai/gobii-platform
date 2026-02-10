@@ -6,6 +6,7 @@ export type AgentRosterEntry = {
   isActive: boolean
   miniDescription: string
   shortDescription: string
+  auditUrl?: string | null
   isOrgOwned?: boolean
   isCollaborator?: boolean
   canManageAgent?: boolean

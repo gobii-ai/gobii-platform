@@ -49,6 +49,8 @@ const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
 const agentEmail = mountNode.dataset.agentEmail || null
 const agentSms = mountNode.dataset.agentSms || null
 const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
+const auditUrl = mountNode.dataset.auditUrl || null
+const auditUrlTemplate = mountNode.dataset.auditUrlTemplate || null
 const viewerUserIdRaw = mountNode.dataset.viewerUserId
 const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
 const viewerUserId = Number.isFinite(viewerUserIdValue) ? viewerUserIdValue : null
@@ -94,27 +96,30 @@ const handleEmbeddedClose = isEmbedded
   : undefined
 
 switch (appName) {
-  case 'agent-chat':
-    if (!agentId) {
-      throw new Error('Agent identifier is required for the chat experience')
-    }
-    screen = (
-      <AgentChatPage
-        agentId={agentId}
-        agentName={agentName}
-        agentColor={agentColor}
-        agentAvatarUrl={agentAvatarUrl}
-        agentEmail={agentEmail}
-        agentSms={agentSms}
-        collaboratorInviteUrl={collaboratorInviteUrl}
-        canManageCollaborators={canManageCollaborators}
-        isCollaborator={isCollaborator}
-        viewerUserId={viewerUserId}
-        viewerEmail={viewerEmail}
-        onClose={handleEmbeddedClose}
-      />
-    )
-    break
+	  case 'agent-chat':
+	    if (!agentId) {
+	      throw new Error('Agent identifier is required for the chat experience')
+	    }
+	    screen = (
+	      <AgentChatPage
+	        agentId={agentId}
+	        agentName={agentName}
+	        agentColor={agentColor}
+	        agentAvatarUrl={agentAvatarUrl}
+	        agentEmail={agentEmail}
+	        agentSms={agentSms}
+	        collaboratorInviteUrl={collaboratorInviteUrl}
+	        isStaff={isStaff}
+	        auditUrl={auditUrl}
+	        auditUrlTemplate={auditUrlTemplate}
+	        canManageCollaborators={canManageCollaborators}
+	        isCollaborator={isCollaborator}
+	        viewerUserId={viewerUserId}
+	        viewerEmail={viewerEmail}
+	        onClose={handleEmbeddedClose}
+	      />
+	    )
+	    break
   case 'agent-detail':
     const propsId = mountNode.dataset.propsJsonId
     const initialData = readJsonScript<import('./screens/AgentDetailScreen').AgentDetailScreenProps['initialData']>(propsId)

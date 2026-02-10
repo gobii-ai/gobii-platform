@@ -16,13 +16,16 @@
        data-agent-email="{{ agent_email }}"
        data-agent-sms="{{ agent_sms }}"
        data-user-plan="{{ user_plan|default:'' }}"
-       data-startup-trial-days="{{ startup_trial_days|default:0 }}"
-       data-scale-trial-days="{{ scale_trial_days|default:0 }}"
-       data-is-proprietary-mode="{% if settings.GOBII_PROPRIETARY_MODE %}true{% else %}false{% endif %}"
-       data-viewer-user-id="{{ request.user.id }}"
-       data-viewer-email="{{ request.user.email|default_if_none:'' }}"
-       data-collaborator-invite-url="{% url 'agent_detail' pk=agent.id %}"
-       data-can-manage-collaborators="{% if can_manage_collaborators %}true{% else %}false{% endif %}"
+	       data-startup-trial-days="{{ startup_trial_days|default:0 }}"
+	       data-scale-trial-days="{{ scale_trial_days|default:0 }}"
+	       data-is-proprietary-mode="{% if settings.GOBII_PROPRIETARY_MODE %}true{% else %}false{% endif %}"
+	       data-is-staff="{% if request.user.is_staff or request.user.is_superuser %}true{% else %}false{% endif %}"
+	       data-audit-url="{% if request.user.is_staff or request.user.is_superuser %}{% url 'console-agent-audit' agent_id=agent.id %}{% endif %}"
+	       data-audit-url-template="{% if request.user.is_staff or request.user.is_superuser %}{% url 'console-agent-audit' agent_id='00000000-0000-0000-0000-000000000000' %}{% endif %}"
+	       data-viewer-user-id="{{ request.user.id }}"
+	       data-viewer-email="{{ request.user.email|default_if_none:'' }}"
+	       data-collaborator-invite-url="{% url 'agent_detail' pk=agent.id %}"
+	       data-can-manage-collaborators="{% if can_manage_collaborators %}true{% else %}false{% endif %}"
        data-is-collaborator="{% if is_collaborator %}true{% else %}false{% endif %}">
   </div>
 </div>

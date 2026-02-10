@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Mail, MessageSquare, Settings, UserPlus, X, Zap } from 'lucide-react'
+import { Check, Mail, MessageSquare, Settings, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
@@ -17,6 +17,7 @@ type AgentChatBannerProps = {
   agentColorHex?: string | null
   agentEmail?: string | null
   agentSms?: string | null
+  auditUrl?: string | null
   isOrgOwned?: boolean
   canManageAgent?: boolean
   isCollaborator?: boolean
@@ -51,6 +52,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   agentColorHex,
   agentEmail,
   agentSms,
+  auditUrl,
   isOrgOwned = false,
   canManageAgent = true,
   isCollaborator = false,
@@ -155,6 +157,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
   const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
   const showShareButton = canShowBannerActions && Boolean(onShare)
+  const showAuditButton = Boolean(auditUrl)
   const showAttentionDot = softTargetExceeded || hardLimitReached
   const settingsLabel = hardLimitReached
     ? 'Daily task limit reached. Open agent settings'
@@ -245,10 +248,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
         ) : null}
 
           {/* Right: Upgrade button + Close button */}
-          <div className="banner-right">
-            {showUpgradeButton && (
-              <button
-                type="button"
+	          <div className="banner-right">
+	            {showUpgradeButton && (
+	              <button
+	                type="button"
                 className="banner-upgrade"
                 onClick={handleBannerUpgradeClick}
               >
@@ -256,30 +259,42 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <span>{upgradeButtonLabel}</span>
               </button>
             )}
-            {showShareButton ? (
-              <button
-                type="button"
-                className="banner-share"
-                onClick={onShare}
-                aria-label="Invite collaborators"
-              >
-                <UserPlus size={14} strokeWidth={2} />
-                <span className="banner-share-label">Collaborate</span>
-              </button>
-            ) : null}
-            {showSettingsButton ? (
-              <button
-                type="button"
-                className={`banner-settings ${hardLimitReached ? 'banner-settings--alert' : ''}`}
-                onClick={onSettingsOpen}
-                aria-label={settingsLabel}
-              >
-                <Settings size={16} />
-                {showAttentionDot ? (
-                  <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
-                ) : null}
-              </button>
-            ) : null}
+	            {showShareButton ? (
+	              <button
+	                type="button"
+	                className="banner-share"
+	                onClick={onShare}
+	                aria-label="Invite collaborators"
+	              >
+	                <UserPlus size={14} strokeWidth={2} />
+	                <span className="banner-share-label">Collaborate</span>
+	              </button>
+	            ) : null}
+	            {showAuditButton ? (
+	              <a
+	                className="banner-settings"
+	                href={auditUrl ?? undefined}
+	                target="_blank"
+	                rel="noreferrer"
+	                aria-label="Open audit timeline"
+	                title="Open audit timeline"
+	              >
+	                <Stethoscope size={16} />
+	              </a>
+	            ) : null}
+	            {showSettingsButton ? (
+	              <button
+	                type="button"
+	                className={`banner-settings ${hardLimitReached ? 'banner-settings--alert' : ''}`}
+	                onClick={onSettingsOpen}
+	                aria-label={settingsLabel}
+	              >
+	                <Settings size={16} />
+	                {showAttentionDot ? (
+	                  <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
+	                ) : null}
+	              </button>
+	            ) : null}
             {onClose ? (
               <button
                 type="button"

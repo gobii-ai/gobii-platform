@@ -112,3 +112,36 @@ class AgentChatAccessTests(TestCase):
             matching_entry.get("short_description"),
             "Qualifies inbound leads and drafts handoff-ready summaries.",
         )
+
+    def test_roster_includes_audit_url_for_staff(self):
+        User = get_user_model()
+        staff_user = User.objects.create_superuser(
+            username="staff@example.com",
+            email="staff@example.com",
+            password="pw",
+        )
+        staff_client = Client()
+        staff_client.login(email="staff@example.com", password="pw")
+
+        browser_agent = BrowserUseAgent.objects.create(user=staff_user, name="Staff Agent")
+        persistent_agent = PersistentAgent.objects.create(
+            user=staff_user,
+            name="Staff Agent",
+            charter="",
+            browser_use_agent=browser_agent,
+        )
+
+        response = staff_client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_CONTEXT_ID=str(staff_user.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        matching_entry = next(
+            entry for entry in payload.get("agents", []) if entry.get("id") == str(persistent_agent.id)
+        )
+        self.assertEqual(
+            matching_entry.get("audit_url"),
+            f"/console/staff/agents/{persistent_agent.id}/audit/",
+        )
