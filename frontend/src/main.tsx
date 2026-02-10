@@ -49,6 +49,8 @@ const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
 const agentEmail = mountNode.dataset.agentEmail || null
 const agentSms = mountNode.dataset.agentSms || null
 const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
+const auditUrl = mountNode.dataset.auditUrl || null
+const auditUrlTemplate = mountNode.dataset.auditUrlTemplate || null
 const viewerUserIdRaw = mountNode.dataset.viewerUserId
 const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
 const viewerUserId = Number.isFinite(viewerUserIdValue) ? viewerUserIdValue : null
@@ -107,6 +109,9 @@ switch (appName) {
         agentEmail={agentEmail}
         agentSms={agentSms}
         collaboratorInviteUrl={collaboratorInviteUrl}
+        isStaff={isStaff}
+        auditUrl={auditUrl}
+        auditUrlTemplate={auditUrlTemplate}
         canManageCollaborators={canManageCollaborators}
         isCollaborator={isCollaborator}
         viewerUserId={viewerUserId}
@@ -201,7 +206,14 @@ switch (appName) {
     if (!agentId) {
       throw new Error('Agent identifier is required for audit screen')
     }
-    screen = <AgentAuditScreen agentId={agentId} agentName={agentName} agentColor={agentColor} />
+    screen = (
+      <AgentAuditScreen
+        agentId={agentId}
+        agentName={agentName}
+        agentColor={agentColor}
+        adminAgentUrl={mountNode.dataset.adminAgentUrl}
+      />
+    )
     break
   case 'immersive-app':
     screen = <ImmersiveApp />

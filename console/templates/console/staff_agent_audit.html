@@ -9,7 +9,8 @@
      data-app="agent-audit"
      data-agent-id="{{ agent.id }}"
      data-agent-name="{{ agent.name|default:'' }}"
-     data-agent-color="{{ agent.get_display_color|default_if_none:'' }}">
+     data-agent-color="{{ agent.get_display_color|default_if_none:'' }}"
+     data-admin-agent-url="{{ admin_agent_url }}">
 </div>
 {% endblock %}
 

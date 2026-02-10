@@ -1720,7 +1720,8 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 ]
             ).values_list("org_id", flat=True)
         )
-        is_staff = bool(user.is_staff)
+        # Keep behavior aligned with SystemAdminRequiredMixin: superusers may not be staff.
+        is_admin_user = bool(user.is_staff or user.is_superuser)
         def get_primary_email(agent: PersistentAgent) -> str | None:
             endpoints = getattr(agent, "primary_email_endpoints", None)
             if endpoints:
@@ -1745,15 +1746,16 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "is_org_owned": agent.organization_id is not None,
                 "is_collaborator": agent.id in collaborators_by_agent_id,
                 "can_manage_agent": (
-                    is_staff
+                    is_admin_user
                     or agent.user_id == user.id
                     or (agent.organization_id and agent.organization_id in org_ids)
                 ),
                 "can_manage_collaborators": (
-                    is_staff
+                    is_admin_user
                     or agent.user_id == user.id
                     or (agent.organization_id and agent.organization_id in admin_org_ids)
                 ),
+                "audit_url": reverse("console-agent-audit", kwargs={"agent_id": agent.id}) if is_admin_user else None,
                 "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
                 "email": get_primary_email(agent),
                 "sms": get_primary_sms(agent),

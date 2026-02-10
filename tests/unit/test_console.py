@@ -42,6 +42,36 @@ class ConsoleViewsTest(TestCase):
         return json.loads(script.string)
 
     @tag("batch_console_agents")
+    def test_staff_agent_audit_page_exposes_admin_settings_url(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin@example.com",
+            email="admin@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(admin_user)
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=admin_user,
+            name="Audit Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=admin_user,
+            name="Audit Agent",
+            charter="Audit charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("console-agent-audit", kwargs={"agent_id": persistent_agent.id}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'data-admin-agent-url="/admin/api/persistentagent/{persistent_agent.id}/change/"',
+        )
+
+    @tag("batch_console_agents")
     @patch("console.views.get_stripe_settings")
     def test_user_plan_api_includes_trial_days(self, mock_get_stripe_settings):
         mock_get_stripe_settings.return_value = SimpleNamespace(
@@ -82,6 +112,43 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-startup-trial-days="9"')
         self.assertContains(response, 'data-scale-trial-days="18"')
+        self.assertContains(response, 'data-is-staff="false"')
+
+    @tag("batch_console_agents")
+    def test_agent_chat_shell_exposes_audit_url_for_staff(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        User = get_user_model()
+        staff_user = User.objects.create_superuser(
+            username="staff@example.com",
+            email="staff@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(staff_user)
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=staff_user,
+            name="Staff Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=staff_user,
+            name="Staff Agent",
+            charter="Audit charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-is-staff="true"')
+        self.assertContains(
+            response,
+            f'data-audit-url="/console/staff/agents/{persistent_agent.id}/audit/"',
+        )
+        self.assertContains(
+            response,
+            'data-audit-url-template="/console/staff/agents/00000000-0000-0000-0000-000000000000/audit/"',
+        )
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_also_deletes_browser_agent(self):

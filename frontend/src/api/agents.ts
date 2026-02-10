@@ -28,6 +28,7 @@ type AgentRosterPayload = {
     is_collaborator: boolean
     can_manage_agent: boolean
     can_manage_collaborators: boolean
+    audit_url?: string | null
     preferred_llm_tier: string | null
     email: string | null
     sms: string | null
@@ -47,6 +48,7 @@ export async function fetchAgentRoster(
     isActive: agent.is_active,
     miniDescription: agent.mini_description,
     shortDescription: agent.short_description,
+    auditUrl: agent.audit_url ?? null,
     isOrgOwned: agent.is_org_owned,
     isCollaborator: agent.is_collaborator,
     canManageAgent: agent.can_manage_agent,

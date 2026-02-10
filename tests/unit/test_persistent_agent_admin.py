@@ -8,6 +8,8 @@ from django.utils import timezone
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentMessage,
     PersistentAgentSystemMessage,
     PersistentAgentSystemMessageBroadcast,
 )
@@ -229,6 +231,29 @@ class PersistentAgentAdminTests(TestCase):
         mock_delay.assert_not_called()
         messages = list(response.context["messages"])
         self.assertTrue(any("owner inactive" in message.message for message in messages))
+
+    def test_change_view_renders_with_message_inline(self):
+        agent_ep = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.persistent_agent,
+            channel="email",
+            address="agent@example.com",
+            is_primary=True,
+        )
+        external_ep = PersistentAgentCommsEndpoint.objects.create(
+            channel="email",
+            address="external@example.com",
+            is_primary=True,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=agent_ep,
+            to_endpoint=external_ep,
+            body="Hi there",
+        )
+
+        url = reverse("admin:api_persistentagent_change", args=[self.persistent_agent.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
 
     def test_system_message_get_renders_form(self):
         url = reverse("admin:api_persistentagent_system_message", args=[self.persistent_agent.pk])

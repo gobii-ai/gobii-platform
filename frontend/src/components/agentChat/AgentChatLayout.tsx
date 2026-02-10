@@ -48,6 +48,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentEmail?: string | null
   agentSms?: string | null
   agentName?: string | null
+  auditUrl?: string | null
   agentIsOrgOwned?: boolean
   canManageAgent?: boolean
   isCollaborator?: boolean
@@ -144,6 +145,7 @@ export function AgentChatLayout({
   agentEmail,
   agentSms,
   agentName,
+  auditUrl,
   agentIsOrgOwned = false,
   canManageAgent = true,
   isCollaborator = false,
@@ -665,18 +667,19 @@ export function AgentChatLayout({
         onCreateAgent={onCreateAgent}
         contextSwitcher={contextSwitcher}
       />
-      {showBanner && (
-        <AgentChatBanner
-          agentName={agentName || 'Agent'}
-          agentAvatarUrl={agentAvatarUrl}
-          agentColorHex={agentColorHex}
-          agentEmail={agentEmail}
-          agentSms={agentSms}
-          isOrgOwned={agentIsOrgOwned}
-          canManageAgent={canManageAgent}
-          isCollaborator={isCollaborator}
-          connectionStatus={connectionStatus}
-          connectionLabel={connectionLabel}
+	      {showBanner && (
+	        <AgentChatBanner
+	          agentName={agentName || 'Agent'}
+	          agentAvatarUrl={agentAvatarUrl}
+	          agentColorHex={agentColorHex}
+	          agentEmail={agentEmail}
+	          agentSms={agentSms}
+	          auditUrl={auditUrl}
+	          isOrgOwned={agentIsOrgOwned}
+	          canManageAgent={canManageAgent}
+	          isCollaborator={isCollaborator}
+	          connectionStatus={connectionStatus}
+	          connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
           kanbanSnapshot={kanbanSnapshot}
           processingActive={processingActive}

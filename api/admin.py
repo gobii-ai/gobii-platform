@@ -1427,7 +1427,7 @@ class BrowserUseAgentAdmin(admin.ModelAdmin):
         if pa:
             url = reverse("admin:api_persistentagent_change", args=[pa.pk])
             return format_html('<a href="{}">{}</a>', url, pa.name)
-        return format_html('<span style="color: gray;">None</span>')
+        return format_html('<span style="color: gray;">{}</span>', "None")
     persistent_agent_link.admin_order_field = 'persistent_agent__name'
 
 # --- STEPS INSIDE TASK (BrowserUseAgentTask) ---
@@ -1937,7 +1937,7 @@ class ProxyServerAdmin(admin.ModelAdmin):
         if obj.is_active:
             url = reverse("admin:api_proxyserver_health_check", args=[obj.pk])
             return format_html('<a class="button" href="{}">Test&nbsp;Now</a>', url)
-        return format_html('<span style="color: gray;">Inactive</span>')
+        return format_html('<span style="color: gray;">{}</span>', "Inactive")
 
     def health_check_view(self, request, object_id, *args, **kwargs):
         """Handle the health check button click - queue a Celery task and redirect."""
@@ -2010,7 +2010,7 @@ class ProxyServerAdmin(admin.ModelAdmin):
                 icon = "?"
                 
             return format_html('<a href="{}" style="color: {};">{} {} results</a>', url, color, icon, count)
-        return format_html('<span style="color: gray;">No tests</span>')
+        return format_html('<span style="color: gray;">{}</span>', "No tests")
     health_results_link.short_description = 'Health Status'
 
     def decodo_ip_link(self, obj):
@@ -2282,9 +2282,9 @@ class AgentMessageInline(admin.TabularInline):
     
     def direction_display(self, obj):
         if obj.is_outbound:
-            return format_html('<span style="color: blue;">→ OUT</span>')
+            return format_html('<span style="color: blue;">{}</span>', "→ OUT")
         else:
-            return format_html('<span style="color: green;">← IN</span>')
+            return format_html('<span style="color: green;">{}</span>', "← IN")
     direction_display.short_description = "Direction"
     
     def from_to_display(self, obj):
@@ -2532,7 +2532,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         if bua:
             url = reverse("admin:api_browseruseagent_change", args=[bua.pk])
             return format_html('<a href="{}">{}</a>', url, bua.name)
-        return format_html('<span style="color: gray;">None</span>')
+        return format_html('<span style="color: gray;">{}</span>', "None")
     browser_use_agent_link.admin_order_field = 'browser_use_agent__name'
 
     @admin.display(description='Messages')
@@ -3159,7 +3159,7 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
         if obj.owner_agent:
             url = reverse("admin:api_persistentagent_change", args=[obj.owner_agent.pk])
             return format_html('<a href="{}">{}</a>', url, obj.owner_agent.name)
-        return format_html('<em>External</em>')
+        return format_html('<em>{}</em>', "External")
     owner_agent_name.short_description = "Owner Agent"
     owner_agent_name.admin_order_field = 'owner_agent__name'
 
@@ -3555,9 +3555,9 @@ class PersistentAgentMessageAdmin(admin.ModelAdmin):
 
     def direction_icon(self, obj):
         if obj.is_outbound:
-            return format_html('<span style="color: blue; font-weight: bold;">→</span>')
+            return format_html('<span style="color: blue; font-weight: bold;">{}</span>', "→")
         else:
-            return format_html('<span style="color: green; font-weight: bold;">←</span>')
+            return format_html('<span style="color: green; font-weight: bold;">{}</span>', "←")
     direction_icon.short_description = "Dir"
 
     def from_address(self, obj):
@@ -3760,13 +3760,13 @@ class PersistentAgentStepAdmin(admin.ModelAdmin):
 
     def step_type(self, obj):
         if hasattr(obj, 'tool_call'):
-            return format_html('<span style="color: blue;">Tool Call</span>')
+            return format_html('<span style="color: blue;">{}</span>', "Tool Call")
         elif hasattr(obj, 'cron_trigger'):
-            return format_html('<span style="color: green;">Cron</span>')
+            return format_html('<span style="color: green;">{}</span>', "Cron")
         elif hasattr(obj, 'system_step'):
-            return format_html('<span style="color: orange;">System</span>')
+            return format_html('<span style="color: orange;">{}</span>', "System")
         else:
-            return format_html('<span style="color: gray;">General</span>')
+            return format_html('<span style="color: gray;">{}</span>', "General")
     step_type.short_description = "Type"
 
     @admin.display(description='Task Credit')
