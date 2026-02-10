@@ -85,6 +85,12 @@ DEFERRED_REFERRAL_CREDITS_ENABLED = env.bool("DEFERRED_REFERRAL_CREDITS_ENABLED"
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 # Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
 LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
+# Enforce free-trial eligibility for personal agents and personal API keys.
+# Keep disabled until grandfathering/backfill is complete in production.
+PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED = env.bool(
+    "PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED",
+    default=False,
+)
 # Enable insights system (contextual info during agent processing)
 INSIGHTS_ENABLED = env.bool("INSIGHTS_ENABLED", default=True)
 # Allow solutions partners to access billing pages

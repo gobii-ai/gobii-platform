@@ -397,6 +397,41 @@ class ConsoleViewsTest(TestCase):
         )
         self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("console.views.AgentService.has_agents_available", return_value=True)
+    @tag("batch_console_agents")
+    def test_personal_agent_creation_requires_trial(self, _mock_agents_available):
+        from api.models import PersistentAgent
+
+        session = self.client.session
+        session["agent_charter"] = "Help with tasks"
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["context_name"] = self.user.get_full_name() or self.user.username
+        session.save()
+
+        response = self.client.post(
+            reverse("agent_create_contact"),
+            data={
+                "preferred_contact_method": "email",
+                "contact_endpoint_email": "owner@example.com",
+                "email_enabled": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context.get("form")
+        self.assertIsNotNone(form)
+        self.assertTrue(
+            any("Start a free trial" in error for error in form.non_field_errors()),
+            form.non_field_errors(),
+        )
+        self.assertEqual(
+            PersistentAgent.objects.filter(user=self.user, organization__isnull=True).count(),
+            0,
+        )
+
     @tag("batch_console_agents")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
     @patch('util.analytics.Analytics.track_event')

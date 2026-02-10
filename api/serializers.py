@@ -27,6 +27,12 @@ from .models import (
 )
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 from util.analytics import AnalyticsSource
+from util.subscription_helper import get_owner_plan
+from util.trial_enforcement import (
+    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_use_personal_agents_and_api,
+)
+
 # Serializer for Listing Agents (id, name, created_at)
 class BrowserUseAgentListSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(read_only=True, format='hex_verbose')
@@ -564,6 +570,11 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
 
         request = self.context['request']
         organization = self.context.get('organization')
+        if organization is None and not can_user_use_personal_agents_and_api(request.user):
+            raise serializers.ValidationError(
+                {"non_field_errors": [PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE]}
+            )
+
         template_code = validated_data.pop('template_code', None)
         personal_servers = validated_data.pop('enabled_personal_server_ids', None)
         preferred_input = validated_data.pop('preferred_contact_endpoint', None)

@@ -4,6 +4,18 @@ from django.db.models import QuerySet
 from api.models import OrganizationMembership, PersistentAgent, AgentCollaborator
 from console.context_helpers import ConsoleContext, resolve_console_context
 from console.context_overrides import get_context_override
+from util.trial_enforcement import (
+    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_use_personal_agents_and_api,
+)
+
+
+def _is_blocked_personal_owner(user, agent: PersistentAgent) -> bool:
+    return bool(
+        agent.organization_id is None
+        and agent.user_id == user.id
+        and not can_user_use_personal_agents_and_api(user)
+    )
 
 
 def agent_queryset_for(user, context: ConsoleContext) -> QuerySet:
@@ -11,6 +23,8 @@ def agent_queryset_for(user, context: ConsoleContext) -> QuerySet:
     qs = PersistentAgent.objects.non_eval().select_related("browser_use_agent").all()
     if context.type == "organization":
         return qs.filter(organization_id=context.id)
+    if not can_user_use_personal_agents_and_api(user):
+        return qs.none()
     return qs.filter(user=user, organization__isnull=True)
 
 def shared_agent_queryset_for(user) -> QuerySet:
@@ -25,6 +39,8 @@ def user_can_manage_agent(user, agent: PersistentAgent) -> bool:
     if user.is_staff:
         return True
     if agent.user_id == user.id:
+        if _is_blocked_personal_owner(user, agent):
+            return False
         return True
     if agent.organization_id:
         return OrganizationMembership.objects.filter(
@@ -48,12 +64,24 @@ def resolve_agent(
     context_info = resolve_console_context(user, session, override=context_override)
     queryset = agent_queryset_for(user, context_info.current_context)
     try:
-        return queryset.get(pk=agent_id)
+        agent = queryset.get(pk=agent_id)
+        if _is_blocked_personal_owner(user, agent):
+            raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
+        return agent
     except PersistentAgent.DoesNotExist as exc:  # pragma: no cover - defensive guard
         if allow_shared:
             agent = shared_agent_queryset_for(user).filter(pk=agent_id).first()
             if agent:
                 return agent
+        if (
+            not can_user_use_personal_agents_and_api(user)
+            and PersistentAgent.objects.non_eval().filter(
+                pk=agent_id,
+                user=user,
+                organization__isnull=True,
+            ).exists()
+        ):
+            raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE) from exc
         raise PermissionDenied("Agent not found in current context") from exc
 
 

@@ -3,7 +3,7 @@ import uuid
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 import sys
@@ -17,6 +17,7 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     TaskCredit,
+    UserFlags,
     UserQuota,
 )
 from constants.grant_types import GrantTypeChoices
@@ -26,8 +27,10 @@ from api.serializers import BrowserUseAgentTaskSerializer
 from django.utils import timezone
 from datetime import timedelta
 from django.core.exceptions import ValidationError
+from waffle.models import Switch
 
 from console.forms import ApiKeyForm
+from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
 
 User = get_user_model()
@@ -61,6 +64,41 @@ class ApiKeyFormTests(TestCase):
         self.assertIn('Unable to determine API key owner', ''.join(form.non_field_errors()))
 
 
+@tag("batch_console_api_keys")
+class ApiKeyListViewTrialEnforcementTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="api-keys-enforcement@example.com",
+            email="api-keys-enforcement@example.com",
+            password="password123",
+        )
+        self.client.force_login(self.user)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("console.views.has_verified_email", return_value=True)
+    def test_blocks_personal_api_key_creation_without_trial(self, _mock_verified):
+        response = self.client.post(reverse("api_keys"), data={"name": "Blocked Key"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        form = response.context.get("form")
+        self.assertIsNotNone(form)
+        self.assertTrue(
+            any("Start a free trial" in error for error in form.non_field_errors()),
+            form.non_field_errors(),
+        )
+        self.assertFalse(ApiKey.objects.filter(user=self.user, name="Blocked Key").exists())
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("console.views.has_verified_email", return_value=True)
+    def test_allows_personal_api_key_creation_for_grandfathered_user(self, _mock_verified):
+        UserFlags.objects.create(user=self.user, is_freemium_grandfathered=True)
+
+        response = self.client.post(reverse("api_keys"), data={"name": "Grandfathered Key"})
+
+        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
+        self.assertTrue(ApiKey.objects.filter(user=self.user, name="Grandfathered Key").exists())
+
+
 @tag("batch_api_agents")
 class BrowserUseAgentViewSetTests(APITestCase):
     def setUp(self):
@@ -83,6 +121,27 @@ class BrowserUseAgentViewSetTests(APITestCase):
 
         # Authenticate as user1 by default
         self.client.credentials(HTTP_X_API_KEY=self.raw_api_key1)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_personal_api_key_rejected_when_trial_required(self):
+        url = reverse("api:browseruseagent-list")
+        response = self.client.get(url)
+
+        self.assertIn(
+            response.status_code,
+            [status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN],
+        )
+        detail = response.data.get("detail") if isinstance(response.data, dict) else str(response.data)
+        self.assertIn("Start a free trial", str(detail))
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_personal_api_key_allowed_for_grandfathered_user(self):
+        UserFlags.objects.create(user=self.user1, is_freemium_grandfathered=True)
+
+        url = reverse("api:browseruseagent-list")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_list_agents_authenticated_user(self):
         """
@@ -344,6 +403,14 @@ class OrganizationApiKeyTests(APITestCase):
         names = {agent['name'] for agent in response.data['results']}
         self.assertIn(self.org_browser.name, names)
         self.assertNotIn(self.personal_browser.name, names)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_org_key_still_works_when_personal_trial_enforcement_enabled(self):
+        self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
+        url = reverse("api:browseruseagent-list")
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
     def test_org_key_limits_agent_listing_to_org_owned_agent(self):
         self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
@@ -1054,6 +1121,42 @@ class AutoCreateApiKeyTest(APITestCase):
         # Verify UserQuota was still created
         user_quota = UserQuota.objects.filter(user=new_user)
         self.assertEqual(user_quota.count(), 1)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_enforcement_skips_initial_free_plan_credit_grant(self):
+        new_user = User.objects.create_user(
+            username="newuser-enforced@example.com",
+            email="newuser-enforced@example.com",
+            password="password123",
+        )
+
+        initial_plan_credits = TaskCredit.objects.filter(
+            user=new_user,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+        )
+        self.assertEqual(initial_plan_credits.count(), 0)
+
+    def test_waffle_switch_skips_initial_free_plan_credit_grant(self):
+        Switch.objects.update_or_create(
+            name=PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH,
+            defaults={"active": True},
+        )
+
+        new_user = User.objects.create_user(
+            username="newuser-switch-enforced@example.com",
+            email="newuser-switch-enforced@example.com",
+            password="password123",
+        )
+
+        initial_plan_credits = TaskCredit.objects.filter(
+            user=new_user,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+        )
+        self.assertEqual(initial_plan_credits.count(), 0)
 
 
 @tag("batch_api_persistent_agents")

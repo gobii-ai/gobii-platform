@@ -46,6 +46,10 @@ import logging
 
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.trial_enforcement import (
+    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_use_personal_agents_and_api,
+)
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,
@@ -64,6 +68,13 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, inline_seri
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
+
+
+def _enforce_personal_api_access_or_raise(user, *, organization=None):
+    if organization is not None:
+        return
+    if not can_user_use_personal_agents_and_api(user):
+        raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
 
 
 # Standard Pagination (can be customized or moved to settings)
@@ -111,6 +122,7 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         """Return BrowserUseAgent instances owned by the user or organization."""
         org = self._request_organization()
+        _enforce_personal_api_access_or_raise(self.request.user, organization=org)
         properties = {}
 
         if org is not None:
@@ -143,6 +155,7 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
         """Associate the agent with the current user"""
         if self._request_organization() is not None:
             raise DRFValidationError(detail="Organization API keys cannot create browser agents.")
+        _enforce_personal_api_access_or_raise(self.request.user)
 
         try:
             serializer.save(user=self.request.user)
@@ -208,6 +221,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
 
     def _validate_agent_access(self, agent):
         org = self._request_organization()
+        _enforce_personal_api_access_or_raise(self.request.user, organization=org)
         if org is not None:
             persistent = getattr(agent, 'persistent_agent', None)
             if not persistent or persistent.organization_id != org.id:
@@ -244,6 +258,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
             qs = BrowserUseAgentTask.objects.alive().select_related('agent', 'agent__persistent_agent')
 
             org = self._request_organization()
+            _enforce_personal_api_access_or_raise(self.request.user, organization=org)
             if org is not None:
                 span.set_attribute('tasks.owner_type', 'organization')
                 span.set_attribute('tasks.organization_id', str(org.id))
@@ -279,6 +294,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
     def list_all(self, request):
         with traced("GET tasks", user_id=self.request.user.id) as span:
             org = self._request_organization()
+            _enforce_personal_api_access_or_raise(request.user, organization=org)
             queryset = BrowserUseAgentTask.objects.alive().select_related('agent', 'agent__persistent_agent')
 
             if org is not None:
@@ -323,6 +339,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                     self._validate_agent_access(agent)
 
             org = self._request_organization()
+            _enforce_personal_api_access_or_raise(self.request.user, organization=org)
 
             wait_time = serializer.validated_data.pop('wait', None)
 
@@ -718,6 +735,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         org = self._request_organization()
+        _enforce_personal_api_access_or_raise(self.request.user, organization=org)
         if org is not None:
             return self.queryset.filter(organization=org)
         return self.queryset.filter(user=self.request.user)
