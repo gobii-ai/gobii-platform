@@ -5837,6 +5837,8 @@ class AgentDeleteView(LoginRequiredMixin, View):
             
         except PersistentAgent.DoesNotExist:
             return HttpResponse("Agent not found or you don't have permission.", status=404)
+        except PermissionDenied:
+            raise
         except Exception as e:
             return HttpResponse(f"An error occurred: {e}", status=500)
 

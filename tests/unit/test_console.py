@@ -343,6 +343,28 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(cache.get(cache_key))
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_console_agents")
+    def test_delete_personal_agent_trial_requirement_returns_forbidden(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Trial Gated Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Trial Gated Agent",
+            charter="Trial gated",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.delete(reverse("agent_delete", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
+        self.assertTrue(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
+
     @patch("console.views.AgentService.has_agents_available", return_value=True)
     @tag("batch_console_agents")
     def test_org_agent_creation_blocked_without_seat(self, _mock_agents_available):
