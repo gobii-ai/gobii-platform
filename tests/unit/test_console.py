@@ -697,10 +697,10 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(agent.daily_credit_limit)
 
     @tag("batch_console_agents")
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_agent_detail_ajax_clamps_intelligence_tier_and_returns_warning(self):
         from django.db.models import Max
 
+        from api.agent.core.llm_config import AgentLLMTier
         from config.plans import PLAN_CONFIG
         from api.models import BrowserUseAgent, IntelligenceTier, PersistentAgent
 
@@ -733,8 +733,11 @@ class ConsoleViewsTest(TestCase):
         )
 
         url = reverse("agent_detail", kwargs={"pk": agent.id})
-        # Force a free plan so the view should clamp any paid-tier selection.
-        with patch("console.views.get_user_plan", return_value=PLAN_CONFIG["free"]):
+        # Make this deterministic in CI: force proprietary mode + free plan + max tier == STANDARD.
+        with override_settings(GOBII_PROPRIETARY_MODE=True), \
+             patch("console.views.get_user_plan", return_value=PLAN_CONFIG["free"]), \
+             patch("console.views.max_allowed_tier_for_plan", return_value=AgentLLMTier.STANDARD), \
+             patch("util.subscription_helper.get_user_plan", return_value=PLAN_CONFIG["free"]):
             response = self.client.post(
                 url,
                 {
