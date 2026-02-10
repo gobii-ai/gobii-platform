@@ -183,6 +183,11 @@ class UserSignedUpSignalTests(TestCase):
             click_ids["fbc"].endswith(".test-fbclid-from-session"),
             f"fbc should end with fbclid but was: {click_ids.get('fbc')}"
         )
+        fbc_timestamp = click_ids["fbc"].split(".")[2]
+        self.assertTrue(
+            fbc_timestamp.isdigit() and len(fbc_timestamp) == 13,
+            f"fbc timestamp should be a 13-digit millisecond value but was: {fbc_timestamp}"
+        )
         # fbclid should also be included
         self.assertEqual(click_ids.get("fbclid"), "test-fbclid-from-session")
 
@@ -247,6 +252,11 @@ class BuildMarketingContextFromUserTests(TestCase):
         self.assertTrue(
             click_ids["fbc"].endswith(".test-fbclid-value"),
             f"fbc should end with fbclid but was: {click_ids.get('fbc')}"
+        )
+        fbc_timestamp = click_ids["fbc"].split(".")[2]
+        self.assertTrue(
+            fbc_timestamp.isdigit() and len(fbc_timestamp) == 13,
+            f"fbc timestamp should be a 13-digit millisecond value but was: {fbc_timestamp}"
         )
         # fbclid should also be included
         self.assertEqual(click_ids.get("fbclid"), "test-fbclid-value")

@@ -562,7 +562,7 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
         click_ids["fbc"] = fbc
     elif fbclid:
         # Synthesize fbc from fbclid if fbc is missing (improves Meta Event Match Quality)
-        click_ids["fbc"] = f"fb.1.{int(timezone.now().timestamp())}.{fbclid}"
+        click_ids["fbc"] = f"fb.1.{int(timezone.now().timestamp() * 1000)}.{fbclid}"
     if fbclid:
         click_ids["fbclid"] = fbclid
     if fbp:
@@ -1082,6 +1082,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
 
         event_timestamp = timezone.now()
         event_timestamp_unix = int(event_timestamp.timestamp())
+        event_timestamp_ms = int(event_timestamp.timestamp() * 1000)
 
         Analytics.track(
             user_id=str(user.id),
@@ -1135,7 +1136,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                 # No fbc from cookies or extract_click_context, try to synthesize from fbclid
                 stored_fbclid = fbclid_cookie  # includes session fallback from lines 750-753
                 if stored_fbclid:
-                    click_ids['fbc'] = f"fb.1.{event_timestamp_unix}.{stored_fbclid}"
+                    click_ids['fbc'] = f"fb.1.{event_timestamp_ms}.{stored_fbclid}"
                     click_ids['fbclid'] = stored_fbclid
                     marketing_context['click_ids'] = click_ids
             elif fbc_cookie and not click_ids.get('fbc'):
