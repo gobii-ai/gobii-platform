@@ -149,6 +149,7 @@ tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
 MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation signal present
+MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS = 60
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -2966,7 +2967,7 @@ def _run_agent_loop(
                         "Will resume on the next trigger."
                     ),
                 )
-            except Exception:
+            except DatabaseError:
                 logger.debug(
                     "Failed to persist runtime limit step for agent %s",
                     agent.id,
@@ -3894,5 +3895,44 @@ def _run_agent_loop(
 
     else:
         logger.warning("Agent %s reached max iterations.", agent.id)
+        span.add_event("Agent loop aborted - max iterations")
+        if heartbeat:
+            heartbeat.touch("max_iterations")
+        try:
+            PersistentAgentStep.objects.create(
+                agent=agent,
+                description=(
+                    "Processing paused: max iterations reached. "
+                    "Will resume shortly."
+                ),
+            )
+        except DatabaseError:
+            logger.debug(
+                "Failed to persist max-iterations step for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+        pending_settings = get_pending_drain_settings(settings)
+        delay_seconds = max(
+            int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
+            int(pending_settings.pending_drain_delay_seconds),
+        )
+        try:
+            from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
+
+            # Avoid globally throttling the pending-drain scheduler when a single agent
+            # hits its iteration cap; resume this agent directly after a cooldown.
+            process_agent_events_task.apply_async(
+                args=[str(agent.id)],
+                countdown=delay_seconds,
+            )
+            span.add_event("Max iterations follow-up scheduled")
+        except Exception:
+            logger.debug(
+                "Failed to schedule max-iterations follow-up for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+        _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
     return cumulative_token_usage
