@@ -1716,3 +1716,102 @@ class EventProcessingRuntimeGuardTests(TestCase):
             span=ANY,
         )
         self.assertEqual(usage.get("total_tokens"), 0)
+
+
+@tag("batch_event_processing")
+class EventProcessingMaxIterationsFollowUpTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="max_iterations@example.com",
+            email="max_iterations@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="MaxIterBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="MaxIterAgent",
+            charter="Test max iterations follow-up",
+            browser_use_agent=self.browser_agent,
+        )
+
+    @patch("api.agent.core.event_processing._schedule_pending_drain")
+    @patch("api.agent.core.event_processing.enqueue_pending_agent")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.should_pause_for_burn_rate", return_value=False)
+    @patch("api.agent.core.event_processing.get_redis_client")
+    def test_run_agent_loop_queues_follow_up_when_max_iterations_reached(
+        self,
+        mock_get_redis,
+        _mock_pause,
+        mock_get_pending_settings,
+        mock_enqueue_pending,
+        mock_schedule_pending,
+    ):
+        enable_tools(self.agent, ["sqlite_batch"])
+
+        class _FakeRedis:
+            def get(self, _key):
+                return None
+
+        mock_get_redis.return_value = _FakeRedis()
+        mock_get_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql": "UPDATE t SET id = 1", "will_continue_work": false}'
+
+        response_message = MagicMock()
+        response_message.tool_calls = [tool_call]
+        response_message.function_call = None
+        response_message.content = None
+
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=5,
+                completion_tokens=5,
+                total_tokens=10,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+
+        token_usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "total_tokens": 10,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)), \
+             patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "warning", "message": "0 rows affected"}), \
+             patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}):
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(
+            self.agent.steps.filter(description__icontains="max iterations").exists()
+        )
+        mock_enqueue_pending.assert_called_once_with(
+            self.agent.id,
+            ttl=123,
+        )
+        mock_schedule_pending.assert_called_once_with(
+            delay_seconds=60,
+            schedule_ttl_seconds=360,
+            span=ANY,
+        )

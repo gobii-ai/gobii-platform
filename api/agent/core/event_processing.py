@@ -149,6 +149,7 @@ tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
 MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation signal present
+MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS = 60
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -3894,5 +3895,49 @@ def _run_agent_loop(
 
     else:
         logger.warning("Agent %s reached max iterations.", agent.id)
+        span.add_event("Agent loop aborted - max iterations")
+        if heartbeat:
+            heartbeat.touch("max_iterations")
+        try:
+            PersistentAgentStep.objects.create(
+                agent=agent,
+                description=(
+                    "Processing paused: max iterations reached. "
+                    "Will resume shortly."
+                ),
+            )
+        except Exception:
+            logger.debug(
+                "Failed to persist max-iterations step for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+        try:
+            pending_settings = get_pending_drain_settings(settings)
+            enqueue_pending_agent(
+                agent.id,
+                ttl=pending_settings.pending_set_ttl_seconds,
+            )
+            delay_seconds = max(
+                int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
+                int(pending_settings.pending_drain_delay_seconds),
+            )
+            schedule_ttl_seconds = max(
+                int(pending_settings.pending_drain_schedule_ttl_seconds),
+                max(30, delay_seconds * 6),
+            )
+            _schedule_pending_drain(
+                delay_seconds=delay_seconds,
+                schedule_ttl_seconds=schedule_ttl_seconds,
+                span=span,
+            )
+            span.add_event("Max iterations follow-up queued")
+        except Exception:
+            logger.debug(
+                "Failed to schedule max-iterations follow-up for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+        _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
     return cumulative_token_usage
