@@ -1,5 +1,5 @@
 from datetime import timezone, datetime
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from types import SimpleNamespace
 import uuid
 
@@ -21,7 +21,12 @@ from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
+from config.socialaccount_adapter import (
+    OAUTH_ATTRIBUTION_COOKIE,
+    OAUTH_ATTRIBUTION_SESSION_KEYS,
+    OAUTH_CHARTER_COOKIE,
+    OAUTH_CHARTER_SESSION_KEYS,
+)
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -67,6 +72,7 @@ from django.utils import timezone as dj_timezone
 from django.utils.html import escape, strip_tags
 from opentelemetry import trace
 from marketing_events.api import capi
+from marketing_events.telemetry import record_fbc_synthesized
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -193,6 +199,36 @@ def _build_oauth_charter_cookie_payload(
         if key in request.session:
             payload[key] = request.session.get(key)
     return payload
+
+
+def _build_oauth_attribution_cookie_payload(request) -> dict[str, str | dict]:
+    payload: dict[str, str | dict] = {}
+    for key in OAUTH_ATTRIBUTION_SESSION_KEYS:
+        if key in request.session:
+            payload[key] = request.session.get(key)
+    return payload
+
+
+def _set_oauth_stash_cookies(response, request, *, charter_data: dict, attribution_data: dict) -> None:
+    cookie_common = {
+        "max_age": 7200,  # 2 hours
+        "httponly": True,
+        "samesite": "Lax",
+        "secure": request.is_secure(),
+    }
+    response.set_cookie(
+        OAUTH_CHARTER_COOKIE,
+        signing.dumps(charter_data, compress=True),
+        **cookie_common,
+    )
+    if attribution_data:
+        response.set_cookie(
+            OAUTH_ATTRIBUTION_COOKIE,
+            signing.dumps(attribution_data, compress=True),
+            **cookie_common,
+        )
+    else:
+        response.delete_cookie(OAUTH_ATTRIBUTION_COOKIE)
 
 
 POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
@@ -741,13 +777,12 @@ class PretrainedWorkerHireView(View):
             charter=template.charter,
             template_code=template.code,
         )
-        response.set_cookie(
-            OAUTH_CHARTER_COOKIE,
-            signing.dumps(charter_data, compress=True),
-            max_age=3600,  # 1 hour
-            httponly=True,
-            samesite="Lax",
-            secure=request.is_secure(),
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
         )
 
         return response
@@ -889,13 +924,12 @@ class PublicTemplateHireView(View):
             charter=template.charter,
             template_code=template.code,
         )
-        response.set_cookie(
-            OAUTH_CHARTER_COOKIE,
-            signing.dumps(charter_data, compress=True),
-            max_age=3600,  # 1 hour
-            httponly=True,
-            samesite="Lax",
-            secure=request.is_secure(),
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
         )
 
         return response
@@ -1037,10 +1071,15 @@ class LandingRedirectView(View):
 
         # Store the fbclid cookie if it exists
         try:
-            if 'fbclid' in request.GET and request.COOKIES.get('_fbc') is None:
-                fbc = f"fb.1.{int(datetime.now(timezone.utc).timestamp() * 1000)}.{request.GET['fbclid']}"
-                response.set_cookie('_fbc', fbc, max_age=60*60*24*90)
-                response.set_cookie('fbclid', request.GET['fbclid'], max_age=60*60*24*90)
+            fbclid = (request.GET.get("fbclid") or "").strip()
+            if fbclid:
+                existing_fbc = request.COOKIES.get("_fbc") or ""
+                existing_fbclid = existing_fbc.rsplit(".", 1)[-1] if existing_fbc.startswith("fb.1.") else ""
+                if existing_fbclid != fbclid:
+                    fbc = f"fb.1.{int(datetime.now(timezone.utc).timestamp() * 1000)}.{fbclid}"
+                    response.set_cookie("_fbc", fbc, max_age=60 * 60 * 24 * 90)
+                    record_fbc_synthesized(source="pages.views.landing_page_redirect")
+                response.set_cookie("fbclid", fbclid, max_age=60 * 60 * 24 * 90)
         except Exception as e:
             logger.error(f"Error setting fbclid cookie: {e}")
 
@@ -1235,6 +1274,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.STARTUP,
+            "checkout_source_url": urlsplit(request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL)._replace(query="", fragment="").geturl()[:500],
         }
 
         _emit_checkout_initiated_event(
@@ -1383,6 +1423,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.SCALE,
+            "checkout_source_url": urlsplit(request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL)._replace(query="", fragment="").geturl()[:500],
         }
 
         _emit_checkout_initiated_event(

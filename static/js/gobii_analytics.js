@@ -54,7 +54,7 @@ if (typeof window !== 'undefined') {
 }
 
 const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
-const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid'];
+const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'fbclid'];
 
 const LANDING_PARAM = 'g';
 
@@ -94,6 +94,33 @@ const LANDING_PARAM = 'g';
     const attrs = `; expires=${expiry.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
     document.cookie = `__click_first=${encodeURIComponent(JSON.stringify(found))}${attrs}`;
   }
+})();
+
+// Meta attribution fallbacks: synthesize _fbc from fbclid, generate _fbp when pixel is blocked
+(function () {
+  const params = new URLSearchParams(window.location.search);
+  const fbclid = params.get('fbclid');
+  const now = Date.now();
+  const expiry = new Date(now + 90 * 24 * 60 * 60 * 1000);
+  const attrs = `; expires=${expiry.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
+
+  // Synthesize _fbc when fbclid is present and _fbc is missing or for a different click
+  if (fbclid) {
+    const fbcMatch = document.cookie.match(/(?:^|;\s*)_fbc=([^;]*)/);
+    const existing = fbcMatch ? decodeURIComponent(fbcMatch[1]) : '';
+    const oldClickId = existing.startsWith('fb.1.') ? existing.split('.').slice(3).join('.') : '';
+    if (oldClickId !== fbclid) {
+      document.cookie = `_fbc=${encodeURIComponent('fb.1.' + now + '.' + fbclid)}${attrs}`;
+    }
+  }
+
+  // Generate _fbp if Meta Pixel hasn't set it (e.g. ad blocker).
+  // Short delay lets fbevents.js write it first when not blocked.
+  setTimeout(function () {
+    if (document.cookie.includes('_fbp=')) return;
+    const rand = (Math.floor(Math.random() * 9000000000) + 1000000000).toString();
+    document.cookie = `_fbp=${encodeURIComponent('fb.1.' + now + '.' + rand)}${attrs}`;
+  }, 1500);
 })();
 
 (function () {

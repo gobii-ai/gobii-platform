@@ -144,10 +144,13 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.signals.record_fbc_synthesized")
     @patch("pages.signals.capi")
     @patch("pages.signals.Analytics.track")
     @patch("pages.signals.Analytics.identify")
-    def test_signup_capi_synthesizes_fbc_from_session_fbclid(self, mock_identify, mock_track, mock_capi):
+    def test_signup_capi_synthesizes_fbc_from_session_fbclid(
+        self, mock_identify, mock_track, mock_capi, mock_record_fbc_synthesized
+    ):
         """When user lands with fbclid but signs up on a page without it, fbc should be synthesized.
 
         This improves Meta Event Match Quality by ensuring fbc is present even when
@@ -183,14 +186,25 @@ class UserSignedUpSignalTests(TestCase):
             click_ids["fbc"].endswith(".test-fbclid-from-session"),
             f"fbc should end with fbclid but was: {click_ids.get('fbc')}"
         )
+        fbc_timestamp = click_ids["fbc"].split(".")[2]
+        self.assertTrue(
+            fbc_timestamp.isdigit() and len(fbc_timestamp) == 13,
+            f"fbc timestamp should be a 13-digit millisecond value but was: {fbc_timestamp}"
+        )
         # fbclid should also be included
         self.assertEqual(click_ids.get("fbclid"), "test-fbclid-from-session")
+        mock_record_fbc_synthesized.assert_called_once_with(
+            source="pages.signals.handle_user_signed_up"
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.signals.record_fbc_synthesized")
     @patch("pages.signals.capi")
     @patch("pages.signals.Analytics.track")
     @patch("pages.signals.Analytics.identify")
-    def test_signup_capi_uses_existing_fbc_cookie_over_synthesis(self, mock_identify, mock_track, mock_capi):
+    def test_signup_capi_uses_existing_fbc_cookie_over_synthesis(
+        self, mock_identify, mock_track, mock_capi, mock_record_fbc_synthesized
+    ):
         """When _fbc cookie exists, use it instead of synthesizing from fbclid."""
         request = self.factory.get("/signup")
         request.META["REMOTE_ADDR"] = "198.51.100.24"
@@ -212,6 +226,7 @@ class UserSignedUpSignalTests(TestCase):
 
         # Should use existing _fbc cookie, not synthesize
         self.assertEqual(click_ids.get("fbc"), "fb.1.existing.cookie-fbc-value")
+        mock_record_fbc_synthesized.assert_not_called()
 
 
 @tag("batch_pages")
@@ -235,7 +250,8 @@ class BuildMarketingContextFromUserTests(TestCase):
             fbc="",  # No fbc stored
         )
 
-        context = _build_marketing_context_from_user(self.user)
+        with patch("pages.signals.record_fbc_synthesized") as mock_record_fbc_synthesized:
+            context = _build_marketing_context_from_user(self.user)
         click_ids = context.get("click_ids", {})
 
         # fbc should be synthesized
@@ -248,8 +264,16 @@ class BuildMarketingContextFromUserTests(TestCase):
             click_ids["fbc"].endswith(".test-fbclid-value"),
             f"fbc should end with fbclid but was: {click_ids.get('fbc')}"
         )
+        fbc_timestamp = click_ids["fbc"].split(".")[2]
+        self.assertTrue(
+            fbc_timestamp.isdigit() and len(fbc_timestamp) == 13,
+            f"fbc timestamp should be a 13-digit millisecond value but was: {fbc_timestamp}"
+        )
         # fbclid should also be included
         self.assertEqual(click_ids.get("fbclid"), "test-fbclid-value")
+        mock_record_fbc_synthesized.assert_called_once_with(
+            source="pages.signals.build_marketing_context_from_user"
+        )
 
     def test_uses_existing_fbc_over_synthesis(self):
         """When fbc already exists, don't synthesize from fbclid."""
@@ -261,11 +285,13 @@ class BuildMarketingContextFromUserTests(TestCase):
             fbclid="some-fbclid",
         )
 
-        context = _build_marketing_context_from_user(self.user)
+        with patch("pages.signals.record_fbc_synthesized") as mock_record_fbc_synthesized:
+            context = _build_marketing_context_from_user(self.user)
         click_ids = context.get("click_ids", {})
 
         # Should use existing fbc
         self.assertEqual(click_ids.get("fbc"), "fb.1.existing.stored-fbc")
+        mock_record_fbc_synthesized.assert_not_called()
 
     def test_includes_fbp_in_context(self):
         """fbp (Browser ID) should be included in click_ids."""

@@ -10,7 +10,7 @@ from django.core import signing
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from api.models import BrowserUseAgent, PersistentAgent
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_CHARTER_COOKIE
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -320,6 +320,38 @@ class LandingPageRedirectTests(TestCase):
         self.assertEqual(params.get("utm_medium"), ["email"])
         self.assertEqual(params.get("fbclid"), ["abc123"])
 
+    @tag("batch_pages")
+    @patch("pages.views.record_fbc_synthesized")
+    def test_landing_redirect_refreshes_fbc_when_fbclid_changes(self, mock_record_fbc_synthesized):
+        lp = LandingPage.objects.create(charter="x")
+        self.client.cookies["_fbc"] = "fb.1.1111111111111.old-click"
+
+        resp = self.client.get(f"/g/{lp.code}/", {"fbclid": "new-click"})
+        self.assertEqual(resp.status_code, 302)
+
+        self.assertIn("_fbc", resp.cookies)
+        self.assertIn("fbclid", resp.cookies)
+        self.assertTrue(resp.cookies["_fbc"].value.startswith("fb.1."))
+        self.assertTrue(resp.cookies["_fbc"].value.endswith(".new-click"))
+        self.assertEqual(resp.cookies["fbclid"].value, "new-click")
+        mock_record_fbc_synthesized.assert_called_once_with(
+            source="pages.views.landing_page_redirect"
+        )
+
+    @tag("batch_pages")
+    @patch("pages.views.record_fbc_synthesized")
+    def test_landing_redirect_does_not_rotate_fbc_for_same_fbclid(self, mock_record_fbc_synthesized):
+        lp = LandingPage.objects.create(charter="x")
+        self.client.cookies["_fbc"] = "fb.1.1111111111111.same-click"
+
+        resp = self.client.get(f"/g/{lp.code}/", {"fbclid": "same-click"})
+        self.assertEqual(resp.status_code, 302)
+
+        self.assertNotIn("_fbc", resp.cookies)
+        self.assertIn("fbclid", resp.cookies)
+        self.assertEqual(resp.cookies["fbclid"].value, "same-click")
+        mock_record_fbc_synthesized.assert_not_called()
+
 
 @tag("batch_pages")
 class RobotsTxtTests(TestCase):
@@ -408,6 +440,12 @@ class PretrainedWorkerHireRedirectTests(TestCase):
 
         session = self.client.session
         session["utm_querystring"] = "utm_medium=ads"
+        session["utm_first_touch"] = {"utm_source": "meta", "utm_medium": "paid_social"}
+        session["utm_last_touch"] = {"utm_source": "meta", "utm_campaign": "retargeting"}
+        session["click_ids_first"] = {"gclid": "first-gclid"}
+        session["click_ids_last"] = {"gclid": "last-gclid"}
+        session["fbclid_first"] = "first-fbclid"
+        session["fbclid_last"] = "last-fbclid"
         session.save()
 
         response = self.client.post(
@@ -425,6 +463,29 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         next_params = parse_qs(next_parts.query)
         self.assertEqual(next_params.get("spawn"), ["1"])
         self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+        charter_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        self.assertEqual(charter_payload.get("agent_charter"), template.charter)
+        self.assertNotIn("utm_first_touch", charter_payload)
+        self.assertNotIn("utm_last_touch", charter_payload)
+
+        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
+        self.assertEqual(
+            attribution_payload.get("utm_first_touch"),
+            {"utm_source": "meta", "utm_medium": "paid_social"},
+        )
+        self.assertEqual(
+            attribution_payload.get("utm_last_touch"),
+            {"utm_source": "meta", "utm_campaign": "retargeting"},
+        )
+        self.assertEqual(attribution_payload.get("click_ids_first"), {"gclid": "first-gclid"})
+        self.assertEqual(attribution_payload.get("click_ids_last"), {"gclid": "last-gclid"})
+        self.assertEqual(attribution_payload.get("fbclid_first"), "first-fbclid")
+        self.assertEqual(attribution_payload.get("fbclid_last"), "last-fbclid")
+        self.assertEqual(attribution_payload.get("utm_querystring"), "utm_medium=ads")
 
     @tag("batch_pages")
     def test_hire_redirects_to_login_for_pro_flow(self):
@@ -474,8 +535,11 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         )
         self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
         self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+        self.assertEqual(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, "")
+        self.assertEqual(int(response.cookies[OAUTH_ATTRIBUTION_COOKIE]["max-age"]), 0)
 
-        cookie_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=3600)
+        cookie_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
         self.assertTrue(cookie_payload.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
         self.assertEqual(
             cookie_payload.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),

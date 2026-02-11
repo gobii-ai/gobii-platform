@@ -1,6 +1,7 @@
 import time
 
 from util.analytics import Analytics
+from marketing_events.telemetry import record_fbc_synthesized
 
 
 def _client_ip(request):
@@ -33,8 +34,9 @@ def extract_click_context(request):
     fbc = c.get("_fbc")
     fbclid = q.get("fbclid")
     if not fbc and fbclid:
-        # synthesize per Meta guidance: fb.1.<ts>.<fbclid>
-        fbc = f"fb.1.{int(time.time())}.{fbclid}"
+        # synthesize per Meta guidance: fb.1.<ts_ms>.<fbclid>
+        fbc = f"fb.1.{int(time.time() * 1000)}.{fbclid}"
+        record_fbc_synthesized(source="marketing_events.context.extract_click_context")
 
     rdt_cid = q.get("rdt_cid") or q.get("rdt_click_id")
     ttclid = q.get("ttclid") or q.get("tt_click_id")

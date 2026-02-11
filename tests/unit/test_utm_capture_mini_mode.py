@@ -1,3 +1,5 @@
+from urllib.parse import parse_qs
+
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, tag
@@ -83,3 +85,25 @@ class UTMCaptureMiniModeTests(TestCase):
         self.assertEqual(cookie.value, "")
         self.assertEqual(int(cookie["max-age"]), 0)
         self.assertEqual(cookie["samesite"], "Lax")
+
+    def test_click_ids_first_preserved_when_last_touch_updates(self):
+        first_request = self._build_request("/?gclid=first-gclid&msclkid=first-msclkid")
+        self.middleware(first_request)
+
+        second_request = self.factory.get("/?gclid=last-gclid&msclkid=last-msclkid")
+        second_request.session = first_request.session
+        self.middleware(second_request)
+
+        self.assertEqual(
+            second_request.session.get("click_ids_first"),
+            {"gclid": "first-gclid", "msclkid": "first-msclkid"},
+        )
+        self.assertEqual(
+            second_request.session.get("click_ids_last"),
+            {"gclid": "last-gclid", "msclkid": "last-msclkid"},
+        )
+
+        querystring = second_request.session.get("utm_querystring", "")
+        params = parse_qs(querystring)
+        self.assertEqual(params.get("gclid"), ["last-gclid"])
+        self.assertEqual(params.get("msclkid"), ["last-msclkid"])

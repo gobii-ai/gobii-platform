@@ -35,6 +35,7 @@ from tasks.services import TaskCreditService
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from marketing_events.api import capi
 from marketing_events.context import extract_click_context
+from marketing_events.telemetry import record_fbc_synthesized
 import logging
 import stripe
 
@@ -561,8 +562,11 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     if fbc:
         click_ids["fbc"] = fbc
     elif fbclid:
-        # Synthesize fbc from fbclid if fbc is missing (improves Meta Event Match Quality)
-        click_ids["fbc"] = f"fb.1.{int(timezone.now().timestamp())}.{fbclid}"
+        # Use first_touch_at for a timestamp closer to the actual ad click
+        touch_ts = getattr(attribution, "first_touch_at", None)
+        ts_ms = int(touch_ts.timestamp() * 1000) if touch_ts else int(timezone.now().timestamp() * 1000)
+        click_ids["fbc"] = f"fb.1.{ts_ms}.{fbclid}"
+        record_fbc_synthesized(source="pages.signals.build_marketing_context_from_user")
     if fbclid:
         click_ids["fbclid"] = fbclid
     if fbp:
@@ -1082,6 +1086,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
 
         event_timestamp = timezone.now()
         event_timestamp_unix = int(event_timestamp.timestamp())
+        event_timestamp_ms = int(event_timestamp.timestamp() * 1000)
 
         Analytics.track(
             user_id=str(user.id),
@@ -1135,9 +1140,16 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                 # No fbc from cookies or extract_click_context, try to synthesize from fbclid
                 stored_fbclid = fbclid_cookie  # includes session fallback from lines 750-753
                 if stored_fbclid:
-                    click_ids['fbc'] = f"fb.1.{event_timestamp_unix}.{stored_fbclid}"
+                    synthesized_fbc = f"fb.1.{event_timestamp_ms}.{stored_fbclid}"
+                    click_ids['fbc'] = synthesized_fbc
                     click_ids['fbclid'] = stored_fbclid
                     marketing_context['click_ids'] = click_ids
+                    record_fbc_synthesized(source="pages.signals.handle_user_signed_up")
+                    # Persist so webhook events use the stored value instead of re-synthesizing
+                    try:
+                        UserAttribution.objects.filter(user=user).update(fbc=synthesized_fbc)
+                    except Exception:
+                        logger.warning("Failed to persist synthesized fbc for user %s", user.id, exc_info=True)
             elif fbc_cookie and not click_ids.get('fbc'):
                 # fbc exists in cookie but wasn't captured by extract_click_context
                 click_ids['fbc'] = fbc_cookie
@@ -1505,12 +1517,16 @@ def handle_invoice_payment_succeeded(event, **kwargs):
 
                 marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
 
+                subscribe_context = _build_marketing_context_from_user(owner) if owner_type == "user" else {}
+                checkout_source_url = metadata.get("checkout_source_url")
+                if checkout_source_url:
+                    subscribe_context["page"] = {"url": checkout_source_url}
                 capi(
                     user=owner,
                     event_name="Subscribe",
                     properties=marketing_properties,
                     request=None,
-                    context=_build_marketing_context_from_user(owner) if owner_type == "user" else {},
+                    context=subscribe_context,
                 )
         except Exception:
             logger.exception(
@@ -1735,12 +1751,14 @@ def handle_subscription_event(event, **kwargs):
                         "churn_stage": "voluntary",
                     }
                     cancel_properties = {k: v for k, v in cancel_properties.items() if v is not None}
+                    cancel_context = dict(marketing_context)
+                    cancel_context["page"] = {"url": f"{settings.PUBLIC_SITE_URL.rstrip('/')}/console/billing/"}
                     capi(
                         user=owner,
                         event_name="CancelSubscription",
                         properties=cancel_properties,
                         request=None,
-                        context=marketing_context,
+                        context=cancel_context,
                     )
                 except Exception:
                     logger.exception(
@@ -2072,6 +2090,9 @@ def handle_subscription_event(event, **kwargs):
                     if not suppress_marketing_event:
                         try:
                             if analytics_event != AnalyticsEvent.SUBSCRIPTION_RENEWED and sub.status == "trialing":
+                                checkout_source_url = subscription_metadata.get("checkout_source_url")
+                                if checkout_source_url:
+                                    marketing_context["page"] = {"url": checkout_source_url}
                                 capi(
                                     user=owner,
                                     event_name="StartTrial",
