@@ -43,6 +43,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
       - name: Bump version
         env:
           BUMP: ${{ inputs.bump }}
@@ -143,12 +146,16 @@ jobs:
           print(f"Bumped version to {new_version}")
           PY
 
+      - name: Update uv lockfile
+        run: |
+          uv lock
+
       - name: Commit version bump
         run: |
           NEW_VERSION="$(printf '%s' "$NEW_VERSION" | tr -d '\r\n')"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml frontend/package.json
+          git add pyproject.toml uv.lock frontend/package.json
           git commit -m "chore(release): ${NEW_VERSION}"
           git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
 
