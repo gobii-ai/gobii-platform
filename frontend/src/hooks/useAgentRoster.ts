@@ -21,7 +21,6 @@ export function useAgentRoster(options?: UseAgentRosterOptions) {
     refetchOnWindowFocus: false,
     refetchInterval: refetchIntervalMs,
     refetchIntervalInBackground: false,
-    placeholderData: (previousData) => previousData,
     enabled,
   })
 }

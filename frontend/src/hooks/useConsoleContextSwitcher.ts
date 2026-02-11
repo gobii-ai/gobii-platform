@@ -6,7 +6,7 @@ import {
   type ConsoleContext,
   type ConsoleContextData,
 } from '../api/context'
-import { storeConsoleContext } from '../util/consoleContextStorage'
+import { readStoredConsoleContext, storeConsoleContext } from '../util/consoleContextStorage'
 
 type UseConsoleContextSwitcherOptions = {
   enabled?: boolean
@@ -58,7 +58,15 @@ export function useConsoleContextSwitcher({
       }
       setData(payload)
       setIsLoading(false)
-      storeConsoleContext(payload.context)
+      const stored = readStoredConsoleContext()
+      if (
+        !stored
+        || stored.type !== payload.context.type
+        || stored.id !== payload.context.id
+        || (stored.name ?? null) !== (payload.context.name ?? null)
+      ) {
+        storeConsoleContext(payload.context)
+      }
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) {
         return

@@ -26,7 +26,6 @@ import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
-import { storeConsoleContext } from '../util/consoleContextStorage'
 import { track, AnalyticsEvent } from '../util/analytics'
 import { appendReturnTo } from '../util/returnTo'
 
@@ -452,6 +451,7 @@ export function AgentChatPage({
   onContextSwitch,
 }: AgentChatPageProps) {
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
+  const routeAgentId = typeof agentId === 'string' ? agentId : null
   const {
     data: quickSettingsPayload,
     isLoading: quickSettingsLoading,
@@ -479,7 +479,6 @@ export function AgentChatPage({
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey; charterOverride?: string | null } | null>(null)
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
-  const [fallbackContext, setFallbackContext] = useState<ConsoleContext | null>(null)
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
@@ -500,10 +499,9 @@ export function AgentChatPage({
     isSwitching: contextSwitching,
     error: contextError,
     switchContext,
-    refresh: refreshContext,
   } = useConsoleContextSwitcher({
-    enabled: showContextSwitcher,
-    forAgentId: typeof agentId === 'string' ? agentId : undefined,
+    enabled: true,
+    forAgentId: routeAgentId ?? undefined,
     onSwitched: handleContextSwitched,
     persistSession: persistContextSession,
   })
@@ -513,8 +511,7 @@ export function AgentChatPage({
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
-  const switcherContext = contextData?.context ?? null
-  const effectiveContext = showContextSwitcher ? switcherContext : (fallbackContext ?? switcherContext)
+  const effectiveContext = contextData?.context ?? null
   const contextReady = Boolean(effectiveContext)
   const agentContextReady = contextReady
   const liveAgentId = contextSwitching || !agentContextReady ? null : activeAgentId
@@ -702,7 +699,7 @@ export function AgentChatPage({
   })
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
-  const rosterQueryAgentId = effectiveContext ? undefined : (agentId ?? undefined)
+  const rosterQueryAgentId = routeAgentId ?? undefined
   const hasPendingAvatarTracking = Object.keys(pendingAvatarTracking).length > 0
   const rosterRefreshIntervalMs = hasPendingAvatarTracking
     ? ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS
@@ -738,21 +735,6 @@ export function AgentChatPage({
     }
     setPendingAvatarTracking((current) => prunePendingAvatarTracking(current, rosterQuery.data.agents))
   }, [rosterQuery.data?.agents])
-
-  useEffect(() => {
-    if (showContextSwitcher) {
-      return
-    }
-    if (!rosterQuery.isSuccess || !rosterQuery.data?.context) {
-      return
-    }
-    const next = rosterQuery.data.context
-    if (sameConsoleContext(fallbackContext, next)) {
-      return
-    }
-    setFallbackContext(next)
-    storeConsoleContext(next)
-  }, [fallbackContext, rosterQuery.data?.context, rosterQuery.isSuccess, showContextSwitcher])
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   // Sync ref during render (not in useEffect) so ResizeObservers see updated value immediately
@@ -843,9 +825,6 @@ export function AgentChatPage({
         agentName: resolvedPendingMeta?.agentName ?? agentName,
         agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
       })
-      if (showContextSwitcher) {
-        void refreshContext()
-      }
     }
     void run()
     // Fetch insights when agent initializes
@@ -858,9 +837,6 @@ export function AgentChatPage({
     fetchInsights,
     initialize,
     agentContextReady,
-    persistContextSession,
-    refreshContext,
-    showContextSwitcher,
   ])
 
   // IntersectionObserver-based bottom detection - simpler and more reliable than scroll math
@@ -1184,8 +1160,7 @@ export function AgentChatPage({
   ])
 
   const rosterContextMismatch = Boolean(
-    showContextSwitcher
-      && effectiveContext
+    effectiveContext
       && rosterQuery.data?.context
       && !sameConsoleContext(rosterQuery.data.context, effectiveContext),
   )
@@ -1282,6 +1257,9 @@ export function AgentChatPage({
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
   const rosterLoading = rosterQuery.isLoading || !agentContextReady || rosterContextMismatch
   const contextSwitcher = useMemo(() => {
+    if (!showContextSwitcher) {
+      return null
+    }
     if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
       return null
     }
@@ -1293,7 +1271,7 @@ export function AgentChatPage({
       isBusy: contextSwitching,
       errorMessage: contextError,
     }
-  }, [contextData, contextError, contextSwitching, switchContext])
+  }, [contextData, contextError, contextSwitching, showContextSwitcher, switchContext])
   const connectionIndicator = useMemo(
     () => {
       // For new agent, show ready state since there's no socket/session yet
@@ -1767,29 +1745,6 @@ export function AgentChatPage({
     }, STREAMING_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(interval)
   }, [allowAgentRefresh, refreshProcessing, timelineStreaming])
-
-  useEffect(() => {
-    if (
-      contextSwitching ||
-      !showContextSwitcher ||
-      !activeAgentId ||
-      !contextReady ||
-      rosterContextMismatch ||
-      !rosterQuery.isSuccess
-    ) {
-      return
-    }
-    void refreshContext()
-  }, [
-    activeAgentId,
-    contextReady,
-    contextSwitching,
-    refreshContext,
-    rosterContextMismatch,
-    rosterQuery.dataUpdatedAt,
-    rosterQuery.isSuccess,
-    showContextSwitcher,
-  ])
 
   useEffect(() => {
     if (!allowAgentRefresh || !timelineStreaming || timelineStreaming.done) {
