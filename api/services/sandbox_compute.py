@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, Optional
@@ -759,26 +760,90 @@ class SandboxComputeService:
         )
         _select_proxy_for_session(agent, session)
         started = session.state != AgentComputeSession.State.RUNNING
+        bootstrap_started_at = time.monotonic()
         if started:
+            deploy_started_at = time.monotonic()
             update = self._backend.deploy_or_resume(agent, session)
+            deploy_duration_ms = int(round((time.monotonic() - deploy_started_at) * 1000))
             if not update.state:
                 update.state = AgentComputeSession.State.RUNNING
             self._apply_session_update(session, update)
+            logger.info(
+                (
+                    "Sandbox bootstrap deploy_or_resume agent=%s source=%s duration_ms=%s "
+                    "state=%s pod=%s namespace=%s"
+                ),
+                agent.id,
+                source,
+                deploy_duration_ms,
+                update.state,
+                update.pod_name or session.pod_name,
+                update.namespace or session.namespace,
+            )
+            pull_started_at = time.monotonic()
             sync_result = self._sync_workspace_pull(agent, session)
+            pull_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
+            pull_status = sync_result.get("status") if isinstance(sync_result, dict) else "skipped"
+            logger.info(
+                "Sandbox bootstrap initial_pull agent=%s source=%s duration_ms=%s status=%s",
+                agent.id,
+                source,
+                pull_duration_ms,
+                pull_status,
+            )
             if sync_result and sync_result.get("status") != "ok":
                 logger.warning("Sandbox pull sync failed agent=%s result=%s", agent.id, sync_result)
         self._touch_session(session, source=source)
+        if started:
+            logger.info(
+                "Sandbox bootstrap complete agent=%s source=%s total_duration_ms=%s",
+                agent.id,
+                source,
+                int(round((time.monotonic() - bootstrap_started_at) * 1000)),
+            )
         return session
 
     def _sync_workspace_pull(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
         if isinstance(self._backend, LocalSandboxBackend):
             return None
+        pull_started_at = time.monotonic()
         manifest = build_filespace_pull_manifest(agent)
+        manifest_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
         if manifest.get("status") != "ok":
+            logger.warning(
+                "Sandbox pull manifest failed agent=%s duration_ms=%s status=%s result=%s",
+                agent.id,
+                manifest_duration_ms,
+                manifest.get("status"),
+                manifest,
+            )
             return manifest
         files = manifest.get("files") or []
+        logger.info(
+            "Sandbox pull manifest built agent=%s files=%s duration_ms=%s",
+            agent.id,
+            len(files),
+            manifest_duration_ms,
+        )
         payload = {"files": files}
+        backend_started_at = time.monotonic()
         response = self._backend.sync_filespace(agent, session, direction="pull", payload=payload)
+        backend_duration_ms = int(round((time.monotonic() - backend_started_at) * 1000))
+        total_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
+        logger.info(
+            (
+                "Sandbox pull sync completed agent=%s files=%s status=%s "
+                "backend_duration_ms=%s total_duration_ms=%s applied=%s skipped=%s conflicts=%s"
+            ),
+            agent.id,
+            len(files),
+            response.get("status"),
+            backend_duration_ms,
+            total_duration_ms,
+            response.get("applied"),
+            response.get("skipped"),
+            response.get("conflicts"),
+        )
         return response
 
     def _sync_workspace_push(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:

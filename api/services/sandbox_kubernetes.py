@@ -515,19 +515,46 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             logger.warning("Failed to delete egress proxy service %s: %s", service_name, exc)
 
     def _wait_for_pod_ready(self, pod_name: str) -> bool:
+        started_at = time.monotonic()
         deadline = time.time() + self._pod_ready_timeout
+        attempts = 0
+        last_phase = None
         while time.time() < deadline:
+            attempts += 1
             pod = self._get_pod(pod_name)
             if not pod:
                 time.sleep(2)
                 continue
             status = pod.get("status") or {}
             phase = status.get("phase")
+            if phase != last_phase:
+                logger.info(
+                    "Sandbox pod readiness progress pod=%s phase=%s attempts=%s elapsed_ms=%s",
+                    pod_name,
+                    phase,
+                    attempts,
+                    int(round((time.monotonic() - started_at) * 1000)),
+                )
+                last_phase = phase
             if phase == "Running":
                 for condition in status.get("conditions", []):
                     if condition.get("type") == "Ready" and condition.get("status") == "True":
+                        logger.info(
+                            "Sandbox pod ready pod=%s attempts=%s elapsed_ms=%s",
+                            pod_name,
+                            attempts,
+                            int(round((time.monotonic() - started_at) * 1000)),
+                        )
                         return True
             time.sleep(2)
+        logger.warning(
+            "Sandbox pod readiness timeout pod=%s attempts=%s elapsed_ms=%s timeout_seconds=%s last_phase=%s",
+            pod_name,
+            attempts,
+            int(round((time.monotonic() - started_at) * 1000)),
+            self._pod_ready_timeout,
+            last_phase,
+        )
         return False
 
     def _wait_for_snapshot_ready(self, snapshot_name: str) -> bool:
