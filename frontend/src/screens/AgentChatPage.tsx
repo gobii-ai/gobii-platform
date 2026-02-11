@@ -479,7 +479,7 @@ export function AgentChatPage({
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey; charterOverride?: string | null } | null>(null)
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
-  const [resolvedContext, setResolvedContext] = useState<ConsoleContext | null>(null)
+  const [fallbackContext, setFallbackContext] = useState<ConsoleContext | null>(null)
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
@@ -512,9 +512,10 @@ export function AgentChatPage({
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
-  const effectiveContext = resolvedContext ?? contextData?.context ?? null
+  const switcherContext = contextData?.context ?? null
+  const effectiveContext = showContextSwitcher ? switcherContext : (fallbackContext ?? switcherContext)
   const contextReady = Boolean(effectiveContext)
-  const agentContextReady = activeAgentId ? Boolean(resolvedContext) : contextReady
+  const agentContextReady = contextReady
   const liveAgentId = contextSwitching || !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
@@ -700,7 +701,7 @@ export function AgentChatPage({
   })
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
-  const rosterQueryAgentId = resolvedContext ? undefined : (agentId ?? undefined)
+  const rosterQueryAgentId = effectiveContext ? undefined : (agentId ?? undefined)
   const hasPendingAvatarTracking = Object.keys(pendingAvatarTracking).length > 0
   const rosterRefreshIntervalMs = hasPendingAvatarTracking
     ? ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS
@@ -738,32 +739,19 @@ export function AgentChatPage({
   }, [rosterQuery.data?.agents])
 
   useEffect(() => {
-    if (!contextData?.context) {
+    if (showContextSwitcher) {
       return
     }
-    const next = contextData.context
-    if (
-      (!agentId || contextSwitching) &&
-      (resolvedContext?.id !== next.id || resolvedContext?.type !== next.type)
-    ) {
-      setResolvedContext(next)
-    }
-  }, [agentId, contextData?.context, contextSwitching, resolvedContext])
-
-  useEffect(() => {
-    if (rosterQuery.isSuccess && rosterQuery.data?.context) {
-      setResolvedContext(rosterQuery.data.context)
-      storeConsoleContext(rosterQuery.data.context)
+    if (!rosterQuery.isSuccess || !rosterQuery.data?.context) {
       return
     }
-    if (rosterQuery.isError && contextData?.context) {
-      const next = contextData.context
-      if (resolvedContext?.id !== next.id || resolvedContext?.type !== next.type) {
-        // Use current console context as fallback so roster failures don't block chat init.
-        setResolvedContext(next)
-      }
+    const next = rosterQuery.data.context
+    if (sameConsoleContext(fallbackContext, next)) {
+      return
     }
-  }, [contextData?.context, resolvedContext, rosterQuery.isError, rosterQuery.isSuccess, rosterQuery.data?.context])
+    setFallbackContext(next)
+    storeConsoleContext(next)
+  }, [fallbackContext, rosterQuery.data?.context, rosterQuery.isSuccess, showContextSwitcher])
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   // Sync ref during render (not in useEffect) so ResizeObservers see updated value immediately
@@ -1194,9 +1182,15 @@ export function AgentChatPage({
     timelineAwaitingResponse,
   ])
 
+  const rosterContextMismatch = Boolean(
+    showContextSwitcher
+      && effectiveContext
+      && rosterQuery.data?.context
+      && !sameConsoleContext(rosterQuery.data.context, effectiveContext),
+  )
   const rosterAgents = useMemo(
-    () => (contextReady ? rosterQuery.data?.agents ?? [] : []),
-    [contextReady, rosterQuery.data?.agents],
+    () => (contextReady && !rosterContextMismatch ? rosterQuery.data?.agents ?? [] : []),
+    [contextReady, rosterContextMismatch, rosterQuery.data?.agents],
   )
   const activeRosterMeta = useMemo(
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
@@ -1284,8 +1278,8 @@ export function AgentChatPage({
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(timelineEvents), [timelineEvents])
   const hasSelectedAgent = Boolean(activeAgentId)
-  const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady
-  const rosterLoading = rosterQuery.isLoading || !agentContextReady
+  const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
+  const rosterLoading = rosterQuery.isLoading || !agentContextReady || rosterContextMismatch
   const contextSwitcher = useMemo(() => {
     if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
       return null
@@ -1534,7 +1528,7 @@ export function AgentChatPage({
     // Not applicable for new agent creation
     if (isNewAgent) return false
     // Wait for both roster and initial load to complete
-    if (rosterQuery.isLoading || initialLoading) return false
+    if (rosterQuery.isLoading || initialLoading || rosterContextMismatch) return false
     // Check if agent exists in roster
     const agentInRoster = rosterAgents.some((agent) => agent.id === activeAgentId)
     // If there's an error loading the agent AND it's not in the roster, it's not found
@@ -1543,7 +1537,7 @@ export function AgentChatPage({
     // If roster loaded, agent isn't in roster, and we have no events (failed to load), mark as not found
     if (!agentInRoster && !loading && timelineEvents.length === 0) return true
     return false
-  }, [contextReady, isNewAgent, rosterQuery.isLoading, initialLoading, rosterAgents, activeAgentId, error, loading, timelineEvents.length])
+  }, [activeAgentId, contextReady, error, initialLoading, isNewAgent, loading, rosterAgents, rosterContextMismatch, rosterQuery.isLoading, timelineEvents.length])
 
   useEffect(() => {
     if (!switchingAgentId) {
@@ -1779,7 +1773,7 @@ export function AgentChatPage({
       !showContextSwitcher ||
       !activeAgentId ||
       !contextReady ||
-      !resolvedContext ||
+      rosterContextMismatch ||
       !rosterQuery.isSuccess
     ) {
       return
@@ -1789,8 +1783,8 @@ export function AgentChatPage({
     activeAgentId,
     contextReady,
     contextSwitching,
-    resolvedContext,
     refreshContext,
+    rosterContextMismatch,
     rosterQuery.dataUpdatedAt,
     rosterQuery.isSuccess,
     showContextSwitcher,
@@ -2110,7 +2104,7 @@ export function AgentChatPage({
     if (spawnIntent.onboarding_target === 'api_keys') {
       return
     }
-    if (!contextReady || rosterQuery.isLoading) {
+    if (!contextReady || rosterQuery.isLoading || rosterContextMismatch) {
       return
     }
     if (spawnIntentAutoSubmittedRef.current) {
@@ -2143,6 +2137,7 @@ export function AgentChatPage({
     handleSend,
     isNewAgent,
     llmIntelligence,
+    rosterContextMismatch,
     rosterQuery.isLoading,
     spawnFlow,
     spawnIntent,
