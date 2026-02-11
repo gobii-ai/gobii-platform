@@ -250,7 +250,12 @@ export function AgentChatLayout({
     isProprietaryMode,
     openUpgradeModal,
     ensureAuthenticated,
+    trialDaysByPlan,
   } = useSubscriptionStore()
+  const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
+  const useTrialUpgradeCopy = maxTrialDays > 0 && (upgradeModalSource === 'trial_onboarding' || subscriptionPlan === 'free')
+  const upgradeTitle = useTrialUpgradeCopy ? `Start ${maxTrialDays}-day Free Trial` : 'Upgrade your plan'
+  const upgradeSubtitle = useTrialUpgradeCopy ? 'Choose your plan to continue' : 'Choose the plan that fits your needs'
   const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.innerWidth < 768
@@ -925,10 +930,10 @@ export function AgentChatLayout({
           <AgentChatMobileSheet
             open={isUpgradeModalOpen}
             onClose={handleUpgradeModalDismiss}
-            title="Upgrade your plan"
-            subtitle="Choose the plan that fits your needs"
+            title={upgradeTitle}
+            subtitle={upgradeSubtitle}
             icon={Zap}
-            ariaLabel="Upgrade your plan"
+            ariaLabel={upgradeTitle}
             bodyPadding={false}
           >
             <SubscriptionUpgradePlans
