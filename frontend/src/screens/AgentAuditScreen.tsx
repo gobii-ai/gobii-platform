@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   ChevronDown,
   ChevronUp,
+  Download,
   ListChevronsDownUp,
   ListChevronsUpDown,
   Megaphone,
@@ -151,6 +152,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [agentSearchError, setAgentSearchError] = useState<string | null>(null)
   const pendingMessageScrollId = useRef<string | null>(null)
   useAgentAuditSocket(agentId)
+  const auditExportUrl = useMemo(() => `/console/api/staff/agents/${agentId}/audit/export/`, [agentId])
 
   useEffect(() => {
     initialize(agentId)
@@ -636,6 +638,14 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                 <Settings className="h-4 w-4" aria-hidden />
               </a>
             ) : null}
+            <a
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+              href={auditExportUrl}
+              title="Download audit export zip"
+              aria-label="Download audit export zip"
+            >
+              <Download className="h-4 w-4" aria-hidden />
+            </a>
             <button
               type="button"
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"

@@ -6,6 +6,8 @@ import secrets
 import time
 import uuid
 import base64
+import io
+import zipfile
 from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -18,8 +20,9 @@ from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
-from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -80,6 +83,7 @@ from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
 from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
+from console.agent_audit.export import build_agent_audit_export_payload
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
 from console.agent_chat.timeline import compute_processing_status
@@ -1228,6 +1232,42 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
                 },
             }
         )
+
+
+class StaffAgentAuditExportAPIView(SystemAdminAPIView):
+    """Build and return a downloadable zip export for staff audit review."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        payload = build_agent_audit_export_payload(agent)
+        payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        payload_bytes = payload_json.encode("utf-8")
+        payload_b64 = base64.b64encode(payload_bytes).decode("ascii")
+
+        html = render_to_string(
+            "console/staff_agent_audit_export.html",
+            {
+                "agent_name": agent.name or "Agent",
+                "generated_at": payload.get("exported_at"),
+                "payload_b64": payload_b64,
+            },
+        )
+
+        archive_buffer = io.BytesIO()
+        with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("index.html", html.encode("utf-8"))
+            archive.writestr("audit-data.json", payload_bytes)
+        archive_buffer.seek(0)
+
+        timestamp_label = timezone.now().strftime("%Y%m%dT%H%M%SZ")
+        base_name = get_valid_filename(agent.name or "") or f"agent_{agent.id}"
+        filename = f"{base_name}_audit_export_{timestamp_label}.zip"
+
+        response = HttpResponse(archive_buffer.getvalue(), content_type="application/zip")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
 
 
 class StaffAgentAuditTimelineAPIView(SystemAdminAPIView):
