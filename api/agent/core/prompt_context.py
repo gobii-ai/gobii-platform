@@ -3429,7 +3429,7 @@ def _get_system_instruction(
             "- Peer agents: `send_agent_message()`\n\n"
             "For file attachments, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms; "
             "do not paste file paths into the message body unless you want them shown as text.\n\n"
-            "Never send internal monologue, thinking content, or self-correction text in your message\n\n"
+            "Never send internal monologue, thinking content, or self-correction text in your message. Write only the final, polished message you want the user to see.\n\n"
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
