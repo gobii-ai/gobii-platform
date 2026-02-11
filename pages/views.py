@@ -1,5 +1,5 @@
 from datetime import timezone, datetime
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from types import SimpleNamespace
 import uuid
 
@@ -1274,7 +1274,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.STARTUP,
-            "checkout_source_url": request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL,
+            "checkout_source_url": urlsplit(request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL)._replace(query="", fragment="").geturl()[:500],
         }
 
         _emit_checkout_initiated_event(
@@ -1423,7 +1423,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.SCALE,
-            "checkout_source_url": request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL,
+            "checkout_source_url": urlsplit(request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL)._replace(query="", fragment="").geturl()[:500],
         }
 
         _emit_checkout_initiated_event(
