@@ -120,6 +120,7 @@ from console.agent_chat.timeline import (
 )
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
+from console.agent_context import resolve_context_override_for_agent
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
@@ -1645,54 +1646,12 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def _resolve_override_for_agent(self, request: HttpRequest, agent_id: str) -> tuple[dict[str, str] | None, JsonResponse | None]:
-        try:
-            agent = (
-                PersistentAgent.objects.non_eval()
-                .select_related("organization")
-                .get(pk=agent_id)
-            )
-        except PersistentAgent.DoesNotExist:
+        override, error_code = resolve_context_override_for_agent(request.user, agent_id)
+        if error_code == "not_found":
             return None, JsonResponse({"error": "Agent not found"}, status=404)
-
-        if agent.organization_id:
-            membership = (
-                OrganizationMembership.objects.select_related("org")
-                .filter(
-                    user=request.user,
-                    org_id=agent.organization_id,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                )
-                .first()
-            )
-            if membership is None:
-                if user_is_collaborator(request.user, agent):
-                    return None, None
-                return None, JsonResponse({"error": "Not permitted"}, status=403)
-            return (
-                {
-                    "type": "organization",
-                    "id": str(agent.organization_id),
-                    "name": membership.org.name,
-                },
-                None,
-            )
-
-        if agent.user_id != request.user.id:
-            if user_is_collaborator(request.user, agent):
-                return None, None
+        if error_code == "forbidden":
             return None, JsonResponse({"error": "Not permitted"}, status=403)
-
-        return (
-            {
-                "type": "personal",
-                "id": str(agent.user_id),
-                "name": request.user.get_full_name()
-                or request.user.username
-                or request.user.email
-                or "Personal",
-            },
-            None,
-        )
+        return override, None
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         override = get_context_override(request)

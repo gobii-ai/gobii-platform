@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import {keepPreviousData, useQuery} from '@tanstack/react-query'
 
 import { fetchAgentRoster } from '../api/agents'
 
@@ -17,11 +17,11 @@ export function useAgentRoster(options?: UseAgentRosterOptions) {
   return useQuery({
     queryKey: ['agent-roster', contextKey, forAgentId ?? null],
     queryFn: () => fetchAgentRoster({ forAgentId }),
+    placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     refetchInterval: refetchIntervalMs,
     refetchIntervalInBackground: false,
-    placeholderData: (previousData) => previousData,
     enabled,
   })
 }

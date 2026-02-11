@@ -6,6 +6,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from waffle import flag_is_active
 
 from api.models import OrganizationMembership
+from console.agent_context import resolve_context_override_for_agent
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
 
@@ -15,6 +16,16 @@ class SwitchContextView(LoginRequiredMixin, View):
 
     def get(self, request):
         override = get_context_override(request)
+        for_agent_id = (request.GET.get("for_agent") or "").strip()
+        if for_agent_id:
+            override, error_code = resolve_context_override_for_agent(
+                request.user,
+                for_agent_id,
+            )
+            if error_code == "not_found":
+                return JsonResponse({"error": "Agent not found"}, status=404)
+            if error_code == "forbidden":
+                return JsonResponse({"error": "Not permitted"}, status=403)
         if override:
             try:
                 resolved = resolve_console_context(request.user, request.session, override=override)

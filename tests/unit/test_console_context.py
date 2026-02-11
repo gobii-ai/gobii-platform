@@ -10,6 +10,7 @@ from waffle.models import Flag
 from api.models import (
     Organization,
     OrganizationMembership,
+    AgentCollaborator,
     BrowserUseAgent,
     PersistentAgent,
     BrowserUseAgentTask,
@@ -133,6 +134,92 @@ class ConsoleContextTests(TestCase):
         )
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json().get("error"), "Invalid context override.")
+
+    def test_switch_context_for_agent_returns_org_context_without_persisting_session(self):
+        self._set_personal_context()
+
+        resp = self.client.get(
+            reverse("switch_context"),
+            {"for_agent": str(self.org_agent.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload.get("context", {}).get("type"), "organization")
+        self.assertEqual(payload.get("context", {}).get("id"), str(self.org.id))
+
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(self.owner.id))
+
+    def test_switch_context_for_agent_overrides_stale_context_headers(self):
+        self._set_personal_context()
+
+        resp = self.client.get(
+            reverse("switch_context"),
+            {"for_agent": str(self.org_agent.id)},
+            HTTP_X_GOBII_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.owner.id),
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload.get("context", {}).get("type"), "organization")
+        self.assertEqual(payload.get("context", {}).get("id"), str(self.org.id))
+
+    def test_switch_context_for_agent_forbidden_without_access(self):
+        self.client.logout()
+        assert self.client.login(username="stranger", password="pw")
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.stranger.id)
+        session["context_name"] = self.stranger.username
+        session.save()
+
+        resp = self.client.get(
+            reverse("switch_context"),
+            {"for_agent": str(self.org_agent.id)},
+        )
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(resp.json().get("error"), "Not permitted")
+
+    def test_switch_context_for_org_agent_allows_collaborator_without_membership(self):
+        AgentCollaborator.objects.create(agent=self.org_agent, user=self.stranger)
+
+        self.client.logout()
+        assert self.client.login(username="stranger", password="pw")
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.stranger.id)
+        session["context_name"] = self.stranger.username
+        session.save()
+
+        resp = self.client.get(
+            reverse("switch_context"),
+            {"for_agent": str(self.org_agent.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json().get("context", {})
+        self.assertEqual(payload.get("type"), "personal")
+        self.assertEqual(payload.get("id"), str(self.stranger.id))
+
+    def test_switch_context_for_personal_agent_allows_collaborator(self):
+        AgentCollaborator.objects.create(agent=self.personal_agent, user=self.stranger)
+
+        self.client.logout()
+        assert self.client.login(username="stranger", password="pw")
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.stranger.id)
+        session["context_name"] = self.stranger.username
+        session.save()
+
+        resp = self.client.get(
+            reverse("switch_context"),
+            {"for_agent": str(self.personal_agent.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json().get("context", {})
+        self.assertEqual(payload.get("type"), "personal")
+        self.assertEqual(payload.get("id"), str(self.stranger.id))
 
     def test_tasks_view_org_requires_membership_and_shows_org_tasks(self):
         # As owner (member) — should see org tasks
