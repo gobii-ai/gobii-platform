@@ -3,9 +3,12 @@ import logging
 import mimetypes
 import os
 import secrets
+import shutil
+import tempfile
 import time
 import uuid
 import base64
+import zipfile
 from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -20,6 +23,7 @@ from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
@@ -80,6 +84,7 @@ from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
 from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
+from console.agent_audit.export import write_agent_audit_export_json
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
 from console.agent_chat.timeline import compute_processing_status
@@ -1227,6 +1232,57 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
                     "color": agent.get_display_color(),
                 },
             }
+        )
+
+
+class StaffAgentAuditExportAPIView(SystemAdminAPIView):
+    """Build and return a downloadable zip export for staff audit review."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+
+        audit_json_file = tempfile.SpooledTemporaryFile(mode="w+b", max_size=5 * 1024 * 1024)
+        audit_summary = write_agent_audit_export_json(agent, audit_json_file)
+        audit_json_file.seek(0)
+
+        audit_js_file = tempfile.SpooledTemporaryFile(mode="w+b", max_size=2 * 1024 * 1024)
+        audit_js_file.write(b"window.__AUDIT_DATA__=")
+        shutil.copyfileobj(audit_json_file, audit_js_file, length=64 * 1024)
+        audit_js_file.write(b";")
+        audit_js_file.seek(0)
+
+        html = render_to_string(
+            "console/staff_agent_audit_export.html",
+            {
+                "agent_name": agent.name or "Agent",
+                "generated_at": audit_summary.get("exported_at"),
+            },
+        )
+        viewer_js = render_to_string("console/staff_agent_audit_export_viewer.js")
+
+        archive_file = tempfile.SpooledTemporaryFile(mode="w+b", max_size=10 * 1024 * 1024)
+        with zipfile.ZipFile(archive_file, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("index.html", html.encode("utf-8"))
+            archive.writestr("viewer.js", viewer_js.encode("utf-8"))
+            with archive.open("audit-data.json", "w") as zipped_json:
+                audit_json_file.seek(0)
+                shutil.copyfileobj(audit_json_file, zipped_json, length=64 * 1024)
+            with archive.open("audit-data.js", "w") as zipped_js:
+                audit_js_file.seek(0)
+                shutil.copyfileobj(audit_js_file, zipped_js, length=64 * 1024)
+        archive_file.seek(0)
+
+        timestamp_label = timezone.now().strftime("%Y%m%dT%H%M%SZ")
+        base_name = get_valid_filename(agent.name or "") or f"agent_{agent.id}"
+        filename = f"{base_name}_audit_export_{timestamp_label}.zip"
+
+        return FileResponse(
+            archive_file,
+            as_attachment=True,
+            filename=filename,
+            content_type="application/zip",
         )
 
 

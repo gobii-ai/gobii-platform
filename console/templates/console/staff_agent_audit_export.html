@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Audit Export - {{ agent_name }}</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #ffffff;
+      --ink: #0b1220;
+      --ink-soft: #334155;
+      --accent: #0ea5e9;
+      --accent-soft: #e0f2fe;
+      --message-soft: #dcfce7;
+      --message-ink: #047857;
+      --completion-soft: #dbeafe;
+      --completion-ink: #1d4ed8;
+      --tool-soft: #fef3c7;
+      --tool-ink: #a16207;
+      --warn: #b91c1c;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 10% -20%, #1d4ed8 0%, transparent 45%), var(--bg);
+      color: var(--ink);
+    }
+
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px 16px 40px;
+    }
+
+    .header {
+      border-radius: 16px;
+      background: linear-gradient(135deg, #082f49, #0f766e);
+      color: #f8fafc;
+      padding: 18px 20px;
+      box-shadow: 0 16px 30px rgba(2, 8, 23, 0.35);
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .header p {
+      margin: 10px 0 0;
+      opacity: 0.9;
+      font-size: 14px;
+    }
+
+    .controls {
+      margin-top: 14px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .controls label {
+      font-size: 13px;
+      opacity: 0.95;
+    }
+
+    .controls select {
+      margin-left: 8px;
+      border: 0;
+      border-radius: 8px;
+      padding: 7px 10px;
+      font-size: 13px;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+
+    .panel {
+      margin-top: 20px;
+      border-radius: 16px;
+      background: var(--panel);
+      padding: 14px;
+      box-shadow: 0 16px 30px rgba(2, 8, 23, 0.22);
+      min-height: 240px;
+    }
+
+    .panel h2 {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: 17px;
+    }
+
+    .counts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .count {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #0369a1;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 10px;
+    }
+
+    .list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .empty {
+      color: var(--ink-soft);
+      font-size: 14px;
+      margin: 0;
+    }
+
+    .card {
+      border: 1px solid #bae6fd;
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: #f0f9ff;
+    }
+
+    .card.message {
+      border-color: #86efac;
+      background: #f0fdf4;
+    }
+
+    .card.completion {
+      border-color: #93c5fd;
+      background: #eff6ff;
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: baseline;
+      flex-wrap: wrap;
+    }
+
+    .card-title {
+      margin: 0;
+      font-size: 14px;
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .stamp {
+      margin: 0;
+      font-size: 12px;
+      color: #075985;
+      font-weight: 600;
+    }
+
+    .meta {
+      margin-top: 8px;
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 4px 8px;
+      background: #dbeafe;
+      color: #1d4ed8;
+    }
+
+    .pill.message {
+      background: var(--message-soft);
+      color: var(--message-ink);
+    }
+
+    .pill.completion {
+      background: var(--completion-soft);
+      color: var(--completion-ink);
+    }
+
+    .pill.tool {
+      background: var(--tool-soft);
+      color: var(--tool-ink);
+    }
+
+    details {
+      margin-top: 8px;
+      border-radius: 8px;
+      background: #ffffff;
+      border: 1px solid #bae6fd;
+      padding: 8px 9px;
+    }
+
+    details > summary {
+      cursor: pointer;
+      font-size: 13px;
+      color: var(--ink);
+      font-weight: 600;
+      list-style: none;
+    }
+
+    .summary-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .copy-btn {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      color: #0f172a;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 6px;
+      cursor: pointer;
+      line-height: 1.2;
+    }
+
+    .copy-btn:hover {
+      border-color: #94a3b8;
+      background: #f1f5f9;
+    }
+
+    details > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details > summary::after {
+      content: " +";
+      color: #0369a1;
+      font-weight: 700;
+    }
+
+    details[open] > summary::after {
+      content: " -";
+    }
+
+    pre {
+      margin: 8px 0 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 8px;
+      color: var(--ink);
+      font-size: 12px;
+      line-height: 1.35;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .html-body {
+      margin-top: 8px;
+      border-radius: 8px;
+      padding: 10px;
+      background: #ffffff;
+      border: 1px solid #bbf7d0;
+      color: #052e16;
+      font-size: 13px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+
+    .html-body p,
+    .html-body ul,
+    .html-body ol,
+    .html-body pre,
+    .html-body blockquote {
+      margin-top: 0;
+      margin-bottom: 10px;
+    }
+
+    .html-body :last-child {
+      margin-bottom: 0;
+    }
+
+    .tool-call {
+      margin-top: 8px;
+      border-radius: 10px;
+      background: #ffffff;
+      border: 1px solid #fde68a;
+      padding: 8px;
+    }
+
+    .tool-call h4 {
+      margin: 0;
+      font-size: 13px;
+      color: #7c2d12;
+    }
+
+    .tool-call p {
+      margin: 5px 0 0;
+      font-size: 11px;
+      color: #9a3412;
+      font-weight: 600;
+    }
+
+    .warn {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--warn);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="header">
+      <h1>Agent Audit Export - {{ agent_name }}</h1>
+      <p id="summary-line">Generated {{ generated_at|default:"(unknown)" }}.</p>
+      <div class="controls">
+        <label>
+          Sort by timestamp
+          <select id="sort-order">
+            <option value="desc">Newest first</option>
+            <option value="asc">Oldest first</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Unified Timeline</h2>
+      <div class="counts" id="timeline-counts"></div>
+      <div class="list" id="timeline-list"></div>
+    </section>
+  </main>
+
+  <script src="audit-data.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>
