@@ -35,29 +35,26 @@ def resolve_context_override_for_agent(
             )
             .first()
         )
-        if membership is None:
-            if user_is_collaborator(user, agent):
-                return None, None
-            return None, "forbidden"
+        if membership:
+            return (
+                {
+                    "type": "organization",
+                    "id": str(agent.organization_id),
+                    "name": membership.org.name,
+                },
+                None,
+            )
+    elif agent.user_id == user.id:
         return (
             {
-                "type": "organization",
-                "id": str(agent.organization_id),
-                "name": membership.org.name,
+                "type": "personal",
+                "id": str(agent.user_id),
+                "name": user.get_full_name() or user.username or user.email or "Personal",
             },
             None,
         )
 
-    if agent.user_id != user.id:
-        if user_is_collaborator(user, agent):
-            return None, None
-        return None, "forbidden"
+    if user_is_collaborator(user, agent):
+        return None, None
 
-    return (
-        {
-            "type": "personal",
-            "id": str(agent.user_id),
-            "name": user.get_full_name() or user.username or user.email or "Personal",
-        },
-        None,
-    )
+    return None, "forbidden"
