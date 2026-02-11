@@ -211,7 +211,7 @@ def _build_oauth_attribution_cookie_payload(request) -> dict[str, str | dict]:
 
 def _set_oauth_stash_cookies(response, request, *, charter_data: dict, attribution_data: dict) -> None:
     cookie_common = {
-        "max_age": 3600,  # 1 hour
+        "max_age": 7200,  # 2 hours
         "httponly": True,
         "samesite": "Lax",
         "secure": request.is_secure(),
@@ -1274,7 +1274,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.STARTUP,
-            "checkout_source_url": request.META.get("HTTP_REFERER") or request.build_absolute_uri(),
+            "checkout_source_url": request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL,
         }
 
         _emit_checkout_initiated_event(
@@ -1423,7 +1423,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.SCALE,
-            "checkout_source_url": request.META.get("HTTP_REFERER") or request.build_absolute_uri(),
+            "checkout_source_url": request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL,
         }
 
         _emit_checkout_initiated_event(

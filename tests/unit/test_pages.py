@@ -467,12 +467,12 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
         self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
 
-        charter_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=3600)
+        charter_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
         self.assertEqual(charter_payload.get("agent_charter"), template.charter)
         self.assertNotIn("utm_first_touch", charter_payload)
         self.assertNotIn("utm_last_touch", charter_payload)
 
-        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=3600)
+        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
         self.assertEqual(
             attribution_payload.get("utm_first_touch"),
             {"utm_source": "meta", "utm_medium": "paid_social"},
@@ -539,7 +539,7 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, "")
         self.assertEqual(int(response.cookies[OAUTH_ATTRIBUTION_COOKIE]["max-age"]), 0)
 
-        cookie_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=3600)
+        cookie_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
         self.assertTrue(cookie_payload.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
         self.assertEqual(
             cookie_payload.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),

@@ -1149,7 +1149,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     try:
                         UserAttribution.objects.filter(user=user).update(fbc=synthesized_fbc)
                     except Exception:
-                        logger.debug("Failed to persist synthesized fbc for user %s", user.id, exc_info=True)
+                        logger.warning("Failed to persist synthesized fbc for user %s", user.id, exc_info=True)
             elif fbc_cookie and not click_ids.get('fbc'):
                 # fbc exists in cookie but wasn't captured by extract_click_context
                 click_ids['fbc'] = fbc_cookie

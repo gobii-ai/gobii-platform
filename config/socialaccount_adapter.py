@@ -60,7 +60,7 @@ def _restore_session_keys_from_cookie(
         return False
 
     try:
-        stashed = signing.loads(cookie_value, max_age=3600)  # 1 hour max
+        stashed = signing.loads(cookie_value, max_age=7200)  # 2 hours max
     except (signing.BadSignature, signing.SignatureExpired):
         logger.debug("Invalid or expired OAuth cookie: %s", cookie_name)
         return False
