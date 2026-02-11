@@ -562,8 +562,10 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     if fbc:
         click_ids["fbc"] = fbc
     elif fbclid:
-        # Synthesize fbc from fbclid if fbc is missing (improves Meta Event Match Quality)
-        click_ids["fbc"] = f"fb.1.{int(timezone.now().timestamp() * 1000)}.{fbclid}"
+        # Use first_touch_at for a timestamp closer to the actual ad click
+        touch_ts = getattr(attribution, "first_touch_at", None)
+        ts_ms = int(touch_ts.timestamp() * 1000) if touch_ts else int(timezone.now().timestamp() * 1000)
+        click_ids["fbc"] = f"fb.1.{ts_ms}.{fbclid}"
         record_fbc_synthesized(source="pages.signals.build_marketing_context_from_user")
     if fbclid:
         click_ids["fbclid"] = fbclid
@@ -1138,10 +1140,16 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                 # No fbc from cookies or extract_click_context, try to synthesize from fbclid
                 stored_fbclid = fbclid_cookie  # includes session fallback from lines 750-753
                 if stored_fbclid:
-                    click_ids['fbc'] = f"fb.1.{event_timestamp_ms}.{stored_fbclid}"
+                    synthesized_fbc = f"fb.1.{event_timestamp_ms}.{stored_fbclid}"
+                    click_ids['fbc'] = synthesized_fbc
                     click_ids['fbclid'] = stored_fbclid
                     marketing_context['click_ids'] = click_ids
                     record_fbc_synthesized(source="pages.signals.handle_user_signed_up")
+                    # Persist so webhook events use the stored value instead of re-synthesizing
+                    try:
+                        UserAttribution.objects.filter(user=user).update(fbc=synthesized_fbc)
+                    except Exception:
+                        logger.debug("Failed to persist synthesized fbc for user %s", user.id, exc_info=True)
             elif fbc_cookie and not click_ids.get('fbc'):
                 # fbc exists in cookie but wasn't captured by extract_click_context
                 click_ids['fbc'] = fbc_cookie
