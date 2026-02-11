@@ -10,6 +10,7 @@ import { storeConsoleContext } from '../util/consoleContextStorage'
 
 type UseConsoleContextSwitcherOptions = {
   enabled?: boolean
+  forAgentId?: string
   onSwitched?: (context: ConsoleContext) => void
   persistSession?: boolean
 }
@@ -25,6 +26,7 @@ type UseConsoleContextSwitcherResult = {
 
 export function useConsoleContextSwitcher({
   enabled = false,
+  forAgentId,
   onSwitched,
   persistSession = true,
 }: UseConsoleContextSwitcherOptions): UseConsoleContextSwitcherResult {
@@ -50,7 +52,7 @@ export function useConsoleContextSwitcher({
     setIsLoading(true)
     setError(null)
     try {
-      const payload = await fetchConsoleContext()
+      const payload = await fetchConsoleContext({ forAgentId })
       if (!mountedRef.current || requestId !== requestIdRef.current) {
         return
       }
@@ -65,7 +67,7 @@ export function useConsoleContextSwitcher({
       setError('Unable to load workspace contexts.')
       setIsLoading(false)
     }
-  }, [enabled])
+  }, [enabled, forAgentId])
 
   useEffect(() => {
     void refresh()

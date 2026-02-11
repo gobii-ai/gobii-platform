@@ -503,6 +503,7 @@ export function AgentChatPage({
     refresh: refreshContext,
   } = useConsoleContextSwitcher({
     enabled: showContextSwitcher,
+    forAgentId: typeof agentId === 'string' ? agentId : undefined,
     onSwitched: handleContextSwitched,
     persistSession: persistContextSession,
   })

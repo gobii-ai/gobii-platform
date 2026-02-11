@@ -38,8 +38,11 @@ export type ConsoleContextData = {
   organizationsEnabled: boolean
 }
 
-export async function fetchConsoleContext(): Promise<ConsoleContextData> {
-  const payload = await jsonFetch<ConsoleContextResponsePayload>('/console/switch-context/')
+export async function fetchConsoleContext(options: { forAgentId?: string } = {}): Promise<ConsoleContextData> {
+  const query = options.forAgentId
+    ? `?for_agent=${encodeURIComponent(options.forAgentId)}`
+    : ''
+  const payload = await jsonFetch<ConsoleContextResponsePayload>(`/console/switch-context/${query}`)
   return {
     context: payload.context,
     personal: {
