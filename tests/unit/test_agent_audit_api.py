@@ -156,10 +156,13 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(response["Content-Type"], "application/zip")
         self.assertIn("attachment; filename=", response["Content-Disposition"])
 
-        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        archive_bytes = b"".join(response.streaming_content)
+        archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
         names = set(archive.namelist())
         self.assertIn("index.html", names)
         self.assertIn("audit-data.json", names)
+        self.assertIn("audit-data.js", names)
+        self.assertIn("viewer.js", names)
 
         export_payload = json.loads(archive.read("audit-data.json").decode("utf-8"))
         self.assertIn("exported_at", export_payload)
