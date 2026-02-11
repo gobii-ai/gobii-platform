@@ -28,7 +28,7 @@ from django.template.loader import render_to_string
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import postmark_status
-from util.text_sanitizer import normalize_llm_output
+from util.text_sanitizer import decode_unicode_escapes, normalize_llm_output
 
 from .email_content import convert_body_to_html_and_plaintext
 from .email_footer_service import append_footer_if_needed
@@ -305,6 +305,15 @@ def _build_from_header(message: PersistentAgentMessage) -> str:
     return from_address
 
 
+def _normalized_email_subject(message: PersistentAgentMessage) -> str:
+    """Return subject with escaped unicode sequences decoded for delivery."""
+    raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    raw_subject = raw_payload.get("subject", "")
+    if raw_subject is None:
+        return ""
+    return decode_unicode_escapes(str(raw_subject))
+
+
 def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage) -> int:
     attachments = list(message.attachments.select_related("filespace_node"))
     if not attachments:
@@ -453,6 +462,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             message.latest_status,
         )
         return
+    subject = _normalized_email_subject(message)
 
     # First: per-endpoint SMTP override
     acct = None
@@ -485,7 +495,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
         try:
             from_address = message.from_endpoint.address
             to_address = message.to_endpoint.address if message.to_endpoint else ""
-            subject = message.raw_payload.get("subject", "")
             body_raw = message.body
 
             # content conversion
@@ -599,7 +608,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 "present" if postmark_token else "missing",
                 message.id,
             )
-        subject = message.raw_payload.get("subject", "")
         body_raw = message.body
         html_snippet, plaintext_body = _prepare_email_content(message, body_raw)
 
@@ -643,7 +651,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "Simulating email delivery for message %s.",
             message.id,
         )
-        subject = message.raw_payload.get("subject", "")
         body_raw = message.body
         
         # Log raw message details for simulation as well
@@ -723,7 +730,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
         from_address = message.from_endpoint.address
         from_header = _build_from_header(message)
         to_address = message.to_endpoint.address
-        subject = message.raw_payload.get("subject", "")
         body_raw = message.body
         
         # Log the raw message received from the agent
@@ -893,7 +899,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             message.id,
             message.from_endpoint.address,
             message.to_endpoint.address,
-            message.raw_payload.get("subject", "")
+            subject,
         )
         error_str = str(e)
         logger.error(
@@ -916,7 +922,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             message.id,
             message.from_endpoint.address,
             message.to_endpoint.address,
-            message.raw_payload.get("subject", "")
+            subject,
         )
         error_str = f"An unexpected error occurred: {str(e)}"
         logger.error(

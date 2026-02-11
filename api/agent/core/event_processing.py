@@ -136,6 +136,7 @@ from api.services.web_sessions import get_active_web_sessions, has_active_web_se
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.text_sanitizer import decode_unicode_escapes
 from .gemini_cache import (
     GEMINI_CACHE_BLOCKLIST,
     GeminiCachedContentManager,
@@ -1158,6 +1159,17 @@ def _substitute_variables_in_params(params: Any) -> Any:
         return {k: _substitute_variables_in_params(v) for k, v in params.items()}
     if isinstance(params, list):
         return [_substitute_variables_in_params(item) for item in params]
+    return params
+
+
+def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
+    """Recursively decode unicode escape sequences inside tool parameters."""
+    if isinstance(params, str):
+        return decode_unicode_escapes(params)
+    if isinstance(params, dict):
+        return {k: _normalize_tool_params_unicode_escapes(v) for k, v in params.items()}
+    if isinstance(params, list):
+        return [_normalize_tool_params_unicode_escapes(item) for item in params]
     return params
 
 
@@ -3550,6 +3562,7 @@ def _run_agent_loop(
                         else:
                             raw_args = raw_args or ""
                             tool_params = json.loads(raw_args)
+                        tool_params = _normalize_tool_params_unicode_escapes(tool_params)
                     except Exception:
                         # Simple recovery: record a correction instruction and retry next iteration.
                         preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
