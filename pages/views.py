@@ -1274,6 +1274,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.STARTUP,
+            "checkout_source_url": request.META.get("HTTP_REFERER") or request.build_absolute_uri(),
         }
 
         _emit_checkout_initiated_event(
@@ -1422,6 +1423,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.SCALE,
+            "checkout_source_url": request.META.get("HTTP_REFERER") or request.build_absolute_uri(),
         }
 
         _emit_checkout_initiated_event(

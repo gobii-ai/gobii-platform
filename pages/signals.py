@@ -1509,12 +1509,16 @@ def handle_invoice_payment_succeeded(event, **kwargs):
 
                 marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
 
+                subscribe_context = _build_marketing_context_from_user(owner) if owner_type == "user" else {}
+                checkout_source_url = metadata.get("checkout_source_url")
+                if checkout_source_url:
+                    subscribe_context["page"] = {"url": checkout_source_url}
                 capi(
                     user=owner,
                     event_name="Subscribe",
                     properties=marketing_properties,
                     request=None,
-                    context=_build_marketing_context_from_user(owner) if owner_type == "user" else {},
+                    context=subscribe_context,
                 )
         except Exception:
             logger.exception(
@@ -1739,12 +1743,14 @@ def handle_subscription_event(event, **kwargs):
                         "churn_stage": "voluntary",
                     }
                     cancel_properties = {k: v for k, v in cancel_properties.items() if v is not None}
+                    cancel_context = dict(marketing_context)
+                    cancel_context["page"] = {"url": f"{settings.PUBLIC_SITE_URL.rstrip('/')}/console/billing/"}
                     capi(
                         user=owner,
                         event_name="CancelSubscription",
                         properties=cancel_properties,
                         request=None,
-                        context=marketing_context,
+                        context=cancel_context,
                     )
                 except Exception:
                     logger.exception(
@@ -2076,6 +2082,9 @@ def handle_subscription_event(event, **kwargs):
                     if not suppress_marketing_event:
                         try:
                             if analytics_event != AnalyticsEvent.SUBSCRIPTION_RENEWED and sub.status == "trialing":
+                                checkout_source_url = subscription_metadata.get("checkout_source_url")
+                                if checkout_source_url:
+                                    marketing_context["page"] = {"url": checkout_source_url}
                                 capi(
                                     user=owner,
                                     event_name="StartTrial",
