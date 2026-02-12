@@ -22,9 +22,6 @@ from console.api_views import (
     AgentCollaboratorLeaveAPIView,
     AgentProcessingStatusAPIView,
     AgentDailyCreditsAPIView,
-    AgentEmailSettingsAPIView,
-    AgentEmailSettingsEnsureAccountAPIView,
-    AgentEmailSettingsTestAPIView,
     AgentAddonsAPIView,
     AgentQuickSettingsAPIView,
     AgentReassignAPIView,
@@ -125,6 +122,11 @@ from console.api_views import (
     EvalRunDetailAPIView,
     EvalRunCompareAPIView,
     EvalSuiteRunCompareAPIView,
+)
+from console.email_settings.views import (
+    AgentEmailSettingsAPIView,
+    AgentEmailSettingsEnsureAccountAPIView,
+    AgentEmailSettingsTestAPIView,
 )
 from console.usage_views import (
     UsageSummaryAPIView,

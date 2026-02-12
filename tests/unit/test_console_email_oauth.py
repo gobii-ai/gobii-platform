@@ -17,7 +17,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
 )
-from console.api_views import _format_email_connection_error, _normalize_email_error_text
+from console.email_settings.views import _format_email_connection_error, _normalize_email_error_text
 
 
 @tag("batch_console_email_oauth")
@@ -313,7 +313,7 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertIn("errors", payload)
         self.assertIn("endpoint_address", payload["errors"])
 
-    @patch("console.api_views._validate_agent_smtp_connection", return_value=(True, ""))
+    @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(True, ""))
     def test_email_settings_test_endpoint_runs_smtp(self, _mock_validate_smtp):
         url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
         response = self.client.post(
@@ -350,7 +350,7 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["results"]["smtp"]["ok"])
 
-    @patch("console.api_views._validate_agent_smtp_connection", return_value=(False, "mock-smtp-error"))
+    @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(False, "mock-smtp-error"))
     def test_email_settings_test_endpoint_does_not_persist_draft_settings(self, _mock_validate_smtp):
         self.account.smtp_host = "saved.smtp.example.com"
         self.account.smtp_port = 587
