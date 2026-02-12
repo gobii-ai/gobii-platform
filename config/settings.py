@@ -993,6 +993,10 @@ SEGMENT_WEB_WRITE_KEY = env(
         fallback=SEGMENT_WRITE_KEY,
     ),
 )
+GA_MEASUREMENT_API_SECRET = env(
+    "GA_MEASUREMENT_API_SECRET",
+    default=_proprietary_default("analytics", "GA_MEASUREMENT_API_SECRET"),
+)
 
 # Ad/Pixel IDs (empty disables)
 REDDIT_PIXEL_ID = env(

@@ -37,6 +37,13 @@ def normalize_event(payload: dict) -> dict:
     ctx = payload.get("context") or {}
     click = ctx.get("click_ids") or {}
     page = ctx.get("page") or {}
+    ga_client_id = ctx.get("ga_client_id")
+    if isinstance(ga_client_id, str):
+        ga_client_id = ga_client_id.strip()
+        if not ga_client_id:
+            ga_client_id = None
+    else:
+        ga_client_id = None
 
     client_ip = ctx.get("client_ip")
     if isinstance(client_ip, str):
@@ -68,6 +75,7 @@ def normalize_event(payload: dict) -> dict:
             "fbclid": click.get("fbclid"),
             "rdt_cid": click.get("rdt_cid"),
             "ttclid": click.get("ttclid"),
+            "ga_client_id": ga_client_id,
         },
         "utm": ctx.get("utm") or {},
         "consent": ctx.get("consent", True),

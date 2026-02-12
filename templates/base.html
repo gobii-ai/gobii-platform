@@ -71,7 +71,7 @@
 
     {% get_page_meta request.path as ga_page_meta %}
 
-    {% if page_meta %}
+    {% if ga_page_meta %}
     let gaPageTitle = "{{ ga_page_meta.0|escapejs }} - {{ ga_page_meta.1|escapejs }}";
     {% else %}
     let gaPageTitle = document.title;
@@ -436,6 +436,7 @@
   </script>
 
   <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  <script src="{% static 'js/signup_tracking.js' %}"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js"></script>
   <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
 

@@ -593,6 +593,10 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     if last_user_agent:
         context["user_agent"] = last_user_agent
 
+    ga_client_id = getattr(attribution, "ga_client_id", None)
+    if ga_client_id:
+        context["ga_client_id"] = ga_client_id
+
     return context
 
 

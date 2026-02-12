@@ -336,6 +336,19 @@ class BuildMarketingContextFromUserTests(TestCase):
 
         self.assertEqual(context.get("client_ip"), "192.168.1.100")
 
+    def test_includes_ga_client_id_in_context(self):
+        """GA client ID should be included in context for GA MP events."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            ga_client_id="GA1.2.111.222",
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+
+        self.assertEqual(context.get("ga_client_id"), "GA1.2.111.222")
+
     def test_returns_minimal_context_when_no_attribution(self):
         """When user has no attribution, return minimal context with consent."""
         from pages.signals import _build_marketing_context_from_user

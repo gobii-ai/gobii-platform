@@ -78,88 +78,13 @@ def _format_signup_tracking_snippet() -> str:
 
     return """<script>
   (function() {
-    var maxRetries = 3;
-    var baseDelay = 1000;
-
-    function firePixels(data) {
-      var p = data.pixels || {};
-      var val = data.registrationValue || 0;
-      var cur = 'USD';
-
-      // Google Analytics
-      if (p.ga && typeof window.gtag === 'function') {
-        gtag('event', 'sign_up', { method: 'email', value: val, currency: cur });
-      }
-
-      // Reddit
-      if (p.reddit && typeof window.rdt === 'function') {
-        rdt('track', 'SignUp', {
-          email: data.emailHash,
-          externalId: data.idHash,
-          conversionId: data.eventId,
-          value: val,
-          currency: cur
-        });
-      }
-
-      // TikTok
-      if (p.tiktok && window.ttq && typeof window.ttq.track === 'function') {
-        ttq.track('CompleteRegistration', {
-          event_id: data.eventId,
-          external_id: data.idHash,
-          email: data.emailHash,
-          value: val,
-          currency: cur
-        });
-      }
-
-      // Meta/Facebook
-      if (p.meta && typeof window.fbq === 'function') {
-        fbq('track', 'CompleteRegistration', {
-          value: val,
-          currency: cur
-        }, {
-          external_id: data.idHash,
-          em: data.emailHash,
-          eventID: data.eventId
-        });
-      }
-
-      // LinkedIn
-      if (p.linkedin && typeof window.lintrk === 'function') {
-        window.lintrk('track', { conversion_id: p.linkedin });
-      }
-
-      // Track successful pixel fire
-      if (window.analytics && typeof window.analytics.track === 'function') {
-        window.analytics.track('Signup Pixels Fired', { eventId: data.eventId, source: 'app_shell' });
-      }
+    if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== 'function') {
+      return;
     }
-
-    function fetchWithRetry(attempt) {
-      fetch('/clear_signup_tracking', { credentials: 'same-origin' })
-        .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.json();
-        })
-        .then(function(data) {
-          if (data.tracking) firePixels(data);
-        })
-        .catch(function(err) {
-          if (attempt < maxRetries) {
-            var delay = baseDelay * Math.pow(2, attempt - 1);
-            setTimeout(function() { fetchWithRetry(attempt + 1); }, delay);
-          } else if (window.analytics && typeof window.analytics.track === 'function') {
-            window.analytics.track('Signup Pixel Fetch Failed', {
-              error: err.message || 'Unknown error',
-              attempts: maxRetries,
-              source: 'app_shell'
-            });
-          }
-        });
-    }
-
-    fetchWithRetry(1);
+    window.GobiiSignupTracking.fetchAndFire({
+      endpoint: '/clear_signup_tracking',
+      source: 'app_shell'
+    });
   })();
   </script>"""
 
@@ -180,7 +105,7 @@ def _format_pixel_loaders() -> str:
     window.dataLayer = window.dataLayer || [];
     function gtag(){{dataLayer.push(arguments);}}
     gtag('js', new Date());
-    gtag('config', '{ga_id}', {{ anonymize_ip: true }});
+    gtag('config', '{ga_id}', {{ anonymize_ip: true, send_page_view: false }});
   </script>""")
 
     if not proprietary:
@@ -240,6 +165,8 @@ def _build_shell_html() -> str:
     segment_snippet = _format_segment_snippet()
     pixel_loaders = _format_pixel_loaders()
     signup_tracking = _format_signup_tracking_snippet()
+    analytics_js = static("js/gobii_analytics.js")
+    signup_tracking_js = static("js/signup_tracking.js")
     icon_url = static("images/noBgBlue.png")
     fonts_css = static("css/custom_fonts.css")
     pygments_css = static("css/pygments.css")
@@ -260,6 +187,8 @@ def _build_shell_html() -> str:
   <link rel="stylesheet" href="{globals_css}">
   {pixel_loaders}
   {segment_snippet}
+  <script src="{analytics_js}"></script>
+  <script src="{signup_tracking_js}"></script>
   {signup_tracking}
   {vite_tags}
 </head>

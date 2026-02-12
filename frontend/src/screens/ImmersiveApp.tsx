@@ -16,6 +16,8 @@ type AppRoute =
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'agent_new' | 'agent_chat' | 'not_found'
+
 type LocationSnapshot = {
   pathname: string
   search: string
@@ -81,6 +83,40 @@ function parseRoute(pathname: string): AppRoute {
   }
 
   return { kind: 'not-found' }
+}
+
+function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
+  if (route.kind === 'command-center') {
+    return 'command_center'
+  }
+  if (route.kind === 'agent-select') {
+    return 'agent_select'
+  }
+  if (route.kind === 'agent-chat') {
+    return route.agentId ? 'agent_chat' : 'agent_new'
+  }
+  return 'not_found'
+}
+
+function getAnalyticsPath(route: AppRoute, pathname: string): string {
+  if (route.kind === 'command-center') {
+    return '/app'
+  }
+  if (route.kind === 'agent-select') {
+    return '/app/agents'
+  }
+  if (route.kind === 'agent-chat') {
+    return route.agentId ? '/app/agents/:id' : '/app/agents/new'
+  }
+  return pathname
+}
+
+function cleanQueryForTracking(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('embed')
+  params.delete('return_to')
+  const cleaned = params.toString()
+  return cleaned ? `?${cleaned}` : ''
 }
 
 function parseBooleanFlag(value: string | null): boolean {
@@ -269,6 +305,33 @@ export function ImmersiveApp() {
       window.location.origin,
     )
   }, [embed, location.pathname, location.search])
+
+  useEffect(() => {
+    const analyticsRoute = getAnalyticsRoute(route)
+    const analyticsPath = `${getAnalyticsPath(route, location.pathname)}${cleanQueryForTracking(location.search)}`
+    const analyticsUrl = `${window.location.origin}${analyticsPath}`
+
+    const timeoutId = window.setTimeout(() => {
+      window.gtag?.('event', 'page_view', {
+        page_title: document.title,
+        page_path: analyticsPath,
+        page_location: analyticsUrl,
+        app_route: analyticsRoute,
+        app_embed: embed ? 'true' : 'false',
+      })
+
+      window.analytics?.page('App', analyticsRoute, {
+        path: analyticsPath,
+        url: analyticsUrl,
+        app_route: analyticsRoute,
+        embed,
+      })
+    }, 0)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [route, location.pathname, location.search, embed])
 
   useEffect(() => {
     if (route.kind === 'agent-chat') {
