@@ -199,6 +199,7 @@ class HomePageTests(TestCase):
 
         hero_form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(hero_form)
+        self.assertEqual(hero_form.get("data-requires-trial"), "true")
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
         self.assertEqual(self._normalized_button_text(hero_button), "Start Free Trial")
@@ -231,6 +232,7 @@ class HomePageTests(TestCase):
 
         hero_form = soup.find("form", {"id": "create-agent-form"})
         self.assertIsNotNone(hero_form)
+        self.assertEqual(hero_form.get("data-requires-trial"), "false")
         hero_button = hero_form.find("button", {"type": "submit"})
         self.assertIsNotNone(hero_button)
         self.assertEqual(self._normalized_button_text(hero_button), "Spawn Agent")

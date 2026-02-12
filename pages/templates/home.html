@@ -210,7 +210,7 @@
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
       <div class="max-w-4xl mx-auto relative z-20">
-          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-immersive-form>
+          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-requires-trial="{{ home_spawn_requires_trial|yesno:'true,false' }}" data-immersive-form>
             {% csrf_token %}
             <input type="hidden" name="return_to" id="agent-return-to" value="">
             <input type="hidden" name="embed" id="agent-embed" value="{% if user.is_authenticated %}1{% else %}0{% endif %}">
@@ -849,6 +849,7 @@
       const gateContinue = gateModal ? gateModal.querySelector('[data-gate-continue]') : null
       const gateClose = gateModal ? gateModal.querySelectorAll('[data-gate-close]') : []
       const isAuthenticated = form ? form.dataset.authenticated === 'true' : false
+      const requiresTrialFlow = form ? form.dataset.requiresTrial === 'true' : false
       const billingUrl = selector.dataset.billingUrl || '/console/billing/'
       const upgradeUrl = selector.dataset.intelligenceUpgrade || ''
       const maxAllowedTier = selector.dataset.intelligenceMaxTier || 'standard'
@@ -950,6 +951,12 @@
           }
 
           if (!isAuthenticated) {
+            bypassGate = true
+            submitForm()
+            return
+          }
+
+          if (requiresTrialFlow) {
             bypassGate = true
             submitForm()
             return
