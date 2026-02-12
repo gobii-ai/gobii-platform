@@ -1691,11 +1691,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             upgrade_url,
         )
 
-        # Prefetch primary email and SMS endpoints for header display
+        # Prefetch email endpoints and prefer primary first when available.
         email_prefetch = models.Prefetch(
             "comms_endpoints",
-            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL, is_primary=True),
-            to_attr="primary_email_endpoints",
+            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL).order_by("-is_primary", "address"),
+            to_attr="email_endpoints_for_display",
         )
         sms_prefetch = models.Prefetch(
             "comms_endpoints",
@@ -1737,8 +1737,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         )
         # Keep behavior aligned with SystemAdminRequiredMixin: superusers may not be staff.
         is_admin_user = bool(user.is_staff or user.is_superuser)
-        def get_primary_email(agent: PersistentAgent) -> str | None:
-            endpoints = getattr(agent, "primary_email_endpoints", None)
+        def get_display_email(agent: PersistentAgent) -> str | None:
+            endpoints = (
+                getattr(agent, "email_endpoints_for_display", None)
+                or getattr(agent, "primary_email_endpoints", None)
+            )
             if endpoints:
                 return endpoints[0].address if endpoints else None
             return None
@@ -1772,7 +1775,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 ),
                 "audit_url": reverse("console-agent-audit", kwargs={"agent_id": agent.id}) if is_admin_user else None,
                 "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
-                "email": get_primary_email(agent),
+                "email": get_display_email(agent),
                 "sms": get_primary_sms(agent),
             }
             for agent in agents
