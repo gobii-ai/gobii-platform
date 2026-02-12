@@ -1,9 +1,10 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
-from django.test import Client, TestCase, tag
+from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
+from unittest.mock import patch
 
-from api.models import BrowserUseAgent, Organization, OrganizationMembership, PersistentAgent
+from api.models import AgentCollaborator, BrowserUseAgent, Organization, OrganizationMembership, PersistentAgent
 from console.agent_chat.access import resolve_agent
 
 
@@ -76,6 +77,35 @@ class AgentChatAccessTests(TestCase):
         )
         with self.assertRaises(PermissionDenied):
             resolve_agent(stranger, {}, str(self.org_agent.id))
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_resolve_agent_denies_personal_owner_without_trial(self):
+        with self.assertRaises(PermissionDenied) as raised:
+            resolve_agent(self.user, self.client.session, str(self.personal_agent.id))
+        self.assertIn("Start a free trial", str(raised.exception))
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_resolve_agent_allows_shared_personal_agent_for_collaborator(self):
+        User = get_user_model()
+        collaborator = User.objects.create_user(
+            username="collab@example.com",
+            email="collab@example.com",
+            password="pw",
+        )
+        with patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=0):
+            AgentCollaborator.objects.create(
+                agent=self.personal_agent,
+                user=collaborator,
+                invited_by=self.user,
+            )
+
+        agent = resolve_agent(
+            collaborator,
+            {},
+            str(self.personal_agent.id),
+            allow_shared=True,
+        )
+        self.assertEqual(agent.id, self.personal_agent.id)
 
     def test_roster_uses_org_agents_for_active_org_agent(self):
         url = reverse("console_agent_roster")

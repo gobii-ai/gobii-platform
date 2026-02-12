@@ -1662,7 +1662,7 @@ class UserFlagsInlineForUser(admin.StackedInline):
     extra = 1
     max_num = 1
     can_delete = True
-    fields = ("is_vip",)
+    fields = ("is_vip", "is_freemium_grandfathered")
 
 
 class UserReferralInlineForUser(admin.StackedInline):

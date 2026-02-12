@@ -64,8 +64,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         trial_eligible = _is_trial_eligible()
 
-        def _trial_cta(days: int, label: str) -> str:
-            if days > 0 and trial_eligible:
+        def _trial_cta(days: int, label: str, *, prefer_trial_copy: bool = False) -> str:
+            if days > 0 and (trial_eligible or prefer_trial_copy):
                 return f"Start {days}-day Free Trial"
             return f"Choose {label}"
 
@@ -78,8 +78,16 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             context["trial_note"] = "Free trials are for first-time customers only."
 
         # When true, we'll say Upgrade for Startup plan
-        startup_cta_text = _trial_cta(startup_trial_days, "Pro")
-        scale_cta_text = _trial_cta(scale_trial_days, "Scale")
+        startup_cta_text = _trial_cta(
+            startup_trial_days,
+            "Pro",
+            prefer_trial_copy=not authenticated,
+        )
+        scale_cta_text = _trial_cta(
+            scale_trial_days,
+            "Scale",
+            prefer_trial_copy=not authenticated,
+        )
         startup_cta_disabled = False
         scale_cta_disabled = False
         startup_current = False
@@ -95,8 +103,16 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 current_plan_id = plan_id
 
                 if plan_id == PlanNames.FREE:
-                    startup_cta_text = _trial_cta(startup_trial_days, "Pro")
-                    scale_cta_text = _trial_cta(scale_trial_days, "Scale")
+                    startup_cta_text = _trial_cta(
+                        startup_trial_days,
+                        "Pro",
+                        prefer_trial_copy=True,
+                    )
+                    scale_cta_text = _trial_cta(
+                        scale_trial_days,
+                        "Scale",
+                        prefer_trial_copy=True,
+                    )
                 elif plan_id == PlanNames.STARTUP:
                     startup_cta_text = "Current Plan"
                     scale_cta_text = "Upgrade to Scale"

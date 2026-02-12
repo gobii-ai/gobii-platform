@@ -2,6 +2,10 @@ from django.utils import timezone
 
 from observability import traced
 from util.analytics import Analytics
+from util.trial_enforcement import (
+    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_use_personal_agents_and_api,
+)
 from rest_framework import authentication, exceptions
 from .models import ApiKey, OrganizationMembership
 
@@ -94,5 +98,8 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
 
         if not api_key.user.is_active:
             raise exceptions.AuthenticationFailed("User account is inactive")
+
+        if not can_user_use_personal_agents_and_api(api_key.user):
+            raise exceptions.AuthenticationFailed(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
 
         return api_key.user

@@ -4,6 +4,7 @@ from datetime import timedelta
 import shutil
 import tempfile
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from django.utils import timezone
 
@@ -18,6 +19,12 @@ from bs4 import BeautifulSoup
 from api.services.daily_credit_settings import get_daily_credit_settings_for_plan
 from constants.plans import PlanNames
 from django.core.files.uploadedfile import SimpleUploadedFile
+from util.onboarding import (
+    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+)
 
 
 @tag("batch_console_agents")
@@ -336,6 +343,28 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(cache.get(cache_key))
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_console_agents")
+    def test_delete_personal_agent_trial_requirement_returns_forbidden(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Trial Gated Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Trial Gated Agent",
+            charter="Trial gated",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.delete(reverse("agent_delete", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
+        self.assertTrue(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
+
     @patch("console.views.AgentService.has_agents_available", return_value=True)
     @tag("batch_console_agents")
     def test_org_agent_creation_blocked_without_seat(self, _mock_agents_available):
@@ -396,6 +425,64 @@ class ConsoleViewsTest(TestCase):
             )
         )
         self.assertEqual(PersistentAgent.objects.filter(organization=org).count(), 0)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("console.views.AgentService.has_agents_available", return_value=True)
+    @tag("batch_console_agents")
+    def test_personal_agent_creation_requires_trial(self, _mock_agents_available):
+        from api.models import PersistentAgent
+
+        session = self.client.session
+        session["agent_charter"] = "Help with tasks"
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["context_name"] = self.user.get_full_name() or self.user.username
+        session.save()
+
+        response = self.client.post(
+            reverse("agent_create_contact"),
+            data={
+                "preferred_contact_method": "email",
+                "contact_endpoint_email": "owner@example.com",
+                "email_enabled": "on",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        form = response.context.get("form")
+        self.assertIsNotNone(form)
+        self.assertTrue(
+            any("Start a free trial" in error for error in form.non_field_errors()),
+            form.non_field_errors(),
+        )
+        self.assertEqual(
+            PersistentAgent.objects.filter(user=self.user, organization__isnull=True).count(),
+            0,
+        )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_console_agents")
+    def test_quick_spawn_trial_requirement_redirects_to_trial_onboarding_modal(self):
+        session = self.client.session
+        session["agent_charter"] = "Help with tasks"
+        session.save()
+
+        response = self.client.get(reverse("agent_quick_spawn"))
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        query = parse_qs(parsed.query)
+        self.assertEqual(query.get("spawn"), ["1"])
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
     @tag("batch_console_agents")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')

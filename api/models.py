@@ -522,6 +522,7 @@ class UserFlags(models.Model):
         related_name="flags",
     )
     is_vip = models.BooleanField(default=False, db_index=True)
+    is_freemium_grandfathered = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -568,9 +569,31 @@ def _user_is_vip(self):
     return bool(flags and getattr(flags, "is_vip", False))
 
 
+def _user_is_freemium_grandfathered(self):
+    """Safe freemium-grandfathered accessor that tolerates missing flags rows."""
+    if not getattr(self, "pk", None):
+        return False
+
+    flags = None
+    if "flags" in getattr(self, "__dict__", {}):
+        flags = self.__dict__["flags"]
+    elif getattr(self, "_prefetched_objects_cache", None) and "flags" in self._prefetched_objects_cache:
+        flags = self._prefetched_objects_cache.get("flags")
+
+    if flags is None:
+        flags = UserFlags.objects.filter(user=self).only("is_freemium_grandfathered").first()
+
+    return bool(flags and getattr(flags, "is_freemium_grandfathered", False))
+
+
 UserModel = get_user_model()
 if not hasattr(UserModel, "is_vip"):
     UserModel.add_to_class("is_vip", property(_user_is_vip))
+if not hasattr(UserModel, "is_freemium_grandfathered"):
+    UserModel.add_to_class(
+        "is_freemium_grandfathered",
+        property(_user_is_freemium_grandfathered),
+    )
 
 
 class UserReferral(models.Model):
@@ -2150,11 +2173,20 @@ def initialize_new_user_resources(sender, instance, created, **kwargs):
             now = timezone.now()
             expires = now + timedelta(days=INITIAL_TASK_CREDIT_EXPIRATION_DAYS)
 
-            # Note: since this is a new, they are automatically on the free plan. The might immediately upgrade, but
-            # we still want to give them some initial credits here in case they do not
+            # New users only receive free-plan bootstrap credits when legacy freemium
+            # remains enabled or they were explicitly grandfathered.
+            from util.trial_enforcement import is_personal_trial_enforcement_enabled
+
+            should_grant_initial_free_credits = not is_personal_trial_enforcement_enabled()
+            if not should_grant_initial_free_credits:
+                should_grant_initial_free_credits = UserFlags.objects.filter(
+                    user=instance,
+                    is_freemium_grandfathered=True,
+                ).exists()
+
             credit_amount = PLAN_CONFIG[PlanNames.FREE]["monthly_task_credits"]
 
-            if credit_amount > 0:
+            if should_grant_initial_free_credits and credit_amount > 0:
                 # Only create TaskCredit if the user has a positive credit limit
                 # This avoids creating TaskCredit with 0 credits
                 with traced("CREATE User TaskCredit", user_id=instance.id):

@@ -29,12 +29,12 @@ export function SubscriptionUpgradeModal({
     }
   }, [dismissible, onClose])
 
-  const isTrialOnboarding = source === 'trial_onboarding'
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
-  const title = isTrialOnboarding
-    ? (maxTrialDays > 0 ? `Start ${maxTrialDays}-day Free Trial` : 'Choose your plan')
+  const useTrialCopy = !allowDowngrade && maxTrialDays > 0 && (source === 'trial_onboarding' || currentPlan === 'free')
+  const title = useTrialCopy
+    ? `Start ${maxTrialDays}-day Free Trial`
     : (allowDowngrade ? 'Change your plan' : 'Upgrade your plan')
-  const subtitle = isTrialOnboarding
+  const subtitle = useTrialCopy
     ? 'Choose your plan to continue'
     : 'Choose the plan that fits your needs'
 

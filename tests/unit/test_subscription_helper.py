@@ -2,7 +2,7 @@ from datetime import datetime, timezone as datetime_timezone
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from unittest.mock import patch, MagicMock
 
@@ -10,6 +10,7 @@ from api.models import (
     BrowserUseAgent,
     PersistentAgent,
     UserBilling,
+    UserFlags,
     Organization,
     OrganizationBilling,
     TaskCredit,
@@ -25,6 +26,8 @@ from util.subscription_helper import (
     get_existing_individual_subscriptions,
     get_subscription_base_price,
 )
+from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
+from waffle.models import Switch
 
 
 User = get_user_model()
@@ -231,6 +234,50 @@ class GetUsersDueForMonthlyGrantTests(TestCase):
                 mock_now.return_value = datetime(2025, 11, 6, tzinfo=datetime_timezone.utc)
                 results = get_users_due_for_monthly_grant()
 
+        self.assertNotIn(self.other, results)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_enforcement_only_returns_grandfathered_free_users(self):
+        with timezone.override("UTC"):
+            UserBilling.objects.update_or_create(
+                user=self.user,
+                defaults={"billing_cycle_anchor": 6, "subscription": PlanNames.FREE},
+            )
+            UserBilling.objects.update_or_create(
+                user=self.other,
+                defaults={"billing_cycle_anchor": 6, "subscription": PlanNames.FREE},
+            )
+            UserFlags.objects.create(user=self.user, is_freemium_grandfathered=True)
+
+            with patch("util.subscription_helper.timezone.now") as mock_now:
+                mock_now.return_value = datetime(2025, 11, 6, tzinfo=datetime_timezone.utc)
+                results = get_users_due_for_monthly_grant()
+
+        self.assertIn(self.user, results)
+        self.assertNotIn(self.other, results)
+
+    def test_waffle_switch_enforcement_only_returns_grandfathered_free_users(self):
+        Switch.objects.update_or_create(
+            name=PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH,
+            defaults={"active": True},
+        )
+
+        with timezone.override("UTC"):
+            UserBilling.objects.update_or_create(
+                user=self.user,
+                defaults={"billing_cycle_anchor": 6, "subscription": PlanNames.FREE},
+            )
+            UserBilling.objects.update_or_create(
+                user=self.other,
+                defaults={"billing_cycle_anchor": 6, "subscription": PlanNames.FREE},
+            )
+            UserFlags.objects.create(user=self.user, is_freemium_grandfathered=True)
+
+            with patch("util.subscription_helper.timezone.now") as mock_now:
+                mock_now.return_value = datetime(2025, 11, 6, tzinfo=datetime_timezone.utc)
+                results = get_users_due_for_monthly_grant()
+
+        self.assertIn(self.user, results)
         self.assertNotIn(self.other, results)
 
 

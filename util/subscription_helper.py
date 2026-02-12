@@ -1083,6 +1083,12 @@ def get_users_due_for_monthly_grant(days: int = 35):
                 last_grant_date=latest_grant,
             )
         )
+        from util.trial_enforcement import is_personal_trial_enforcement_enabled
+
+        if is_personal_trial_enforcement_enabled():
+            annotated_users = annotated_users.filter(
+                flags__is_freemium_grandfathered=True,
+            )
 
         due_users: list = []
         for user in annotated_users.iterator():

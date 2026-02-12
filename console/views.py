@@ -135,7 +135,12 @@ from billing.addons import AddonEntitlementService
 from util import sms
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
-from util.onboarding import clear_trial_onboarding_intent
+from util.onboarding import (
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    clear_trial_onboarding_intent,
+    set_trial_onboarding_intent,
+    set_trial_onboarding_requires_plan_selection,
+)
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import (
     get_user_plan,
@@ -152,8 +157,14 @@ from util.subscription_helper import (
     get_subscription_base_price,
     ensure_single_individual_subscription,
 )
+from util.trial_enforcement import (
+    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_use_personal_agents_and_api,
+)
 from util.urls import (
+    IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
+    append_query_params,
     append_context_query,
     build_immersive_chat_url,
     load_daily_limit_action_payload,
@@ -219,6 +230,15 @@ def _format_validation_error(error: ValidationError) -> str:
     if hasattr(error, "messages") and error.messages:
         return " ".join(error.messages)
     return str(error)
+
+
+def _enforce_personal_agent_access_or_raise(user, agent: PersistentAgent) -> None:
+    if (
+        agent.organization_id is None
+        and agent.user_id == user.id
+        and not can_user_use_personal_agents_and_api(user)
+    ):
+        raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
 
 
 def _build_agent_gradient(hex_color: str) -> str:
@@ -913,7 +933,7 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     def get_context_data(self, **kwargs):
         """Add form to context."""
         context = super().get_context_data(**kwargs)
-        context['form'] = self.get_form() # Add form instance from FormMixin
+        context['form'] = kwargs.get("form") or self.get_form()
         context['api_key_context'] = self.api_key_context
         context['can_manage_api_keys'] = self.api_key_context.get("can_manage", False)
         context['email_verified'] = has_verified_email(self.request.user)
@@ -988,12 +1008,21 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
                 self.object_list = self.get_queryset() # Need to set this for get()
                 return self.render_to_response(self.get_context_data(form=form))
 
+    def _render_form_errors(self, form):
+        if self.request.htmx:
+            response = render(self.request, "partials/_api_key_form.html", {"form": form})
+            response["HX-Retarget"] = "#create-api-key-form"
+            response["HX-Reswap"] = "outerHTML"
+            return response
+        self.object_list = self.get_queryset()
+        return self.render_to_response(self.get_context_data(form=form))
+
     @transaction.atomic
     def form_valid(self, form):
         """Process a valid form to create an API key."""
         if not has_verified_email(self.request.user):
             form.add_error(None, "Email verification required to create API keys. Please verify your email address in your account settings.")
-            return self.form_invalid(form)
+            return self._render_form_errors(form)
 
         name = form.cleaned_data['name']
         ctx = self.api_key_context
@@ -1005,6 +1034,10 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
                 name=name,
             )
         else:
+            if not can_user_use_personal_agents_and_api(self.request.user):
+                form.add_error(None, PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
+                return self._render_form_errors(form)
+
             # create_for_user bypasses model validation by using objects.create
             # The validation will now happen in the model's save method
             # which could raise ValidationError (e.g., if key limit is reached)
@@ -2270,6 +2303,13 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 'can_spawn_agents': False,
             }
 
+        if owner_type == "user" and not can_user_use_personal_agents_and_api(self.request.user):
+            return {
+                'agents_available': 0,
+                'agents_unlimited': False,
+                'can_spawn_agents': False,
+            }
+
         try:
             agents_available = AgentService.get_agents_available(owner)
         except Exception:
@@ -2412,10 +2452,13 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
-            persistent_agents = PersistentAgent.objects.non_eval().filter(
-                user=self.request.user,
-                organization__isnull=True  # Only personal agents
-            ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+            if can_user_use_personal_agents_and_api(self.request.user):
+                persistent_agents = PersistentAgent.objects.non_eval().filter(
+                    user=self.request.user,
+                    organization__isnull=True,  # Only personal agents
+                ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+            else:
+                persistent_agents = PersistentAgent.objects.none()
         
         persistent_agents = list(persistent_agents)
         shared_agents_qs = (
@@ -2818,6 +2861,20 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             error_messages.extend(getattr(exc, 'messages', []))
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
+
+            if any(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE in str(message) for message in error_messages):
+                set_trial_onboarding_intent(
+                    request,
+                    target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                )
+                set_trial_onboarding_requires_plan_selection(request, required=True)
+                return redirect(
+                    append_query_params(
+                        f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                        {"spawn": "1"},
+                    )
+                )
+
             for message_text in error_messages:
                 messages.error(request, message_text)
             return redirect('agents')
@@ -2866,6 +2923,7 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
             pk=kwargs["pk"],
             user=request.user,
         )
+        _enforce_personal_agent_access_or_raise(request.user, self.agent)
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
@@ -2917,6 +2975,7 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
             raise Http404()
 
         agent = get_object_or_404(PersistentAgent.objects.non_eval(), pk=agent_id)
+        _enforce_personal_agent_access_or_raise(request.user, agent)
         if not user_can_manage_agent(request.user, agent):
             raise PermissionDenied("You do not have permission to manage this agent.")
         if action not in {"double", "unlimited"}:
@@ -3012,6 +3071,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             return qs.filter(organization_id=org_id)
 
         # Personal context
+        if not can_user_use_personal_agents_and_api(self.request.user):
+            return qs.none()
         return qs.filter(user=self.request.user, organization__isnull=True)
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - get_context_data")
@@ -5563,20 +5624,16 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
         return agent
 
     def _can_manage(self, user, agent: PersistentAgent) -> bool:
-        if agent.user_id == user.id:
+        if user.is_staff:
             return True
         if agent.organization_id:
             return OrganizationMembership.objects.filter(
                 org=agent.organization,
                 user=user,
                 status=OrganizationMembership.OrgStatus.ACTIVE,
-                role__in=[
-                    OrganizationMembership.OrgRole.OWNER,
-                    OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-                ],
+                role__in=MEMBER_MANAGE_ROLES,
             ).exists()
-        return False
+        return user_can_manage_agent(user, agent)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -5668,6 +5725,8 @@ class AgentFilesView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
                 return qs.none()
             return qs.filter(organization_id=org_id)
 
+        if not can_user_use_personal_agents_and_api(self.request.user):
+            return qs.none()
         return qs.filter(user=self.request.user, organization__isnull=True)
 
     def get_context_data(self, **kwargs):
@@ -5710,6 +5769,7 @@ class AgentDeleteView(LoginRequiredMixin, View):
                 pk=self.kwargs['pk'],
                 user=request.user
             )
+            _enforce_personal_agent_access_or_raise(request.user, agent)
 
             agent_name = agent.name
             agent_id = str(agent.pk)
@@ -5777,6 +5837,8 @@ class AgentDeleteView(LoginRequiredMixin, View):
             
         except PersistentAgent.DoesNotExist:
             return HttpResponse("Agent not found or you don't have permission.", status=404)
+        except PermissionDenied:
+            raise
         except Exception as e:
             return HttpResponse(f"An error occurred: {e}", status=500)
 
@@ -6794,6 +6856,7 @@ class AgentSecretRerequestView(LoginRequiredMixin, View):
             pk=self.kwargs['pk'],
             user=request.user,
         )
+        _enforce_personal_agent_access_or_raise(request.user, agent)
         secret_id = self.kwargs.get('secret_id')
         from api.models import PersistentAgentSecret
         try:
@@ -6818,11 +6881,13 @@ class AgentSecretsRequestThanksView(LoginRequiredMixin, TemplateView):
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request Thanks View - get_object")
     def get_object(self):
         """Get the agent or raise 404."""
-        return get_object_or_404(
+        agent = get_object_or_404(
             PersistentAgent.objects.non_eval(),
             pk=self.kwargs['pk'],
             user=self.request.user
         )
+        _enforce_personal_agent_access_or_raise(self.request.user, agent)
+        return agent
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request Thanks View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -6841,12 +6906,15 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
     @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_queryset")
     def get_queryset(self):
         # Ensure users can only access their own agents
-        return (
+        qs = (
             super()
             .get_queryset()
             .filter(user=self.request.user)
             .select_related('organization__billing')
         )
+        if can_user_use_personal_agents_and_api(self.request.user):
+            return qs
+        return qs.exclude(organization__isnull=True)
 
     @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -6944,6 +7012,15 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                 current_span.set_attribute("approval.issue", "wrong_account")
             logger.info("Agent contact-requests wrong account", extra={"agent_id": str(pk), "user_id": self.request.user.id})
             return None, 'wrong_account'
+
+        if agent.organization_id is None and not can_user_use_personal_agents_and_api(self.request.user):
+            if current_span:
+                current_span.set_attribute("approval.issue", "wrong_account")
+            logger.info(
+                "Agent contact-requests blocked by personal trial enforcement",
+                extra={"agent_id": str(pk), "user_id": self.request.user.id},
+            )
+            return None, "wrong_account"
             
         return agent, None
 
@@ -7225,6 +7302,14 @@ class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
                 current_span.set_attribute("approval.issue", "wrong_account")
             logger.info("Agent contact-requests-thanks wrong account", extra={"agent_id": str(pk), "user_id": self.request.user.id})
             return None, 'wrong_account'
+        if agent.organization_id is None and not can_user_use_personal_agents_and_api(self.request.user):
+            if current_span:
+                current_span.set_attribute("approval.issue", "wrong_account")
+            logger.info(
+                "Agent contact-requests-thanks blocked by personal trial enforcement",
+                extra={"agent_id": str(pk), "user_id": self.request.user.id},
+            )
+            return None, "wrong_account"
         return agent, None
 
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get")

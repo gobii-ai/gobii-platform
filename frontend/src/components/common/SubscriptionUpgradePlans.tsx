@@ -97,7 +97,8 @@ export function SubscriptionUpgradePlans({
   const footerClass = variant === 'inline'
     ? 'mt-4 text-center'
     : 'border-t border-slate-200 bg-white px-6 py-4 sm:px-8'
-  const isTrialOnboarding = source === 'trial_onboarding'
+  const hasAnyTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale) > 0
+  const useTrialCopy = !allowDowngrade && hasAnyTrialDays && (source === 'trial_onboarding' || currentPlan === 'free')
 
   return (
     <>
@@ -107,7 +108,7 @@ export function SubscriptionUpgradePlans({
             const isCurrent = isCurrentPlan(plan.id)
             const canUpgrade = canSelectPlan(plan.id)
             const trialDays = plan.id === 'startup' ? trialDaysByPlan.startup : trialDaysByPlan.scale
-            const ctaLabel = isTrialOnboarding
+            const ctaLabel = useTrialCopy
               ? (trialDays > 0 ? `Start ${trialDays}-day Free Trial` : `Get ${plan.name}`)
               : (allowDowngrade ? `Select ${plan.name}` : `Get ${plan.name}`)
 
