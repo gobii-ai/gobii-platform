@@ -1691,10 +1691,10 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             upgrade_url,
         )
 
-        # Prefetch primary email and SMS endpoints for header display
+        # Prefetch email endpoints and prefer primary first when available.
         email_prefetch = models.Prefetch(
             "comms_endpoints",
-            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL, is_primary=True),
+            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL).order_by("-is_primary", "address"),
             to_attr="primary_email_endpoints",
         )
         sms_prefetch = models.Prefetch(

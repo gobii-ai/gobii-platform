@@ -2430,11 +2430,11 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         context['pin_console_nav'] = True
         
-        # Define a prefetch for the primary email endpoint to avoid N+1 queries
+        # Prefetch email endpoints and prefer primary first when available.
         primary_email_prefetch = models.Prefetch(
             'comms_endpoints',
-            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL, is_primary=True),
-            to_attr='primary_email_endpoints'  # Use a plural name as it's a list
+            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL).order_by('-is_primary', 'address'),
+            to_attr='primary_email_endpoints'
         )
 
         primary_sms_prefetch = models.Prefetch(
