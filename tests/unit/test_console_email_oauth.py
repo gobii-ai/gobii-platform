@@ -17,6 +17,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
 )
+from console.api_views import _format_email_connection_error, _normalize_email_error_text
 
 
 @tag("batch_console_email_oauth")
@@ -203,3 +204,94 @@ class AgentEmailOAuthApiTests(TestCase):
         response = self.client.get(url, {"code": "abc", "state": "xyz"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "js/agent_email_oauth_callback.js")
+
+    def test_settings_page_mounts_react_email_app(self):
+        url = reverse("agent_email_settings", args=[self.agent.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-app="agent-email-settings"')
+        self.assertContains(response, reverse("console_agent_email_settings", args=[self.agent.pk]))
+
+    def test_email_settings_api_get(self):
+        url = reverse("console_agent_email_settings", args=[self.agent.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["agent"]["id"], str(self.agent.pk))
+        self.assertEqual(payload["endpoint"]["address"], self.endpoint.address)
+        self.assertTrue(payload["account"]["exists"])
+        self.assertFalse(payload["account"]["hasSmtpPassword"])
+        self.assertFalse(payload["account"]["hasImapPassword"])
+
+    def test_email_settings_ensure_account_creates_endpoint(self):
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-2")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="OAuth Agent Two",
+            charter="c",
+            browser_use_agent=browser_agent,
+        )
+        ensure_url = reverse("console_agent_email_settings_ensure_account", args=[second_agent.pk])
+        response = self.client.post(
+            ensure_url,
+            data=json.dumps({"endpointAddress": "second-agent@example.com"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["settings"]["endpoint"]["exists"])
+        self.assertTrue(payload["settings"]["account"]["exists"])
+        created_endpoint = PersistentAgentCommsEndpoint.objects.get(
+            owner_agent=second_agent,
+            channel=CommsChannel.EMAIL,
+        )
+        self.assertEqual(created_endpoint.address, "second-agent@example.com")
+
+    @patch("console.api_views._validate_agent_smtp_connection", return_value=(True, ""))
+    def test_email_settings_test_endpoint_runs_smtp(self, _mock_validate_smtp):
+        url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "endpointAddress": self.endpoint.address,
+                    "connectionMode": "custom",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": False,
+                    "testOutbound": True,
+                    "testInbound": False,
+                    "smtpHost": "smtp.gmail.com",
+                    "smtpPort": 587,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "login",
+                    "smtpUsername": self.endpoint.address,
+                    "smtpPassword": "app-password",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "login",
+                    "imapUsername": "",
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["results"]["smtp"]["ok"])
+
+    def test_normalize_email_error_text_flattens_tuple_and_bytes(self):
+        normalized = _normalize_email_error_text(
+            "(535, b'5.7.8 Username and Password not accepted. Learn more at https://support.google.com/mail/?p=BadCredentials x - gsmtp')"
+        )
+        self.assertNotIn("b'", normalized)
+        self.assertIn("Username and Password not accepted", normalized)
+
+    def test_format_email_connection_error_humanizes_missing_credentials(self):
+        message = _format_email_connection_error("b'Empty username or password. af79cd13be357-8cb2e53b218mb5783094385a'")
+        self.assertEqual(message, "Username or password is missing. Enter both values and try again.")

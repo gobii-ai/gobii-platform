@@ -22,6 +22,7 @@ const EvalsScreen = lazy(async () => ({ default: (await import('./screens/EvalsS
 const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/EvalsDetailScreen')).EvalsDetailScreen }))
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
 const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
+const AgentEmailSettingsScreen = lazy(async () => ({ default: (await import('./screens/AgentEmailSettingsScreen')).AgentEmailSettingsScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
 const LoadingFallback = () => (
@@ -129,6 +130,26 @@ switch (appName) {
     const propsId = mountNode.dataset.propsJsonId
     const initialData = readJsonScript<import('./screens/AgentFilesScreen').AgentFilesScreenProps['initialData']>(propsId)
     screen = <AgentFilesScreen initialData={initialData} />
+    break
+  }
+  case 'agent-email-settings': {
+    if (!agentId) {
+      throw new Error('Agent identifier is required for email settings')
+    }
+    const emailSettingsUrl = mountNode.dataset.emailSettingsUrl
+    const ensureAccountUrl = mountNode.dataset.emailSettingsEnsureUrl
+    const testUrl = mountNode.dataset.emailSettingsTestUrl
+    if (!emailSettingsUrl || !ensureAccountUrl || !testUrl) {
+      throw new Error('Email settings API endpoints are required')
+    }
+    screen = (
+      <AgentEmailSettingsScreen
+        agentId={agentId}
+        emailSettingsUrl={emailSettingsUrl}
+        ensureAccountUrl={ensureAccountUrl}
+        testUrl={testUrl}
+      />
+    )
     break
   }
   case 'diagnostics':
