@@ -2341,7 +2341,11 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         is_shared: bool = False,
     ) -> dict[str, Any]:
         display_tags = agent.display_tags if isinstance(agent.display_tags, list) else []
-        primary_email = _first_endpoint_address(getattr(agent, 'primary_email_endpoints', None))
+        email_endpoints_for_display = (
+            getattr(agent, 'email_endpoints_for_display', None)
+            or getattr(agent, 'primary_email_endpoints', None)
+        )
+        primary_email = _first_endpoint_address(email_endpoints_for_display)
         primary_sms = _first_endpoint_address(getattr(agent, 'primary_sms_endpoints', None))
         remaining = _coerce_decimal_to_float(getattr(agent, 'daily_credit_remaining', None))
         recent_burn = _coerce_decimal_to_float(getattr(agent, 'daily_credit_last_24h_usage', None))
@@ -2431,10 +2435,10 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         context['pin_console_nav'] = True
         
         # Prefetch email endpoints and prefer primary first when available.
-        primary_email_prefetch = models.Prefetch(
+        email_prefetch = models.Prefetch(
             'comms_endpoints',
             queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL).order_by('-is_primary', 'address'),
-            to_attr='primary_email_endpoints'
+            to_attr='email_endpoints_for_display'
         )
 
         primary_sms_prefetch = models.Prefetch(
@@ -2449,14 +2453,14 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             # Show organization's agents
             persistent_agents = PersistentAgent.objects.non_eval().filter(
                 organization_id=current_context.get('id')
-            ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+            ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
             if can_user_use_personal_agents_and_api(self.request.user):
                 persistent_agents = PersistentAgent.objects.non_eval().filter(
                     user=self.request.user,
                     organization__isnull=True,  # Only personal agents
-                ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+                ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
             else:
                 persistent_agents = PersistentAgent.objects.none()
         
@@ -2466,7 +2470,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             .non_eval()
             .filter(collaborators__user=self.request.user)
             .select_related('browser_use_agent', 'agent_color')
-            .prefetch_related(primary_email_prefetch)
+            .prefetch_related(email_prefetch)
             .prefetch_related(primary_sms_prefetch)
             .order_by('-created_at')
         )
