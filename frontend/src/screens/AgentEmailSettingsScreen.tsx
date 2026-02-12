@@ -181,6 +181,19 @@ function applyGmailDefaults(draft: DraftState, settings: AgentEmailSettingsPaylo
   }
 }
 
+function syncUsernamesWithEndpoint(current: DraftState, endpointAddress: string): DraftState {
+  const previousEndpoint = current.endpointAddress.trim()
+  const nextEndpoint = endpointAddress.trim()
+  const shouldUpdateSmtpUsername = !current.smtpUsername.trim() || current.smtpUsername.trim() === previousEndpoint
+  const shouldUpdateImapUsername = !current.imapUsername.trim() || current.imapUsername.trim() === previousEndpoint
+  return {
+    ...current,
+    endpointAddress,
+    smtpUsername: shouldUpdateSmtpUsername && nextEndpoint ? nextEndpoint : current.smtpUsername,
+    imapUsername: shouldUpdateImapUsername && nextEndpoint ? nextEndpoint : current.imapUsername,
+  }
+}
+
 function buildSavePayload(draft: DraftState): EmailSettingsSaveRequest {
   const oauthMode = draft.provider === 'gmail' && draft.connectionType === 'oauth'
   return {
@@ -250,7 +263,6 @@ export function AgentEmailSettingsScreen({
     mutationFn: (payload: EmailSettingsSaveRequest & { testOutbound: boolean; testInbound: boolean }) =>
       testAgentEmailSettings(testUrl, payload),
     onSuccess: (response) => {
-      queryClient.setQueryData(queryKey, response.settings)
       setTestResults({
         smtp: response.results.smtp ?? undefined,
         imap: response.results.imap ?? undefined,
@@ -270,7 +282,17 @@ export function AgentEmailSettingsScreen({
     if (!settings) {
       return
     }
-    setDraft((current) => current ?? draftFromSettings(settings))
+    const nextDraft = draftFromSettings(settings)
+    setDraft((current) => {
+      if (!current) {
+        return nextDraft
+      }
+      return {
+        ...nextDraft,
+        smtpPassword: current.smtpPassword,
+        imapPassword: current.imapPassword,
+      }
+    })
   }, [settings])
 
   useEffect(() => {
@@ -482,15 +504,15 @@ export function AgentEmailSettingsScreen({
         <div className="space-y-4">
             <div>
               <label className="text-sm font-semibold text-slate-700">Agent Email Address</label>
-              <input
-                type="email"
-                value={draft.endpointAddress}
-                onChange={(event) => {
-                  const endpointAddress = event.currentTarget.value
-                  updateDraft((current) => ({ ...current, endpointAddress }))
-                }}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+                <input
+                  type="email"
+                  value={draft.endpointAddress}
+                  onChange={(event) => {
+                    const endpointAddress = event.currentTarget.value
+                    updateDraft((current) => syncUsernamesWithEndpoint(current, endpointAddress))
+                  }}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
               <p className="mt-1 text-xs text-slate-600">
                 This is the email address your agent uses to send and receive emails.
               </p>
@@ -557,6 +579,14 @@ export function AgentEmailSettingsScreen({
                         ...current,
                         provider,
                         connectionType: provider === 'custom' ? 'manual' : '',
+                      }
+                      if (provider === 'custom' && current.endpointAddress.trim()) {
+                        if (!next.smtpUsername.trim()) {
+                          next.smtpUsername = current.endpointAddress.trim()
+                        }
+                        if (!next.imapUsername.trim()) {
+                          next.imapUsername = current.endpointAddress.trim()
+                        }
                       }
                       return provider === 'gmail' ? applyGmailDefaults(next, settings) : next
                     })
@@ -713,6 +743,37 @@ export function AgentEmailSettingsScreen({
                         />
                       </div>
                       <div>
+                        <label className="text-sm font-semibold text-slate-700">SMTP Security</label>
+                        <select
+                          value={draft.smtpSecurity}
+                          onChange={(event) => {
+                            const smtpSecurity = event.currentTarget.value
+                            updateDraft((current) => ({ ...current, smtpSecurity }))
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        >
+                          <option value="starttls">STARTTLS</option>
+                          <option value="ssl">SSL</option>
+                          <option value="none">None</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-sm font-semibold text-slate-700">SMTP Auth Mode</label>
+                        <select
+                          value={draft.smtpAuth}
+                          onChange={(event) => {
+                            const smtpAuth = event.currentTarget.value
+                            updateDraft((current) => ({ ...current, smtpAuth }))
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        >
+                          <option value="login">LOGIN</option>
+                          <option value="plain">PLAIN</option>
+                          <option value="oauth2">OAuth 2.0</option>
+                          <option value="none">None</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className="text-sm font-semibold text-slate-700">SMTP Username</label>
                         <input
                           type="text"
@@ -781,6 +842,36 @@ export function AgentEmailSettingsScreen({
                         />
                       </div>
                       <div>
+                        <label className="text-sm font-semibold text-slate-700">IMAP Security</label>
+                        <select
+                          value={draft.imapSecurity}
+                          onChange={(event) => {
+                            const imapSecurity = event.currentTarget.value
+                            updateDraft((current) => ({ ...current, imapSecurity }))
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        >
+                          <option value="ssl">SSL</option>
+                          <option value="starttls">STARTTLS</option>
+                          <option value="none">None</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-sm font-semibold text-slate-700">IMAP Auth Mode</label>
+                        <select
+                          value={draft.imapAuth}
+                          onChange={(event) => {
+                            const imapAuth = event.currentTarget.value
+                            updateDraft((current) => ({ ...current, imapAuth }))
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        >
+                          <option value="login">LOGIN</option>
+                          <option value="oauth2">OAuth 2.0</option>
+                          <option value="none">None</option>
+                        </select>
+                      </div>
+                      <div>
                         <label className="text-sm font-semibold text-slate-700">IMAP Username</label>
                         <input
                           type="text"
@@ -816,6 +907,43 @@ export function AgentEmailSettingsScreen({
                           <p className="mt-1 text-xs text-slate-600">Password is already stored. Leave blank to keep it.</p>
                         )}
                       </div>
+                      <div>
+                        <label className="text-sm font-semibold text-slate-700">IMAP Folder</label>
+                        <input
+                          type="text"
+                          value={draft.imapFolder}
+                          onChange={(event) => {
+                            const imapFolder = event.currentTarget.value
+                            updateDraft((current) => ({ ...current, imapFolder }))
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-semibold text-slate-700">Poll Interval (sec)</label>
+                        <input
+                          type="number"
+                          min={30}
+                          value={draft.pollIntervalSec}
+                          onChange={(event) => {
+                            const pollIntervalSec = event.currentTarget.value
+                            updateDraft((current) => ({ ...current, pollIntervalSec }))
+                          }}
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                        />
+                      </div>
+                      <label className="sm:col-span-2 rounded-lg border border-blue-200 px-3 py-2 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={draft.imapIdleEnabled}
+                          onChange={(event) => {
+                            const imapIdleEnabled = event.currentTarget.checked
+                            updateDraft((current) => ({ ...current, imapIdleEnabled }))
+                          }}
+                          className="mr-2 rounded"
+                        />
+                        Enable IMAP IDLE (low-latency triggers)
+                      </label>
                     </div>
                   </div>
                 )}

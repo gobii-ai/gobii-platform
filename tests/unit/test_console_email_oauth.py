@@ -212,6 +212,29 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertContains(response, 'data-app="agent-email-settings"')
         self.assertContains(response, reverse("console_agent_email_settings", args=[self.agent.pk]))
 
+    def test_settings_page_creates_account_with_imap_idle_enabled_by_default(self):
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-page-defaults")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Page Defaults Agent",
+            charter="c",
+            browser_use_agent=browser_agent,
+        )
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=second_agent,
+            channel=CommsChannel.EMAIL,
+            address="page-defaults@example.com",
+            is_primary=True,
+        )
+
+        url = reverse("agent_email_settings", args=[second_agent.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        account = AgentEmailAccount.objects.get(endpoint=endpoint)
+        self.assertTrue(account.imap_idle_enabled)
+
     def test_email_settings_api_get(self):
         url = reverse("console_agent_email_settings", args=[self.agent.pk])
         response = self.client.get(url)
@@ -222,6 +245,35 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertTrue(payload["account"]["exists"])
         self.assertFalse(payload["account"]["hasSmtpPassword"])
         self.assertFalse(payload["account"]["hasImapPassword"])
+        self.assertTrue(payload["account"]["imapIdleEnabled"])
+
+    def test_email_settings_api_get_defaults_imap_idle_enabled_for_unconfigured_agent(self):
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-no-email")
+        unconfigured_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="No Email Agent",
+            charter="c",
+            browser_use_agent=browser_agent,
+        )
+        url = reverse("console_agent_email_settings", args=[unconfigured_agent.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertFalse(payload["account"]["exists"])
+        self.assertTrue(payload["account"]["imapIdleEnabled"])
+
+    def test_email_settings_api_get_preserves_imap_idle_value_for_configured_account(self):
+        self.account.imap_host = "imap.example.com"
+        self.account.is_inbound_enabled = True
+        self.account.imap_idle_enabled = False
+        self.account.save()
+
+        url = reverse("console_agent_email_settings", args=[self.agent.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertFalse(payload["account"]["imapIdleEnabled"])
 
     def test_email_settings_ensure_account_creates_endpoint(self):
         with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
@@ -242,11 +294,24 @@ class AgentEmailOAuthApiTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["settings"]["endpoint"]["exists"])
         self.assertTrue(payload["settings"]["account"]["exists"])
+        self.assertTrue(payload["settings"]["account"]["imapIdleEnabled"])
         created_endpoint = PersistentAgentCommsEndpoint.objects.get(
             owner_agent=second_agent,
             channel=CommsChannel.EMAIL,
         )
         self.assertEqual(created_endpoint.address, "second-agent@example.com")
+
+    def test_email_settings_ensure_account_rejects_invalid_endpoint(self):
+        ensure_url = reverse("console_agent_email_settings_ensure_account", args=[self.agent.pk])
+        response = self.client.post(
+            ensure_url,
+            data=json.dumps({"endpointAddress": "not-an-email"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        payload = response.json()
+        self.assertIn("errors", payload)
+        self.assertIn("endpoint_address", payload["errors"])
 
     @patch("console.api_views._validate_agent_smtp_connection", return_value=(True, ""))
     def test_email_settings_test_endpoint_runs_smtp(self, _mock_validate_smtp):
@@ -284,6 +349,71 @@ class AgentEmailOAuthApiTests(TestCase):
         payload = response.json()
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["results"]["smtp"]["ok"])
+
+    @patch("console.api_views._validate_agent_smtp_connection", return_value=(False, "mock-smtp-error"))
+    def test_email_settings_test_endpoint_does_not_persist_draft_settings(self, _mock_validate_smtp):
+        self.account.smtp_host = "saved.smtp.example.com"
+        self.account.smtp_port = 587
+        self.account.smtp_security = "starttls"
+        self.account.smtp_auth = "login"
+        self.account.smtp_username = "saved-user@example.com"
+        self.account.is_outbound_enabled = True
+        self.account.imap_host = "saved.imap.example.com"
+        self.account.imap_port = 993
+        self.account.imap_security = "ssl"
+        self.account.imap_auth = "login"
+        self.account.imap_username = "saved-user@example.com"
+        self.account.is_inbound_enabled = True
+        self.account.save()
+
+        url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "endpointAddress": self.endpoint.address,
+                    "connectionMode": "custom",
+                    "isOutboundEnabled": False,
+                    "isInboundEnabled": False,
+                    "testOutbound": True,
+                    "testInbound": False,
+                    "smtpHost": "new.smtp.example.com",
+                    "smtpPort": 465,
+                    "smtpSecurity": "ssl",
+                    "smtpAuth": "none",
+                    "smtpUsername": "new-user@example.com",
+                    "smtpPassword": "new-password",
+                    "imapHost": "new.imap.example.com",
+                    "imapPort": 143,
+                    "imapSecurity": "starttls",
+                    "imapAuth": "none",
+                    "imapUsername": "new-user@example.com",
+                    "imapPassword": "new-password",
+                    "imapFolder": "NEWFOLDER",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 180,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.smtp_host, "saved.smtp.example.com")
+        self.assertEqual(self.account.smtp_port, 587)
+        self.assertEqual(self.account.smtp_security, "starttls")
+        self.assertEqual(self.account.smtp_auth, "login")
+        self.assertEqual(self.account.smtp_username, "saved-user@example.com")
+        self.assertEqual(self.account.imap_host, "saved.imap.example.com")
+        self.assertEqual(self.account.imap_port, 993)
+        self.assertEqual(self.account.imap_security, "ssl")
+        self.assertEqual(self.account.imap_auth, "login")
+        self.assertEqual(self.account.imap_username, "saved-user@example.com")
+        self.assertTrue(self.account.is_outbound_enabled)
+        self.assertTrue(self.account.is_inbound_enabled)
+        self.assertIn("SMTP test failed: mock-smtp-error", self.account.connection_error)
 
     def test_normalize_email_error_text_flattens_tuple_and_bytes(self):
         normalized = _normalize_email_error_text(

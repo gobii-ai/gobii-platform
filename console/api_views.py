@@ -21,6 +21,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.validators import validate_email
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -352,9 +353,17 @@ def _ensure_agent_email_endpoint_and_account(
     agent: PersistentAgent,
     endpoint_address: str,
 ) -> tuple[PersistentAgentCommsEndpoint, AgentEmailAccount, bool]:
+    raw_address = (endpoint_address or "").strip()
+    if not raw_address:
+        raise ValidationError({"endpoint_address": "Please provide a valid email address."})
+    try:
+        validate_email(raw_address)
+    except ValidationError as exc:
+        raise ValidationError({"endpoint_address": "Please provide a valid email address."}) from exc
+
     normalized = PersistentAgentCommsEndpoint.normalize_address(
         CommsChannel.EMAIL,
-        (endpoint_address or "").strip(),
+        raw_address,
     )
     if not normalized:
         raise ValidationError({"endpoint_address": "Please provide a valid email address."})
@@ -422,7 +431,10 @@ def _ensure_agent_email_endpoint_and_account(
                 if updates:
                     endpoint.save(update_fields=updates)
 
-        new_account, created = AgentEmailAccount.objects.get_or_create(endpoint=endpoint)
+        new_account, created = AgentEmailAccount.objects.get_or_create(
+            endpoint=endpoint,
+            defaults={"imap_idle_enabled": True},
+        )
         if account and account.pk != new_account.pk:
             _copy_agent_email_account_data(account, new_account)
             new_account.save()
@@ -624,6 +636,38 @@ def _serialize_agent_email_settings(
     endpoint: PersistentAgentCommsEndpoint | None,
     account: AgentEmailAccount | None,
 ) -> dict[str, Any]:
+    credential = None
+    if account:
+        try:
+            credential = account.oauth_credential
+        except AgentEmailOAuthCredential.DoesNotExist:
+            credential = None
+
+    is_first_time_custom_setup = bool(account) and not any(
+        (
+            account.is_outbound_enabled,
+            account.is_inbound_enabled,
+            bool(account.smtp_host),
+            bool(account.imap_host),
+            bool(account.smtp_username),
+            bool(account.imap_username),
+            bool(account.smtp_password_encrypted),
+            bool(account.imap_password_encrypted),
+            bool(account.connection_error),
+            account.connection_last_ok_at is not None,
+            account.last_polled_at is not None,
+            bool(account.last_seen_uid),
+            account.backoff_until is not None,
+            (account.imap_folder or "INBOX").upper() != "INBOX",
+            account.poll_interval_sec != 120,
+            credential is not None,
+        )
+    )
+
+    imap_idle_enabled = True
+    if account and not is_first_time_custom_setup:
+        imap_idle_enabled = bool(account.imap_idle_enabled)
+
     endpoint_payload = {
         "address": endpoint.address if endpoint else "",
         "exists": endpoint is not None,
@@ -646,19 +690,12 @@ def _serialize_agent_email_settings(
         "imapFolder": account.imap_folder if account else "INBOX",
         "isOutboundEnabled": bool(account.is_outbound_enabled) if account else False,
         "isInboundEnabled": bool(account.is_inbound_enabled) if account else False,
-        "imapIdleEnabled": bool(account.imap_idle_enabled) if account else False,
+        "imapIdleEnabled": imap_idle_enabled,
         "pollIntervalSec": account.poll_interval_sec if account else 120,
         "connectionMode": account.connection_mode if account else AgentEmailAccount.ConnectionMode.CUSTOM,
         "connectionLastOkAt": account.connection_last_ok_at.isoformat() if account and account.connection_last_ok_at else None,
         "connectionError": account.connection_error if account else "",
     }
-
-    credential = None
-    if account:
-        try:
-            credential = account.oauth_credential
-        except AgentEmailOAuthCredential.DoesNotExist:
-            credential = None
 
     oauth_payload = {
         "connected": credential is not None,
@@ -5305,7 +5342,7 @@ def _build_email_settings_form_input(payload: dict[str, Any]) -> dict[str, Any]:
             _email_settings_payload_value(payload, "isInboundEnabled", "is_inbound_enabled", False)
         ),
         "imap_idle_enabled": _coerce_bool(
-            _email_settings_payload_value(payload, "imapIdleEnabled", "imap_idle_enabled", False)
+            _email_settings_payload_value(payload, "imapIdleEnabled", "imap_idle_enabled", True)
         ),
         "poll_interval_sec": _email_settings_payload_value(payload, "pollIntervalSec", "poll_interval_sec", 120),
         "connection_mode": _email_settings_payload_value(
@@ -5451,21 +5488,21 @@ class AgentEmailSettingsTestAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"errors": _build_email_form_error_payload(form)}, status=400)
 
         provider = str(_email_settings_payload_value(payload, "oauthProvider", "oauth_provider", "") or "").strip().lower()
-        _apply_email_account_settings(account, endpoint, form.cleaned_data, provider=provider)
-        account.save()
+        test_account = AgentEmailAccount.objects.get(pk=account.pk)
+        _apply_email_account_settings(test_account, endpoint, form.cleaned_data, provider=provider)
 
         smtp_result: dict[str, Any] | None = None
         imap_result: dict[str, Any] | None = None
         errors: list[str] = []
 
         if test_outbound:
-            smtp_ok, smtp_error = _validate_agent_smtp_connection(account)
+            smtp_ok, smtp_error = _validate_agent_smtp_connection(test_account)
             smtp_result = {"ok": smtp_ok, "error": smtp_error}
             if not smtp_ok:
                 errors.append(f"SMTP test failed: {smtp_error}")
 
         if test_inbound:
-            imap_ok, imap_error = _validate_agent_imap_connection(account)
+            imap_ok, imap_error = _validate_agent_imap_connection(test_account)
             imap_result = {"ok": imap_ok, "error": imap_error}
             if not imap_ok:
                 errors.append(f"IMAP test failed: {imap_error}")
