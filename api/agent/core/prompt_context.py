@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import partial
@@ -38,6 +39,8 @@ from api.services.prompt_settings import get_prompt_settings
 from ...models import (
     AgentAllowlistInvite,
     AgentCommPeerState,
+    AgentFileSpaceAccess,
+    AgentFsNode,
     AgentPeerLink,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
@@ -76,7 +79,7 @@ from .llm_config import (
 from .promptree import Prompt, hmt
 from .step_compaction import llm_summarise_steps
 
-from ..files.filesystem_prompt import get_agent_filesystem_prompt
+from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
 from ..tools.email_sender import get_send_email_tool
 from ..tools.peer_dm import get_send_agent_message_tool
@@ -91,6 +94,7 @@ from ..tools.spawn_web_task import (
 from ..tools.sqlite_kanban import format_kanban_friendly_id
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
+    FILES_TABLE,
     KANBAN_CARDS_TABLE,
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
@@ -108,6 +112,7 @@ from .tool_results import (
     ToolResultPromptInfo,
     prepare_tool_results_for_prompt,
 )
+from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
 
@@ -133,6 +138,15 @@ SIGNED_FILES_URL_RE = re.compile(
 )
 SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
+SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
+
+
+@dataclass(frozen=True)
+class _FileSnapshotBundle:
+    has_filespace: bool
+    records: List[FileSQLiteRecord]
+
+
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
@@ -325,6 +339,13 @@ recent_messages → SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 20
 inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC
 attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json)
 __messages is per-cycle snapshot: newest→oldest full bodies up to ~5MB total; dropped before persistence
+
+# __files (special table; metadata only)
+__files.columns = {node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at}
+recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30
+find_file_by_path → SELECT * FROM __files WHERE path='/exports/report.csv'
+list_export_files → SELECT path, size_bytes FROM __files WHERE path LIKE '/exports/%' ORDER BY updated_at DESC
+__files is per-cycle snapshot of recent files in the default filespace; metadata only (no file contents)
 
 # JSON: path from hint, field from hint
 hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
@@ -2048,6 +2069,9 @@ def build_prompt_context(
             non_shrinkable=True
         )
 
+    files_snapshot = _build_sqlite_files_snapshot(agent)
+    store_files_for_prompt(files_snapshot.records)
+
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
     _get_unified_history_prompt(agent, unified_history_group)
@@ -2079,8 +2103,12 @@ def build_prompt_context(
         shrinker="hmt"
     )
 
-    # Agent filesystem listing - simple list of accessible files
-    files_listing_block = get_agent_filesystem_prompt(agent)
+    # Agent filesystem listing - recent metadata-only list from the same snapshot used for __files
+    files_listing_block = format_agent_filesystem_prompt(
+        files_snapshot.records,
+        has_filespace=files_snapshot.has_filespace,
+        max_rows=MAX_RECENT_FILES_IN_PROMPT,
+    )
     variable_group.section_text(
         "agent_filesystem",
         files_listing_block,
@@ -2101,7 +2129,8 @@ def build_prompt_context(
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs and "
         "__messages stores a newest-first communication snapshot (full bodies up to ~5MB total). "
-        "Both are per-cycle snapshots dropped before persistence. "
+        f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
+        "All are per-cycle snapshots dropped before persistence. "
         "Query them with sqlite_batch (not read_file). "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
         "CREATE TABLE AS SELECT is a fast way to persist tool results. "
@@ -4618,6 +4647,58 @@ def _build_sqlite_messages_snapshot_records(
         )
 
     return records
+
+
+def _build_sqlite_files_snapshot(agent: PersistentAgent) -> _FileSnapshotBundle:
+    records: List[FileSQLiteRecord] = []
+    access = (
+        AgentFileSpaceAccess.objects
+        .filter(agent=agent)
+        .order_by("-is_default", "-granted_at")
+        .first()
+    )
+    if not access:
+        return _FileSnapshotBundle(has_filespace=False, records=records)
+
+    files_qs = (
+        AgentFsNode.objects
+        .filter(
+            filespace_id=access.filespace_id,
+            is_deleted=False,
+            node_type=AgentFsNode.NodeType.FILE,
+        )
+        .only(
+            "id",
+            "filespace_id",
+            "path",
+            "name",
+            "mime_type",
+            "size_bytes",
+            "checksum_sha256",
+            "created_at",
+            "updated_at",
+        )
+        .order_by("-updated_at", "-created_at", "path")[:SQLITE_FILES_SNAPSHOT_MAX_RECORDS]
+    )
+
+    for node in files_qs.iterator(chunk_size=500):
+        path = node.path or ""
+        parent_path = path.rsplit("/", 1)[0] or "/"
+        records.append(
+            FileSQLiteRecord(
+                node_id=str(node.id),
+                filespace_id=str(node.filespace_id),
+                path=path,
+                name=node.name or "",
+                parent_path=parent_path,
+                mime_type=node.mime_type or "",
+                size_bytes=node.size_bytes,
+                checksum_sha256=node.checksum_sha256 or "",
+                created_at=node.created_at.isoformat() if node.created_at else None,
+                updated_at=node.updated_at.isoformat() if node.updated_at else None,
+            )
+        )
+    return _FileSnapshotBundle(has_filespace=True, records=records)
 
 
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:

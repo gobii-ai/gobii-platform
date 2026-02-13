@@ -11,13 +11,14 @@ attachments param on send_* tools.
 Charts/exports are referenced as file variables like $[/charts/...] and $[/exports/...].
 """
 import logging
-from typing import List
+from typing import List, Sequence
 
 from django.db.models import QuerySet
 
 from api.models import PersistentAgent, AgentFileSpaceAccess, AgentFsNode
 
 logger = logging.getLogger(__name__)
+MAX_RECENT_FILES_IN_PROMPT = 30
 
 def _get_default_filespace_id(agent: PersistentAgent) -> str | None:
     """
@@ -52,45 +53,49 @@ def _format_size(size_bytes: int | None) -> str:
         return str(size_bytes)
 
 
-def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
-    """
-    Return a human-readable list of file paths within the agent's filespace.
+def format_agent_filesystem_prompt(
+    file_nodes: Sequence[object],
+    *,
+    has_filespace: bool,
+    total_files: int | None = None,
+    max_rows: int = MAX_RECENT_FILES_IN_PROMPT,
+) -> str:
+    if not has_filespace:
+        return (
+            "No filespace configured for this agent. "
+            "Tool results/messages/file index live in SQLite __tool_results, __messages, and __files."
+        )
 
-    - Lists only non-deleted file nodes from the agent's default filespace
-    - Includes size and mime type when available
-    - Does NOT show URLs (prevents LLM from copying/corrupting signed URLs)
-    - Caps the returned text to ~30KB with a truncation notice
-    """
-    fs_id = _get_default_filespace_id(agent)
-    if not fs_id:
-        return "No filespace configured for this agent. Tool results/messages live in SQLite __tool_results and __messages."
+    if not file_nodes:
+        return (
+            "No files available in the agent filesystem. "
+            "Tool results/messages/file index live in SQLite __tool_results, __messages, and __files."
+        )
 
-    # Fetch files ordered by path for readability
-    files: QuerySet[AgentFsNode] = (
-        AgentFsNode.objects
-        .filter(filespace_id=fs_id, is_deleted=False, node_type=AgentFsNode.NodeType.FILE)
-        .only("id", "path", "size_bytes", "mime_type")
-        .order_by("path")
-    )
-
-    if not files.exists():
-        return "No files available in the agent filesystem. Tool results/messages live in SQLite __tool_results and __messages."
-
-    header = (
-        "Files in agent filespace (use read_file for contents; for attachments, pass $[/path] via the attachments param on send_* tools):"
-    )
+    display_count = min(len(file_nodes), max_rows)
+    if total_files is not None and total_files > display_count:
+        header = (
+            f"Most recent files in agent filespace (showing {display_count} of {total_files}; "
+            "use read_file for contents; for attachments, pass $[/path] via the attachments param on send_* tools):"
+        )
+    else:
+        header = (
+            f"Most recent files in agent filespace (up to {max_rows}; "
+            "use read_file for contents; for attachments, pass $[/path] via the attachments param on send_* tools):"
+        )
     lines: List[str] = [header]
     total_bytes = len(header.encode("utf-8"))
     max_bytes = 30000
 
-    for node in files.iterator():
-        size = _format_size(node.size_bytes)
-        mime = (node.mime_type or "?")
-        # Simple listing - no URLs shown (prevents copying/corruption)
-        line = f"- $[{node.path}] ({size}, {mime})"
+    for node in list(file_nodes)[:max_rows]:
+        size = _format_size(getattr(node, "size_bytes", None))
+        mime = (getattr(node, "mime_type", None) or "?")
+        updated_raw = getattr(node, "updated_at", None)
+        updated = updated_raw.isoformat() if hasattr(updated_raw, "isoformat") else (str(updated_raw) if updated_raw else "?")
+        line = f"- $[{getattr(node, 'path', '')}] ({size}, {mime}, updated {updated})"
 
         line_len = len(line.encode("utf-8"))
-        if lines:  # Add 1 for the newline character
+        if lines:
             line_len += 1
 
         if total_bytes + line_len > max_bytes:
@@ -101,3 +106,32 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
         total_bytes += line_len
 
     return "\n".join(lines)
+
+
+def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
+    """
+    Return a human-readable list of recent file paths within the agent's filespace.
+
+    - Lists only non-deleted file nodes from the agent's default filespace
+    - Shows only the most recently updated files (up to MAX_RECENT_FILES_IN_PROMPT)
+    - Includes size and mime type when available
+    - Does NOT show URLs (prevents LLM from copying/corrupting signed URLs)
+    - Caps the returned text to ~30KB with a truncation notice
+    """
+    fs_id = _get_default_filespace_id(agent)
+    if not fs_id:
+        return format_agent_filesystem_prompt([], has_filespace=False)
+
+    files: QuerySet[AgentFsNode] = (
+        AgentFsNode.objects
+        .filter(filespace_id=fs_id, is_deleted=False, node_type=AgentFsNode.NodeType.FILE)
+        .only("id", "path", "size_bytes", "mime_type", "updated_at")
+        .order_by("-updated_at", "-created_at", "path")[:MAX_RECENT_FILES_IN_PROMPT]
+    )
+    file_nodes = list(files)
+    return format_agent_filesystem_prompt(
+        file_nodes,
+        has_filespace=True,
+        total_files=len(file_nodes),
+        max_rows=MAX_RECENT_FILES_IN_PROMPT,
+    )
