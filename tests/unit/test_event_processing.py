@@ -255,6 +255,67 @@ class PromptContextBuilderTests(TestCase):
             reset_sqlite_db_path(token)
             sqlite_tmp.cleanup()
 
+    def test_messages_sqlite_snapshot_respects_record_cap(self):
+        base = timezone.now()
+        oldest = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="A",
+            seq=f"SQLR1{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
+        )
+        middle = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="B",
+            seq=f"SQLR2{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
+        )
+        newest = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="C",
+            seq=f"SQLR3{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
+        )
+
+        PersistentAgentMessage.objects.filter(pk=oldest.pk).update(timestamp=base - timedelta(minutes=3))
+        PersistentAgentMessage.objects.filter(pk=middle.pk).update(timestamp=base - timedelta(minutes=2))
+        PersistentAgentMessage.objects.filter(pk=newest.pk).update(timestamp=base - timedelta(minutes=1))
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+        try:
+            with patch("api.agent.core.prompt_context.SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS", 2), \
+                 patch("api.agent.core.prompt_context.SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES", 1000), \
+                 patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                build_prompt_context(self.agent)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT body
+                    FROM "__messages"
+                    ORDER BY timestamp DESC;
+                    """
+                )
+                rows = cur.fetchall()
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[0][0], "C")
+                self.assertEqual(rows[1][0], "B")
+            finally:
+                conn.close()
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
     def test_prompt_omits_implied_send_without_active_web_session(self):
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):

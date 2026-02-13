@@ -132,6 +132,7 @@ SIGNED_FILES_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+/d/(?P<token>[^\s\"'<>/]+)(?:/)?"
 )
 SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
+SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
@@ -4555,7 +4556,7 @@ def _build_sqlite_messages_snapshot_records(
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
         .order_by("-timestamp")
-    )
+    )[:SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS]
 
     for message in messages_qs.iterator(chunk_size=200):
         if not message.from_endpoint:

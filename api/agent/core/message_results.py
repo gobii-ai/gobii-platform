@@ -1,5 +1,6 @@
 import json
 import logging
+import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -118,11 +119,11 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
         logger.exception("Failed to store messages in SQLite.")
     finally:
         if conn is not None:
+            clear_guarded_connection(conn)
             try:
-                clear_guarded_connection(conn)
                 conn.close()
-            except Exception:
-                pass
+            except sqlite3.Error:
+                logger.warning("Failed to close SQLite connection during cleanup.", exc_info=True)
 
 
 def _recreate_messages_table(conn) -> None:
