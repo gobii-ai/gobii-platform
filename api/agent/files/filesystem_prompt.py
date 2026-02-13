@@ -63,7 +63,7 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
     """
     fs_id = _get_default_filespace_id(agent)
     if not fs_id:
-        return "No filespace configured for this agent. Tool results live in SQLite __tool_results."
+        return "No filespace configured for this agent. Tool results/messages live in SQLite __tool_results and __messages."
 
     # Fetch files ordered by path for readability
     files: QuerySet[AgentFsNode] = (
@@ -74,7 +74,7 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
     )
 
     if not files.exists():
-        return "No files available in the agent filesystem. Tool results live in SQLite __tool_results."
+        return "No files available in the agent filesystem. Tool results/messages live in SQLite __tool_results and __messages."
 
     header = (
         "Files in agent filespace (use read_file for contents; for attachments, pass $[/path] via the attachments param on send_* tools):"

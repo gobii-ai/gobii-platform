@@ -38,9 +38,12 @@ from .sqlite_guardrails import (
 )
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
 from .sqlite_helpers import is_write_statement
-from .sqlite_state import _sqlite_db_path_var  # type: ignore
+from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
 
 logger = logging.getLogger(__name__)
+PROTECTED_TABLE_NAMES = frozenset(
+    {name.lower() for name in EPHEMERAL_TABLES} | {"sqlite_master", "sqlite_schema"}
+)
 
 try:
     import resource
@@ -1219,7 +1222,7 @@ def _autocorrect_cte_typos(sql: str) -> tuple[str, list[str]]:
         if ref_lower in cte_lower:
             continue
         # Skip common table names that shouldn't be auto-corrected
-        if ref_lower in ('__tool_results', 'sqlite_master', 'sqlite_schema'):
+        if ref_lower in PROTECTED_TABLE_NAMES:
             continue
         # Check if it's a typo of any CTE
         for cte_name in cte_names:

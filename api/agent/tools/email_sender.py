@@ -257,6 +257,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {
             "status": "ok",
             "message": f"Email sent to {to_address}.",
+            "message_id": str(message.id),
             "auto_sleep_ok": not will_continue,
         }
 

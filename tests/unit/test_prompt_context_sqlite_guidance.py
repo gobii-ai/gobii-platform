@@ -22,3 +22,9 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("inspect before parsing", csv_section)
         self.assertIn("result_text", csv_section)
         self.assertIn("path_from_hint", csv_section)
+
+    def test_examples_include_messages_table_schema(self):
+        examples = prompt_context._get_sqlite_examples()
+        self.assertIn("# __messages (special table)", examples)
+        self.assertIn("attachment_paths_json", examples)
+        self.assertIn("latest_status", examples)

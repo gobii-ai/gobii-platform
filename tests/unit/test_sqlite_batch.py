@@ -344,6 +344,13 @@ class SqliteBatchToolTests(TestCase):
         self.assertIn("__tool_results", corrected)
         self.assertEqual(corrections, [])
 
+    def test_autocorrect_preserves_messages_table(self):
+        """Doesn't try to 'fix' __messages."""
+        sql = "WITH msgs AS (SELECT 1) SELECT * FROM __messages"
+        corrected, corrections = _autocorrect_cte_typos(sql)
+        self.assertIn("__messages", corrected)
+        self.assertEqual(corrections, [])
+
     def test_autocorrect_handles_join(self):
         """Auto-corrects typos in JOIN clauses too."""
         sql = "WITH items AS (SELECT 1 as id) SELECT * FROM __tool_results JOIN item ON 1=1"

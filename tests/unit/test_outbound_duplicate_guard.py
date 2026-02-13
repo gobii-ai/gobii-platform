@@ -110,6 +110,7 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
 
         first = execute_send_email(self.agent, params)
         self.assertEqual(first.get("status"), "ok")
+        self.assertTrue(first.get("message_id"))
 
         mock_deliver_email.reset_mock()
         second = execute_send_email(self.agent, params)
@@ -126,6 +127,7 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
 
         first = execute_send_sms(self.agent, params)
         self.assertEqual(first.get("status"), "ok")
+        self.assertTrue(first.get("message_id"))
         self.assertEqual(mock_deliver_sms.call_count, 1)
 
         mock_deliver_sms.reset_mock()

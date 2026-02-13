@@ -120,6 +120,7 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             result = execute_send_email(self.agent, params)
 
         self.assertEqual(result.get("status"), "ok")
+        self.assertTrue(result.get("message_id"))
 
     def test_execute_send_email_strips_control_characters(self):
         params = {
@@ -136,8 +137,10 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             result = execute_send_email(self.agent, params)
 
         self.assertEqual(result.get("status"), "ok")
+        self.assertTrue(result.get("message_id"))
 
         message = PersistentAgentMessage.objects.get(owner_agent=self.agent)
+        self.assertEqual(str(message.id), result.get("message_id"))
         self.assertNotIn("\u0019", message.body)
         self.assertIn("It's", message.body)
         self.assertEqual(message.raw_payload.get("subject", ""), params["subject"])
