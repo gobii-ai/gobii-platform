@@ -317,11 +317,12 @@ def _normalized_email_subject(message: PersistentAgentMessage) -> str:
     return decode_unicode_escapes(str(raw_subject))
 
 
-def _extract_cid_lookup(html_body: str) -> dict[str, str]:
+def _extract_cid_lookup(html_body: str) -> tuple[dict[str, str], dict[str, list[str]]]:
     if not html_body:
-        return {}
+        return {}, {}
 
     cid_lookup: dict[str, str] = {}
+    basename_lookup: dict[str, list[str]] = {}
     for match in _CID_REFERENCE_RE.finditer(html_body):
         raw_cid = (match.group(1) or "").strip()
         if not raw_cid:
@@ -331,8 +332,10 @@ def _extract_cid_lookup(html_body: str) -> dict[str, str]:
 
         basename = os.path.basename(raw_cid).strip().lower()
         if basename:
-            cid_lookup.setdefault(basename, raw_cid)
-    return cid_lookup
+            basename_matches = basename_lookup.setdefault(basename, [])
+            if raw_cid not in basename_matches:
+                basename_matches.append(raw_cid)
+    return cid_lookup, basename_lookup
 
 
 def _to_mime_type_parts(content_type: str) -> tuple[str, str]:
@@ -348,13 +351,14 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
     if not attachments:
         return 0
 
-    cid_lookup = _extract_cid_lookup(html_body)
+    cid_lookup, basename_cid_lookup = _extract_cid_lookup(html_body)
     agent = getattr(message, "owner_agent", None)
     message_id = str(getattr(message, "id", "")) if getattr(message, "id", None) else None
     channel = getattr(getattr(message, "from_endpoint", None), "channel", None)
     user_initiated = bool(getattr(agent, "user_id", None)) if agent else None
     max_bytes = get_max_file_size()
     attached = 0
+    used_cids: set[str] = set()
     for att in attachments:
         filename = att.filename or "attachment"
         content_type = att.content_type or "application/octet-stream"
@@ -456,7 +460,13 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
             if normalized_filename:
                 matched_cid = cid_lookup.get(normalized_filename)
                 if not matched_cid:
-                    matched_cid = cid_lookup.get(os.path.basename(normalized_filename))
+                    basename = os.path.basename(normalized_filename)
+                    basename_candidates = basename_cid_lookup.get(basename, [])
+                    if basename_candidates:
+                        matched_cid = basename_candidates.pop(0)
+
+            if matched_cid in used_cids:
+                matched_cid = None
 
             if matched_cid:
                 maintype, subtype = _to_mime_type_parts(content_type)
@@ -466,10 +476,11 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                     maintype=maintype,
                     subtype=subtype,
                     disposition="inline",
-                    cid=f"<{matched_cid}>",
                     filename=filename,
                 )
+                inline_part["Content-ID"] = f"<{matched_cid}>"
                 msg.attach(inline_part)
+                used_cids.add(matched_cid)
             else:
                 msg.attach(filename, content, content_type)
             attached += 1

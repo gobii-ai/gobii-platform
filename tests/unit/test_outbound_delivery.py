@@ -397,6 +397,62 @@ class EmailDeliveryTests(TestCase):
     @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
     @patch(
         "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=(
+            "<p><img src='cid:charts/logo.png' /><img src='cid:footer/logo.png' /></p>",
+            "inline logos",
+        ),
+    )
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_production_email_delivery_uses_distinct_cids_for_duplicate_basenames(
+        self,
+        mock_anymail,
+        _mock_prepare,
+    ):
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "test-message-id"
+
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "Duplicate Basenames"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"aaa", name="logo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="logo.png",
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"bbb", name="logo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="logo.png",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><img src='cid:charts/logo.png' /><img src='cid:footer/logo.png' /></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        self.assertEqual(mock_msg.attach.call_count, 2)
+        attachment_parts = [call.args[0] for call in mock_msg.attach.call_args_list]
+        self.assertTrue(all(isinstance(part, MIMEPart) for part in attachment_parts))
+        content_ids = {part["Content-ID"] for part in attachment_parts}
+        self.assertEqual(content_ids, {"<charts/logo.png>", "<footer/logo.png>"})
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
         return_value=("<p>No inline image in this message.</p>", "No inline image in this message."),
     )
     @patch("api.agent.comms.outbound_delivery.AnymailMessage")
