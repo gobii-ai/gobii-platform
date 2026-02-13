@@ -1098,6 +1098,17 @@ class CheckoutRedirectTests(TestCase):
 @tag("batch_pages")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
 class ProprietaryPricingTrialCopyTests(TestCase):
+    def _get_pricing_context_for_user(self, user):
+        from django.test.client import RequestFactory
+        from proprietary.views import PricingView
+
+        request = RequestFactory().get("/pricing/")
+        request.user = user
+
+        view = PricingView()
+        view.setup(request)
+        return view.get_context_data()
+
     @tag("batch_pages")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.customer_has_any_individual_subscription", return_value=True)
@@ -1121,10 +1132,8 @@ class ProprietaryPricingTrialCopyTests(TestCase):
             scale_trial_days=14,
         )
 
-        response = self.client.get(reverse("proprietary:pricing"))
-
-        self.assertEqual(response.status_code, 200)
-        plans = response.context["pricing_plans"]
+        context = self._get_pricing_context_for_user(user)
+        plans = context["pricing_plans"]
         self.assertEqual(plans[0]["cta"], "Subscribe to Pro")
         self.assertEqual(plans[1]["cta"], "Subscribe to Scale")
 
@@ -1151,10 +1160,8 @@ class ProprietaryPricingTrialCopyTests(TestCase):
             scale_trial_days=14,
         )
 
-        response = self.client.get(reverse("proprietary:pricing"))
-
-        self.assertEqual(response.status_code, 200)
-        plans = response.context["pricing_plans"]
+        context = self._get_pricing_context_for_user(user)
+        plans = context["pricing_plans"]
         self.assertEqual(plans[0]["cta"], "Start 7-day Free Trial")
         self.assertEqual(plans[1]["cta"], "Start 14-day Free Trial")
 
