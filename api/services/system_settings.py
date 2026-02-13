@@ -19,6 +19,7 @@ _CACHE_TTL_SECONDS = 300
 VALUE_TYPE_INT = "int"
 VALUE_TYPE_FLOAT = "float"
 VALUE_TYPE_BOOL = "bool"
+VALUE_TYPE_STRING = "string"
 LOGIN_TOGGLE_KEYS = frozenset(
     {
         "ACCOUNT_ALLOW_PASSWORD_LOGIN",
@@ -34,19 +35,21 @@ class SystemSettingDefinition:
     description: str
     value_type: str
     env_var: str
-    default_getter: Callable[[], int | float | bool]
+    default_getter: Callable[[], int | float | bool | str]
     category: str
     unit: str | None = None
     min_value: int | float | None = None
     disable_value: int | float | None = None
 
-    def coerce(self, value: Any) -> int | float | bool:
+    def coerce(self, value: Any) -> int | float | bool | str:
         if self.value_type == VALUE_TYPE_INT:
             coerced = _coerce_int(value)
         elif self.value_type == VALUE_TYPE_FLOAT:
             coerced = _coerce_float(value)
         elif self.value_type == VALUE_TYPE_BOOL:
             coerced = _coerce_bool(value)
+        elif self.value_type == VALUE_TYPE_STRING:
+            coerced = _coerce_string(value)
         else:
             raise ValueError(f"Unsupported value type: {self.value_type}")
         if self.disable_value is not None and coerced == self.disable_value:
@@ -101,6 +104,42 @@ SYSTEM_SETTING_DEFINITIONS = (
         category="LLM",
         unit="seconds",
         min_value=1,
+    ),
+    SystemSettingDefinition(
+        key="SANDBOX_COMPUTE_ENABLED",
+        label="Sandbox compute enabled",
+        description="Enable sandbox compute for eligible agents.",
+        value_type=VALUE_TYPE_BOOL,
+        env_var="SANDBOX_COMPUTE_ENABLED",
+        default_getter=lambda: settings.SANDBOX_COMPUTE_ENABLED,
+        category="Sandbox",
+    ),
+    SystemSettingDefinition(
+        key="SANDBOX_COMPUTE_POD_IMAGE",
+        label="Sandbox compute pod image",
+        description="Container image used for sandbox compute supervisor pods.",
+        value_type=VALUE_TYPE_STRING,
+        env_var="SANDBOX_COMPUTE_POD_IMAGE",
+        default_getter=lambda: settings.SANDBOX_COMPUTE_POD_IMAGE,
+        category="Sandbox",
+    ),
+    SystemSettingDefinition(
+        key="SANDBOX_EGRESS_PROXY_POD_IMAGE",
+        label="Sandbox egress proxy image",
+        description="Container image used for per-agent sandbox egress proxy pods.",
+        value_type=VALUE_TYPE_STRING,
+        env_var="SANDBOX_EGRESS_PROXY_POD_IMAGE",
+        default_getter=lambda: settings.SANDBOX_EGRESS_PROXY_POD_IMAGE,
+        category="Sandbox",
+    ),
+    SystemSettingDefinition(
+        key="SANDBOX_COMPUTE_REQUIRE_PROXY",
+        label="Require sandbox proxy",
+        description="Require a configured proxy for sandbox compute sessions.",
+        value_type=VALUE_TYPE_BOOL,
+        env_var="SANDBOX_COMPUTE_REQUIRE_PROXY",
+        default_getter=lambda: settings.SANDBOX_COMPUTE_REQUIRE_PROXY,
+        category="Sandbox",
     ),
     SystemSettingDefinition(
         key="ACCOUNT_ALLOW_PASSWORD_SIGNUP",
@@ -188,6 +227,15 @@ def _coerce_bool(value: Any) -> bool:
             return False
         raise ValueError("Value must be true or false.")
     raise ValueError("Value must be true or false.")
+
+
+def _coerce_string(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ValueError("Value must be text.")
+    text = value.strip()
+    if not text:
+        raise ValueError("Value cannot be empty.")
+    return text
 
 
 def _get_system_setting_model():
@@ -291,7 +339,7 @@ def validate_login_toggle_update(key: str, value: bool | None, clear: bool) -> N
         raise ValueError("At least one login method must remain enabled.")
 
 
-def _parse_db_value(definition: SystemSettingDefinition, raw_value: str | None) -> int | float | bool | None:
+def _parse_db_value(definition: SystemSettingDefinition, raw_value: str | None) -> int | float | bool | str | None:
     if raw_value is None:
         return None
     if isinstance(raw_value, str) and not raw_value.strip():
@@ -362,7 +410,7 @@ def list_system_settings() -> list[dict[str, Any]]:
     return [serialize_setting(definition, db_values) for definition in SYSTEM_SETTING_DEFINITIONS]
 
 
-def get_setting_value(key: str) -> int | float | bool:
+def get_setting_value(key: str) -> int | float | bool | str:
     definition = SYSTEM_SETTING_DEFINITIONS_BY_KEY.get(key)
     if definition is None:
         raise KeyError(f"Unknown system setting: {key}")
@@ -370,7 +418,7 @@ def get_setting_value(key: str) -> int | float | bool:
     return resolved["effective_value"]
 
 
-def set_setting_value(definition: SystemSettingDefinition, value: int | float | bool) -> None:
+def set_setting_value(definition: SystemSettingDefinition, value: int | float | bool | str) -> None:
     validate_login_toggle_update(
         definition.key,
         value if isinstance(value, bool) else None,
@@ -421,3 +469,19 @@ def get_account_allow_password_login() -> bool:
 
 def get_account_allow_social_login() -> bool:
     return bool(get_setting_value("ACCOUNT_ALLOW_SOCIAL_LOGIN"))
+
+
+def get_sandbox_compute_enabled() -> bool:
+    return bool(get_setting_value("SANDBOX_COMPUTE_ENABLED"))
+
+
+def get_sandbox_compute_pod_image() -> str:
+    return str(get_setting_value("SANDBOX_COMPUTE_POD_IMAGE"))
+
+
+def get_sandbox_egress_proxy_pod_image() -> str:
+    return str(get_setting_value("SANDBOX_EGRESS_PROXY_POD_IMAGE"))
+
+
+def get_sandbox_compute_require_proxy() -> bool:
+    return bool(get_setting_value("SANDBOX_COMPUTE_REQUIRE_PROXY"))

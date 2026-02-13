@@ -17,8 +17,9 @@ from django.utils import timezone
 
 from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
-from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
+from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
+from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import normalize_timeout as _normalize_timeout
 from waffle import get_waffle_flag_model
 
@@ -29,7 +30,7 @@ SANDBOX_COMPUTE_WAFFLE_FLAG = "sandbox_compute"
 
 
 def sandbox_compute_enabled() -> bool:
-    return bool(getattr(settings, "SANDBOX_COMPUTE_ENABLED", False))
+    return get_sandbox_compute_enabled()
 
 
 def sandbox_compute_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -99,7 +100,7 @@ def _sync_on_run_command() -> bool:
 
 
 def _proxy_required() -> bool:
-    return bool(getattr(settings, "SANDBOX_COMPUTE_REQUIRE_PROXY", False))
+    return get_sandbox_compute_require_proxy()
 
 
 def _no_proxy_value() -> str:
