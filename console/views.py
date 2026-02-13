@@ -6274,7 +6274,10 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
 
         if endpoint and account is None:
             from api.models import AgentEmailAccount
-            account, _ = AgentEmailAccount.objects.get_or_create(endpoint=endpoint)
+            account, _ = AgentEmailAccount.objects.get_or_create(
+                endpoint=endpoint,
+                defaults={"imap_idle_enabled": True},
+            )
 
         initial = {}
         if account:
@@ -6358,7 +6361,7 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
             data = form.cleaned_data
             created = False
             if not account:
-                account = AgentEmailAccount(endpoint=endpoint)
+                account = AgentEmailAccount(endpoint=endpoint, imap_idle_enabled=True)
                 created = True
             # Update endpoint address to match user-entered value, if provided
             new_address = (request.POST.get('endpoint_address') or '').strip()
@@ -6386,7 +6389,10 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                                     endpoint.is_primary = False
                                     endpoint.save(update_fields=["is_primary"])
                                 if account:
-                                    new_account, _ = AgentEmailAccount.objects.get_or_create(endpoint=existing_endpoint)
+                                    new_account, _ = AgentEmailAccount.objects.get_or_create(
+                                        endpoint=existing_endpoint,
+                                        defaults={"imap_idle_enabled": True},
+                                    )
                                     if new_account.pk != account.pk:
                                         for field in (
                                             "smtp_host",

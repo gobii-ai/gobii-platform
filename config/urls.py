@@ -123,6 +123,11 @@ from console.api_views import (
     EvalRunCompareAPIView,
     EvalSuiteRunCompareAPIView,
 )
+from console.email_settings.views import (
+    AgentEmailSettingsAPIView,
+    AgentEmailSettingsEnsureAccountAPIView,
+    AgentEmailSettingsTestAPIView,
+)
 from console.usage_views import (
     UsageSummaryAPIView,
     UsageBurnRateSnapshotAPIView,
@@ -277,6 +282,17 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/files/move/", AgentFsNodeMoveAPIView.as_view(), name="console_agent_fs_move"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
     path("console/api/agents/<uuid:agent_id>/daily-credits/", AgentDailyCreditsAPIView.as_view(), name="console_agent_daily_credits"),
+    path("console/api/agents/<uuid:agent_id>/email-settings/", AgentEmailSettingsAPIView.as_view(), name="console_agent_email_settings"),
+    path(
+        "console/api/agents/<uuid:agent_id>/email-settings/ensure-account/",
+        AgentEmailSettingsEnsureAccountAPIView.as_view(),
+        name="console_agent_email_settings_ensure_account",
+    ),
+    path(
+        "console/api/agents/<uuid:agent_id>/email-settings/test/",
+        AgentEmailSettingsTestAPIView.as_view(),
+        name="console_agent_email_settings_test",
+    ),
     path("console/api/agents/<uuid:agent_id>/addons/", AgentAddonsAPIView.as_view(), name="console_agent_addons"),
     path("console/api/agents/<uuid:agent_id>/quick-settings/", AgentQuickSettingsAPIView.as_view(), name="console_agent_quick_settings"),
     path("console/api/agents/<uuid:agent_id>/insights/", AgentInsightsAPIView.as_view(), name="console_agent_insights"),

@@ -16,8 +16,20 @@ function showError(text) {
 }
 
 function getCsrfToken() {
-  const match = document.cookie.match(/csrftoken=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : "";
+  if (typeof window.getCsrfTokenValue === "function") {
+    return window.getCsrfTokenValue() || "";
+  }
+
+  const meta = document.querySelector('meta[name="csrf-cookie-name"]');
+  const cookieName = (meta && meta.getAttribute("content") && meta.getAttribute("content").trim()) || "csrftoken";
+  const cookies = document.cookie ? document.cookie.split(";") : [];
+  for (let i = 0; i < cookies.length; i += 1) {
+    const parts = cookies[i].trim().split("=");
+    if (parts[0] === cookieName) {
+      return decodeURIComponent(parts.slice(1).join("="));
+    }
+  }
+  return "";
 }
 
 function getPendingSession(state) {
@@ -78,6 +90,7 @@ async function completeOAuth() {
   try {
     const response = await fetch("/console/api/email/oauth/callback/", {
       method: "POST",
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
         "X-CSRFToken": getCsrfToken(),
