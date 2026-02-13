@@ -106,7 +106,7 @@ def get_read_file_tool() -> Dict[str, Any]:
             "name": "read_file",
             "description": (
                 "Read a file from the agent filesystem and return the text content as markdown. "
-                "Not for tool/message snapshots; use sqlite_batch on __tool_results or __messages instead. "
+                "Not for SQLite snapshots; use sqlite_batch on __tool_results, __messages, or __files instead. "
                 "Uses OCR for images to return a detailed description. "
                 "Supports images, PDFs, text files, office documents, and more."
             ),
