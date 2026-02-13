@@ -4,16 +4,19 @@ and HTML-to-plaintext conversion using inscriptis.
 """
 
 import os
+from email.message import MIMEPart
 from unittest.mock import patch, MagicMock
 from datetime import timedelta
 from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from django.core.files.base import ContentFile
 
 from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
+    PersistentAgentMessageAttachment,
     OutboundMessageAttempt,
     CommsChannel,
     DeliveryStatus,
@@ -346,6 +349,86 @@ class EmailDeliveryTests(TestCase):
 
         call_kwargs = mock_anymail.call_args[1]
         self.assertEqual(call_kwargs["subject"], "Re: 🚨 Breaking update")
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p>Screenshot:</p><p><img src='cid:photo.png' alt='shot' /></p>", "Screenshot:"),
+    )
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_production_email_delivery_attaches_cid_matches_as_inline(self, mock_anymail, _mock_prepare):
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "test-message-id"
+
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "Inline Image"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"abc", name="photo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="photo.png",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><img src='cid:photo.png' /></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        mock_msg.attach.assert_called_once()
+        attachment_part = mock_msg.attach.call_args.args[0]
+        self.assertIsInstance(attachment_part, MIMEPart)
+        self.assertEqual(attachment_part["Content-ID"], "<photo.png>")
+        self.assertIn("inline", (attachment_part["Content-Disposition"] or "").lower())
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p>No inline image in this message.</p>", "No inline image in this message."),
+    )
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_production_email_delivery_keeps_non_cid_attachments_regular(self, mock_anymail, _mock_prepare):
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "test-message-id"
+
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "Regular Attachment"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"abc", name="photo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="photo.png",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><p>No cid refs</p></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        mock_msg.attach.assert_called_once_with("photo.png", b"abc", "image/png")
         mock_msg.send.assert_called_once_with(fail_silently=False)
 
 

@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+from email.message import MIMEPart
 from email.utils import formataddr
 
 from django.core.mail import get_connection
@@ -236,6 +238,7 @@ logger = logging.getLogger(__name__)
 
 
 _postmark_connection = None
+_CID_REFERENCE_RE = re.compile(r"cid:([^'\"<>\s)]+)", re.IGNORECASE)
 
 
 def _get_postmark_connection():
@@ -314,11 +317,38 @@ def _normalized_email_subject(message: PersistentAgentMessage) -> str:
     return decode_unicode_escapes(str(raw_subject))
 
 
-def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage) -> int:
+def _extract_cid_lookup(html_body: str) -> dict[str, str]:
+    if not html_body:
+        return {}
+
+    cid_lookup: dict[str, str] = {}
+    for match in _CID_REFERENCE_RE.finditer(html_body):
+        raw_cid = (match.group(1) or "").strip()
+        if not raw_cid:
+            continue
+        normalized = raw_cid.lower()
+        cid_lookup.setdefault(normalized, raw_cid)
+
+        basename = os.path.basename(raw_cid).strip().lower()
+        if basename:
+            cid_lookup.setdefault(basename, raw_cid)
+    return cid_lookup
+
+
+def _to_mime_type_parts(content_type: str) -> tuple[str, str]:
+    base_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if "/" not in base_content_type:
+        return "application", "octet-stream"
+    maintype, subtype = base_content_type.split("/", 1)
+    return maintype or "application", subtype or "octet-stream"
+
+
+def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage, html_body: str) -> int:
     attachments = list(message.attachments.select_related("filespace_node"))
     if not attachments:
         return 0
 
+    cid_lookup = _extract_cid_lookup(html_body)
     agent = getattr(message, "owner_agent", None)
     message_id = str(getattr(message, "id", "")) if getattr(message, "id", None) else None
     channel = getattr(getattr(message, "from_endpoint", None), "channel", None)
@@ -421,7 +451,27 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
         try:
             with storage.open(name, "rb") as handle:
                 content = handle.read()
-            msg.attach(filename, content, content_type)
+            matched_cid = None
+            normalized_filename = filename.strip().lower()
+            if normalized_filename:
+                matched_cid = cid_lookup.get(normalized_filename)
+                if not matched_cid:
+                    matched_cid = cid_lookup.get(os.path.basename(normalized_filename))
+
+            if matched_cid:
+                maintype, subtype = _to_mime_type_parts(content_type)
+                inline_part = MIMEPart()
+                inline_part.set_content(
+                    content,
+                    maintype=maintype,
+                    subtype=subtype,
+                    disposition="inline",
+                    cid=f"<{matched_cid}>",
+                    filename=filename,
+                )
+                msg.attach(inline_part)
+            else:
+                msg.attach(filename, content, content_type)
             attached += 1
         except Exception:
             logger.exception("Failed attaching file %s to message %s", att.id, message.id)
@@ -834,7 +884,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         logger.info("Attaching HTML alternative to message %s", message.id)
         msg.attach_alternative(html_body, "text/html")
 
-        attachment_count = _attach_email_attachments(message, msg)
+        attachment_count = _attach_email_attachments(message, msg, html_body)
         if attachment_count:
             logger.info(
                 "Attached %d file(s) to email message %s",
