@@ -59,9 +59,6 @@ class SqliteFilesTableTests(SimpleTestCase):
             self.assertEqual(row[4], "text/csv")
             self.assertEqual(row[5], 123)
             self.assertEqual(row[6], "abc123")
-            cur.execute('SELECT total_files, indexed_files, is_truncated FROM "__files_meta" WHERE id=1;')
-            meta = cur.fetchone()
-            self.assertEqual(meta, (1, 1, 0))
         finally:
             conn.close()
 
@@ -101,38 +98,5 @@ class SqliteFilesTableTests(SimpleTestCase):
             self.assertEqual(cur.fetchone()[0], 1)
             cur.execute('SELECT node_id FROM "__files";')
             self.assertEqual(cur.fetchone()[0], "node-new")
-            cur.execute('SELECT total_files, indexed_files, is_truncated FROM "__files_meta" WHERE id=1;')
-            meta = cur.fetchone()
-            self.assertEqual(meta, (1, 1, 0))
-        finally:
-            conn.close()
-
-    def test_store_files_for_prompt_writes_truncation_metadata(self):
-        records = [
-            FileSQLiteRecord(
-                node_id="node-1",
-                filespace_id="fs-1",
-                path="/a.txt",
-                name="a.txt",
-                parent_path="/",
-                mime_type="text/plain",
-                size_bytes=1,
-                checksum_sha256="x",
-                created_at=None,
-                updated_at=None,
-            )
-        ]
-        store_files_for_prompt(
-            records,
-            total_files=50,
-            indexed_files=1,
-            is_truncated=True,
-        )
-        conn = sqlite3.connect(self.db_path)
-        try:
-            cur = conn.cursor()
-            cur.execute('SELECT total_files, indexed_files, is_truncated FROM "__files_meta" WHERE id=1;')
-            meta = cur.fetchone()
-            self.assertEqual(meta, (50, 1, 1))
         finally:
             conn.close()

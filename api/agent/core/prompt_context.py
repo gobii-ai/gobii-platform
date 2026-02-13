@@ -95,7 +95,6 @@ from ..tools.sqlite_kanban import format_kanban_friendly_id
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
     FILES_TABLE,
-    FILES_META_TABLE,
     KANBAN_CARDS_TABLE,
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
@@ -145,16 +144,7 @@ SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
 @dataclass(frozen=True)
 class _FileSnapshotBundle:
     has_filespace: bool
-    total_files: int
     records: List[FileSQLiteRecord]
-
-    @property
-    def indexed_files(self) -> int:
-        return len(self.records)
-
-    @property
-    def is_truncated(self) -> bool:
-        return self.indexed_files < self.total_files
 
 
 __all__ = [
@@ -356,11 +346,6 @@ recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30
 find_file_by_path → SELECT * FROM __files WHERE path='/exports/report.csv'
 list_export_files → SELECT path, size_bytes FROM __files WHERE path LIKE '/exports/%' ORDER BY updated_at DESC
 __files is per-cycle snapshot of recent files in the default filespace; metadata only (no file contents)
-
-# __files_meta (special table; snapshot metadata)
-__files_meta.columns = {id, total_files, indexed_files, is_truncated}
-file_index_status → SELECT total_files, indexed_files, is_truncated FROM __files_meta WHERE id=1
-if is_truncated=1, __files is partial for this cycle (query by known path or narrow with LIKE)
 
 # JSON: path from hint, field from hint
 hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
@@ -2085,12 +2070,7 @@ def build_prompt_context(
         )
 
     files_snapshot = _build_sqlite_files_snapshot(agent)
-    store_files_for_prompt(
-        files_snapshot.records,
-        total_files=files_snapshot.total_files,
-        indexed_files=files_snapshot.indexed_files,
-        is_truncated=files_snapshot.is_truncated,
-    )
+    store_files_for_prompt(files_snapshot.records)
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
@@ -2127,7 +2107,6 @@ def build_prompt_context(
     files_listing_block = format_agent_filesystem_prompt(
         files_snapshot.records,
         has_filespace=files_snapshot.has_filespace,
-        total_files=files_snapshot.total_files,
         max_rows=MAX_RECENT_FILES_IN_PROMPT,
     )
     variable_group.section_text(
@@ -2151,7 +2130,6 @@ def build_prompt_context(
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs and "
         "__messages stores a newest-first communication snapshot (full bodies up to ~5MB total). "
         f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
-        f"{FILES_META_TABLE} reports whether that file index was truncated this cycle. "
         "All are per-cycle snapshots dropped before persistence. "
         "Query them with sqlite_batch (not read_file). "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
@@ -4680,19 +4658,15 @@ def _build_sqlite_files_snapshot(agent: PersistentAgent) -> _FileSnapshotBundle:
         .first()
     )
     if not access:
-        return _FileSnapshotBundle(has_filespace=False, total_files=0, records=records)
+        return _FileSnapshotBundle(has_filespace=False, records=records)
 
-    base_qs = (
+    files_qs = (
         AgentFsNode.objects
         .filter(
             filespace_id=access.filespace_id,
             is_deleted=False,
             node_type=AgentFsNode.NodeType.FILE,
         )
-    )
-    total_files = base_qs.count()
-    files_qs = (
-        base_qs
         .only(
             "id",
             "filespace_id",
@@ -4724,7 +4698,7 @@ def _build_sqlite_files_snapshot(agent: PersistentAgent) -> _FileSnapshotBundle:
                 updated_at=node.updated_at.isoformat() if node.updated_at else None,
             )
         )
-    return _FileSnapshotBundle(has_filespace=True, total_files=total_files, records=records)
+    return _FileSnapshotBundle(has_filespace=True, records=records)
 
 
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:

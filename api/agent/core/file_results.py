@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
-from ..tools.sqlite_state import FILES_META_TABLE, FILES_TABLE, get_sqlite_db_path
+from ..tools.sqlite_state import FILES_TABLE, get_sqlite_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +25,6 @@ class FileSQLiteRecord:
 
 def store_files_for_prompt(
     records: Sequence[FileSQLiteRecord],
-    *,
-    total_files: Optional[int] = None,
-    indexed_files: Optional[int] = None,
-    is_truncated: Optional[bool] = None,
 ) -> None:
     """Store a per-cycle files index in SQLite for agent querying."""
     db_path = get_sqlite_db_path()
@@ -40,7 +36,6 @@ def store_files_for_prompt(
     try:
         conn = open_guarded_sqlite_connection(db_path)
         _recreate_files_table(conn)
-        _recreate_files_meta_table(conn)
         rows = []
         for record in records:
             rows.append(
@@ -77,20 +72,6 @@ def store_files_for_prompt(
                 """,
                 rows,
             )
-        indexed_count = indexed_files if indexed_files is not None else len(rows)
-        total_count = total_files if total_files is not None else indexed_count
-        truncated_flag = int(bool(is_truncated)) if is_truncated is not None else int(total_count > indexed_count)
-        conn.execute(
-            f"""
-            INSERT INTO "{FILES_META_TABLE}" (
-                id,
-                total_files,
-                indexed_files,
-                is_truncated
-            ) VALUES (1, ?, ?, ?)
-            """,
-            (int(total_count), int(indexed_count), truncated_flag),
-        )
         conn.commit()
     except Exception:
         logger.exception("Failed to store files index in SQLite.")
@@ -118,20 +99,6 @@ def _recreate_files_table(conn) -> None:
             checksum_sha256 TEXT,
             created_at TEXT,
             updated_at TEXT
-        );
-        """
-    )
-
-
-def _recreate_files_meta_table(conn) -> None:
-    conn.execute(f'DROP TABLE IF EXISTS "{FILES_META_TABLE}";')
-    conn.execute(
-        f"""
-        CREATE TABLE "{FILES_META_TABLE}" (
-            id INTEGER PRIMARY KEY,
-            total_files INTEGER,
-            indexed_files INTEGER,
-            is_truncated INTEGER
         );
         """
     )

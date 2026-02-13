@@ -32,6 +32,5 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
     def test_examples_include_files_table_schema(self):
         examples = prompt_context._get_sqlite_examples()
         self.assertIn("# __files (special table; metadata only)", examples)
-        self.assertIn("# __files_meta (special table; snapshot metadata)", examples)
         self.assertIn("recent_files", examples)
         self.assertIn("metadata only", examples)
