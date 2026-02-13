@@ -22,7 +22,7 @@ export function SubscriptionUpgradeModal({
   dismissible = true,
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
-  const { trialDaysByPlan } = useSubscriptionStore()
+  const { trialDaysByPlan, trialEligible } = useSubscriptionStore()
   const handleClose = useCallback(() => {
     if (dismissible) {
       onClose()
@@ -30,7 +30,12 @@ export function SubscriptionUpgradeModal({
   }, [dismissible, onClose])
 
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
-  const useTrialCopy = !allowDowngrade && maxTrialDays > 0 && (source === 'trial_onboarding' || currentPlan === 'free')
+  const useTrialCopy = (
+    trialEligible
+    && !allowDowngrade
+    && maxTrialDays > 0
+    && (source === 'trial_onboarding' || currentPlan === 'free')
+  )
   const title = useTrialCopy
     ? `Start ${maxTrialDays}-day Free Trial`
     : (allowDowngrade ? 'Change your plan' : 'Upgrade your plan')

@@ -64,10 +64,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         trial_eligible = _is_trial_eligible()
 
-        def _trial_cta(days: int, label: str, *, prefer_trial_copy: bool = False) -> str:
-            if days > 0 and (trial_eligible or prefer_trial_copy):
+        def _trial_cta(days: int, label: str) -> str:
+            if days > 0 and trial_eligible:
                 return f"Start {days}-day Free Trial"
-            return f"Choose {label}"
+            return f"Subscribe to {label}"
 
         def _trial_pricing_model(days: int) -> str:
             if days > 0 and trial_eligible:
@@ -81,12 +81,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         startup_cta_text = _trial_cta(
             startup_trial_days,
             "Pro",
-            prefer_trial_copy=not authenticated,
         )
         scale_cta_text = _trial_cta(
             scale_trial_days,
             "Scale",
-            prefer_trial_copy=not authenticated,
         )
         startup_cta_disabled = False
         scale_cta_disabled = False
@@ -106,12 +104,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                     startup_cta_text = _trial_cta(
                         startup_trial_days,
                         "Pro",
-                        prefer_trial_copy=True,
                     )
                     scale_cta_text = _trial_cta(
                         scale_trial_days,
                         "Scale",
-                        prefer_trial_copy=True,
                     )
                 elif plan_id == PlanNames.STARTUP:
                     startup_cta_text = "Current Plan"

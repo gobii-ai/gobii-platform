@@ -1094,6 +1094,70 @@ class CheckoutRedirectTests(TestCase):
 
 
 @tag("batch_pages")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
+class ProprietaryPricingTrialCopyTests(TestCase):
+    @tag("batch_pages")
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=True)
+    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_prior_trial"))
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_cta_uses_subscribe_copy_when_trial_ineligible(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_stripe_customer,
+        _mock_has_any_subscription,
+        _mock_get_user_plan,
+    ):
+        user = get_user_model().objects.create_user(
+            email="pricing_ineligible@test.com",
+            password="pw",
+            username="pricing_ineligible_user",
+        )
+        self.client.force_login(user)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = response.context["pricing_plans"]
+        self.assertEqual(plans[0]["cta"], "Subscribe to Pro")
+        self.assertEqual(plans[1]["cta"], "Subscribe to Scale")
+
+    @tag("batch_pages")
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=False)
+    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_new_trial"))
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_cta_shows_trial_copy_when_trial_eligible(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_stripe_customer,
+        _mock_has_any_subscription,
+        _mock_get_user_plan,
+    ):
+        user = get_user_model().objects.create_user(
+            email="pricing_eligible@test.com",
+            password="pw",
+            username="pricing_eligible_user",
+        )
+        self.client.force_login(user)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = response.context["pricing_plans"]
+        self.assertEqual(plans[0]["cta"], "Start 7-day Free Trial")
+        self.assertEqual(plans[1]["cta"], "Start 14-day Free Trial")
+
+
+@tag("batch_pages")
 class AuthLinkTests(TestCase):
     @tag("batch_pages")
     def test_signup_page_signin_link_includes_utms(self):

@@ -251,9 +251,14 @@ export function AgentChatLayout({
     openUpgradeModal,
     ensureAuthenticated,
     trialDaysByPlan,
+    trialEligible,
   } = useSubscriptionStore()
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
-  const useTrialUpgradeCopy = maxTrialDays > 0 && (upgradeModalSource === 'trial_onboarding' || subscriptionPlan === 'free')
+  const useTrialUpgradeCopy = (
+    trialEligible
+    && maxTrialDays > 0
+    && (upgradeModalSource === 'trial_onboarding' || subscriptionPlan === 'free')
+  )
   const upgradeTitle = useTrialUpgradeCopy ? `Start ${maxTrialDays}-day Free Trial` : 'Upgrade your plan'
   const upgradeSubtitle = useTrialUpgradeCopy ? 'Choose your plan to continue' : 'Choose the plan that fits your needs'
   const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {

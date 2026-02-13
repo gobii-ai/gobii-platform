@@ -30,9 +30,11 @@ type SubscriptionState = {
   upgradeModalDismissible: boolean
   isProprietaryMode: boolean
   trialDaysByPlan: TrialDaysByPlan
+  trialEligible: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
   setProprietaryMode: (isProprietary: boolean) => void
   setTrialDaysByPlan: (trialDaysByPlan: TrialDaysByPlan) => void
+  setTrialEligible: (trialEligible: boolean) => void
   openUpgradeModal: (source?: UpgradeModalSource, options?: UpgradeModalOptions) => void
   closeUpgradeModal: () => void
   ensureAuthenticated: () => Promise<boolean>
@@ -46,9 +48,11 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   upgradeModalDismissible: true,
   isProprietaryMode: false,
   trialDaysByPlan: { startup: 0, scale: 0 },
+  trialEligible: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
   setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
   setTrialDaysByPlan: (trialDaysByPlan) => set({ trialDaysByPlan }),
+  setTrialEligible: (trialEligible) => set({ trialEligible }),
   openUpgradeModal: (source = 'unknown', options = {}) => set((state) => {
     const resolvedSource = source ?? 'unknown'
     const dismissible = options.dismissible ?? true
@@ -84,6 +88,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
         currentPlan: plan,
         isProprietaryMode: Boolean(data?.is_proprietary_mode),
         trialDaysByPlan: normalizeTrialDaysByPlan(data),
+        trialEligible: normalizeBoolean(data?.trial_eligible),
         isLoading: false,
       })
       return true
@@ -102,12 +107,14 @@ type UserPlanPayload = {
   is_proprietary_mode?: boolean
   startup_trial_days?: number | string | null
   scale_trial_days?: number | string | null
+  trial_eligible?: boolean | string | null
 }
 
 type UserPlanResponse = {
   plan: PlanTier | null
   isProprietaryMode: boolean
   trialDaysByPlan: TrialDaysByPlan
+  trialEligible: boolean
   authenticated: boolean
 }
 
@@ -124,6 +131,16 @@ function normalizeTrialDays(value: unknown): number {
     return 0
   }
   return Math.max(0, Math.trunc(numeric))
+}
+
+function normalizeBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'string') {
+    return value.toLowerCase() === 'true'
+  }
+  return false
 }
 
 function normalizeTrialDaysByPlan(payload: UserPlanPayload | null | undefined): TrialDaysByPlan {
@@ -146,6 +163,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         plan: null,
         isProprietaryMode: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
+        trialEligible: false,
         authenticated: false,
       }
     }
@@ -154,6 +172,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       plan,
       isProprietaryMode: Boolean(data?.is_proprietary_mode),
       trialDaysByPlan: normalizeTrialDaysByPlan(data),
+      trialEligible: normalizeBoolean(data?.trial_eligible),
       authenticated: true,
     }
   } catch (error) {
@@ -162,6 +181,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         plan: null,
         isProprietaryMode: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
+        trialEligible: false,
         authenticated: false,
       }
     }
@@ -169,6 +189,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       plan: null,
       isProprietaryMode: false,
       trialDaysByPlan: { startup: 0, scale: 0 },
+      trialEligible: false,
       authenticated: true,
     }
   }
@@ -183,6 +204,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   // Check for data attributes first (server-rendered templates)
   const proprietaryAttr = mountElement.dataset.isProprietaryMode
   const planAttr = mountElement.dataset.userPlan
+  const trialEligibleAttr = mountElement.dataset.trialEligible
   const trialDaysByPlan: TrialDaysByPlan = {
     startup: normalizeTrialDays(mountElement.dataset.startupTrialDays),
     scale: normalizeTrialDays(mountElement.dataset.scaleTrialDays),
@@ -191,17 +213,24 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   useSubscriptionStore.getState().setTrialDaysByPlan(trialDaysByPlan)
 
   // If we have both data attributes, use them directly
-  if (proprietaryAttr !== undefined && planAttr && ['free', 'startup', 'scale'].includes(planAttr)) {
+  if (
+    proprietaryAttr !== undefined
+    && planAttr
+    && ['free', 'startup', 'scale'].includes(planAttr)
+    && trialEligibleAttr !== undefined
+  ) {
     useSubscriptionStore.getState().setProprietaryMode(proprietaryAttr === 'true')
     useSubscriptionStore.getState().setCurrentPlan(planAttr as PlanTier)
+    useSubscriptionStore.getState().setTrialEligible(normalizeBoolean(trialEligibleAttr))
     return
   }
 
   // No data attributes (e.g., static app shell) - fetch from API
   useSubscriptionStore.setState({ isLoading: true })
-  fetchUserPlan().then(({ plan, isProprietaryMode, trialDaysByPlan: apiTrialDaysByPlan }) => {
+  fetchUserPlan().then(({ plan, isProprietaryMode, trialDaysByPlan: apiTrialDaysByPlan, trialEligible }) => {
     useSubscriptionStore.getState().setCurrentPlan(plan)
     useSubscriptionStore.getState().setProprietaryMode(isProprietaryMode)
     useSubscriptionStore.getState().setTrialDaysByPlan(apiTrialDaysByPlan)
+    useSubscriptionStore.getState().setTrialEligible(trialEligible)
   })
 }
