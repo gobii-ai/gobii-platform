@@ -210,6 +210,7 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
         return {
             "status": "ok",
             "message": f"SMS queued for {to_number}.",
+            "message_id": str(message.id),
             "auto_sleep_ok": not will_continue,
         }
 

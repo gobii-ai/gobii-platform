@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import shutil
 import tempfile
 from datetime import timedelta
@@ -29,6 +30,7 @@ from api.agent.tools.schedule_updater import execute_update_schedule as _execute
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
 from api.agent.files.filespace_service import DOWNLOADS_DIR_NAME
 from api.agent.tools.tool_manager import enable_tools
+from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
 from api.models import (
     BrowserUseAgent,
@@ -143,6 +145,115 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
+
+    def test_build_prompt_context_populates_messages_sqlite_table(self):
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Hello from sqlite snapshot",
+            raw_payload={"subject": "Snapshot Subject", "hide_in_chat": True},
+            seq=f"SQLMSG{int(timezone.now().timestamp() * 1_000_000):020d}"[:26],
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+        try:
+            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                build_prompt_context(self.agent)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT channel, is_outbound, subject, body, is_hidden_in_chat, attachment_paths_json
+                    FROM "__messages"
+                    ORDER BY timestamp DESC
+                    LIMIT 1;
+                    """
+                )
+                row = cur.fetchone()
+                self.assertIsNotNone(row)
+                assert row is not None
+                self.assertEqual(row[0], "email")
+                self.assertEqual(row[1], 0)
+                self.assertEqual(row[2], "Snapshot Subject")
+                self.assertIn("Hello from sqlite snapshot", row[3])
+                self.assertEqual(row[4], 1)
+                self.assertEqual(json.loads(row[5]), [])
+            finally:
+                conn.close()
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
+    def test_messages_sqlite_snapshot_includes_full_bodies_up_to_budget(self):
+        base = timezone.now()
+        oldest = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="AAAAAA",
+            seq=f"SQLA{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+        )
+        middle = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="BBBBBB",
+            seq=f"SQLB{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+        )
+        newest = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="CCCCCC",
+            seq=f"SQLC{int(timezone.now().timestamp() * 1_000_000):022d}"[:26],
+        )
+
+        PersistentAgentMessage.objects.filter(pk=oldest.pk).update(timestamp=base - timedelta(minutes=3))
+        PersistentAgentMessage.objects.filter(pk=middle.pk).update(timestamp=base - timedelta(minutes=2))
+        PersistentAgentMessage.objects.filter(pk=newest.pk).update(timestamp=base - timedelta(minutes=1))
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+        try:
+            with patch("api.agent.core.prompt_context.SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES", 12), \
+                 patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                build_prompt_context(self.agent)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT body, body_is_truncated, body_truncated_bytes
+                    FROM "__messages"
+                    ORDER BY timestamp DESC;
+                    """
+                )
+                rows = cur.fetchall()
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[0][0], "CCCCCC")
+                self.assertEqual(rows[1][0], "BBBBBB")
+                self.assertEqual(rows[0][1], 0)
+                self.assertEqual(rows[1][1], 0)
+                self.assertEqual(rows[0][2], 0)
+                self.assertEqual(rows[1][2], 0)
+            finally:
+                conn.close()
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
 
     def test_prompt_omits_implied_send_without_active_web_session(self):
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \

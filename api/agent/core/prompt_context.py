@@ -50,6 +50,7 @@ from ...models import (
     PersistentAgentCommsSnapshot,
     PersistentAgentKanbanCard,
     PersistentAgentMessage,
+    PersistentAgentMessageAttachment,
     PersistentAgentPromptArchive,
     PersistentAgentEnabledTool,
     PersistentAgentSecret,
@@ -107,6 +108,7 @@ from .tool_results import (
     ToolResultPromptInfo,
     prepare_tool_results_for_prompt,
 )
+from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
 
 logger = logging.getLogger(__name__)
@@ -129,6 +131,7 @@ KANBAN_ACTIVITY_DESC_LIMIT = 120
 SIGNED_FILES_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+/d/(?P<token>[^\s\"'<>/]+)(?:/)?"
 )
+SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
@@ -314,6 +317,13 @@ result_text   → always populated (use this for inspection/extraction)
 result_json   → populated when is_json=1 (enables json_extract/json_each)
 analysis_json → optional hints (not the data)
 do not invent columns; only use those listed above
+
+# __messages (special table)
+__messages.columns = {message_id, seq, timestamp, channel, is_outbound, direction, from_address, to_address, conversation_id, conversation_address, is_peer_dm, peer_agent_id, subject, body, body_bytes, body_is_truncated, body_truncated_bytes, attachment_paths_json, attachment_count, latest_status, latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, is_hidden_in_chat}
+recent_messages → SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 20
+inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC
+attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json)
+__messages is per-cycle snapshot: newest→oldest full bodies up to ~5MB total; dropped before persistence
 
 # JSON: path from hint, field from hint
 hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
@@ -2088,8 +2098,10 @@ def build_prompt_context(
         )
 
     sqlite_note = (
-        "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
-        "for this cycle only and is dropped before persistence. Query it with sqlite_batch (not read_file). "
+        "SQLite is always available. The built-in __tool_results table stores recent tool outputs and "
+        "__messages stores a newest-first communication snapshot (full bodies up to ~5MB total). "
+        "Both are per-cycle snapshots dropped before persistence. "
+        "Query them with sqlite_batch (not read_file). "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
         "CREATE TABLE AS SELECT is a fast way to persist tool results. "
         "Source all identifiers from ground truth—schema, tool results, prior query output, or context "
@@ -4453,15 +4465,159 @@ def _get_message_attachment_paths(message: PersistentAgentMessage) -> List[str]:
         if path and path not in seen:
             paths.append(path)
             seen.add(path)
-    if not paths and isinstance(message.raw_payload, dict):
-        nodes = message.raw_payload.get("filespace_nodes") or []
-        for node_info in nodes:
-            if isinstance(node_info, dict):
-                path = node_info.get("path")
-                if path and path not in seen:
-                    paths.append(path)
-                    seen.add(path)
+    if not paths:
+        for path in _extract_attachment_paths_from_raw_payload(message.raw_payload):
+            if path not in seen:
+                paths.append(path)
+                seen.add(path)
     return paths
+
+
+def _extract_attachment_paths_from_raw_payload(raw_payload: object) -> List[str]:
+    if not isinstance(raw_payload, dict):
+        return []
+    nodes = raw_payload.get("filespace_nodes") or []
+    if not isinstance(nodes, list):
+        return []
+    paths: List[str] = []
+    seen: set[str] = set()
+    for node_info in nodes:
+        if not isinstance(node_info, dict):
+            continue
+        path = node_info.get("path")
+        if not path or path in seen:
+            continue
+        paths.append(path)
+        seen.add(path)
+    return paths
+
+
+def _build_message_sqlite_record(
+    message: PersistentAgentMessage,
+    *,
+    channel: str,
+    subject: str,
+    body: str,
+    attachment_paths: Sequence[str],
+    raw_payload: Dict[str, Any],
+) -> MessageSQLiteRecord:
+    to_address = ""
+    if message.to_endpoint and message.to_endpoint.address:
+        to_address = message.to_endpoint.address
+    elif message.conversation and message.conversation.address:
+        to_address = message.conversation.address
+
+    latest_error_code = (message.latest_error_code or "").strip() or None
+    latest_error_message = (message.latest_error_message or "").strip() or None
+    latest_sent_at = message.latest_sent_at.isoformat() if message.latest_sent_at else None
+    latest_delivered_at = message.latest_delivered_at.isoformat() if message.latest_delivered_at else None
+
+    return MessageSQLiteRecord(
+        message_id=str(message.id),
+        seq=message.seq,
+        timestamp=message.timestamp.isoformat(),
+        channel=channel,
+        is_outbound=bool(message.is_outbound),
+        from_address=message.from_endpoint.address or "",
+        to_address=to_address,
+        conversation_id=str(message.conversation_id) if message.conversation_id else None,
+        conversation_address=message.conversation.address if message.conversation else "",
+        is_peer_dm=bool(message.conversation and getattr(message.conversation, "is_peer_dm", False)),
+        peer_agent_id=str(message.peer_agent_id) if message.peer_agent_id else None,
+        subject=subject,
+        body=body,
+        attachment_paths=attachment_paths,
+        latest_status=message.latest_status or "",
+        latest_sent_at=latest_sent_at,
+        latest_delivered_at=latest_delivered_at,
+        latest_error_code=latest_error_code,
+        latest_error_message=latest_error_message,
+        is_hidden_in_chat=bool(raw_payload.get("hide_in_chat")),
+    )
+
+
+def _build_sqlite_messages_snapshot_records(
+    agent: PersistentAgent,
+    *,
+    max_total_body_bytes: Optional[int] = None,
+) -> List[MessageSQLiteRecord]:
+    records: List[MessageSQLiteRecord] = []
+    if max_total_body_bytes is None:
+        max_total_body_bytes = SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES
+    if max_total_body_bytes <= 0:
+        return records
+
+    selected_messages: List[
+        Tuple[PersistentAgentMessage, str, str, str, Dict[str, Any]]
+    ] = []
+    total_body_bytes = 0
+    messages_qs = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent)
+        .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
+        .order_by("-timestamp")
+    )
+
+    for message in messages_qs.iterator(chunk_size=200):
+        if not message.from_endpoint:
+            continue
+
+        body = _redact_signed_filespace_urls(message.body or "", agent)
+        body_bytes = len(body.encode("utf-8"))
+        if total_body_bytes + body_bytes > max_total_body_bytes:
+            break
+
+        raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+        subject = (raw_payload.get("subject") or "").strip()
+        channel = message.from_endpoint.channel
+        selected_messages.append((message, channel, subject, body, raw_payload))
+        total_body_bytes += body_bytes
+
+    if not selected_messages:
+        return records
+
+    selected_ids = [message.id for message, _, _, _, _ in selected_messages]
+    attachment_map: Dict[str, List[str]] = {}
+    attachment_seen: Dict[str, set[str]] = {}
+    attachments_qs = (
+        PersistentAgentMessageAttachment.objects.filter(message_id__in=selected_ids)
+        .select_related("filespace_node")
+        .order_by("id")
+    )
+    for attachment in attachments_qs.iterator(chunk_size=500):
+        message_id = str(attachment.message_id)
+        node = getattr(attachment, "filespace_node", None)
+        path = getattr(node, "path", None) if node else None
+        if not path:
+            continue
+        seen_paths = attachment_seen.setdefault(message_id, set())
+        if path in seen_paths:
+            continue
+        attachment_map.setdefault(message_id, []).append(path)
+        seen_paths.add(path)
+
+    for message, channel, subject, body, raw_payload in selected_messages:
+        message_id = str(message.id)
+        attachment_paths = list(attachment_map.get(message_id, []))
+        seen_paths = set(attachment_paths)
+        for path in _extract_attachment_paths_from_raw_payload(raw_payload):
+            if path in seen_paths:
+                continue
+            attachment_paths.append(path)
+            seen_paths.add(path)
+
+        records.append(
+            _build_message_sqlite_record(
+                message,
+                channel=channel,
+                subject=subject,
+                body=body,
+                attachment_paths=attachment_paths,
+                raw_payload=raw_payload,
+            )
+        )
+
+    return records
+
 
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
@@ -4544,7 +4700,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         PersistentAgentMessage.objects.filter(
             owner_agent=agent, timestamp__gt=comms_cutoff
         )
-        .select_related("from_endpoint", "to_endpoint")
+        .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
         .prefetch_related("attachments__filespace_node")
         .order_by("-timestamp")[:limit_msg_history]
     )
@@ -4695,6 +4851,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
         channel = m.from_endpoint.channel
         body = _redact_signed_filespace_urls(m.body or "", agent)
+        subject = ""
+        raw_payload = m.raw_payload if isinstance(m.raw_payload, dict) else {}
+        if raw_payload:
+            subject = (raw_payload.get("subject") or "").strip()
         event_prefix = f"message_{'outbound' if m.is_outbound else 'inbound'}"
 
         # Determine if this inbound message needs a trust reminder
@@ -4741,10 +4901,6 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             # Handle email messages with structured components
             if channel == CommsChannel.EMAIL:
-                subject = ""
-                if isinstance(m.raw_payload, dict):
-                    subject = m.raw_payload.get("subject") or ""
-
                 if subject:
                     components["subject"] = subject
 
@@ -4776,6 +4932,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             components["attachments"] = "\n".join(f"- $[{path}]" for path in attachment_paths)
 
         structured_events.append((m.timestamp, event_type, components))
+
+    store_messages_for_prompt(_build_sqlite_messages_snapshot_records(agent))
 
     # Include most recent completed browser tasks as structured events
     for t in completed_tasks:
