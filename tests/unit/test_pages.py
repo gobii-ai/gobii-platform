@@ -1044,6 +1044,7 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+        self.assertEqual(kwargs["subscription_data"]["collection_method"], "charge_automatically")
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
@@ -1091,6 +1092,7 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
+        self.assertEqual(kwargs["subscription_data"]["collection_method"], "charge_automatically")
 
 
 @tag("batch_pages")
