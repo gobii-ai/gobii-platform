@@ -111,6 +111,19 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   return pathname
 }
 
+function getAnalyticsTitle(route: AppRoute): string {
+  if (route.kind === 'command-center') {
+    return 'Command Center · Gobii'
+  }
+  if (route.kind === 'agent-select') {
+    return 'Select a conversation · Gobii'
+  }
+  if (route.kind === 'agent-chat') {
+    return route.agentId ? 'Agent · Gobii' : 'New Agent · Gobii'
+  }
+  return 'Not found · Gobii'
+}
+
 function cleanQueryForTracking(search: string): string {
   const params = new URLSearchParams(search)
   params.delete('embed')
@@ -311,32 +324,27 @@ export function ImmersiveApp() {
     const analyticsRoute = getAnalyticsRoute(route)
     const analyticsPath = `${getAnalyticsPath(route, location.pathname)}${cleanQueryForTracking(location.search)}`
     const analyticsUrl = `${window.location.origin}${analyticsPath}`
+    const analyticsTitle = getAnalyticsTitle(route)
 
-    const timeoutId = window.setTimeout(() => {
-      window.gtag?.('event', 'page_view', {
-        page_title: document.title,
-        page_path: analyticsPath,
-        page_location: analyticsUrl,
-        app_route: analyticsRoute,
-        app_embed: embed ? 'true' : 'false',
-      })
+    window.gtag?.('event', 'page_view', {
+      page_title: analyticsTitle,
+      page_path: analyticsPath,
+      page_location: analyticsUrl,
+      app_route: analyticsRoute,
+      app_embed: embed ? 'true' : 'false',
+    })
 
-      if (!hasSkippedInitialSegmentPage.current) {
-        hasSkippedInitialSegmentPage.current = true
-        return
-      }
-
-      window.analytics?.page('App', analyticsRoute, {
-        path: analyticsPath,
-        url: analyticsUrl,
-        app_route: analyticsRoute,
-        embed,
-      })
-    }, 0)
-
-    return () => {
-      window.clearTimeout(timeoutId)
+    if (!hasSkippedInitialSegmentPage.current) {
+      hasSkippedInitialSegmentPage.current = true
+      return
     }
+
+    window.analytics?.page('App', analyticsRoute, {
+      path: analyticsPath,
+      url: analyticsUrl,
+      app_route: analyticsRoute,
+      embed,
+    })
   }, [route, location.pathname, location.search, embed])
 
   useEffect(() => {
