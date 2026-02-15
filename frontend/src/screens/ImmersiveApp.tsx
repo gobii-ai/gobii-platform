@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Zap } from 'lucide-react'
 import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
@@ -285,6 +285,7 @@ export function ImmersiveApp() {
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
+  const hasSkippedInitialSegmentPage = useRef(false)
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
@@ -319,6 +320,11 @@ export function ImmersiveApp() {
         app_route: analyticsRoute,
         app_embed: embed ? 'true' : 'false',
       })
+
+      if (!hasSkippedInitialSegmentPage.current) {
+        hasSkippedInitialSegmentPage.current = true
+        return
+      }
 
       window.analytics?.page('App', analyticsRoute, {
         path: analyticsPath,
