@@ -17,7 +17,6 @@ GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "")  # e.g. G-2PCKFMF85B
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent
-PROPRIETARY_TEMPLATE_DIR = BASE_DIR / "proprietary" / "templates"
 env = environ.Env(
     DEBUG=(bool, False),
 )
@@ -364,13 +363,6 @@ TEMPLATES = [
         },
     },
 ]
-
-# Keep proprietary templates discoverable even when the proprietary app isn't
-# loaded in INSTALLED_APPS. Tests may toggle GOBII_PROPRIETARY_MODE at runtime
-# with override_settings, which does not update app template loaders.
-if PROPRIETARY_TEMPLATE_DIR.exists():
-    TEMPLATES[0]["DIRS"].append(PROPRIETARY_TEMPLATE_DIR)
-
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
