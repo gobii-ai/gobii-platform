@@ -274,20 +274,15 @@ class LibraryAgentLikeAPIView(View):
         if template is None:
             return JsonResponse({"error": "Shared agent not found."}, status=404)
 
-        existing_like = PersistentAgentTemplateLike.objects.filter(
+        like, created = PersistentAgentTemplateLike.objects.get_or_create(
             template=template,
             user=request.user,
-        ).only("id").first()
-
-        if existing_like is not None:
-            existing_like.delete()
-            is_liked = False
-        else:
-            PersistentAgentTemplateLike.objects.create(
-                template=template,
-                user=request.user,
-            )
+        )
+        if created:
             is_liked = True
+        else:
+            like.delete()
+            is_liked = False
 
         like_count = PersistentAgentTemplateLike.objects.filter(template=template).count()
         return JsonResponse(
