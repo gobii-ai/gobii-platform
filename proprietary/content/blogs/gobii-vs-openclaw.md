@@ -61,11 +61,11 @@ The real differences show up in runtime architecture and security defaults.
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Commit anchors from local git history.</figcaption>
 </figure>
 
-Gobii's private repo starts `2025-05-01` (`3f3b9e89`). Persistent-agent models land on `2025-06-20` (`a36f7e1e`, `77393150`), then cron/event runtime commits land over the next nine days (`b34eb616`, `56b19631`, `0148663c`, `6d48d601`).
+Gobii's private repo starts `2025-05-01` (`3f3b9e89`).
 
-That June sequence is the original always-on prototype window, built in roughly two weeks, then publicly visible in market narrative by early June launch communications around Gobii's first release phase in 2025 ([OpenCore timeline context](https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth)).
+June 2025 is the core moment: Gobii launched as always-on AI employees ([OpenCore launch post](https://www.opencoreventures.com/blog/gobii-launches-to-build-the-chatgpt-of-web-agents)), and the first always-on MVP landed in the same window with a 10-day commit run from `2025-06-20` to `2025-06-29` (`a36f7e1e`, `77393150`, `b34eb616`, `56b19631`, `0148663c`, `6d48d601`).
 
-Public `gobii-platform` opens on `2025-08-30` (`f596424e`), then OpenClaw's repo starts on `2025-11-24` (`f6dd362d3`). In practical terms, Gobii's persistent always-on core shows up around five months earlier in git history (about `156` days between `a36f7e1e` and `f6dd362d3`).
+The public MIT repo (`gobii-platform`) opened on `2025-08-30` (`f596424e`), and OpenClaw's repo began on `2025-11-24` (`f6dd362d3`).
 
 ## Always-On Model: Heartbeat vs Schedule + Event Queue
 
@@ -169,23 +169,84 @@ Gobii memory model:
 
 OpenClaw's approach is very legible to users. Gobii's approach is very strong for agentic state mutation and structured tool workflows.
 
-## Browser Runtime: Triggering and Headed Execution
+## Browser Runtime, State, Proxies, and Secrets
 
-Both projects do real browser work, not toy wrappers.
+Both projects do real browser work, not toy wrappers, and both can run headed sessions.
 
-OpenClaw:
+OpenClaw headed/browser control path:
 
-- browser target routing (host/sandbox/node): `src/agents/tools/browser-tool.ts:81`
-- target resolution policy logic: `src/agents/tools/browser-tool.ts:191`
-- sandbox browser entrypoint with headed default and noVNC option: `scripts/sandbox-browser-entrypoint.sh:13`, `scripts/sandbox-browser-entrypoint.sh:62`
+- headed default in sandbox browser entrypoint (`HEADLESS` default `0`): `scripts/sandbox-browser-entrypoint.sh:13`
+- Xvfb-backed headed runtime and optional noVNC: `scripts/sandbox-browser-entrypoint.sh:17`, `scripts/sandbox-browser-entrypoint.sh:62`
+- browser routing across host/sandbox/node targets: `src/agents/tools/browser-tool.ts:81`
+- local profile user-data dir per browser profile: `src/browser/chrome.ts:62`, `src/browser/chrome.ts:192`
 
-Gobii:
+Gobii headed/browser control path:
 
-- ephemeral Xvfb manager for headed browser contexts: `util/ephemeral_xvfb.py:94`
-- explicit mention of Kubernetes worker context: `util/ephemeral_xvfb.py:98`
-- `DISPLAY` lifecycle handoff: `util/ephemeral_xvfb.py:176`
+- headed default in runtime settings (`BROWSER_HEADLESS=False`): `config/settings.py:884`
+- dedicated Xvfb lifecycle manager with `DISPLAY` swap/restore: `util/ephemeral_xvfb.py:94`, `util/ephemeral_xvfb.py:176`
+- browser profile injected directly into runtime session: `api/tasks/browser_agent_tasks.py:1024`, `api/tasks/browser_agent_tasks.py:1027`
 
-For teams that need fully headed automation in cloud workers, Gobii's pattern is built for that operating environment.
+The timeline is clear in git history: Gobii's headed cloud-worker architecture is already present in public commit `f596424e` on `2025-08-30`; OpenClaw's browser control lands later in `208ba02a4` on `2025-12-13`, sandbox browser support in `d8a417f7f` on `2026-01-03`, and node browser proxy routing in `c3cb26f7c` on `2026-01-24`.
+
+### Proxy Rotation: Transport Proxy vs Browser Control Proxy
+
+This is one of the more important architectural differences.
+
+In OpenClaw, "browser proxy" is a control-plane proxy command between gateway and node-host browser services:
+
+- browser proxy capability check: `src/agents/tools/browser-tool.ts:78`
+- node-host browser proxy config (`enabled`, `allowProfiles`): `src/config/types.node-host.ts:1`
+- node-host browser proxy dispatcher: `src/node-host/invoke-browser.ts:38`, `src/node-host/invoke-browser.ts:128`
+- docs describe proxying browser actions to node-host, not rotating outbound browser egress: `docs/tools/browser.md:146`
+
+In Gobii, proxies are a first-class egress and reliability layer for agent actions:
+
+- health-aware proxy selection with recent-pass preference: `api/proxy_selection.py:19`, `api/proxy_selection.py:102`
+- proxy prioritization logic (healthy static IP -> healthy any -> static IP -> fallback): `api/models.py:1746`
+- per-task browser proxy attachment: `api/tasks/browser_agent_tasks.py:1000`, `api/tasks/browser_agent_tasks.py:1032`
+- dedicated proxy inventory allocation/release: `api/services/dedicated_proxy_service.py:24`, `api/services/dedicated_proxy_service.py:60`
+- proprietary mode requiring proxy for outbound HTTP: `api/agent/tools/http_request.py:306`, `api/agent/tools/http_request.py:323`
+
+OpenClaw can absolutely drive remote browsers, but the codebase today does not expose a built-in browser egress proxy rotation model comparable to Gobii's health-scored and dedicated-IP-aware proxy selection.
+
+### Persistent Browser State: Local Profile Persistence vs Distributed Worker Persistence
+
+OpenClaw persists browser state primarily as local profile data where the browser runs:
+
+- persistent profile user-data dir pathing: `src/browser/chrome.ts:62`
+- profile launch uses persistent `--user-data-dir`: `src/browser/chrome.ts:192`
+- storage APIs for cookies/localStorage/sessionStorage and related session state operations: `src/browser/routes/agent.storage.ts:10`, `src/browser/routes/agent.storage.ts:99`
+
+Gobii persists state as portable per-agent profile archives designed for stateless workers:
+
+- deterministic object-store key layout for profile archives: `api/tasks/browser_agent_tasks.py:774`
+- secure tar extraction guard on restore: `api/tasks/browser_agent_tasks.py:810`
+- profile restore from compressed archive before run: `api/tasks/browser_agent_tasks.py:892`, `api/tasks/browser_agent_tasks.py:929`
+- profile save/compress/upload after run (`tar` + `zstd`): `api/tasks/browser_agent_tasks.py:1288`, `api/tasks/browser_agent_tasks.py:1352`, `api/tasks/browser_agent_tasks.py:1385`
+
+That is a major cloud-native distinction: local profile persistence is strong for a single host workflow, while Gobii's archive-restore-save loop is engineered for distributed worker fleets and continuity across pod/task boundaries.
+
+### Credentials Security Around Browser and API Automation
+
+OpenClaw has typed auth-profile storage and file-permission hardening:
+
+- token-bearing auth profile type: `src/agents/auth-profiles/types.ts:13`
+- auth profile persistence into JSON-backed store: `src/agents/auth-profiles/store.ts:223`
+- JSON store writes with `0600` permissions: `src/infra/json-file.ts:16`, `src/infra/json-file.ts:22`
+
+OpenClaw's own threat model explicitly documents residual token-at-rest risk:
+
+- token theft entry marks residual risk as high with plaintext token note: `docs/security/THREAT-MODEL-ATLAS.md:194`, `docs/security/THREAT-MODEL-ATLAS.md:203`
+- recommendation calls for encryption at rest: `docs/security/THREAT-MODEL-ATLAS.md:204`, `docs/security/THREAT-MODEL-ATLAS.md:545`
+
+Gobii's credential path is encrypted-at-rest and domain-scoped in the runtime model:
+
+- AES-256-GCM secret encryption utilities: `api/encryption.py:3`, `api/encryption.py:23`
+- encrypted binary field on per-agent secret records: `api/models.py:6556`, `api/models.py:6583`
+- request-time secure credential workflow: `api/agent/tools/secure_credentials_request.py:17`
+- domain-scoped secret placeholder substitution during outbound calls: `api/agent/tools/http_request.py:347`, `api/agent/tools/http_request.py:351`
+
+For production automation with persistent browser and API credentials, Gobii's default architecture is closer to a cloud security baseline.
 
 ## Identity Model: Endpoint-Addressable Agents
 
@@ -307,6 +368,9 @@ Gobii stands out on:
 - schedule + event trigger convergence as a first-class runtime model
 - endpoint-addressable agent identity and native A2A
 - SQLite-native internal state for structured tool workflows
+- health-aware proxy rotation with dedicated proxy inventory support
+- portable browser profile persistence across distributed workers
+- encrypted-at-rest credential handling integrated into agent tooling
 - cloud-native production posture (k8s, gVisor, network policies)
 - practical headed browser execution in worker fleets
 
@@ -326,12 +390,13 @@ Commit anchors referenced in this post:
 
 - Gobii private always-on foundation: `3f3b9e89`, `a36f7e1e`, `77393150`, `b34eb616`, `56b19631`, `0148663c`, `6d48d601`
 - Gobii private-to-public MIT transition: `352a1fb6`, `44a4ccb6`, `db5a9d36`, `61c3f3fd`, `f596424e`
-- Gobii public OSS milestones: `f596424e`, `0130b607`, `39bfb8d4`
-- OpenClaw milestones: `f6dd362d3`, `1ed5ca3fd`, `0d8e0ddc4`, `b8f66c260`
+- Gobii public OSS milestones: `f596424e`, `0130b607`, `39bfb8d4`, `8d44c2bb`, `c5e5de26`
+- OpenClaw milestones: `f6dd362d3`, `208ba02a4`, `d8a417f7f`, `c3cb26f7c`, `1ed5ca3fd`, `0d8e0ddc4`, `b8f66c260`, `74fbbda28`
 
 External context links:
 
 - [Peter Steinberger GitHub profile](https://github.com/steipete)
-- [OpenCore Ventures on RA.Aid and Fictie](https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth)
+- [OpenCore Ventures on Gobii launch and always-on AI employees](https://www.opencoreventures.com/blog/gobii-launches-to-build-the-chatgpt-of-web-agents)
+- [OpenCore Ventures on RA.Aid Catalyst (9x growth)](https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth)
 - [Apache NiFi community roster](https://nifi.apache.org/community/)
 - [NSA NiagaraFiles to open source story](https://www.nsa.gov/Research/Technology-Transfer-Program/Success-Stories/Article/3306190/nsa-releases-niagarafiles-to-open-source-software/)
