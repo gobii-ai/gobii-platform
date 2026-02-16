@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load vite_tags %}
+
+{% block title %}Gobii Library{% endblock %}
+
+{% block content %}
+<div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
+  <section class="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <div
+      id="gobii-frontend-root"
+      data-app="library"
+      data-library-list-url="{% url 'pages:library_agents_api' %}"
+    ></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}
