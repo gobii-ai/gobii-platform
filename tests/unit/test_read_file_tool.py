@@ -137,6 +137,19 @@ class ReadFileToolTests(TestCase):
         self.assertIn("raw_text", result.get("message", ""))
         self.assertIn("markdown", result.get("message", ""))
 
+    @patch("api.agent.tools.read_file.MarkItDown")
+    def test_markdown_output_strips_control_chars_from_extraction(self, mock_markitdown):
+        self._write_file(path="/exports/report.pdf", content=b"%PDF-1.4 fake", mime_type="application/pdf")
+        mock_markitdown.return_value.convert.return_value = SimpleNamespace(
+            markdown="Section A\f\nSection B\x0b\n",
+        )
+
+        result = execute_read_file(self.agent, {"path": "/exports/report.pdf"})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("format"), "markdown")
+        self.assertEqual(result.get("markdown"), "Section A\nSection B\n")
+
     def test_invalid_response_format_returns_error(self):
         self._write_file(path="/exports/note.txt", content=b"hello", mime_type="text/plain")
 

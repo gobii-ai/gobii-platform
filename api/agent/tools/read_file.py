@@ -1,6 +1,7 @@
 import codecs
 import logging
 import os
+import re
 import tempfile
 from typing import Any, Dict, Optional
 
@@ -23,6 +24,7 @@ RESPONSE_FORMAT_RAW_TEXT = "raw_text"
 ALLOWED_RESPONSE_FORMATS = {RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT}
 TEMP_FILE_PREFIX = "agent_read_"
 BUFFER_SIZE = 64 * 1024
+DISALLOWED_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
 RAW_TEXT_HARD_BLOCKED_EXTENSIONS = {
     ".pdf",
@@ -132,6 +134,11 @@ def _truncate_content(content: str, max_chars: int) -> str:
         return content
     truncated = content[:max_chars]
     return f"{truncated}\n\n... (truncated to {max_chars} characters)"
+
+
+def _sanitize_text_content(content: str) -> str:
+    # Keep newlines/tabs but drop control bytes that can break markdown rendering.
+    return DISALLOWED_CONTROL_CHARS.sub("", content)
 
 
 def _resolve_response_format(params: Dict[str, Any]) -> str:
@@ -295,6 +302,7 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
         logger.error("Failed to copy file node %s to temp file: %s", node.id, exc)
         return {"status": "error", "message": "Failed to access the file content."}
 
+    markdown = ""
     try:
         llm_config = get_file_handler_llm_config()
         md_kwargs: Dict[str, Any] = {}
@@ -314,6 +322,7 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
         except Exception:
             logger.warning("Failed to clean up temp file %s", temp_path)
 
+    markdown = _sanitize_text_content(markdown)
     if max_chars > 0:
         markdown = _truncate_content(markdown, max_chars)
 
