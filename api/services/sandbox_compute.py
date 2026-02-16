@@ -20,7 +20,7 @@ from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
-from api.sandbox_utils import normalize_timeout as _normalize_timeout
+from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from waffle import get_waffle_flag_model
 
 logger = logging.getLogger(__name__)
@@ -800,7 +800,7 @@ class SandboxComputeService:
         if started:
             deploy_started_at = time.monotonic()
             update = self._backend.deploy_or_resume(agent, session)
-            deploy_duration_ms = int(round((time.monotonic() - deploy_started_at) * 1000))
+            deploy_duration_ms = _elapsed_ms(deploy_started_at)
             if not update.state:
                 update.state = AgentComputeSession.State.RUNNING
             self._apply_session_update(session, update)
@@ -818,7 +818,7 @@ class SandboxComputeService:
             )
         pull_started_at = time.monotonic()
         sync_result = self._sync_workspace_pull(agent, session)
-        pull_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
+        pull_duration_ms = _elapsed_ms(pull_started_at)
         pull_status = sync_result.get("status") if isinstance(sync_result, dict) else "skipped"
         logger.info(
             "Sandbox %s pull agent=%s source=%s duration_ms=%s status=%s",
@@ -836,7 +836,7 @@ class SandboxComputeService:
                 "Sandbox bootstrap complete agent=%s source=%s total_duration_ms=%s",
                 agent.id,
                 source,
-                int(round((time.monotonic() - bootstrap_started_at) * 1000)),
+                _elapsed_ms(bootstrap_started_at),
             )
         return session
 
@@ -846,7 +846,7 @@ class SandboxComputeService:
         pull_started_at = time.monotonic()
         since = session.last_filespace_pull_at
         manifest = build_filespace_pull_manifest(agent, since=since)
-        manifest_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
+        manifest_duration_ms = _elapsed_ms(pull_started_at)
         if manifest.get("status") != "ok":
             logger.warning(
                 "Sandbox pull manifest failed agent=%s duration_ms=%s status=%s result=%s",
@@ -867,8 +867,8 @@ class SandboxComputeService:
         payload = {"files": files}
         backend_started_at = time.monotonic()
         response = self._backend.sync_filespace(agent, session, direction="pull", payload=payload)
-        backend_duration_ms = int(round((time.monotonic() - backend_started_at) * 1000))
-        total_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
+        backend_duration_ms = _elapsed_ms(backend_started_at)
+        total_duration_ms = _elapsed_ms(pull_started_at)
         cursor_value = _parse_sync_timestamp(manifest.get("sync_cursor"))
         cursor_persisted = False
         if response.get("status") == "ok" and cursor_value:

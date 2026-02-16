@@ -8,7 +8,11 @@ from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.models import AgentComputeSession, AgentFsNode, BrowserUseAgent, PersistentAgent
-from api.services.sandbox_compute import SandboxComputeService, _build_nonzero_exit_error_payload
+from api.services.sandbox_compute import (
+    SandboxComputeService,
+    SandboxSessionUpdate,
+    _build_nonzero_exit_error_payload,
+)
 from api.services.sandbox_filespace_sync import build_filespace_pull_manifest
 
 
@@ -17,7 +21,7 @@ class _DummyBackend:
         self.sync_calls: list[dict] = []
 
     def deploy_or_resume(self, agent, session):
-        return None
+        return SandboxSessionUpdate(state=AgentComputeSession.State.RUNNING)
 
     def sync_filespace(self, agent, session, *, direction, payload=None):
         self.sync_calls.append(

@@ -9,7 +9,7 @@ import requests
 from django.conf import settings
 
 from api.models import AgentComputeSession
-from api.sandbox_utils import normalize_timeout as _normalize_timeout
+from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate
 from api.services.system_settings import get_sandbox_compute_pod_image, get_sandbox_egress_proxy_pod_image
 
@@ -534,7 +534,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                     pod_name,
                     phase,
                     attempts,
-                    int(round((time.monotonic() - started_at) * 1000)),
+                    _elapsed_ms(started_at),
                 )
                 last_phase = phase
             if phase == "Running":
@@ -544,7 +544,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                             "Sandbox pod ready pod=%s attempts=%s elapsed_ms=%s",
                             pod_name,
                             attempts,
-                            int(round((time.monotonic() - started_at) * 1000)),
+                            _elapsed_ms(started_at),
                         )
                         return True
             time.sleep(2)
@@ -552,7 +552,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             "Sandbox pod readiness timeout pod=%s attempts=%s elapsed_ms=%s timeout_seconds=%s last_phase=%s",
             pod_name,
             attempts,
-            int(round((time.monotonic() - started_at) * 1000)),
+            _elapsed_ms(started_at),
             self._pod_ready_timeout,
             last_phase,
         )
