@@ -19,6 +19,9 @@ type ShareTarget = {
   href: string
 }
 
+const MOBILE_BREAKPOINT_PX = 768
+const MOBILE_MEDIA_QUERY = `(max-width: ${MOBILE_BREAKPOINT_PX - 1}px)`
+
 function buildShareTargets(templateUrl: string, shareText: string): ShareTarget[] {
   const encodedUrl = encodeURIComponent(templateUrl)
   const encodedText = encodeURIComponent(shareText)
@@ -58,10 +61,11 @@ export function TemplateShareDialog({
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
+    const mediaQuery = window.matchMedia(MOBILE_MEDIA_QUERY)
+    const handleMediaChange = () => setIsMobile(mediaQuery.matches)
+    handleMediaChange()
+    mediaQuery.addEventListener('change', handleMediaChange)
+    return () => mediaQuery.removeEventListener('change', handleMediaChange)
   }, [])
 
   const shareText = useMemo(() => {
@@ -82,7 +86,7 @@ export function TemplateShareDialog({
             key={target.key}
             href={target.href}
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
             onClick={onClose}
             className="inline-flex items-center justify-center rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100"
           >
