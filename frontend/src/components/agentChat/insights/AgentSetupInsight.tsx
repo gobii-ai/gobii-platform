@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Download, Globe, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Download, Globe, Loader2, Mail, MessageSquare, Phone, Rocket, Share, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -17,6 +17,7 @@ import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import { getReturnToPath } from '../../../util/returnTo'
 import { downloadVCard } from '../../../util/vcard'
+import { TemplateShareDialog } from './TemplateShareDialog'
 import '../../../styles/insights.css'
 
 // Staggered animation variants for insight panels
@@ -157,6 +158,7 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
   const [templateBusy, setTemplateBusy] = useState(false)
   const [templateError, setTemplateError] = useState<string | null>(null)
   const [templateCopied, setTemplateCopied] = useState(false)
+  const [templateShareOpen, setTemplateShareOpen] = useState(false)
 
   const [orgCurrent, setOrgCurrent] = useState(metadata.organization.currentOrg ?? null)
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(metadata.organization.currentOrg?.id ?? null)
@@ -177,6 +179,12 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
   useEffect(() => {
     setTemplateUrl(metadata.template?.url ?? null)
   }, [metadata.template?.url])
+
+  useEffect(() => {
+    if (!templateUrl) {
+      setTemplateShareOpen(false)
+    }
+  }, [templateUrl])
 
   useEffect(() => {
     const existingHandle = metadata.publicProfile?.handle ?? ''
@@ -836,11 +844,11 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
             {hasTemplate ? (
               <button
                 type="button"
-                className={`collab-row__btn ${templateCopied ? 'collab-row__btn--success' : 'collab-row__btn--secondary'}`}
-                onClick={() => handleTemplateCopy(templateUrl ?? '')}
+                className="collab-row__btn collab-row__btn--secondary"
+                onClick={() => setTemplateShareOpen(true)}
               >
-                {templateCopied ? <Check size={14} /> : <Copy size={14} />}
-                <span>{templateCopied ? 'Copied!' : 'Copy link'}</span>
+                <Share size={14} />
+                <span>Share</span>
               </button>
             ) : (
               <button
@@ -993,18 +1001,28 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
   }
 
   return (
-    <motion.div
-      className="insight-card-v2 insight-card-v2--agent-setup"
-      style={{ background: 'transparent', borderRadius: 0 }}
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      {panel === 'always_on' && renderAlwaysOn()}
-      {panel === 'template' && renderTemplate()}
-      {panel === 'sms' && renderSms()}
-      {panel === 'org_transfer' && renderOrgTransfer()}
-      {(panel === 'upsell_pro' || panel === 'upsell_scale') && renderUpsell()}
-    </motion.div>
+    <>
+      <motion.div
+        className="insight-card-v2 insight-card-v2--agent-setup"
+        style={{ background: 'transparent', borderRadius: 0 }}
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+      >
+        {panel === 'always_on' && renderAlwaysOn()}
+        {panel === 'template' && renderTemplate()}
+        {panel === 'sms' && renderSms()}
+        {panel === 'org_transfer' && renderOrgTransfer()}
+        {(panel === 'upsell_pro' || panel === 'upsell_scale') && renderUpsell()}
+      </motion.div>
+      <TemplateShareDialog
+        open={templateShareOpen}
+        templateUrl={templateUrl ?? ''}
+        agentName={agentDisplayName}
+        copied={templateCopied}
+        onCopy={handleTemplateCopy}
+        onClose={() => setTemplateShareOpen(false)}
+      />
+    </>
   )
 }
