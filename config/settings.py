@@ -530,15 +530,30 @@ ACCOUNT_ALLOW_SOCIAL_SIGNUP = env.bool("ACCOUNT_ALLOW_SOCIAL_SIGNUP", default=Tr
 ACCOUNT_ALLOW_PASSWORD_LOGIN = env.bool("ACCOUNT_ALLOW_PASSWORD_LOGIN", default=True)
 ACCOUNT_ALLOW_SOCIAL_LOGIN = env.bool("ACCOUNT_ALLOW_SOCIAL_LOGIN", default=True)
 
-# Domains declined during signup (lowercase, comma separated via env override)
-SIGNUP_BLOCKED_EMAIL_DOMAINS = [
-    domain.strip().lower()
-    for domain in env(
-        "SIGNUP_BLOCKED_EMAIL_DOMAINS",
-        default="mailslurp.biz",
-    ).split(",")
-    if domain.strip()
-]
+def _parse_domain_set(raw_value: str) -> set[str]:
+    return {
+        domain.strip().lower()
+        for domain in raw_value.split(",")
+        if domain.strip()
+    }
+
+
+# Optional signup email-domain policy controls:
+# - allowlist wins over both hard blocklist and disposable detection
+# - blocklist supports exact domains and their subdomains in the adapter
+GOBII_EMAIL_DOMAIN_ALLOWLIST = _parse_domain_set(
+    env("GOBII_EMAIL_DOMAIN_ALLOWLIST", default="")
+)
+GOBII_EMAIL_DOMAIN_BLOCKLIST = _parse_domain_set(
+    env(
+        "GOBII_EMAIL_DOMAIN_BLOCKLIST",
+        default=env("SIGNUP_BLOCKED_EMAIL_DOMAINS", default="mailslurp.biz"),
+    )
+)
+GOBII_EMAIL_BLOCK_DISPOSABLE = env.bool("GOBII_EMAIL_BLOCK_DISPOSABLE", default=True)
+
+# Backward compatibility for older references to this setting.
+SIGNUP_BLOCKED_EMAIL_DOMAINS = sorted(GOBII_EMAIL_DOMAIN_BLOCKLIST)
 
 # Mailgun credentials only exist in hosted/prod environments; local proprietary
 # runs typically omit them. Use that to decide whether to enforce email
@@ -556,7 +571,7 @@ ACCOUNT_EMAIL_VERIFICATION = env(
     default="optional" if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY else "none",
 )
 ACCOUNT_LOGOUT_ON_GET = True
-ACCOUNT_ADAPTER = "config.account_adapter.GobiiAccountAdapter"
+ACCOUNT_ADAPTER = "config.allauth_adapter.GobiiAccountAdapter"
 SOCIALACCOUNT_ADAPTER = "config.socialaccount_adapter.GobiiSocialAccountAdapter"
 
 # TODO: Test the removal of this; got deprecation warning
