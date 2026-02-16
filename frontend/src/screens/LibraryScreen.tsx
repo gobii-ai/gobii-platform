@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Heart, Library as LibraryIcon, Loader2 } from 'lucide-react'
 
@@ -81,6 +81,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
       }),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.offset + lastPage.limit : undefined),
+    placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   })
@@ -113,7 +114,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
   const categoryFilters = useMemo(() => topCategories, [topCategories])
 
   useEffect(() => {
-    if (!selectedCategory) {
+    if (!selectedCategory || categoryFilters.length === 0) {
       return
     }
     const validCategories = new Set(categoryFilters.map((item) => item.name))

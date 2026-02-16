@@ -103,7 +103,15 @@
               <i data-lucide="bot" class="h-3.5 w-3.5"></i>
               My Agents
             </a>
+            <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
+              <i data-lucide="search" class="h-3.5 w-3.5"></i>
+              Discover
+            </a>
           {% else %}
+            <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
+              <i data-lucide="search" class="h-3.5 w-3.5"></i>
+              Discover
+            </a>
             {% with request.session.utm_querystring as utm_qs %}
             <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
               <i data-lucide="log-in" class="h-3.5 w-3.5"></i>
@@ -306,7 +314,14 @@
         {% endif %}
         
         {% if request.user.is_authenticated %}
-          <a href="{% url 'agents' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">My Agents</a>
+          <a href="{% url 'agents' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <i aria-hidden="true" data-lucide="bot" class="h-4 w-4"></i>
+            My Agents
+          </a>
+          <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+            <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
+            Discover
+          </a>
           
           <div class="mt-4 pt-4 border-t border-gray-200">
             <div class="flex items-center gap-3 px-3 mb-3">
@@ -365,6 +380,10 @@
           </div>
         {% else %}
           <div class="mt-4 pt-4 border-t border-gray-200 space-y-3">
+            <a href="{% url 'pages:library' %}" class="flex items-center gap-2 py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
+              Discover
+            </a>
             {% with request.session.utm_querystring as utm_qs %}
             <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
             {% if request.resolver_match.url_name != 'home' %}
