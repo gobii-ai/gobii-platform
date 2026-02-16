@@ -155,17 +155,21 @@ def build_filespace_pull_manifest(
 
     queryset = AgentFsNode.objects.filter(filespace=filespace)
     if since:
-        queryset = queryset.filter(updated_at__gte=since)
+        queryset = queryset.filter(updated_at__gt=since)
 
     entries = []
+    max_updated_at: Optional[datetime] = None
     for node in queryset.iterator():
         if node.node_type != AgentFsNode.NodeType.FILE:
             continue
+        if node.updated_at and (max_updated_at is None or node.updated_at > max_updated_at):
+            max_updated_at = node.updated_at
         entry = {
             "node_id": str(node.id),
             "path": node.path,
             "updated_at": node.updated_at.isoformat() if node.updated_at else None,
             "is_deleted": bool(node.is_deleted),
+            "checksum_sha256": node.checksum_sha256 or "",
         }
         if not node.is_deleted:
             content_b64 = _encode_node_content_b64(node)
@@ -191,4 +195,8 @@ def build_filespace_pull_manifest(
                 )
         entries.append(entry)
 
-    return {"status": "ok", "files": entries}
+    return {
+        "status": "ok",
+        "files": entries,
+        "sync_cursor": max_updated_at.isoformat() if max_updated_at else None,
+    }

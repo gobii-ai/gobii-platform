@@ -781,19 +781,20 @@ class SandboxComputeService:
                 update.pod_name or session.pod_name,
                 update.namespace or session.namespace,
             )
-            pull_started_at = time.monotonic()
-            sync_result = self._sync_workspace_pull(agent, session)
-            pull_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
-            pull_status = sync_result.get("status") if isinstance(sync_result, dict) else "skipped"
-            logger.info(
-                "Sandbox bootstrap initial_pull agent=%s source=%s duration_ms=%s status=%s",
-                agent.id,
-                source,
-                pull_duration_ms,
-                pull_status,
-            )
-            if sync_result and sync_result.get("status") != "ok":
-                logger.warning("Sandbox pull sync failed agent=%s result=%s", agent.id, sync_result)
+        pull_started_at = time.monotonic()
+        sync_result = self._sync_workspace_pull(agent, session)
+        pull_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
+        pull_status = sync_result.get("status") if isinstance(sync_result, dict) else "skipped"
+        logger.info(
+            "Sandbox %s pull agent=%s source=%s duration_ms=%s status=%s",
+            "bootstrap" if started else "refresh",
+            agent.id,
+            source,
+            pull_duration_ms,
+            pull_status,
+        )
+        if sync_result and sync_result.get("status") != "ok":
+            logger.warning("Sandbox pull sync failed agent=%s result=%s", agent.id, sync_result)
         self._touch_session(session, source=source)
         if started:
             logger.info(
@@ -808,7 +809,8 @@ class SandboxComputeService:
         if isinstance(self._backend, LocalSandboxBackend):
             return None
         pull_started_at = time.monotonic()
-        manifest = build_filespace_pull_manifest(agent)
+        since = session.last_filespace_pull_at
+        manifest = build_filespace_pull_manifest(agent, since=since)
         manifest_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
         if manifest.get("status") != "ok":
             logger.warning(
@@ -821,20 +823,28 @@ class SandboxComputeService:
             return manifest
         files = manifest.get("files") or []
         logger.info(
-            "Sandbox pull manifest built agent=%s files=%s duration_ms=%s",
+            "Sandbox pull manifest built agent=%s files=%s duration_ms=%s since_set=%s",
             agent.id,
             len(files),
             manifest_duration_ms,
+            since is not None,
         )
         payload = {"files": files}
         backend_started_at = time.monotonic()
         response = self._backend.sync_filespace(agent, session, direction="pull", payload=payload)
         backend_duration_ms = int(round((time.monotonic() - backend_started_at) * 1000))
         total_duration_ms = int(round((time.monotonic() - pull_started_at) * 1000))
+        cursor_value = _parse_sync_timestamp(manifest.get("sync_cursor"))
+        cursor_persisted = False
+        if response.get("status") == "ok" and cursor_value:
+            session.last_filespace_pull_at = cursor_value
+            session.save(update_fields=["last_filespace_pull_at", "updated_at"])
+            cursor_persisted = True
         logger.info(
             (
                 "Sandbox pull sync completed agent=%s files=%s status=%s "
-                "backend_duration_ms=%s total_duration_ms=%s applied=%s skipped=%s conflicts=%s"
+                "backend_duration_ms=%s total_duration_ms=%s applied=%s skipped=%s conflicts=%s "
+                "cursor_set=%s"
             ),
             agent.id,
             len(files),
@@ -844,6 +854,7 @@ class SandboxComputeService:
             response.get("applied"),
             response.get("skipped"),
             response.get("conflicts"),
+            cursor_persisted,
         )
         return response
 
