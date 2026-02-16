@@ -54,6 +54,7 @@ Gobii is optimized for a different problem: reliable, secure, always-on agent op
 ## Table of Contents
 
 - [Why Teams Choose Gobii](#why-teams-choose-gobii)
+- [Gobii vs OpenClaw (Production Lens)](#gobii-vs-openclaw-production-lens)
 - [How Gobii Works](#how-gobii-works)
 - [Always-On Runtime: Schedule + Event Triggers](#always-on-runtime-schedule--event-triggers)
 - [Production Browser Runtime](#production-browser-runtime)
@@ -80,6 +81,26 @@ Gobii is optimized for a different problem: reliable, secure, always-on agent op
 - **SQLite-native operational memory**: structured state substrate for long-running tool workflows.
 - **Real browser operations**: headed execution, persistent profile handling, and proxy-aware routing.
 - **Security-first controls**: encrypted-at-rest secrets, proxy-governed egress, and Kubernetes sandbox compute support.
+
+## Gobii vs OpenClaw (Production Lens)
+
+OpenClaw is excellent software, especially for local-first personal assistant workflows and broad channel coverage.
+Gobii is optimized for a different target: cloud-native, secure, always-on agent operations for teams.
+
+| Dimension | Gobii | OpenClaw |
+| --- | --- | --- |
+| Primary deployment model | Cloud-native autonomous agent runtime (self-hosted or managed) | Local-first gateway and personal assistant runtime |
+| Always-on behavior | Per-agent schedule + durable event queue continuity | Heartbeat and cron/wakeup session patterns |
+| Webhook model | Inbound triggers plus outbound agent webhook actions in one lifecycle | Strong gateway ingress hooks and wake/agent webhook routes |
+| Channel strategy | Fewer core channels with deeper lifecycle integration | Wider channel surface with intentionally thinner per-channel depth |
+| Agent identity | Endpoint-addressable agent identities (email/SMS/web) | Workspace/session identity model |
+| Agent coordination | Native agent-to-agent messaging | Orchestrator/subagent flows |
+| Memory substrate | SQLite-native operational state | Markdown-first memory with optional vector acceleration |
+| Browser runtime | Headed execution, persistent profiles, proxy-aware routing, distributed-worker friendly | Headed execution, persistent local profiles, strong local operator UX |
+| Security defaults | Encrypted-at-rest secrets, proxy-governed egress, sandbox compute, Kubernetes/gVisor support | Local-first by design, sandboxing available but deployment-dependent |
+| Best fit | Production team automation with governed runtime controls | Personal/local assistant workflows and channel breadth |
+
+If your priority is secure, governed, always-on production execution in cloud or hybrid environments, Gobii is purpose-built for that.
 
 ## How Gobii Works
 
