@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" width="1400" height="820" role="img" aria-label="Security posture comparison between OpenClaw and Gobii">
+  <defs>
+    <linearGradient id="clawPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#ffedd5"/>
+    </linearGradient>
+    <linearGradient id="gobiiPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ecfeff"/>
+      <stop offset="100%" stop-color="#cffafe"/>
+    </linearGradient>
+    <linearGradient id="clawCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fff5eb"/>
+    </linearGradient>
+    <linearGradient id="gobiiCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ecfeff"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#334155"/>
+    </marker>
+    <style>
+      text { font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif; fill: #0f172a; }
+      .title { font-size: 38px; font-weight: 700; }
+      .lane { stroke-width: 2; rx: 24; ry: 24; }
+      .laneTitle { font-size: 30px; font-weight: 700; }
+      .card { stroke-width: 2; rx: 18; ry: 18; }
+      .cardText { font-size: 22px; font-weight: 600; }
+      .connector { stroke: #334155; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .tag { font-size: 21px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <text class="title" x="700" y="58" text-anchor="middle">Security + Runtime Posture</text>
+
+  <rect class="lane" x="70" y="92" width="610" height="688" fill="url(#clawPanel)" stroke="#ea580c"/>
+  <text class="laneTitle" x="375" y="138" text-anchor="middle">OpenClaw Local-First Flexibility</text>
+
+  <rect class="card" x="145" y="176" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="228" text-anchor="middle">host execution path is available</text>
+
+  <rect class="card" x="145" y="310" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="362" text-anchor="middle">sandboxing is optional by design</text>
+
+  <rect class="card" x="145" y="444" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="496" text-anchor="middle">operator selects isolation strategy</text>
+
+  <rect class="card" x="145" y="578" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="630" text-anchor="middle">high local experimentation velocity</text>
+
+  <path class="connector" d="M375 260 L375 310"/>
+  <path class="connector" d="M375 394 L375 444"/>
+  <path class="connector" d="M375 528 L375 578"/>
+
+  <rect x="158" y="700" width="434" height="46" rx="12" ry="12" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text class="tag" x="375" y="729" text-anchor="middle">Flexible posture, user-tuned hardening</text>
+
+  <rect class="lane" x="720" y="92" width="610" height="688" fill="url(#gobiiPanel)" stroke="#0891b2"/>
+  <text class="laneTitle" x="1025" y="138" text-anchor="middle">Gobii Cloud-Native Defaults</text>
+
+  <rect class="card" x="795" y="152" width="460" height="70" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="196" text-anchor="middle">Kubernetes sandbox backend</text>
+
+  <rect class="card" x="795" y="252" width="460" height="70" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="296" text-anchor="middle">runtimeClassName: gvisor</text>
+
+  <rect class="card" x="795" y="352" width="460" height="70" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="396" text-anchor="middle">seccomp runtime/default</text>
+
+  <rect class="card" x="795" y="452" width="460" height="70" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="496" text-anchor="middle">egress NetworkPolicy guardrails</text>
+
+  <rect class="card" x="795" y="552" width="460" height="70" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="596" text-anchor="middle">proxy-routed internet egress</text>
+
+  <rect class="card" x="795" y="652" width="460" height="70" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="696" text-anchor="middle">headed browser sessions in pods</text>
+
+  <path class="connector" d="M1025 222 L1025 252"/>
+  <path class="connector" d="M1025 322 L1025 352"/>
+  <path class="connector" d="M1025 422 L1025 452"/>
+  <path class="connector" d="M1025 522 L1025 552"/>
+  <path class="connector" d="M1025 622 L1025 652"/>
+
+</svg>

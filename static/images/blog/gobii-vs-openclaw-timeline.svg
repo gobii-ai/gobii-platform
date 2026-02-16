@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 720" width="1500" height="720" role="img" aria-label="Timeline comparing Gobii and OpenClaw implementation milestones with Gobii starting earlier">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#334155"/>
+    </marker>
+    <style>
+      text { font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif; fill: #0f172a; }
+      .title { font-size: 40px; font-weight: 700; }
+      .subtitle { font-size: 22px; font-weight: 600; fill: #334155; }
+      .lane { stroke-width: 2; rx: 22; ry: 22; }
+      .laneTitle { font-size: 28px; font-weight: 700; }
+      .chip { rx: 12; ry: 12; stroke-width: 2; }
+      .chipText { font-size: 18px; font-weight: 700; }
+      .track { stroke-width: 6; fill: none; stroke-linecap: round; }
+      .stem { stroke-width: 2.5; }
+      .card { rx: 14; ry: 14; stroke-width: 2; }
+      .cardMain { font-size: 18px; font-weight: 700; }
+      .cardSub { font-size: 15px; font-weight: 600; fill: #334155; }
+      .deltaLine { stroke: #334155; stroke-width: 3; stroke-dasharray: 8 7; fill: none; }
+      .deltaLabel { font-size: 20px; font-weight: 700; fill: #334155; }
+    </style>
+  </defs>
+
+  <text class="title" x="750" y="56" text-anchor="middle">Timeline: Gobii and OpenClaw Milestones</text>
+  <text class="subtitle" x="750" y="88" text-anchor="middle">Git history shows Gobii's always-on core landing months before OpenClaw repository start.</text>
+
+  <rect class="lane" x="70" y="118" width="1360" height="228" fill="#ecfeff" stroke="#0891b2"/>
+  <text class="laneTitle" x="98" y="158" fill="#0f766e">Gobii (private -&gt; public MIT lineage)</text>
+  <rect class="chip" x="610" y="131" width="188" height="34" fill="#ccfbf1" stroke="#0f766e"/>
+  <text class="chipText" x="704" y="153" text-anchor="middle" fill="#0f766e">starts May 2025</text>
+
+  <line class="track" x1="220" y1="250" x2="1388" y2="250" stroke="#0891b2"/>
+
+  <circle cx="240" cy="250" r="9" fill="#0891b2"/>
+  <line class="stem" x1="240" y1="250" x2="240" y2="238" stroke="#0891b2"/>
+  <rect class="card" x="145" y="170" width="190" height="72" fill="#dff7fb" stroke="#0891b2"/>
+  <text class="cardMain" x="240" y="201" text-anchor="middle">2025-05-01</text>
+  <text class="cardSub" x="240" y="225" text-anchor="middle">private repo init · 3f3b9e89</text>
+
+  <circle cx="430" cy="250" r="9" fill="#0891b2"/>
+  <line class="stem" x1="430" y1="250" x2="430" y2="254" stroke="#0891b2"/>
+  <rect class="card" x="305" y="248" width="250" height="86" fill="#dff7fb" stroke="#0891b2"/>
+  <text class="cardMain" x="430" y="278" text-anchor="middle">2025-06-20 to 06-29</text>
+  <text class="cardSub" x="430" y="302" text-anchor="middle">persistent agents + cron/event core</text>
+  <text class="cardSub" x="430" y="324" text-anchor="middle">a36f7e1e .. 6d48d601</text>
+
+  <circle cx="650" cy="250" r="9" fill="#0891b2"/>
+  <line class="stem" x1="650" y1="250" x2="650" y2="238" stroke="#0891b2"/>
+  <rect class="card" x="560" y="170" width="180" height="72" fill="#dff7fb" stroke="#0891b2"/>
+  <text class="cardMain" x="650" y="201" text-anchor="middle">2025-08-30</text>
+  <text class="cardSub" x="650" y="225" text-anchor="middle">public repo · f596424e</text>
+
+  <circle cx="790" cy="250" r="9" fill="#0891b2"/>
+  <line class="stem" x1="790" y1="250" x2="790" y2="264" stroke="#0891b2"/>
+  <rect class="card" x="705" y="264" width="170" height="72" fill="#dff7fb" stroke="#0891b2"/>
+  <text class="cardMain" x="790" y="294" text-anchor="middle">2025-10-02</text>
+  <text class="cardSub" x="790" y="318" text-anchor="middle">native A2A · 0130b607</text>
+
+  <circle cx="900" cy="250" r="9" fill="#0891b2"/>
+  <line class="stem" x1="900" y1="250" x2="900" y2="238" stroke="#0891b2"/>
+  <rect class="card" x="805" y="170" width="190" height="72" fill="#dff7fb" stroke="#0891b2"/>
+  <text class="cardMain" x="900" y="201" text-anchor="middle">2025-10-17</text>
+  <text class="cardSub" x="900" y="225" text-anchor="middle">webhook tool · 39bfb8d4</text>
+
+  <rect class="lane" x="70" y="362" width="1360" height="236" fill="#fff7ed" stroke="#ea580c"/>
+  <text class="laneTitle" x="98" y="402" fill="#c2410c">OpenClaw</text>
+  <rect class="chip" x="260" y="375" width="194" height="34" fill="#ffedd5" stroke="#c2410c"/>
+  <text class="chipText" x="357" y="397" text-anchor="middle" fill="#c2410c">starts Nov 2025</text>
+
+  <line class="track" x1="220" y1="490" x2="1388" y2="490" stroke="#ea580c"/>
+
+  <circle cx="1060" cy="490" r="9" fill="#ea580c"/>
+  <line class="stem" x1="1060" y1="490" x2="1060" y2="500" stroke="#ea580c"/>
+  <rect class="card" x="955" y="502" width="210" height="82" fill="#fff2e6" stroke="#ea580c"/>
+  <text class="cardMain" x="1060" y="533" text-anchor="middle">2025-11-24</text>
+  <text class="cardSub" x="1060" y="558" text-anchor="middle">repo init · f6dd362d3</text>
+
+  <circle cx="1188" cy="490" r="9" fill="#ea580c"/>
+  <line class="stem" x1="1188" y1="490" x2="1188" y2="478" stroke="#ea580c"/>
+  <rect class="card" x="1060" y="380" width="256" height="94" fill="#fff2e6" stroke="#ea580c"/>
+  <text class="cardMain" x="1188" y="411" text-anchor="middle">2025-12-24 to 12-27</text>
+  <text class="cardSub" x="1188" y="436" text-anchor="middle">gateway webhooks + heartbeat align</text>
+  <text class="cardSub" x="1188" y="459" text-anchor="middle">1ed5ca3fd, 0d8e0ddc4</text>
+
+  <circle cx="1320" cy="490" r="9" fill="#ea580c"/>
+  <line class="stem" x1="1320" y1="490" x2="1320" y2="500" stroke="#ea580c"/>
+  <rect class="card" x="1218" y="502" width="204" height="82" fill="#fff2e6" stroke="#ea580c"/>
+  <text class="cardMain" x="1320" y="533" text-anchor="middle">2026-02-14</text>
+  <text class="cardSub" x="1320" y="556" text-anchor="middle">orchestration depth</text>
+  <text class="cardSub" x="1320" y="576" text-anchor="middle">b8f66c260</text>
+
+  <line class="deltaLine" x1="430" y1="620" x2="1060" y2="620" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <rect x="626" y="600" width="238" height="40" rx="12" ry="12" fill="#e2e8f0" stroke="#334155" stroke-width="2"/>
+  <text class="deltaLabel" x="745" y="626" text-anchor="middle">~156 days earlier</text>
+
+</svg>

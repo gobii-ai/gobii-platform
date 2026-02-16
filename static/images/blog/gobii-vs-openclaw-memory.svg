@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 800" width="1400" height="800" role="img" aria-label="Memory architecture comparison between OpenClaw and Gobii">
+  <defs>
+    <linearGradient id="clawPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#ffedd5"/>
+    </linearGradient>
+    <linearGradient id="gobiiPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ecfeff"/>
+      <stop offset="100%" stop-color="#cffafe"/>
+    </linearGradient>
+    <linearGradient id="clawCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fff5eb"/>
+    </linearGradient>
+    <linearGradient id="gobiiCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ecfeff"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#334155"/>
+    </marker>
+    <style>
+      text { font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif; fill: #0f172a; }
+      .title { font-size: 38px; font-weight: 700; }
+      .lane { stroke-width: 2; rx: 24; ry: 24; }
+      .laneTitle { font-size: 30px; font-weight: 700; }
+      .card { stroke-width: 2; rx: 18; ry: 18; }
+      .cardText { font-size: 22px; font-weight: 600; }
+      .connector { stroke: #334155; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .connectorSoft { stroke: #334155; stroke-width: 3; fill: none; stroke-dasharray: 9 7; marker-end: url(#arrow); }
+      .tag { font-size: 20px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <text class="title" x="700" y="58" text-anchor="middle">Memory Architecture Comparison</text>
+
+  <rect class="lane" x="70" y="92" width="610" height="668" fill="url(#clawPanel)" stroke="#ea580c"/>
+  <text class="laneTitle" x="375" y="138" text-anchor="middle">OpenClaw: Markdown-First</text>
+
+  <rect class="card" x="145" y="176" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="228" text-anchor="middle">MEMORY.md + daily markdown logs</text>
+
+  <rect class="card" x="145" y="310" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="362" text-anchor="middle">human-readable source of truth</text>
+
+  <rect class="card" x="145" y="444" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="496" text-anchor="middle">SQLite vector index for retrieval</text>
+
+  <rect class="card" x="145" y="578" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="630" text-anchor="middle">memory_search + memory_get tools</text>
+
+  <path class="connector" d="M375 260 L375 310"/>
+  <path class="connector" d="M375 394 L375 444"/>
+  <path class="connector" d="M375 528 L375 578"/>
+
+  <rect x="180" y="686" width="390" height="54" rx="14" ry="14" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text class="tag" x="375" y="721" text-anchor="middle">Retrieval readability emphasized</text>
+
+  <rect class="lane" x="720" y="92" width="610" height="668" fill="url(#gobiiPanel)" stroke="#0891b2"/>
+  <text class="laneTitle" x="1025" y="138" text-anchor="middle">Gobii: SQLite Runtime-First</text>
+
+  <rect class="card" x="795" y="160" width="460" height="76" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="208" text-anchor="middle">per-agent SQLite runtime DB</text>
+
+  <rect class="card" x="795" y="274" width="460" height="76" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="322" text-anchor="middle">__agent_config / __messages / __files</text>
+
+  <rect class="card" x="795" y="388" width="460" height="76" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="436" text-anchor="middle">tool execution mutates structured state</text>
+
+  <rect class="card" x="795" y="502" width="460" height="76" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="550" text-anchor="middle">charter + schedule sync tooling</text>
+
+  <rect class="card" x="795" y="616" width="460" height="76" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="664" text-anchor="middle">zstd archive to object storage</text>
+
+  <path class="connector" d="M1025 236 L1025 274"/>
+  <path class="connector" d="M1025 350 L1025 388"/>
+  <path class="connector" d="M1025 464 L1025 502"/>
+  <path class="connector" d="M1025 578 L1025 616"/>
+
+  <rect x="840" y="706" width="370" height="40" rx="12" ry="12" fill="#cffafe" stroke="#0891b2" stroke-width="2"/>
+  <text class="tag" x="1025" y="732" text-anchor="middle">State mutation depth emphasized</text>
+
+</svg>

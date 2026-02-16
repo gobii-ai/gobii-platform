@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 780" width="1400" height="780" role="img" aria-label="Webhook architecture comparison between OpenClaw and Gobii">
+  <defs>
+    <linearGradient id="clawPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#ffedd5"/>
+    </linearGradient>
+    <linearGradient id="gobiiPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ecfeff"/>
+      <stop offset="100%" stop-color="#cffafe"/>
+    </linearGradient>
+    <linearGradient id="clawCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fff5eb"/>
+    </linearGradient>
+    <linearGradient id="gobiiCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ecfeff"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#334155"/>
+    </marker>
+    <style>
+      text { font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif; fill: #0f172a; }
+      .title { font-size: 38px; font-weight: 700; }
+      .lane { stroke-width: 2; rx: 24; ry: 24; }
+      .laneTitle { font-size: 30px; font-weight: 700; }
+      .card { stroke-width: 2; rx: 18; ry: 18; }
+      .cardText { font-size: 22px; font-weight: 600; }
+      .connector { stroke: #334155; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .connectorSoft { stroke: #334155; stroke-width: 3; fill: none; stroke-dasharray: 9 7; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <text class="title" x="700" y="58" text-anchor="middle">Webhook Architecture Comparison</text>
+
+  <rect class="lane" x="70" y="92" width="610" height="648" fill="url(#clawPanel)" stroke="#ea580c"/>
+  <text class="laneTitle" x="375" y="138" text-anchor="middle">OpenClaw: Ingress-Centric Design</text>
+
+  <rect class="card" x="145" y="176" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="228" text-anchor="middle">hooks config + auth extraction</text>
+
+  <rect class="card" x="145" y="310" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="362" text-anchor="middle">agent / session policy checks</text>
+
+  <rect class="card" x="145" y="444" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="496" text-anchor="middle">route to wake or isolated turn</text>
+
+  <rect class="card" x="145" y="578" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="630" text-anchor="middle">heartbeat-aware runtime behavior</text>
+
+  <path class="connector" d="M375 260 L375 310"/>
+  <path class="connector" d="M375 394 L375 444"/>
+  <path class="connector" d="M375 528 L375 578"/>
+
+  <rect class="lane" x="720" y="92" width="610" height="648" fill="url(#gobiiPanel)" stroke="#0891b2"/>
+  <text class="laneTitle" x="1025" y="138" text-anchor="middle">Gobii: Inbound + Outbound Webhooks</text>
+
+  <rect class="card" x="835" y="176" width="380" height="84" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="228" text-anchor="middle">Webhook Integration Surface</text>
+
+  <rect class="card" x="756" y="306" width="250" height="78" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="881" y="355" text-anchor="middle">provider webhooks</text>
+
+  <rect class="card" x="756" y="430" width="250" height="78" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="881" y="479" text-anchor="middle">token validation</text>
+
+  <rect class="card" x="756" y="554" width="250" height="78" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="881" y="596" text-anchor="middle">ingest_inbound</text>
+  <text class="cardText" x="881" y="622" text-anchor="middle">message</text>
+
+  <rect class="card" x="1044" y="306" width="250" height="78" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1169" y="355" text-anchor="middle">Webhook model</text>
+
+  <rect class="card" x="1044" y="430" width="250" height="78" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1169" y="479" text-anchor="middle">send_webhook_event</text>
+
+  <rect class="card" x="1044" y="554" width="250" height="78" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1169" y="603" text-anchor="middle">external systems</text>
+
+  <path class="connector" d="M1025 260 L881 306"/>
+  <path class="connector" d="M881 384 L881 430"/>
+  <path class="connector" d="M881 508 L881 554"/>
+
+  <path class="connector" d="M1025 260 L1169 306"/>
+  <path class="connector" d="M1169 384 L1169 430"/>
+  <path class="connector" d="M1169 508 L1169 554"/>
+
+  <path class="connectorSoft" d="M938 554 C980 520 1030 520 1075 554"/>
+
+</svg>

@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 780" width="1400" height="780" role="img" aria-label="Identity and orchestration comparison between OpenClaw and Gobii">
+  <defs>
+    <linearGradient id="clawPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#ffedd5"/>
+    </linearGradient>
+    <linearGradient id="gobiiPanel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ecfeff"/>
+      <stop offset="100%" stop-color="#cffafe"/>
+    </linearGradient>
+    <linearGradient id="clawCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#fff5eb"/>
+    </linearGradient>
+    <linearGradient id="gobiiCard" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#ecfeff"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#334155"/>
+    </marker>
+    <style>
+      text { font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif; fill: #0f172a; }
+      .title { font-size: 38px; font-weight: 700; }
+      .lane { stroke-width: 2; rx: 24; ry: 24; }
+      .laneTitle { font-size: 30px; font-weight: 700; }
+      .card { stroke-width: 2; rx: 18; ry: 18; }
+      .cardText { font-size: 22px; font-weight: 600; }
+      .connector { stroke: #334155; stroke-width: 3; fill: none; marker-end: url(#arrow); }
+      .tag { font-size: 21px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <text class="title" x="700" y="58" text-anchor="middle">Identity + Orchestration Patterns</text>
+
+  <rect class="lane" x="70" y="92" width="610" height="648" fill="url(#clawPanel)" stroke="#ea580c"/>
+  <text class="laneTitle" x="375" y="138" text-anchor="middle">OpenClaw Workspace Identity</text>
+
+  <rect class="card" x="145" y="176" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="228" text-anchor="middle">SOUL.md bootstrap in workspace</text>
+
+  <rect class="card" x="145" y="310" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="362" text-anchor="middle">session-scoped persona + behavior</text>
+
+  <rect class="card" x="145" y="444" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="496" text-anchor="middle">orchestrator and subagent spawning</text>
+
+  <rect class="card" x="145" y="578" width="460" height="84" fill="url(#clawCard)" stroke="#ea580c"/>
+  <text class="cardText" x="375" y="630" text-anchor="middle">maxSpawnDepth control gates</text>
+
+  <path class="connector" d="M375 260 L375 310"/>
+  <path class="connector" d="M375 394 L375 444"/>
+  <path class="connector" d="M375 528 L375 578"/>
+
+  <rect x="168" y="690" width="414" height="42" rx="12" ry="12" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text class="tag" x="375" y="717" text-anchor="middle">Operator/workspace identity focus</text>
+
+  <rect class="lane" x="720" y="92" width="610" height="648" fill="url(#gobiiPanel)" stroke="#0891b2"/>
+  <text class="laneTitle" x="1025" y="138" text-anchor="middle">Gobii Endpoint-Native Identity</text>
+
+  <rect class="card" x="795" y="156" width="460" height="74" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="203" text-anchor="middle">agent identity is a durable endpoint</text>
+
+  <rect class="card" x="795" y="264" width="460" height="74" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="311" text-anchor="middle">first.last@my.gobii.ai naming</text>
+
+  <rect class="card" x="795" y="372" width="460" height="74" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="419" text-anchor="middle">per-agent email/sms/web channels</text>
+
+  <rect class="card" x="795" y="480" width="460" height="74" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="527" text-anchor="middle">send_agent_message native A2A</text>
+
+  <rect class="card" x="795" y="588" width="460" height="74" fill="url(#gobiiCard)" stroke="#0891b2"/>
+  <text class="cardText" x="1025" y="635" text-anchor="middle">peer wake + quotas + debounce</text>
+
+  <path class="connector" d="M1025 230 L1025 264"/>
+  <path class="connector" d="M1025 338 L1025 372"/>
+  <path class="connector" d="M1025 446 L1025 480"/>
+  <path class="connector" d="M1025 554 L1025 588"/>
+
+  <rect x="822" y="690" width="406" height="42" rx="12" ry="12" fill="#cffafe" stroke="#0891b2" stroke-width="2"/>
+  <text class="tag" x="1025" y="717" text-anchor="middle">Addressable agent identity focus</text>
+
+</svg>
