@@ -150,6 +150,7 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
   const [emailResendError, setEmailResendError] = useState<string | null>(null)
 
   const [templateUrl, setTemplateUrl] = useState(metadata.template?.url ?? null)
+  const [templateDisplayName, setTemplateDisplayName] = useState(metadata.template?.displayName ?? null)
   const [templateHandle, setTemplateHandle] = useState(
     metadata.publicProfile?.handle ?? metadata.publicProfile?.suggestedHandle ?? ''
   )
@@ -179,6 +180,10 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
   useEffect(() => {
     setTemplateUrl(metadata.template?.url ?? null)
   }, [metadata.template?.url])
+
+  useEffect(() => {
+    setTemplateDisplayName(metadata.template?.displayName ?? null)
+  }, [metadata.template?.displayName])
 
   useEffect(() => {
     if (!templateUrl) {
@@ -353,6 +358,7 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
         hasProfile ? null : templateHandle.trim()
       )
       setTemplateUrl(response.templateUrl)
+      setTemplateDisplayName(response.displayName ?? null)
       setTemplateHandle(response.publicProfileHandle)
       setTemplateHandleDirty(false)
       setTemplatePanelOpen(false)
@@ -1018,7 +1024,7 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
       <TemplateShareDialog
         open={templateShareOpen}
         templateUrl={templateUrl ?? ''}
-        agentName={agentDisplayName}
+        templateName={templateDisplayName}
         copied={templateCopied}
         onCopy={handleTemplateCopy}
         onClose={() => setTemplateShareOpen(false)}

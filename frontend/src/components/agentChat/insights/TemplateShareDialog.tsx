@@ -7,7 +7,7 @@ import { AgentChatMobileSheet } from '../AgentChatMobileSheet'
 type TemplateShareDialogProps = {
   open: boolean
   templateUrl: string
-  agentName?: string | null
+  templateName?: string | null
   copied: boolean
   onCopy: (value: string) => void | Promise<void>
   onClose: () => void
@@ -53,7 +53,7 @@ function buildShareTargets(templateUrl: string, shareText: string): ShareTarget[
 export function TemplateShareDialog({
   open,
   templateUrl,
-  agentName,
+  templateName,
   copied,
   onCopy,
   onClose,
@@ -69,9 +69,12 @@ export function TemplateShareDialog({
   }, [])
 
   const shareText = useMemo(() => {
-    const displayName = (agentName || '').trim() || 'my agent'
-    return `Check out ${displayName} on Gobii`
-  }, [agentName])
+    const displayName = (templateName || '').trim()
+    if (displayName) {
+      return `Check out the ${displayName} template on Gobii`
+    }
+    return 'Check out this template on Gobii'
+  }, [templateName])
 
   const shareTargets = useMemo(() => buildShareTargets(templateUrl, shareText), [templateUrl, shareText])
   if (!open || !templateUrl) {
@@ -113,7 +116,7 @@ export function TemplateShareDialog({
   )
 
   const title = 'Share...'
-  const subtitle = 'Share this public agent link anywhere.'
+  const subtitle = 'Share this public template link anywhere.'
 
   if (isMobile) {
     return (
