@@ -16,8 +16,30 @@ from api.services.system_settings import get_max_file_size
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_MARKDOWN_CHARS = 80000
+DEFAULT_RESPONSE_FORMAT = "markdown"
+RESPONSE_FORMAT_MARKDOWN = "markdown"
+RESPONSE_FORMAT_RAW_TEXT = "raw_text"
+ALLOWED_RESPONSE_FORMATS = {RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT}
 TEMP_FILE_PREFIX = "agent_read_"
 BUFFER_SIZE = 64 * 1024
+
+RAW_TEXT_HARD_BLOCKED_EXTENSIONS = {
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".bmp",
+    ".tif",
+    ".tiff",
+    ".doc",
+    ".docx",
+    ".ppt",
+    ".pptx",
+    ".xls",
+    ".xlsx",
+}
 
 
 class _MarkItDownChatCompletions:
@@ -92,11 +114,52 @@ def _copy_node_to_tempfile(node: AgentFsNode) -> str:
         raise
 
 
-def _truncate_markdown(markdown: str, max_chars: int) -> str:
-    if len(markdown) <= max_chars:
-        return markdown
-    truncated = markdown[:max_chars]
+def _truncate_content(content: str, max_chars: int) -> str:
+    if len(content) <= max_chars:
+        return content
+    truncated = content[:max_chars]
     return f"{truncated}\n\n... (truncated to {max_chars} characters)"
+
+
+def _resolve_response_format(params: Dict[str, Any]) -> str:
+    raw_format = params.get("response_format", DEFAULT_RESPONSE_FORMAT)
+    if not isinstance(raw_format, str):
+        return ""
+    return raw_format.strip().lower()
+
+
+def _is_hard_blocked_for_raw_text(node: AgentFsNode) -> bool:
+    mime_type = (node.mime_type or "").strip().lower()
+    if mime_type:
+        if mime_type.startswith("image/"):
+            return True
+        if mime_type == "application/pdf":
+            return True
+        if mime_type.startswith("application/vnd."):
+            return True
+        if mime_type in {"application/msword"}:
+            return True
+
+    extension = os.path.splitext(node.name or "")[1].lower()
+    return extension in RAW_TEXT_HARD_BLOCKED_EXTENSIONS
+
+
+def _read_node_text(node: AgentFsNode, max_size: int | None) -> str:
+    chunks: list[bytes] = []
+    total_bytes = 0
+    with default_storage.open(node.content.name, "rb") as src:
+        for chunk in iter(lambda: src.read(BUFFER_SIZE), b""):
+            chunks.append(chunk)
+            total_bytes += len(chunk)
+            if max_size and total_bytes > max_size:
+                raise ValueError(
+                    f"File exceeds maximum allowed size while reading ({total_bytes} bytes > {max_size} bytes)."
+                )
+
+    data = b"".join(chunks)
+    if b"\x00" in data:
+        raise UnicodeDecodeError("utf-8", data, 0, 1, "binary-like content with null bytes")
+    return data.decode("utf-8")
 
 
 def get_read_file_tool() -> Dict[str, Any]:
@@ -105,9 +168,11 @@ def get_read_file_tool() -> Dict[str, Any]:
         "function": {
             "name": "read_file",
             "description": (
-                "Read a file from the agent filesystem and return the text content as markdown. "
+                "Read a file from the agent filesystem and return content as markdown or raw text. "
+                "Prefer response_format='markdown' for PDFs, images, scanned documents, and office files "
+                "(markdown mode handles OCR and richer extraction). "
                 "Not for SQLite snapshots; use sqlite_batch on __tool_results, __messages, or __files instead. "
-                "Uses OCR for images to return a detailed description. "
+                "Markdown mode uses OCR for images to return a detailed description. "
                 "Supports images, PDFs, text files, office documents, and more."
             ),
             "parameters": {
@@ -119,7 +184,19 @@ def get_read_file_tool() -> Dict[str, Any]:
                     },
                     "max_chars": {
                         "type": "integer",
-                        "description": f"Optional cap on the markdown length (default {DEFAULT_MAX_MARKDOWN_CHARS}).",
+                        "description": (
+                            "Optional cap on returned text length (default "
+                            f"{DEFAULT_MAX_MARKDOWN_CHARS})."
+                        ),
+                    },
+                    "response_format": {
+                        "type": "string",
+                        "enum": [RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT],
+                        "description": (
+                            "Optional output format. "
+                            "'markdown' (default) is recommended for PDFs/images/office docs; "
+                            "'raw_text' is for plain text files."
+                        ),
                     },
                 },
                 "required": ["path"],
@@ -161,6 +238,48 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
     if max_size and node.size_bytes and node.size_bytes > max_size:
         return {"status": "error", "message": f"File exceeds maximum allowed size ({node.size_bytes} bytes)."}
 
+    response_format = _resolve_response_format(params)
+    if response_format not in ALLOWED_RESPONSE_FORMATS:
+        allowed = ", ".join(sorted(ALLOWED_RESPONSE_FORMATS))
+        return {
+            "status": "error",
+            "message": f"Invalid response_format '{response_format}'. Allowed values: {allowed}.",
+        }
+
+    max_chars = params.get("max_chars", DEFAULT_MAX_MARKDOWN_CHARS)
+    try:
+        max_chars = int(max_chars)
+    except (TypeError, ValueError):
+        max_chars = DEFAULT_MAX_MARKDOWN_CHARS
+
+    if response_format == RESPONSE_FORMAT_RAW_TEXT:
+        if _is_hard_blocked_for_raw_text(node):
+            return {
+                "status": "error",
+                "message": (
+                    "raw_text mode is intended for plain text files. "
+                    "Use response_format='markdown' for PDFs, images, and office documents."
+                ),
+            }
+        try:
+            text = _read_node_text(node, max_size=max_size)
+        except UnicodeDecodeError:
+            return {
+                "status": "error",
+                "message": (
+                    "File is not valid UTF-8 text. Use response_format='markdown' for rich/binary formats."
+                ),
+            }
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+        except OSError as exc:
+            logger.error("Failed to read file node %s as raw text: %s", node.id, exc)
+            return {"status": "error", "message": "Failed to access the file content."}
+
+        if max_chars > 0:
+            text = _truncate_content(text, max_chars)
+        return {"status": "ok", "format": RESPONSE_FORMAT_RAW_TEXT, "text": text}
+
     try:
         temp_path = _copy_node_to_tempfile(node)
     except Exception as exc:
@@ -186,12 +305,7 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
         except Exception:
             logger.warning("Failed to clean up temp file %s", temp_path)
 
-    max_chars = params.get("max_chars", DEFAULT_MAX_MARKDOWN_CHARS)
-    try:
-        max_chars = int(max_chars)
-    except (TypeError, ValueError):
-        max_chars = DEFAULT_MAX_MARKDOWN_CHARS
     if max_chars > 0:
-        markdown = _truncate_markdown(markdown, max_chars)
+        markdown = _truncate_content(markdown, max_chars)
 
-    return {"status": "ok", "markdown": markdown}
+    return {"status": "ok", "format": RESPONSE_FORMAT_MARKDOWN, "markdown": markdown}
