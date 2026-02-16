@@ -22,7 +22,7 @@
 <p align="center">
   <a href="https://gobii.ai">Website</a>
   ·
-  <a href="https://gobii.ai/docs/guides/quickstart/">Docs</a>
+  <a href="https://docs.gobii.ai/">Docs</a>
   ·
   <a href="https://discord.gg/yyDB8GwxtE">Discord</a>
   ·
@@ -281,10 +281,16 @@ uv run celery -A config worker -l info --pool=threads --concurrency=4
 
 ## Docs and Deep Dives
 
-- Product/API guides: [gobii.ai/docs/guides/quickstart](https://gobii.ai/docs/guides/quickstart/)
-- Synchronous execution: [gobii.ai/docs/guides/synchronous-tasks](https://gobii.ai/docs/guides/synchronous-tasks/)
-- Structured output: [gobii.ai/docs/guides/structured-output](https://gobii.ai/docs/guides/structured-output/)
-- Secrets guide: [gobii.ai/docs/guides/secrets](https://gobii.ai/docs/guides/secrets/)
+- Getting started: [Introduction](https://docs.gobii.ai/getting-started/introduction)
+- Developer foundations: [Developer Basics](https://docs.gobii.ai/developers/developer-basics)
+- Agent API: [Agents](https://docs.gobii.ai/developers/developer-agents)
+- Browser task execution: [Tasks](https://docs.gobii.ai/developers/developer-tasks)
+- Structured outputs: [Structured Data](https://docs.gobii.ai/developers/structured-data)
+- Event ingress and automation: [Webhooks](https://docs.gobii.ai/developers/webhooks)
+- REST reference: [API Reference](https://docs.gobii.ai/api-reference)
+- Self-hosting: [Self-Hosted Deployment Overview](https://docs.gobii.ai/self-hosted/overview)
+- Concepts: [Agents](https://docs.gobii.ai/core-concepts/agents), [Dedicated IPs](https://docs.gobii.ai/core-concepts/dedicated-ips)
+- Advanced integrations: [MCP Servers](https://docs.gobii.ai/advanced-usage/mcp-servers)
 - Local sandbox design docs: [docs/design](docs/design)
 
 ## Contributing
