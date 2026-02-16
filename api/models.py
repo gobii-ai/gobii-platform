@@ -9721,6 +9721,7 @@ class AgentComputeSession(models.Model):
     )
     last_activity_at = models.DateTimeField(null=True, blank=True)
     lease_expires_at = models.DateTimeField(null=True, blank=True)
+    last_filespace_pull_at = models.DateTimeField(null=True, blank=True)
     last_filespace_sync_at = models.DateTimeField(null=True, blank=True)
     proxy_server = models.ForeignKey(
         "ProxyServer",

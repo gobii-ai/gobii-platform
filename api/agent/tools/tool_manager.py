@@ -156,7 +156,6 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_CSV_TOOL_NAME: {
         "definition": get_create_csv_tool,
         "executor": execute_create_csv,
-        "sandboxed": True,
     },
     CREATE_PDF_TOOL_NAME: {
         "definition": get_create_pdf_tool,

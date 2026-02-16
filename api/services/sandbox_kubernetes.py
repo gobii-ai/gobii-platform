@@ -9,8 +9,9 @@ import requests
 from django.conf import settings
 
 from api.models import AgentComputeSession
-from api.sandbox_utils import normalize_timeout as _normalize_timeout
+from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate
+from api.services.system_settings import get_sandbox_compute_pod_image, get_sandbox_egress_proxy_pod_image
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +76,12 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         timeout = int(getattr(settings, "SANDBOX_COMPUTE_K8S_TIMEOUT_SECONDS", 30))
         self._client = KubernetesApiClient(base_url=base_url, token=token, ca_path=ca_path, timeout=timeout)
         self._namespace = _k8s_namespace()
-        self._pod_image = getattr(settings, "SANDBOX_COMPUTE_POD_IMAGE", "")
+        self._pod_image = get_sandbox_compute_pod_image()
         self._pod_service_account = getattr(settings, "SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT", "gobii-sa")
         self._pod_runtime_class = getattr(settings, "SANDBOX_COMPUTE_POD_RUNTIME_CLASS", "gvisor")
         self._pod_configmap = getattr(settings, "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME", "gobii-sandbox-common-env")
         self._pod_secret = getattr(settings, "SANDBOX_COMPUTE_POD_SECRET_NAME", "gobii-sandbox-env")
-        self._egress_proxy_image = getattr(settings, "SANDBOX_EGRESS_PROXY_POD_IMAGE", "")
+        self._egress_proxy_image = get_sandbox_egress_proxy_pod_image()
         self._egress_proxy_port = int(getattr(settings, "SANDBOX_EGRESS_PROXY_POD_PORT", 3128))
         self._egress_proxy_service_port = int(
             getattr(settings, "SANDBOX_EGRESS_PROXY_SERVICE_PORT", self._egress_proxy_port)
@@ -515,19 +516,46 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             logger.warning("Failed to delete egress proxy service %s: %s", service_name, exc)
 
     def _wait_for_pod_ready(self, pod_name: str) -> bool:
+        started_at = time.monotonic()
         deadline = time.time() + self._pod_ready_timeout
+        attempts = 0
+        last_phase = None
         while time.time() < deadline:
+            attempts += 1
             pod = self._get_pod(pod_name)
             if not pod:
                 time.sleep(2)
                 continue
             status = pod.get("status") or {}
             phase = status.get("phase")
+            if phase != last_phase:
+                logger.info(
+                    "Sandbox pod readiness progress pod=%s phase=%s attempts=%s elapsed_ms=%s",
+                    pod_name,
+                    phase,
+                    attempts,
+                    _elapsed_ms(started_at),
+                )
+                last_phase = phase
             if phase == "Running":
                 for condition in status.get("conditions", []):
                     if condition.get("type") == "Ready" and condition.get("status") == "True":
+                        logger.info(
+                            "Sandbox pod ready pod=%s attempts=%s elapsed_ms=%s",
+                            pod_name,
+                            attempts,
+                            _elapsed_ms(started_at),
+                        )
                         return True
             time.sleep(2)
+        logger.warning(
+            "Sandbox pod readiness timeout pod=%s attempts=%s elapsed_ms=%s timeout_seconds=%s last_phase=%s",
+            pod_name,
+            attempts,
+            _elapsed_ms(started_at),
+            self._pod_ready_timeout,
+            last_phase,
+        )
         return False
 
     def _wait_for_snapshot_ready(self, snapshot_name: str) -> bool:
@@ -723,7 +751,7 @@ def _build_pod_manifest(
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
         "image": image,
-        "imagePullPolicy": "Always",
+        "imagePullPolicy": "IfNotPresent",
         "ports": [{"containerPort": 8080}],
         "envFrom": [
             {"secretRef": {"name": secret_name}},
@@ -794,7 +822,7 @@ def _build_discovery_pod_manifest(
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
         "image": image,
-        "imagePullPolicy": "Always",
+        "imagePullPolicy": "IfNotPresent",
         "ports": [{"containerPort": 8080}],
         "envFrom": [
             {"secretRef": {"name": secret_name}},
@@ -890,7 +918,7 @@ def _build_egress_proxy_pod_manifest(
             {
                 "name": "egress-proxy",
                 "image": image,
-                "imagePullPolicy": "Always",
+                "imagePullPolicy": "IfNotPresent",
                 "ports": [{"containerPort": listen_port}],
                 "env": env,
                 "securityContext": {

@@ -31,17 +31,20 @@ const buttonStyles = {
 const loginToggleKeys = new Set(['ACCOUNT_ALLOW_PASSWORD_LOGIN', 'ACCOUNT_ALLOW_SOCIAL_LOGIN'])
 const loginToggleError = 'At least one login method must remain enabled.'
 
-const formatValue = (setting: SystemSetting, value: number | boolean | null) => {
+const formatValue = (setting: SystemSetting, value: number | boolean | string | null) => {
   if (value === null || value === undefined) {
     return '—'
   }
   if (setting.value_type === 'bool') {
     return value ? 'Enabled' : 'Disabled'
   }
+  if (setting.value_type === 'string') {
+    return String(value)
+  }
   if (setting.disable_value !== null && setting.disable_value !== undefined && value === setting.disable_value) {
     return `Disabled (${value})`
   }
-  if (setting.unit) {
+  if (setting.unit && typeof value === 'number') {
     return `${value} ${setting.unit}`
   }
   return String(value)
@@ -379,6 +382,7 @@ export function SystemSettingsScreen() {
                           ? loginToggleState.message
                           : null
                       const isBool = setting.value_type === 'bool'
+                      const isString = setting.value_type === 'string'
                       const boolValue =
                         draftValue.trim() !== '' ? draftValue === 'true' : Boolean(setting.effective_value)
                       const minValue = setting.min_value ?? undefined
@@ -444,6 +448,24 @@ export function SystemSettingsScreen() {
                                     )}
                                   </AriaSwitch>
                                 </div>
+                              ) : isString ? (
+                                <input
+                                  type="text"
+                                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                                  placeholder={String(placeholderValue)}
+                                  value={draftValue}
+                                  onChange={(event) => {
+                                    const value = event.target.value
+                                    setDirtyKey(setting.key, true)
+                                    setDrafts((prev) => ({
+                                      ...prev,
+                                      [setting.key]: value,
+                                    }))
+                                    if (status?.error) {
+                                      updateRowError(setting.key, null)
+                                    }
+                                  }}
+                                />
                               ) : (
                                 <input
                                   type="number"

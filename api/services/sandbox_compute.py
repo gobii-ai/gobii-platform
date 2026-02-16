@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Dict, Optional
@@ -16,9 +17,10 @@ from django.utils import timezone
 
 from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
-from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
-from api.sandbox_utils import normalize_timeout as _normalize_timeout
+from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
+from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
+from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from waffle import get_waffle_flag_model
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,7 @@ SANDBOX_COMPUTE_WAFFLE_FLAG = "sandbox_compute"
 
 
 def sandbox_compute_enabled() -> bool:
-    return bool(getattr(settings, "SANDBOX_COMPUTE_ENABLED", False))
+    return get_sandbox_compute_enabled()
 
 
 def sandbox_compute_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -98,7 +100,7 @@ def _sync_on_run_command() -> bool:
 
 
 def _proxy_required() -> bool:
-    return bool(getattr(settings, "SANDBOX_COMPUTE_REQUIRE_PROXY", False))
+    return get_sandbox_compute_require_proxy()
 
 
 def _no_proxy_value() -> str:
@@ -137,6 +139,33 @@ def _sanitize_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
             if key in allowed or str(key).startswith("SANDBOX_"):
                 env[str(key)] = str(value)
     return env
+
+
+def _stderr_summary(stderr: str) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[-1]
+
+
+def _build_nonzero_exit_error_payload(
+    *,
+    process_name: str,
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+) -> Dict[str, Any]:
+    summary = _stderr_summary(stderr)
+    payload: Dict[str, Any] = {
+        "status": "error",
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "message": summary or f"{process_name} exited with status {exit_code}.",
+    }
+    if stderr.strip():
+        payload["detail"] = stderr
+    return payload
 
 
 class SandboxComputeUnavailable(RuntimeError):
@@ -260,15 +289,19 @@ class LocalSandboxBackend(SandboxComputeBackend):
             return {"status": "error", "message": f"Command failed to start: {exc}"}
 
         stdout, stderr = _truncate_streams(result.stdout or "", result.stderr or "", _stdio_max_bytes())
-        payload = {
-            "status": "ok" if result.returncode == 0 else "error",
+        if result.returncode != 0:
+            return _build_nonzero_exit_error_payload(
+                process_name="Command",
+                exit_code=result.returncode,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        return {
+            "status": "ok",
             "exit_code": result.returncode,
             "stdout": stdout,
             "stderr": stderr,
         }
-        if result.returncode != 0:
-            payload["message"] = "Command exited with non-zero status."
-        return payload
 
     def mcp_request(
         self,
@@ -587,15 +620,19 @@ def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "error", "message": f"Python execution failed to start: {exc}"}
 
     stdout, stderr = _truncate_streams(result.stdout or "", result.stderr or "", _stdio_max_bytes())
-    payload = {
-        "status": "ok" if result.returncode == 0 else "error",
+    if result.returncode != 0:
+        return _build_nonzero_exit_error_payload(
+            process_name="Python",
+            exit_code=result.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    return {
+        "status": "ok",
         "exit_code": result.returncode,
         "stdout": stdout,
         "stderr": stderr,
     }
-    if result.returncode != 0:
-        payload["message"] = "Python exited with non-zero status."
-    return payload
 
 
 def _local_tool_executors() -> Dict[str, Any]:
@@ -759,26 +796,101 @@ class SandboxComputeService:
         )
         _select_proxy_for_session(agent, session)
         started = session.state != AgentComputeSession.State.RUNNING
+        bootstrap_started_at = time.monotonic()
         if started:
+            deploy_started_at = time.monotonic()
             update = self._backend.deploy_or_resume(agent, session)
+            deploy_duration_ms = _elapsed_ms(deploy_started_at)
             if not update.state:
                 update.state = AgentComputeSession.State.RUNNING
             self._apply_session_update(session, update)
-            sync_result = self._sync_workspace_pull(agent, session)
-            if sync_result and sync_result.get("status") != "ok":
-                logger.warning("Sandbox pull sync failed agent=%s result=%s", agent.id, sync_result)
+            logger.info(
+                (
+                    "Sandbox bootstrap deploy_or_resume agent=%s source=%s duration_ms=%s "
+                    "state=%s pod=%s namespace=%s"
+                ),
+                agent.id,
+                source,
+                deploy_duration_ms,
+                update.state,
+                update.pod_name or session.pod_name,
+                update.namespace or session.namespace,
+            )
+        pull_started_at = time.monotonic()
+        sync_result = self._sync_workspace_pull(agent, session)
+        pull_duration_ms = _elapsed_ms(pull_started_at)
+        pull_status = sync_result.get("status") if isinstance(sync_result, dict) else "skipped"
+        logger.info(
+            "Sandbox %s pull agent=%s source=%s duration_ms=%s status=%s",
+            "bootstrap" if started else "refresh",
+            agent.id,
+            source,
+            pull_duration_ms,
+            pull_status,
+        )
+        if sync_result and sync_result.get("status") != "ok":
+            logger.warning("Sandbox pull sync failed agent=%s result=%s", agent.id, sync_result)
         self._touch_session(session, source=source)
+        if started:
+            logger.info(
+                "Sandbox bootstrap complete agent=%s source=%s total_duration_ms=%s",
+                agent.id,
+                source,
+                _elapsed_ms(bootstrap_started_at),
+            )
         return session
 
     def _sync_workspace_pull(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
         if isinstance(self._backend, LocalSandboxBackend):
             return None
-        manifest = build_filespace_pull_manifest(agent)
+        pull_started_at = time.monotonic()
+        since = session.last_filespace_pull_at
+        manifest = build_filespace_pull_manifest(agent, since=since)
+        manifest_duration_ms = _elapsed_ms(pull_started_at)
         if manifest.get("status") != "ok":
+            logger.warning(
+                "Sandbox pull manifest failed agent=%s duration_ms=%s status=%s result=%s",
+                agent.id,
+                manifest_duration_ms,
+                manifest.get("status"),
+                manifest,
+            )
             return manifest
         files = manifest.get("files") or []
+        logger.info(
+            "Sandbox pull manifest built agent=%s files=%s duration_ms=%s since_set=%s",
+            agent.id,
+            len(files),
+            manifest_duration_ms,
+            since is not None,
+        )
         payload = {"files": files}
+        backend_started_at = time.monotonic()
         response = self._backend.sync_filespace(agent, session, direction="pull", payload=payload)
+        backend_duration_ms = _elapsed_ms(backend_started_at)
+        total_duration_ms = _elapsed_ms(pull_started_at)
+        cursor_value = _parse_sync_timestamp(manifest.get("sync_cursor"))
+        cursor_persisted = False
+        if response.get("status") == "ok" and cursor_value:
+            session.last_filespace_pull_at = cursor_value
+            session.save(update_fields=["last_filespace_pull_at", "updated_at"])
+            cursor_persisted = True
+        logger.info(
+            (
+                "Sandbox pull sync completed agent=%s files=%s status=%s "
+                "backend_duration_ms=%s total_duration_ms=%s applied=%s skipped=%s conflicts=%s "
+                "cursor_set=%s"
+            ),
+            agent.id,
+            len(files),
+            response.get("status"),
+            backend_duration_ms,
+            total_duration_ms,
+            response.get("applied"),
+            response.get("skipped"),
+            response.get("conflicts"),
+            cursor_persisted,
+        )
         return response
 
     def _sync_workspace_push(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
