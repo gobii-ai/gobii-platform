@@ -1,10 +1,10 @@
 from django.conf import settings
 
-from .tasks import enqueue_marketing_event
 from .context import extract_click_context
+from .tasks import enqueue_marketing_event
 
 
-def capi(user, event_name, properties=None, request=None, context=None):
+def capi(user, event_name, properties=None, request=None, context=None, provider_targets=None):
     """
     Public entrypoint. Call from views/services to emit a marketing event.
     """
@@ -20,4 +20,6 @@ def capi(user, event_name, properties=None, request=None, context=None):
         },
         "context": (extract_click_context(request) or {}) | (context or {}),
     }
+    if provider_targets:
+        payload["provider_targets"] = provider_targets
     enqueue_marketing_event.delay(payload)
