@@ -11,11 +11,29 @@ class GoogleAnalyticsMP:
 
     @staticmethod
     def _map_event_name(name: str) -> str | None:
-        # Trial start is the highest-priority billing lifecycle event for GA.
+        # Map internal marketing events to GA4 recommended/custom events.
         mapping = {
+            "CompleteRegistration": "sign_up",
+            "InitiateCheckout": "begin_checkout",
+            "Subscribe": "purchase",
+            "CancelSubscription": "cancel_subscription",
             "StartTrial": "start_trial",
         }
         return mapping.get(name)
+
+    @staticmethod
+    def _extract_transaction_id(properties: dict | None) -> str | None:
+        if not properties:
+            return None
+
+        candidate = properties.get("stripe.invoice_id")
+        if candidate is None:
+            return None
+
+        transaction_id = str(candidate).strip()
+        if not transaction_id:
+            return None
+        return transaction_id[:100]
 
     @staticmethod
     def _sanitize_params(properties: dict | None) -> dict:
@@ -81,7 +99,13 @@ class GoogleAnalyticsMP:
         if not event_name:
             return
 
-        params = self._sanitize_params(evt.get("properties") or {})
+        properties = evt.get("properties") or {}
+        params = self._sanitize_params(properties)
+        if event_name == "purchase":
+            transaction_id = self._extract_transaction_id(properties)
+            if not transaction_id:
+                return
+            params["transaction_id"] = transaction_id
         params["event_id"] = str(evt.get("event_id") or "")
         params.setdefault("engagement_time_msec", 1)
 

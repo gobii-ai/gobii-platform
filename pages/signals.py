@@ -1501,6 +1501,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                 marketing_properties = {
                     "plan": plan_value,
                     "subscription_id": subscription_id,
+                    "stripe.invoice_id": payload.get("id"),
                 }
 
                 metadata = {}

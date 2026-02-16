@@ -57,10 +57,140 @@ class GoogleAnalyticsMPTests(SimpleTestCase):
         self.assertNotIn("invalid.param", body["events"][0]["params"])
         self.assertNotIn("empty_value", body["events"][0]["params"])
 
-    def test_send_ignores_unmapped_event(self):
+    def test_send_complete_registration_maps_to_sign_up(self):
         provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
         evt = {
             "event_name": "CompleteRegistration",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-reg-1",
+            "properties": {
+                "value": 10.0,
+                "currency": "USD",
+            },
+            "ids": {"external_id": "hashed-user-id"},
+            "network": {},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.google_analytics.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        body = mock_post.call_args.kwargs["json"]
+        self.assertEqual(body["events"][0]["name"], "sign_up")
+        self.assertEqual(body["events"][0]["params"]["event_id"], "evt-reg-1")
+
+    def test_send_initiate_checkout_maps_to_begin_checkout(self):
+        provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
+        evt = {
+            "event_name": "InitiateCheckout",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-checkout-1",
+            "properties": {
+                "plan": "startup",
+                "value": 50.0,
+                "currency": "USD",
+            },
+            "ids": {"external_id": "hashed-user-id"},
+            "network": {},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.google_analytics.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        body = mock_post.call_args.kwargs["json"]
+        self.assertEqual(body["events"][0]["name"], "begin_checkout")
+        self.assertEqual(body["events"][0]["params"]["plan"], "startup")
+
+    def test_send_subscribe_maps_to_purchase_with_transaction_id(self):
+        provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
+        evt = {
+            "event_name": "Subscribe",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-sub-1",
+            "properties": {
+                "plan": "startup",
+                "subscription_id": "sub_123",
+                "stripe.invoice_id": "in_123",
+                "value": 50.0,
+                "currency": "USD",
+            },
+            "ids": {"external_id": "hashed-user-id"},
+            "network": {"ga_client_id": "GA1.2.111.222"},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.google_analytics.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        body = mock_post.call_args.kwargs["json"]
+        params = body["events"][0]["params"]
+        self.assertEqual(body["events"][0]["name"], "purchase")
+        self.assertEqual(params["transaction_id"], "in_123")
+        self.assertEqual(params["value"], 50.0)
+        self.assertEqual(params["currency"], "USD")
+        self.assertNotIn("stripe.invoice_id", params)
+
+    def test_send_subscribe_skips_when_invoice_id_missing(self):
+        provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
+        evt = {
+            "event_name": "Subscribe",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-sub-2",
+            "properties": {
+                "plan": "startup",
+                "subscription_id": "sub_123",
+                "value": 50.0,
+                "currency": "USD",
+            },
+            "ids": {"external_id": "hashed-user-id"},
+            "network": {"ga_client_id": "GA1.2.111.222"},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.google_analytics.post_json") as mock_post:
+            provider.send(evt)
+
+        mock_post.assert_not_called()
+
+    def test_send_cancel_subscription_maps_to_custom_event(self):
+        provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
+        evt = {
+            "event_name": "CancelSubscription",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-cancel-1",
+            "properties": {
+                "plan": "startup",
+                "status": "canceled",
+            },
+            "ids": {"external_id": "hashed-user-id"},
+            "network": {},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.google_analytics.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        body = mock_post.call_args.kwargs["json"]
+        self.assertEqual(body["events"][0]["name"], "cancel_subscription")
+
+    def test_send_ignores_unmapped_event(self):
+        provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
+        evt = {
+            "event_name": "UnmappedEvent",
             "event_time": 1_700_000_000,
             "event_id": "evt-123",
             "properties": {},
