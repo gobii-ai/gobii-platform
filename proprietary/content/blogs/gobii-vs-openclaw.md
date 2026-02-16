@@ -26,6 +26,20 @@ If you look closely at the technical shape of both systems, though, you can see 
 
 The interesting part is not "who has feature X" in isolation. The interesting part is the implementation style and operational assumptions underneath each feature.
 
+## The Builders Behind the Architectures
+
+OpenClaw is led by [Peter Steinberger](https://github.com/steipete), a long-time OSS builder and founder of PSPDFKit. In his own profile he says he [came back from retirement](https://github.com/steipete#about) to build OpenClaw in 2025, and his writing about that return to building explains a lot about the project's velocity and product feel: highly operator-centric, fast-moving, and local-first.
+
+Gobii came from a different lineage. My background includes staff-level engineering roles at Hortonworks, Cloudera, and FOSSA, plus nearly a decade as an NSA contractor. From 2021 to early 2025, I was in a semi-retired builder phase that included launching Alwrite, an AI content repurposing platform for content creators, and Fictie, an AI interactive audiobook platform.
+
+Our team now also includes two other former defense contractors: Will and Matt.
+
+RA.Aid came out of that Fictie period. While building Fictie, I had already seen how powerful coding agents could be. I knew Aider well, but it was not agentic enough for what I wanted, so I built RA.Aid and released it as open source because my primary company focus at the time was still Fictie. RA.Aid went on to be discovered and sponsored by Open Core Ventures as the first product in its Catalyst program; OpenCore's write-up reports [9x growth in RA.Aid's inaugural Catalyst run](https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth).
+
+In 2024, I also launched a personal builder brand, A.I. Christianson (my actual initials), and rapidly grew it to 60K+ combined followers across TikTok, Instagram, X, YouTube, and other channels.
+
+The deep systems lineage is also visible in Apache history: I am an [emeritus NiFi committer (`aichrist`)](https://nifi.apache.org/community/), and NiFi itself traces to NSA's release of [NiagaraFiles into open source](https://www.nsa.gov/Research/Technology-Transfer-Program/Success-Stories/Article/3306190/nsa-releases-niagarafiles-to-open-source-software/). When you zoom out, Gobii's cloud-first, policy-heavy, always-on runtime posture makes sense in that context.
+
 ## How Similar Are They, Really?
 
 High level: pretty similar in concept.
@@ -47,17 +61,11 @@ The real differences show up in runtime architecture and security defaults.
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Commit anchors from local git history.</figcaption>
 </figure>
 
-A few concrete points from commit history:
+Gobii's private repo starts `2025-05-01` (`3f3b9e89`). Persistent-agent models land on `2025-06-20` (`a36f7e1e`, `77393150`), then cron/event runtime commits land over the next nine days (`b34eb616`, `56b19631`, `0148663c`, `6d48d601`).
 
-- Gobii private repo starts on `2025-05-01` (`3f3b9e89`).
-- Private Gobii lands persistent-agent models on `2025-06-20` (`a36f7e1e`, then `77393150`).
-- Cron trigger and event loop infrastructure is in by `2025-06-26` to `2025-06-29` (`b34eb616`, `56b19631`, `0148663c`, `6d48d601`).
-- Public `gobii-platform` opens on `2025-08-30` (`f596424e`), with OSS announcement on `2025-10-16`.
-- OpenClaw repo starts on `2025-11-24` (`f6dd362d3`), with webhook and heartbeat unification work landing through late December (`1ed5ca3fd`, `0d8e0ddc4`).
+That June sequence is the original always-on prototype window, built in roughly two weeks, then publicly visible in market narrative by early June launch communications around Gobii's first release phase in 2025 ([OpenCore timeline context](https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth)).
 
-That June sequence is the original "always-on" build window, completed in roughly two weeks.
-
-That puts Gobii's persistent always-on core about five months earlier than OpenClaw's repo start (roughly `156` days between `a36f7e1e` and `f6dd362d3`).
+Public `gobii-platform` opens on `2025-08-30` (`f596424e`), then OpenClaw's repo starts on `2025-11-24` (`f6dd362d3`). In practical terms, Gobii's persistent always-on core shows up around five months earlier in git history (about `156` days between `a36f7e1e` and `f6dd362d3`).
 
 ## Always-On Model: Heartbeat vs Schedule + Event Queue
 
@@ -270,6 +278,16 @@ You can see it in the private history:
 
 That lineage is why the concept continuity is so obvious when you compare systems at code level.
 
+## Creator Timelines and Product Shape
+
+The creator timelines map cleanly to how each project feels in use.
+
+Peter's OpenClaw arc is a return-to-building story: deep product craftsmanship, extremely broad channel surface, and fast local-first operator UX loops. You can see that directly in the documentation density and release tempo in the OpenClaw ecosystem.
+
+My Gobii arc is a systems-operator story: from Alwrite and Fictie into RA.Aid, then a hard turn into always-on autonomous agents and browser-use workflows in 2025. Since then the product has shipped and iterated at a very fast pace. The architecture reflects that background: durable schedules, event-queue continuity, strict sandbox boundaries, and Kubernetes-native runtime controls by default.
+
+Both are high-output builders. The difference is where depth is concentrated.
+
 ## Where OpenClaw Is Excellent
 
 OpenClaw is strong on:
@@ -300,10 +318,17 @@ The overlap in concepts is real. The timeline evidence is also real. Gobii imple
 
 For people deciding where to build serious always-on agent workloads, the biggest differentiator is less "feature checklist" and more runtime posture: security boundaries, cloud execution assumptions, lifecycle consistency, and operational depth.
 
-### Evidence anchors used
+### Source Notes
 
-All commit timestamps were pulled from local git history on `2026-02-16`.
+Repo timestamps in this post were pulled from local git history on `2026-02-16` across:
 
-- Gobii private: `3f3b9e89`, `8915202b`, `a36f7e1e`, `77393150`, `b34eb616`, `56b19631`, `0148663c`, `6d48d601`, `36dec91f`, `e53c8778`, `ce60f4bd`, `352a1fb6`, `44a4ccb6`, `db5a9d36`, `61c3f3fd`
-- Gobii public: `f596424e`, `0130b607`, `39bfb8d4`, `5fc6211e`
-- OpenClaw: `f6dd362d3`, `3998933b3`, `1ed5ca3fd`, `0d8e0ddc4`, `bf11a42c3`, `b8f66c260`, `fece42ce0`, `d8a417f7f`, `d55750189`
+- `/Users/andrew/workspace/gobii` (private lineage)
+- `/Users/andrew/workspace/gobii-platform` (public MIT lineage)
+- `/Users/andrew/workspace/openclaw`
+
+External context links:
+
+- [Peter Steinberger GitHub profile](https://github.com/steipete)
+- [OpenCore Ventures on RA.Aid and Fictie](https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth)
+- [Apache NiFi community roster](https://nifi.apache.org/community/)
+- [NSA NiagaraFiles to open source story](https://www.nsa.gov/Research/Technology-Transfer-Program/Success-Stories/Article/3306190/nsa-releases-niagarafiles-to-open-source-software/)
