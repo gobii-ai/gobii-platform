@@ -31,6 +31,7 @@
 
 Gobii is the open-source platform for running durable autonomous agents in production.
 Each agent can run continuously, wake from schedules and events, use real browsers, call external systems, and coordinate with other agents.
+Each agent can also be contacted like an AI coworker: assign it an identity, email or text it, and it keeps working 24/7.
 
 If you are optimizing for local-first personal assistant UX on a single device, there are excellent projects for that.
 Gobii is optimized for a different problem: reliable, secure, always-on agent operations for teams and businesses.
@@ -55,6 +56,7 @@ Gobii is optimized for a different problem: reliable, secure, always-on agent op
 
 - [Why Teams Choose Gobii](#why-teams-choose-gobii)
 - [Gobii vs OpenClaw (Production Lens)](#gobii-vs-openclaw-production-lens)
+- [AI Coworker Interaction Model](#ai-coworker-interaction-model)
 - [How Gobii Works](#how-gobii-works)
 - [Always-On Runtime: Schedule + Event Triggers](#always-on-runtime-schedule--event-triggers)
 - [Production Browser Runtime](#production-browser-runtime)
@@ -74,7 +76,7 @@ Gobii is optimized for a different problem: reliable, secure, always-on agent op
 ## Why Teams Choose Gobii
 
 - **Always-on by default**: per-agent schedule state plus durable event processing.
-- **Identity-bearing agents**: endpoint-addressable agents across email, SMS, and web channels.
+- **Identity-bearing agents**: each agent can have its own email address and SMS phone number, so teams can contact it directly.
 - **Native agent-to-agent messaging**: linked agents can coordinate directly.
 - **Webhook-native integration model**: inbound webhooks wake agents; outbound webhooks are first-class agent actions.
 - **Based on browser-use**: keeps `/api/v1/tasks/browser-use/` compatibility while adding platform-level runtime controls.
@@ -94,6 +96,7 @@ Gobii is optimized for a different target: cloud-native, secure, always-on agent
 | Webhook model | Inbound triggers plus outbound agent webhook actions in one lifecycle | Strong gateway ingress hooks and wake/agent webhook routes |
 | Channel strategy | Fewer core channels with deeper lifecycle integration | Wider channel surface with intentionally thinner per-channel depth |
 | Agent identity | Endpoint-addressable agent identities (email/SMS/web) | Workspace/session identity model |
+| Human interaction model | Contact each agent directly through its own endpoint like an AI coworker | Primarily session/workspace-oriented assistant interactions |
 | Agent coordination | Native agent-to-agent messaging | Orchestrator/subagent flows |
 | Memory substrate | SQLite-native operational state | Markdown-first memory with optional vector acceleration |
 | Browser runtime | Headed execution, persistent profiles, proxy-aware routing, distributed-worker friendly | Headed execution, persistent local profiles, strong local operator UX |
@@ -101,6 +104,28 @@ Gobii is optimized for a different target: cloud-native, secure, always-on agent
 | Best fit | Production team automation with governed runtime controls | Personal/local assistant workflows and channel breadth |
 
 If your priority is secure, governed, always-on production execution in cloud or hybrid environments, Gobii is purpose-built for that.
+
+## AI Coworker Interaction Model
+
+Gobii agents are designed to behave like AI coworkers, not disposable one-off tasks.
+You can email or text them directly, they wake from those events, execute work, and reply with context-aware follow-through.
+
+```mermaid
+sequenceDiagram
+    participant U as You / Team
+    participant E as Agent Email/SMS Endpoint
+    participant Q as Per-Agent Event Queue
+    participant A as Always-On Gobii Agent
+    participant T as Browser/Tools/APIs
+
+    U->>E: Send message to the agent
+    E->>Q: Inbound event is queued
+    Q->>A: Wake agent with full context
+    A->>T: Execute tasks and gather outputs
+    T-->>A: Results, files, and state updates
+    A-->>U: Reply with outcome and next steps
+    A->>Q: Stay active for follow-up events
+```
 
 ## How Gobii Works
 
@@ -164,11 +189,20 @@ Gobii is based on browser-use and adds production runtime behavior around it.
 ## Identity, Channels, and Agent-to-Agent
 
 Gobii treats agents as operational entities, not just prompt sessions.
+When channels are enabled, each agent can be assigned identity endpoints and contacted directly like an AI coworker.
 
 - Agents can own communication endpoints (email, SMS, web).
 - Managed deployments support first-party agent identities like `first.last@my.gobii.ai`.
 - Inbound email/SMS/web events can wake agents and route into the same runtime lifecycle.
 - Agents can directly message linked peer agents for native coordination.
+
+```mermaid
+flowchart LR
+    U[Team member] --> E[Agent email or SMS endpoint]
+    E --> A[Assigned always-on Gobii agent]
+    A <--> P[Peer Gobii agent]
+    A --> R[Reply back to human channel]
+```
 
 ## Security Posture
 
@@ -274,6 +308,10 @@ Gobii can power individual workflows, but the architecture is tuned for team and
 ### Does Gobii support headed browsers?
 
 Yes. Gobii supports headed browser workflows and persistent profile handling for realistic web task execution.
+
+### Can each agent be contacted directly like a coworker?
+
+Yes. With channels configured, each agent can be assigned its own endpoint identity (email and/or SMS), so your team can interact with it directly and asynchronously.
 
 ### What does “always-on” mean here?
 
