@@ -5,7 +5,7 @@ from django.test import TestCase, tag
 from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
-from api.models import PersistentAgentTemplate, PublicProfile
+from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PublicProfile
 from api.public_profiles import validate_public_handle
 from pages.library_views import LIBRARY_CACHE_KEY
 
@@ -112,6 +112,12 @@ class LibraryViewsTests(TestCase):
         self.assertContains(response, 'data-app="library"')
 
     @tag("batch_public_templates")
+    def test_libary_path_redirects_to_library(self):
+        response = self.client.get("/libary/")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("pages:library"))
+
+    @tag("batch_public_templates")
     def test_library_api_returns_public_active_templates(self):
         user = get_user_model().objects.create_user(username="library-owner", email="library-owner@example.com", password="pw")
         profile = PublicProfile.objects.create(user=user, handle="library-owner")
@@ -191,6 +197,8 @@ class LibraryViewsTests(TestCase):
             first_agent["templateUrl"],
             reverse("pages:public_template_detail", kwargs={"handle": "library-owner", "template_slug": "ops-automator"}),
         )
+        self.assertEqual(first_agent["likeCount"], 0)
+        self.assertFalse(first_agent["isLiked"])
 
     @tag("batch_public_templates")
     def test_library_api_supports_pagination_and_category_filter(self):
@@ -243,3 +251,127 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(len(filtered_payload["agents"]), 1)
         self.assertTrue(filtered_payload["hasMore"])
         self.assertEqual(filtered_payload["agents"][0]["category"], "Research")
+
+    @tag("batch_public_templates")
+    def test_library_api_orders_by_like_count_for_most_popular_default(self):
+        owner = get_user_model().objects.create_user(username="library-like-owner", email="library-like-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=owner, handle="library-like-owner")
+
+        top = PersistentAgentTemplate.objects.create(
+            code="lib-like-top",
+            public_profile=profile,
+            slug="like-top",
+            display_name="Like Top",
+            tagline="Top liked",
+            description="Most liked template.",
+            charter="Top liked template.",
+            category="Operations",
+            is_active=True,
+        )
+        middle = PersistentAgentTemplate.objects.create(
+            code="lib-like-mid",
+            public_profile=profile,
+            slug="like-mid",
+            display_name="Like Middle",
+            tagline="Middle liked",
+            description="Middle liked template.",
+            charter="Middle liked template.",
+            category="Operations",
+            is_active=True,
+        )
+        low = PersistentAgentTemplate.objects.create(
+            code="lib-like-low",
+            public_profile=profile,
+            slug="like-low",
+            display_name="Like Low",
+            tagline="Low liked",
+            description="Low liked template.",
+            charter="Low liked template.",
+            category="Operations",
+            is_active=True,
+        )
+
+        liker_1 = get_user_model().objects.create_user(username="liker-1", email="liker-1@example.com", password="pw")
+        liker_2 = get_user_model().objects.create_user(username="liker-2", email="liker-2@example.com", password="pw")
+        liker_3 = get_user_model().objects.create_user(username="liker-3", email="liker-3@example.com", password="pw")
+
+        PersistentAgentTemplateLike.objects.create(template=top, user=liker_1)
+        PersistentAgentTemplateLike.objects.create(template=top, user=liker_2)
+        PersistentAgentTemplateLike.objects.create(template=top, user=liker_3)
+        PersistentAgentTemplateLike.objects.create(template=middle, user=liker_1)
+
+        response = self.client.get(reverse("pages:library_agents_api"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        ordered_ids = [agent["id"] for agent in payload["agents"]]
+        self.assertEqual(ordered_ids[:3], [str(top.id), str(middle.id), str(low.id)])
+        self.assertEqual(payload["libraryTotalLikes"], 4)
+
+    @tag("batch_public_templates")
+    def test_library_like_api_requires_authentication(self):
+        owner = get_user_model().objects.create_user(username="library-auth-owner", email="library-auth-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=owner, handle="library-auth-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="lib-auth-like",
+            public_profile=profile,
+            slug="auth-like",
+            display_name="Auth Like",
+            tagline="Auth only",
+            description="Auth only like endpoint.",
+            charter="Auth only like endpoint.",
+            category="Operations",
+            is_active=True,
+        )
+
+        response = self.client.post(
+            reverse("pages:library_agent_like_api"),
+            data='{"agentId": "%s"}' % template.id,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 401)
+        self.assertFalse(PersistentAgentTemplateLike.objects.filter(template=template).exists())
+
+    @tag("batch_public_templates")
+    def test_library_like_api_toggles_and_sets_is_liked_for_authenticated_user(self):
+        owner = get_user_model().objects.create_user(username="library-toggle-owner", email="library-toggle-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=owner, handle="library-toggle-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="lib-toggle-like",
+            public_profile=profile,
+            slug="toggle-like",
+            display_name="Toggle Like",
+            tagline="Toggle likes",
+            description="Like toggle behavior.",
+            charter="Like toggle behavior.",
+            category="Operations",
+            is_active=True,
+        )
+
+        liker = get_user_model().objects.create_user(username="library-liker", email="library-liker@example.com", password="pw")
+        self.client.force_login(liker)
+
+        first_toggle = self.client.post(
+            reverse("pages:library_agent_like_api"),
+            data='{"agentId": "%s"}' % template.id,
+            content_type="application/json",
+        )
+        self.assertEqual(first_toggle.status_code, 200)
+        first_payload = first_toggle.json()
+        self.assertTrue(first_payload["isLiked"])
+        self.assertEqual(first_payload["likeCount"], 1)
+
+        listing_after_like = self.client.get(reverse("pages:library_agents_api")).json()
+        first_agent = next(agent for agent in listing_after_like["agents"] if agent["id"] == str(template.id))
+        self.assertTrue(first_agent["isLiked"])
+        self.assertEqual(first_agent["likeCount"], 1)
+
+        second_toggle = self.client.post(
+            reverse("pages:library_agent_like_api"),
+            data='{"agentId": "%s"}' % template.id,
+            content_type="application/json",
+        )
+        self.assertEqual(second_toggle.status_code, 200)
+        second_payload = second_toggle.json()
+        self.assertFalse(second_payload["isLiked"])
+        self.assertEqual(second_payload["likeCount"], 0)

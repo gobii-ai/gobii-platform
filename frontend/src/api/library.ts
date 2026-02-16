@@ -1,4 +1,4 @@
-import { jsonFetch } from './http'
+import { jsonFetch, jsonRequest } from './http'
 
 export type LibraryAgent = {
   id: string
@@ -9,6 +9,8 @@ export type LibraryAgent = {
   publicProfileHandle: string
   templateSlug: string
   templateUrl: string
+  likeCount: number
+  isLiked: boolean
 }
 
 export type LibraryCategory = {
@@ -21,9 +23,16 @@ export type LibraryAgentsPayload = {
   topCategories: LibraryCategory[]
   totalAgents: number
   libraryTotalAgents: number
+  libraryTotalLikes: number
   offset: number
   limit: number
   hasMore: boolean
+}
+
+export type LibraryAgentLikePayload = {
+  agentId: string
+  isLiked: boolean
+  likeCount: number
 }
 
 type FetchLibraryAgentsOptions = {
@@ -44,4 +53,12 @@ export function fetchLibraryAgents(listUrl: string, options: FetchLibraryAgentsO
   const separator = listUrl.includes('?') ? '&' : '?'
   const requestUrl = `${listUrl}${separator}${params.toString()}`
   return jsonFetch<LibraryAgentsPayload>(requestUrl, { signal: options.signal })
+}
+
+export function toggleLibraryAgentLike(likeUrl: string, agentId: string): Promise<LibraryAgentLikePayload> {
+  return jsonRequest<LibraryAgentLikePayload>(likeUrl, {
+    method: 'POST',
+    includeCsrf: true,
+    json: { agentId },
+  })
 }

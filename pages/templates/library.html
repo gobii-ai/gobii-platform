@@ -10,6 +10,8 @@
       id="gobii-frontend-root"
       data-app="library"
       data-library-list-url="{% url 'pages:library_agents_api' %}"
+      data-library-like-url="{% url 'pages:library_agent_like_api' %}"
+      data-library-can-like="{{ user.is_authenticated|yesno:'true,false' }}"
     ></div>
   </section>
 </div>

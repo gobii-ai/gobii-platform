@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useInfiniteQuery } from '@tanstack/react-query'
-import { AlertTriangle, Library as LibraryIcon, Loader2 } from 'lucide-react'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import type { InfiniteData } from '@tanstack/react-query'
+import { AlertTriangle, Heart, Library as LibraryIcon, Loader2 } from 'lucide-react'
 
-import { fetchLibraryAgents } from '../api/library'
+import { fetchLibraryAgents, type LibraryAgentsPayload, toggleLibraryAgentLike } from '../api/library'
 
 type LibraryScreenProps = {
   listUrl: string
+  likeUrl: string
+  canLike: boolean
 }
 
-const ALL_CATEGORIES = 'All categories'
-const ALL_CATEGORIES_KEY = '__all__'
+const MOST_POPULAR_LABEL = 'Most Popular'
+const MOST_POPULAR_KEY = '__most_popular__'
 const PAGE_SIZE = 24
 
 function categoryChipClassName(isActive: boolean): string {
@@ -26,24 +29,76 @@ function categorySidebarButtonClassName(isActive: boolean): string {
   return 'flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50'
 }
 
-export function LibraryScreen({ listUrl }: LibraryScreenProps) {
-  const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES_KEY)
+function updateLikeInCachedPayload(
+  payload: InfiniteData<LibraryAgentsPayload> | undefined,
+  update: {
+    agentId: string
+    likeCount: number
+    isLiked: boolean
+  },
+): InfiniteData<LibraryAgentsPayload> | undefined {
+  if (!payload) {
+    return payload
+  }
+  const { agentId, likeCount, isLiked } = update
 
-  const categoryName = selectedCategory === ALL_CATEGORIES_KEY ? null : selectedCategory
+  let previousLikeCount: number | null = null
+  for (const page of payload.pages) {
+    const existingAgent = page.agents.find((agent) => agent.id === agentId)
+    if (existingAgent) {
+      previousLikeCount = existingAgent.likeCount
+      break
+    }
+  }
+
+  if (previousLikeCount === null) {
+    return payload
+  }
+
+  const delta = likeCount - previousLikeCount
+  return {
+    ...payload,
+    pages: payload.pages.map((page) => ({
+      ...page,
+      libraryTotalLikes: Math.max(0, page.libraryTotalLikes + delta),
+      agents: page.agents.map((agent) => (agent.id === agentId ? { ...agent, likeCount, isLiked } : agent)),
+    })),
+  }
+}
+
+export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps) {
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const queryClient = useQueryClient()
 
   const libraryQuery = useInfiniteQuery({
-    queryKey: ['library-agents', listUrl, categoryName],
+    queryKey: ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY],
     queryFn: ({ signal, pageParam }) =>
       fetchLibraryAgents(listUrl, {
         signal,
         offset: pageParam,
         limit: PAGE_SIZE,
-        category: categoryName,
+        category: selectedCategory,
       }),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.offset + lastPage.limit : undefined),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+  })
+
+  const likeMutation = useMutation({
+    mutationFn: (agentId: string) => toggleLibraryAgentLike(likeUrl, agentId),
+    onSuccess: (result) => {
+      queryClient.setQueriesData<InfiniteData<LibraryAgentsPayload>>(
+        { queryKey: ['library-agents', listUrl] },
+        (payload) =>
+          updateLikeInCachedPayload(payload, {
+            agentId: result.agentId,
+            likeCount: result.likeCount,
+            isLiked: result.isLiked,
+          }),
+      )
+      void queryClient.invalidateQueries({ queryKey: ['library-agents', listUrl] })
+    },
   })
 
   const pages = libraryQuery.data?.pages ?? []
@@ -52,17 +107,18 @@ export function LibraryScreen({ listUrl }: LibraryScreenProps) {
   const topCategories = firstPage?.topCategories ?? []
   const totalAgents = firstPage?.totalAgents ?? 0
   const libraryTotalAgents = firstPage?.libraryTotalAgents ?? totalAgents
+  const libraryTotalLikes = firstPage?.libraryTotalLikes ?? 0
   const hasMore = Boolean(libraryQuery.hasNextPage)
 
-  const categoryFilters = useMemo(
-    () => [{ key: ALL_CATEGORIES_KEY, name: ALL_CATEGORIES, count: libraryTotalAgents }, ...topCategories.map((category) => ({ key: category.name, ...category }))],
-    [topCategories, libraryTotalAgents],
-  )
+  const categoryFilters = useMemo(() => topCategories, [topCategories])
 
   useEffect(() => {
-    const validCategories = new Set(categoryFilters.map((item) => item.key))
+    if (!selectedCategory) {
+      return
+    }
+    const validCategories = new Set(categoryFilters.map((item) => item.name))
     if (!validCategories.has(selectedCategory)) {
-      setSelectedCategory(ALL_CATEGORIES_KEY)
+      setSelectedCategory(null)
     }
   }, [categoryFilters, selectedCategory])
 
@@ -92,67 +148,103 @@ export function LibraryScreen({ listUrl }: LibraryScreenProps) {
     )
   }
 
+  const isMostPopularSelected = selectedCategory === null
+
   return (
     <div className="space-y-6 pb-10">
       <section className="gobii-card-base px-6 py-6 sm:px-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Library</p>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Discover shared Gobii agents</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Most popular shared Gobii agents</h1>
             <p className="max-w-3xl text-sm text-slate-600 sm:text-base">
-              Browse publicly shared agents from across Gobii.
+              Browse and like publicly shared agents from across Gobii.
             </p>
+            {!canLike ? (
+              <p className="text-sm font-medium text-indigo-700">Sign in to like templates.</p>
+            ) : null}
           </div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800">
-            <LibraryIcon className="size-4" aria-hidden="true" />
-            {totalAgents} shared agents
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-4 py-2 text-sm font-semibold text-indigo-800">
+              <LibraryIcon className="size-4" aria-hidden="true" />
+              {libraryTotalAgents} shared agents
+            </div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-rose-100 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700">
+              <Heart className="size-4 fill-rose-500 text-rose-500" aria-hidden="true" />
+              {libraryTotalLikes} likes
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="md:hidden">
-        <div className="flex gap-2 overflow-x-auto pb-2">
-          {categoryFilters.map((category) => {
-            const isActive = selectedCategory === category.key
-            return (
-              <button
-                key={category.key}
-                type="button"
-                onClick={() => setSelectedCategory(category.key)}
-                className={categoryChipClassName(isActive)}
-              >
-                {category.name} ({category.count})
-              </button>
-            )
-          })}
+      <section className="space-y-3 md:hidden">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
+          <button
+            type="button"
+            onClick={() => setSelectedCategory(null)}
+            className={categoryChipClassName(isMostPopularSelected)}
+          >
+            {MOST_POPULAR_LABEL}
+          </button>
+        </div>
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Categories</p>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {categoryFilters.map((category) => {
+              const isActive = selectedCategory === category.name
+              return (
+                <button
+                  key={category.name}
+                  type="button"
+                  onClick={() => setSelectedCategory(category.name)}
+                  className={categoryChipClassName(isActive)}
+                >
+                  {category.name} ({category.count})
+                </button>
+              )
+            })}
+          </div>
         </div>
       </section>
 
       <section className="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)]">
         <aside className="hidden md:block">
-          <div className="gobii-card-base sticky top-24 p-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Categories</p>
-            <div className="space-y-2">
-              {categoryFilters.map((category) => {
-                const isActive = selectedCategory === category.key
-                return (
-                  <button
-                    key={category.key}
-                    type="button"
-                    onClick={() => setSelectedCategory(category.key)}
-                    className={categorySidebarButtonClassName(isActive)}
-                  >
-                    <span>{category.name}</span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs ${
-                        isActive ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-700'
-                      }`}
+          <div className="gobii-card-base sticky top-24 space-y-4 p-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
+              <button
+                type="button"
+                onClick={() => setSelectedCategory(null)}
+                className={categorySidebarButtonClassName(isMostPopularSelected)}
+              >
+                <span>{MOST_POPULAR_LABEL}</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs ${isMostPopularSelected ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-700'}`}>
+                  {libraryTotalAgents}
+                </span>
+              </button>
+            </div>
+
+            <div>
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Categories</p>
+              <div className="space-y-2">
+                {categoryFilters.map((category) => {
+                  const isActive = selectedCategory === category.name
+                  return (
+                    <button
+                      key={category.name}
+                      type="button"
+                      onClick={() => setSelectedCategory(category.name)}
+                      className={categorySidebarButtonClassName(isActive)}
                     >
-                      {category.count}
-                    </span>
-                  </button>
-                )
-              })}
+                      <span>{category.name}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${isActive ? 'bg-indigo-500 text-white' : 'bg-indigo-50 text-indigo-700'}`}>
+                        {category.count}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           </div>
         </aside>
@@ -166,29 +258,53 @@ export function LibraryScreen({ listUrl }: LibraryScreenProps) {
           ) : (
             <>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {agents.map((agent) => (
-                  <a
-                    key={agent.id}
-                    href={agent.templateUrl}
-                    className="gobii-card-hoverable group flex h-full flex-col p-5"
-                  >
-                    <div className="mb-3 flex items-start justify-between gap-2">
-                      <span className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600">
-                        <span className="size-2 rounded-full bg-indigo-400" />
-                        {agent.category}
-                      </span>
-                      <span className="text-xs font-medium text-slate-500">@{agent.publicProfileHandle}</span>
-                    </div>
-                    <h2 className="text-base font-semibold text-slate-900 transition group-hover:text-indigo-700">{agent.name}</h2>
-                    {agent.tagline ? <p className="mt-2 text-sm font-medium text-slate-700">{agent.tagline}</p> : null}
-                    {agent.description ? <p className="mt-2 text-sm text-slate-600">{agent.description}</p> : null}
-                    <div className="mt-auto pt-4">
-                      <span className="text-sm font-medium text-indigo-600 transition group-hover:text-indigo-700">
-                        View details {'->'}
-                      </span>
-                    </div>
-                  </a>
-                ))}
+                {agents.map((agent) => {
+                  const isLikePending = likeMutation.isPending && likeMutation.variables === agent.id
+                  return (
+                    <article key={agent.id} className="gobii-card-hoverable group flex h-full flex-col p-5">
+                      <div className="mb-3 flex items-start justify-between gap-2">
+                        <span className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600">
+                          <span className="size-2 rounded-full bg-indigo-400" />
+                          {agent.category}
+                        </span>
+                        {canLike ? (
+                          <button
+                            type="button"
+                            disabled={isLikePending}
+                            onClick={() => likeMutation.mutate(agent.id)}
+                            className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70"
+                            aria-label={agent.isLiked ? `Remove like from ${agent.name}` : `Like ${agent.name}`}
+                          >
+                            {isLikePending ? (
+                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                            ) : (
+                              <Heart className={`size-3.5 ${agent.isLiked ? 'fill-rose-500 text-rose-500' : 'text-rose-500'}`} aria-hidden="true" />
+                            )}
+                            <span>{agent.likeCount}</span>
+                          </button>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                            <Heart className="size-3.5 text-rose-500" aria-hidden="true" />
+                            <span>{agent.likeCount}</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs font-medium text-slate-500">@{agent.publicProfileHandle}</p>
+                      <h2 className="mt-1 text-base font-semibold text-slate-900 transition group-hover:text-indigo-700">
+                        <a href={agent.templateUrl}>{agent.name}</a>
+                      </h2>
+                      {agent.tagline ? <p className="mt-2 text-sm font-medium text-slate-700">{agent.tagline}</p> : null}
+                      {agent.description ? <p className="mt-2 text-sm text-slate-600">{agent.description}</p> : null}
+
+                      <div className="mt-auto pt-4">
+                        <a href={agent.templateUrl} className="text-sm font-medium text-indigo-600 transition group-hover:text-indigo-700">
+                          View details {'->'}
+                        </a>
+                      </div>
+                    </article>
+                  )
+                })}
               </div>
 
               {hasMore ? (

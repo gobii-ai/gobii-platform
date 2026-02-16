@@ -170,10 +170,12 @@ switch (appName) {
   }
   case 'library': {
     const listUrl = mountNode.dataset.libraryListUrl
-    if (!listUrl) {
-      throw new Error('Library list URL is required')
+    const likeUrl = mountNode.dataset.libraryLikeUrl
+    const canLike = mountNode.dataset.libraryCanLike === 'true'
+    if (!listUrl || !likeUrl) {
+      throw new Error('Library API URLs are required')
     }
-    screen = <LibraryScreen listUrl={listUrl} />
+    screen = <LibraryScreen listUrl={listUrl} likeUrl={likeUrl} canLike={canLike} />
     break
   }
   case 'mcp-servers': {

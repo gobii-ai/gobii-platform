@@ -4,7 +4,7 @@ from django.http import HttpResponse
 from config import settings
 from config.settings import GOBII_PROPRIETARY_MODE
 from proprietary.views import BlogSitemap
-from .library_views import LibraryAgentsAPIView, LibraryView
+from .library_views import LibraryAgentLikeAPIView, LibraryAgentsAPIView, LibraryView
 from .views import (
     MarkdownPageView,
     DocsIndexRedirectView,
@@ -33,7 +33,7 @@ from .views import (
 
 from djstripe import views as djstripe_views
 from django.contrib.sitemaps.views import sitemap
-from django.views.generic.base import TemplateView
+from django.views.generic.base import RedirectView, TemplateView
 
 app_name = "pages"
 
@@ -49,8 +49,10 @@ sitemaps['solutions'] = SolutionsSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
+    path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=False)),
     path("library/", LibraryView.as_view(), name="library"),
     path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
+    path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
     path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
     path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
