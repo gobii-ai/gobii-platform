@@ -57,7 +57,7 @@ The real differences show up in runtime architecture and security defaults.
 ## Timeline in One View
 
 <figure>
-  <img src="/static/images/blog/gobii-vs-openclaw-timeline.svg" alt="Two-lane timeline comparing Gobii milestones from May 2025 onward and OpenClaw milestones from November 2025 onward." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
+  <img src="/static/images/blog/gobii-vs-openclaw-timeline-v2.svg" alt="Two-lane timeline comparing Gobii milestones from May 2025 onward and OpenClaw milestones from November 2025 onward." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Commit anchors from local git history.</figcaption>
 </figure>
 
@@ -320,11 +320,14 @@ For people deciding where to build serious always-on agent workloads, the bigges
 
 ### Source Notes
 
-Repo timestamps in this post were pulled from local git history on `2026-02-16` across:
+Repo timestamps in this post were pulled from git history on `2026-02-16`, including private Gobii history before OSS publishing and public history after the MIT transition.
 
-- `/Users/andrew/workspace/gobii` (private lineage)
-- `/Users/andrew/workspace/gobii-platform` (public MIT lineage)
-- `/Users/andrew/workspace/openclaw`
+Commit anchors referenced in this post:
+
+- Gobii private always-on foundation: `3f3b9e89`, `a36f7e1e`, `77393150`, `b34eb616`, `56b19631`, `0148663c`, `6d48d601`
+- Gobii private-to-public MIT transition: `352a1fb6`, `44a4ccb6`, `db5a9d36`, `61c3f3fd`, `f596424e`
+- Gobii public OSS milestones: `f596424e`, `0130b607`, `39bfb8d4`
+- OpenClaw milestones: `f6dd362d3`, `1ed5ca3fd`, `0d8e0ddc4`, `b8f66c260`
 
 External context links:
 
