@@ -6,6 +6,7 @@ import uuid
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
+from django.templatetags.static import static
 from django.core import signing
 from django.core.mail import send_mail
 from django.utils.decorators import method_decorator
@@ -819,11 +820,20 @@ class PublicTemplateDetailView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        share_description = (self.template.tagline or self.template.description or "").strip()
+        if not share_description:
+            share_description = f"Spawn the {self.template.display_name} public template on Gobii."
+
         context["template"] = self.template
         context["public_profile_handle"] = self.template.public_profile.handle
         context["template_url"] = self.request.build_absolute_uri(
             f"/{self.template.public_profile.handle}/{self.template.slug}/"
         )
+        context["seo_title"] = (
+            f"{self.template.display_name} Template by @{self.template.public_profile.handle}"
+        )
+        context["seo_description"] = share_description
+        context["og_image_url"] = self._build_share_image_url()
         context["schedule_jitter_minutes"] = self.template.schedule_jitter_minutes
         context["base_schedule"] = self.template.base_schedule
         context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.template.base_schedule)
@@ -837,6 +847,17 @@ class PublicTemplateDetailView(TemplateView):
             self.template.recommended_contact_channel
         )
         return context
+
+    def _build_share_image_url(self) -> str:
+        image_path = (self.template.hero_image_path or "").strip()
+        if image_path:
+            parsed_url = urlsplit(image_path)
+            if parsed_url.scheme in {"http", "https"}:
+                return image_path
+            if image_path.startswith("/"):
+                return self.request.build_absolute_uri(image_path)
+            return self.request.build_absolute_uri(static(image_path))
+        return self.request.build_absolute_uri(static("images/noBgBlue.png"))
 
 
 class PublicTemplateHireView(View):

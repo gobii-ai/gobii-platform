@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase, tag
+from django.templatetags.static import static
 from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
@@ -43,11 +44,52 @@ class PublicTemplateViewsTests(TestCase):
             category="Operations",
         )
 
+        detail_path = reverse(
+            "pages:public_template_detail",
+            kwargs={"handle": profile.handle, "template_slug": template.slug},
+        )
+        response = self.client.get(detail_path)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, template.display_name)
+
+        expected_url = f"http://testserver{detail_path}"
+        expected_image = f"http://testserver{static('images/noBgBlue.png')}"
+        self.assertContains(
+            response,
+            f'<meta property="og:title" content="{template.display_name} Template by @{profile.handle}">',
+            html=True,
+        )
+        self.assertContains(response, f'<meta property="og:url" content="{expected_url}">', html=True)
+        self.assertContains(response, f'<meta property="og:image" content="{expected_image}">', html=True)
+        self.assertContains(response, '<meta name="twitter:card" content="summary_large_image">', html=True)
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_uses_hero_image_in_share_metadata(self):
+        user = get_user_model().objects.create_user(username="owner-image", email="owner-image@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="steady-orbit")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-image",
+            public_profile=profile,
+            slug="launch-update",
+            display_name="Launch Update",
+            tagline="Weekly launch notes",
+            description="Summarizes launch status and blockers.",
+            charter="Compile launch updates each week.",
+            base_schedule="@weekly",
+            recommended_contact_channel="email",
+            category="Operations",
+            hero_image_path="images/ai-directory/standup.svg",
+        )
+
         response = self.client.get(
             reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, template.display_name)
+        self.assertContains(
+            response,
+            f'<meta property="og:image" content="http://testserver{static("images/ai-directory/standup.svg")}">',
+            html=True,
+        )
 
     @tag("batch_public_templates")
     def test_public_template_hire_sets_session(self):

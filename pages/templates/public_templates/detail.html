@@ -1,5 +1,21 @@
 {% extends "base.html" %}
 {% block title %}{{ template.display_name }} – Public Template{% endblock %}
+
+{% block head_extras %}
+  <link rel="canonical" href="{{ template_url }}">
+  <meta name="description" content="{{ seo_description|truncatechars:160 }}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ seo_title }}">
+  <meta property="og:description" content="{{ seo_description|truncatechars:200 }}">
+  <meta property="og:url" content="{{ template_url }}">
+  <meta property="og:site_name" content="Gobii">
+  <meta property="og:image" content="{{ og_image_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ seo_title }}">
+  <meta name="twitter:description" content="{{ seo_description|truncatechars:200 }}">
+  <meta name="twitter:image" content="{{ og_image_url }}">
+{% endblock %}
+
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-amber-50/50 via-white via-60% to-white">
   <section class="max-w-5xl mx-auto px-6 pt-16 pb-16">
