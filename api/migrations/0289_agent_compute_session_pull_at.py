@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0286_intelligencetier_is_default"),
+        ("api", "0288_merge_20260211_1743"),
     ]
 
     operations = [
