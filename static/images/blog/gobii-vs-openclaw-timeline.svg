@@ -38,11 +38,11 @@
   <text class="cardSub" x="240" y="225" text-anchor="middle">private repo init · 3f3b9e89</text>
 
   <circle cx="430" cy="250" r="9" fill="#0891b2"/>
-  <line class="stem" x1="430" y1="250" x2="430" y2="270" stroke="#0891b2"/>
-  <rect class="card" x="305" y="272" width="250" height="92" fill="#dff7fb" stroke="#0891b2"/>
-  <text class="cardMain" x="430" y="302" text-anchor="middle">2025-06-20 to 06-29</text>
-  <text class="cardSub" x="430" y="327" text-anchor="middle">persistent agents + cron/event core</text>
-  <text class="cardSub" x="430" y="350" text-anchor="middle">a36f7e1e .. 6d48d601</text>
+  <line class="stem" x1="430" y1="250" x2="430" y2="254" stroke="#0891b2"/>
+  <rect class="card" x="305" y="254" width="250" height="90" fill="#dff7fb" stroke="#0891b2"/>
+  <text class="cardMain" x="430" y="284" text-anchor="middle">2025-06-20 to 06-29</text>
+  <text class="cardSub" x="430" y="309" text-anchor="middle">persistent agents + cron/event core</text>
+  <text class="cardSub" x="430" y="332" text-anchor="middle">a36f7e1e .. 6d48d601</text>
 
   <circle cx="650" cy="250" r="9" fill="#0891b2"/>
   <line class="stem" x1="650" y1="250" x2="650" y2="238" stroke="#0891b2"/>
@@ -64,16 +64,16 @@
 
   <rect class="lane" x="70" y="362" width="1360" height="228" fill="#fff7ed" stroke="#ea580c"/>
   <text class="laneTitle" x="98" y="402" fill="#c2410c">OpenClaw</text>
-  <rect class="chip" x="230" y="375" width="194" height="34" fill="#ffedd5" stroke="#c2410c"/>
-  <text class="chipText" x="327" y="397" text-anchor="middle" fill="#c2410c">starts Nov 2025</text>
+  <rect class="chip" x="260" y="375" width="194" height="34" fill="#ffedd5" stroke="#c2410c"/>
+  <text class="chipText" x="357" y="397" text-anchor="middle" fill="#c2410c">starts Nov 2025</text>
 
   <line class="track" x1="220" y1="490" x2="1388" y2="490" stroke="#ea580c"/>
 
   <circle cx="1060" cy="490" r="9" fill="#ea580c"/>
-  <line class="stem" x1="1060" y1="490" x2="1060" y2="510" stroke="#ea580c"/>
-  <rect class="card" x="955" y="512" width="210" height="86" fill="#fff2e6" stroke="#ea580c"/>
-  <text class="cardMain" x="1060" y="545" text-anchor="middle">2025-11-24</text>
-  <text class="cardSub" x="1060" y="570" text-anchor="middle">repo init · f6dd362d3</text>
+  <line class="stem" x1="1060" y1="490" x2="1060" y2="500" stroke="#ea580c"/>
+  <rect class="card" x="955" y="502" width="210" height="82" fill="#fff2e6" stroke="#ea580c"/>
+  <text class="cardMain" x="1060" y="533" text-anchor="middle">2025-11-24</text>
+  <text class="cardSub" x="1060" y="558" text-anchor="middle">repo init · f6dd362d3</text>
 
   <circle cx="1188" cy="490" r="9" fill="#ea580c"/>
   <line class="stem" x1="1188" y1="490" x2="1188" y2="478" stroke="#ea580c"/>
@@ -83,11 +83,11 @@
   <text class="cardSub" x="1188" y="459" text-anchor="middle">1ed5ca3fd, 0d8e0ddc4</text>
 
   <circle cx="1350" cy="490" r="9" fill="#ea580c"/>
-  <line class="stem" x1="1350" y1="490" x2="1350" y2="510" stroke="#ea580c"/>
-  <rect class="card" x="1248" y="512" width="204" height="86" fill="#fff2e6" stroke="#ea580c"/>
-  <text class="cardMain" x="1350" y="545" text-anchor="middle">2026-02-14</text>
-  <text class="cardSub" x="1350" y="568" text-anchor="middle">orchestration depth</text>
-  <text class="cardSub" x="1350" y="588" text-anchor="middle">b8f66c260</text>
+  <line class="stem" x1="1350" y1="490" x2="1350" y2="500" stroke="#ea580c"/>
+  <rect class="card" x="1248" y="502" width="204" height="82" fill="#fff2e6" stroke="#ea580c"/>
+  <text class="cardMain" x="1350" y="533" text-anchor="middle">2026-02-14</text>
+  <text class="cardSub" x="1350" y="556" text-anchor="middle">orchestration depth</text>
+  <text class="cardSub" x="1350" y="576" text-anchor="middle">b8f66c260</text>
 
   <line class="deltaLine" x1="430" y1="620" x2="1060" y2="620" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
   <rect x="626" y="600" width="238" height="40" rx="12" ry="12" fill="#e2e8f0" stroke="#334155" stroke-width="2"/>
