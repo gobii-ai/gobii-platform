@@ -43,7 +43,7 @@ The real differences show up in runtime architecture and security defaults.
 ## Timeline in One View
 
 <figure>
-  <img src="/static/images/blog/gobii-vs-openclaw-timeline.svg" alt="Two-lane timeline comparing Gobii milestones from May 2025 onward and OpenClaw milestones from November 2025 onward." style="max-width: 100%; width: 980px; display: block; margin: 0 auto;">
+  <img src="/static/images/blog/gobii-vs-openclaw-timeline.svg" alt="Two-lane timeline comparing Gobii milestones from May 2025 onward and OpenClaw milestones from November 2025 onward." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Commit anchors from local git history.</figcaption>
 </figure>
 
@@ -62,7 +62,7 @@ That puts Gobii's persistent always-on core about five months earlier than OpenC
 ## Always-On Model: Heartbeat vs Schedule + Event Queue
 
 <figure>
-  <img src="/static/images/blog/gobii-vs-openclaw-runtime.svg" alt="Diagram comparing Gobii schedule-plus-event processing to OpenClaw heartbeat and hook-trigger runtime." style="max-width: 100%;">
+  <img src="/static/images/blog/gobii-vs-openclaw-runtime.svg" alt="Diagram comparing Gobii schedule-plus-event processing to OpenClaw heartbeat and hook-trigger runtime." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Both are always-on designs; they anchor that behavior differently.</figcaption>
 </figure>
 
@@ -104,7 +104,7 @@ That unification is one of Gobii's strongest architectural choices for reliabili
 ## Webhooks: Ingress Surface vs Agent Integration Primitive
 
 <figure>
-  <img src="/static/images/blog/gobii-vs-openclaw-webhooks.svg" alt="Webhook architecture comparison between Gobii and OpenClaw." style="max-width: 100%;">
+  <img src="/static/images/blog/gobii-vs-openclaw-webhooks.svg" alt="Webhook architecture comparison between Gobii and OpenClaw." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Gobii uses webhooks both to receive external events and as outbound agent actions.</figcaption>
 </figure>
 
@@ -143,7 +143,7 @@ Gobii's native A2A landed publicly on `2025-10-02` (`0130b607`), about `135` day
 ## Memory: Markdown-First vs SQLite-First
 
 <figure>
-  <img src="/static/images/blog/gobii-vs-openclaw-memory.svg" alt="Memory architecture comparison: Gobii SQLite substrate versus OpenClaw markdown plus vector retrieval." style="max-width: 100%;">
+  <img src="/static/images/blog/gobii-vs-openclaw-memory.svg" alt="Memory architecture comparison: Gobii SQLite substrate versus OpenClaw markdown plus vector retrieval." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Different memory philosophies with different tradeoffs.</figcaption>
 </figure>
 
@@ -182,7 +182,7 @@ For teams that need fully headed automation in cloud workers, Gobii's pattern is
 ## Identity Model: Endpoint-Addressable Agents
 
 <figure>
-  <img src="/static/images/blog/gobii-vs-openclaw-identity.svg" alt="Identity model comparison between Gobii and OpenClaw." style="max-width: 100%;">
+  <img src="/static/images/blog/gobii-vs-openclaw-identity.svg" alt="Identity model comparison between Gobii and OpenClaw." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Gobii agents are identity-bearing endpoints, not only session personas.</figcaption>
 </figure>
 
@@ -237,7 +237,7 @@ The simplest way to frame it:
 ## Security and Cloud-Native Posture
 
 <figure>
-  <img src="/static/images/blog/gobii-vs-openclaw-security.svg" alt="Security posture comparison: Gobii Kubernetes + gVisor + network policy versus OpenClaw optional sandboxing." style="max-width: 100%;">
+  <img src="/static/images/blog/gobii-vs-openclaw-security.svg" alt="Security posture comparison: Gobii Kubernetes + gVisor + network policy versus OpenClaw optional sandboxing." style="width: 100%; max-width: 1200px; display: block; margin: 0 auto;">
   <figcaption style="font-size: 0.85em; color: #666; margin-top: 0.5em; text-align: center;">Gobii defaults toward cloud isolation controls; OpenClaw defaults toward local-first flexibility.</figcaption>
 </figure>
 
