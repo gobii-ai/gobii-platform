@@ -12,9 +12,13 @@
 ![Docker Compose](https://img.shields.io/badge/docker-compose-blue?logo=docker)
 ![Status](https://img.shields.io/badge/status-early%20access-orange)
 
-**The production platform for [browser-use](https://github.com/browser-use/browser-use) agents** 🚀
+**Always-on AI employees for teams.**
 
-Gobii is the open-source platform for deploying and managing [browser-use](https://github.com/browser-use/browser-use) agents at scale. While browser-use gives AI agents powerful browser automation capabilities, Gobii provides the infrastructure to run them in production: always-on execution, scheduling, email/API triggers, secret management, and team collaboration. Spin it up with Docker Compose, complete a first-run wizard, and you have self-hosted browser-use agents that work 24/7. Prefer managed hosting? Gobii Cloud at [gobii.ai](https://gobii.ai) delivers the same platform as a service.
+Gobii is an open-source platform for running durable autonomous agents in production.
+Each agent can run continuously, wake from schedules and events, use real browser automation, call external systems, and coordinate with other agents.
+
+If you want local-first, single-user assistant UX, there are great options.
+Gobii is built for a different job: secure, cloud-native, always-on agent operations for real business workflows.
 
 <div style="width: 100%; text-align: center">
   <video
@@ -29,39 +33,72 @@ Gobii is the open-source platform for deploying and managing [browser-use](https
   >
   </video>
   <br/>
-  <em>Gobii Agent demo in action</em>
+  <em>Gobii agent demo in action</em>
 </div>
 
-## What Makes Gobii Different
-- **Production infrastructure for browser-use**: Turn browser-use agents into always-on services with scheduling, email triggers, API endpoints, and persistent execution.
-- **Self-hosted or managed**: MIT-licensed platform you can run anywhere, or Gobii Cloud for zero-ops hosting with SLAs.
-- **Built for teams**: Share agents, manage secrets, collaborate on workflows, and control access across your organization.
+## What Gobii Is
+
+- **Always-on runtime**: per-agent schedule plus event queue continuity, not just isolated turns.
+- **Agent identity**: endpoint-addressable agents (email/SMS/web), including managed identities like `first.last@my.gobii.ai`.
+- **Native agent-to-agent coordination**: linked agents can message each other directly.
+- **Webhook-native integration model**: inbound webhooks wake agents; outbound webhooks are first-class agent actions.
+- **Based on browser-use**: Gobii builds on browser-use and keeps `/api/v1/tasks/browser-use/` for browser automation workflows.
+- **SQLite-backed memory substrate**: structured, tool-friendly state that persists across runs.
+- **Real browser execution**: fully headed browser support, profile persistence, and proxy-aware task routing.
+- **Security-first operations**: encrypted secrets, proxy-governed egress, and sandbox compute designed for Kubernetes/gVisor environments.
+
+## Architecture in One View
+
+```text
+External events/channels (email, SMS, webhooks, API)
+                     │
+                     ▼
+            Durable per-agent event queue
+                     │
+                     ▼
+         Persistent agent runtime + schedule
+                     │
+                     ├─ Browser automation (headed/profile-aware)
+                     ├─ SQLite state + structured memory
+                     ├─ Outbound webhooks + HTTP integrations
+                     └─ Native agent-to-agent messaging
+                     │
+                     ▼
+      Replies, actions, files, and downstream integrations
+```
 
 ## Launch in Minutes
-1. **Prerequisites**: Docker with at least 12 GB RAM allocated to its VM and a few GB of disk.
-2. **Clone & enter the repo**
-   ```bash
-   git clone https://github.com/gobii-ai/gobii-platform.git
-   cd gobii-platform
-   ```
-3. **Start Gobii** (first run and whenever dependencies change)
-   ```bash
-   docker compose up --build
-   ```
-4. Visit [http://localhost:8000](http://localhost:8000) and follow the first-run wizard:
-   - Create the first admin account.
-   - Pick the LLM provider (OpenAI, OpenRouter, Anthropic, Fireworks, or custom) for your agents.
-   - Drop in the API keys and preferred models. You can route browser-use agent calls to a different model if you'd like.
-5. After the redirect, sign in at [http://localhost:8000/](http://localhost:8000/) and start deploying browser-use agents.
 
-Need scheduling, inbox listeners, or extra telemetry later? Launch the optional `beat`, `email`, or `obs` profiles with `docker compose --profile <name> up`.
+1. Prerequisites: Docker Desktop (or compatible engine) with at least 12 GB RAM allocated to its VM.
+2. Clone and enter the repo.
 
-## What You Can Build
-- Deploy browser-use agents with persistent execution, secret management, and email/web chat interfaces.
-- Expose browser-use capabilities via API endpoints for teammates or external services.
-- Monitor agent execution, capture structured outputs, and manage files generated during workflows.
+```bash
+git clone https://github.com/gobii-ai/gobii-platform.git
+cd gobii-platform
+```
 
-### Try the API
+3. Start Gobii.
+
+```bash
+docker compose up --build
+```
+
+4. Visit [http://localhost:8000](http://localhost:8000) and complete first-run setup.
+
+- Create your admin account.
+- Choose model providers (OpenAI, OpenRouter, Anthropic, Fireworks, or custom endpoint).
+- Add keys and preferred models.
+
+5. Sign in and create your first always-on agent.
+
+Optional runtime profiles:
+
+- `docker compose --profile beat up` for scheduled trigger processing.
+- `docker compose --profile email up` for IMAP idlers/inbound email workflows.
+- `docker compose --profile obs up` for Flower + OTEL collector observability services.
+
+## API Quick Start
+
 ```bash
 curl --no-buffer \
   -H "X-Api-Key: $GOBII_API_KEY" \
@@ -79,45 +116,53 @@ curl --no-buffer \
       }'
 ```
 
-## Choose Your Path
-| Self-Host (this repo) | Gobii Cloud (managed) |
+## Core Capabilities
+
+| Capability | Gobii approach |
 | --- | --- |
-| MIT-licensed core, data stays on your infra. | Zero-ops hosting, governed releases, SLAs. |
-| Customize runtime, networking, branding, and integrations. | Autoscaling agents, managed upgrades, enterprise support. |
-| Community support via GitHub issues & Discord. | Dedicated success and support (contracted). |
+| Always-on behavior | Schedule + event trigger lifecycle with durable processing |
+| Event ingress | SMS/email/webhook/API events feeding a unified runtime loop |
+| Outbound integration | Agent-invoked webhooks and HTTP actions |
+| Memory | SQLite-backed state and tool tables |
+| Multi-agent | Native peer agent messaging and coordination |
+| Browser runtime | Headed browser support with persistent profile handling |
+| Secrets | Encrypted-at-rest secret records integrated into tool execution |
+| Egress control | Proxy selection, health-aware routing, dedicated proxy inventory |
+| Sandbox posture | Kubernetes-backed sandbox compute with gVisor runtime-class support |
 
-## The Platform for browser-use
+## Choose Your Path
 
-[browser-use](https://github.com/browser-use/browser-use) is the leading open-source library for AI-powered browser automation, giving agents human-like web interaction capabilities. Gobii provides the production infrastructure to deploy and scale these agents:
+| Self-host (this repo) | Gobii Cloud (managed) |
+| --- | --- |
+| MIT-licensed core on your own infra. | Managed Gobii deployment and operations. |
+| Full control over runtime, networking, and integration behavior. | Governed releases, operational support, and managed scaling. |
+| Ideal for teams that want source-level customization. | Ideal for teams that want faster production rollout. |
 
-**browser-use brings the automation:**
-- Advanced web navigation, form filling, and data extraction
-- Visual understanding of web pages for smarter interactions
-- Robust error handling and retry mechanisms
+## Development
 
-**Gobii brings the platform:**
-- Always-on agent execution and scheduling
-- Email triggers, API endpoints, and web interfaces
-- Secret management, team collaboration, and access control
-- Monitoring, logging, and structured output capture
+Use the local development guide in [DEVELOPMENT.md](DEVELOPMENT.md).
 
-Want to contribute to the browser automation layer? Check out [browser-use on GitHub](https://github.com/browser-use/browser-use).
+Typical local loop:
 
-## Developing
-- Start infrastructure locally with `docker compose -f docker-compose.dev.yaml up` (Postgres, Redis, MinIO).
-- Run Django via `uv run uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000` and the Celery worker on macOS with `uv run celery -A config worker -l info --pool=threads --concurrency=4` (threads avoids recent fork restrictions).
-- Full local workflow, optional profiles, and testing steps live in [DEVELOPMENT.md](DEVELOPMENT.md).
+- `docker compose -f docker-compose.dev.yaml up` for backing services.
+- `uv run uvicorn config.asgi:application --reload --host 0.0.0.0 --port 8000` for Django.
+- `uv run celery -A config worker -l info --pool=threads --concurrency=4` for workers.
 
-## Contribute & Connect
-- Share ideas or bugs in GitHub issues.
-- Follow existing style (ruff/black) when submitting PRs.
+## Security and Sandbox Notes
+
+The repository includes Kubernetes sandbox compute wiring and design docs for stronger isolation and controlled egress:
+
+- [Sandbox compute spec](docs/design/sandbox_pods_compute_spec.md)
+- [Sandbox compute ops notes](docs/design/sandbox-compute-ops.md)
+
+## Contribute and Connect
+
+- Open issues and PRs are welcome.
+- Follow existing project formatting and test conventions.
 - Join the community on [Discord](https://discord.gg/yyDB8GwxtE).
 
-## License & Trademarks
-- Source code ships under the [MIT License](LICENSE).
-- The Gobii name and logo are trademarks of Gobii, Inc. See [NOTICE](NOTICE) for guidance.
-- Proprietary mode and non-MIT components require a commercial agreement with Gobii, Inc.
+## License and Trademarks
 
----
-
-Built with ❤️ by the Gobii team. The production platform for [browser-use](https://github.com/browser-use/browser-use) agents.
+- Source code is licensed under [MIT](LICENSE).
+- Gobii name and logo are trademarks of Gobii, Inc. See [NOTICE](NOTICE).
+- Proprietary-mode and non-MIT components require a commercial agreement with Gobii, Inc.
