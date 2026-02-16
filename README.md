@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/noBgWhite.png" />
-    <source media="(prefers-color-scheme: light)" srcset="assets/logo/noBgBlack.png" />
-    <img src="assets/logo/noBgBlack.png" alt="Gobii logo" width="170" />
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/gobii-fish-readme-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="assets/logo/gobii-fish-readme-light.png" />
+    <img src="assets/logo/gobii-fish-readme-light.png" alt="Gobii fish mascot" width="190" />
   </picture>
 </p>
 
@@ -65,7 +65,6 @@ Gobii is optimized for a different problem: reliable, secure, always-on agent op
 - [Operational Profiles](#operational-profiles)
 - [Production Use Cases](#production-use-cases)
 - [FAQ](#faq)
-- [Branding Assets](#branding-assets)
 - [Developer Workflow](#developer-workflow)
 - [Docs and Deep Dives](#docs-and-deep-dives)
 - [Contributing](#contributing)
@@ -262,13 +261,6 @@ Agents can wake from schedules and external events (email/SMS/webhooks/API), pro
 ### What is the security model?
 
 Gobii integrates encrypted-at-rest secrets, proxy-aware outbound controls, and sandbox compute support with Kubernetes/gVisor backend options for stronger isolation.
-
-## Branding Assets
-
-- GitHub avatar: `.github/avatar.png` (source: `assets/logo/gobii-fish-circle-1024.png`)
-- GitHub social preview: `.github/social-preview.png` (source: `assets/logo/gobii-fish-github-social-clean-1280x640.png`)
-- Rounded icon variants: `assets/logo/gobii-fish-rounded-512.png`, `assets/logo/gobii-fish-rounded-1024.png`
-- Original source copy used for generation: `assets/logo/gobii-fish-source.jpeg`
 
 ## Developer Workflow
 
