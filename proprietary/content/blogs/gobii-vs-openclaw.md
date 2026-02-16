@@ -5,6 +5,7 @@ description: "A deep technical comparison of Gobii and OpenClaw across always-on
 author: "Andrew I. Christianson"
 seo_title: "Gobii vs OpenClaw: Architecture and Timeline Comparison"
 seo_description: "Detailed code-level comparison of Gobii and OpenClaw with commit timestamps, runtime model analysis, webhook architecture, orchestration patterns, and cloud-native security."
+image: "/static/images/blog/gobii-vs-openclaw-hero.jpg"
 tags:
   - gobii
   - openclaw
