@@ -141,6 +141,33 @@ def _sanitize_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     return env
 
 
+def _stderr_summary(stderr: str) -> str:
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return lines[-1]
+
+
+def _build_nonzero_exit_error_payload(
+    *,
+    process_name: str,
+    exit_code: int,
+    stdout: str,
+    stderr: str,
+) -> Dict[str, Any]:
+    summary = _stderr_summary(stderr)
+    payload: Dict[str, Any] = {
+        "status": "error",
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "message": summary or f"{process_name} exited with status {exit_code}.",
+    }
+    if stderr.strip():
+        payload["detail"] = stderr
+    return payload
+
+
 class SandboxComputeUnavailable(RuntimeError):
     pass
 
@@ -262,15 +289,19 @@ class LocalSandboxBackend(SandboxComputeBackend):
             return {"status": "error", "message": f"Command failed to start: {exc}"}
 
         stdout, stderr = _truncate_streams(result.stdout or "", result.stderr or "", _stdio_max_bytes())
-        payload = {
-            "status": "ok" if result.returncode == 0 else "error",
+        if result.returncode != 0:
+            return _build_nonzero_exit_error_payload(
+                process_name="Command",
+                exit_code=result.returncode,
+                stdout=stdout,
+                stderr=stderr,
+            )
+        return {
+            "status": "ok",
             "exit_code": result.returncode,
             "stdout": stdout,
             "stderr": stderr,
         }
-        if result.returncode != 0:
-            payload["message"] = "Command exited with non-zero status."
-        return payload
 
     def mcp_request(
         self,
@@ -589,15 +620,19 @@ def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "error", "message": f"Python execution failed to start: {exc}"}
 
     stdout, stderr = _truncate_streams(result.stdout or "", result.stderr or "", _stdio_max_bytes())
-    payload = {
-        "status": "ok" if result.returncode == 0 else "error",
+    if result.returncode != 0:
+        return _build_nonzero_exit_error_payload(
+            process_name="Python",
+            exit_code=result.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
+    return {
+        "status": "ok",
         "exit_code": result.returncode,
         "stdout": stdout,
         "stderr": stderr,
     }
-    if result.returncode != 0:
-        payload["message"] = "Python exited with non-zero status."
-    return payload
 
 
 def _local_tool_executors() -> Dict[str, Any]:

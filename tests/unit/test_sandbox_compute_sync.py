@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.models import AgentComputeSession, AgentFsNode, BrowserUseAgent, PersistentAgent
-from api.services.sandbox_compute import SandboxComputeService
+from api.services.sandbox_compute import SandboxComputeService, _build_nonzero_exit_error_payload
 from api.services.sandbox_filespace_sync import build_filespace_pull_manifest
 
 
@@ -112,3 +112,47 @@ class SandboxComputeSyncTests(TestCase):
 
         session = AgentComputeSession.objects.get(agent=self.agent)
         self.assertEqual(session.last_filespace_pull_at, cursor_two)
+
+    def test_nonzero_exit_error_uses_last_stderr_line_as_message(self):
+        stderr = (
+            '  File "/workspace/exports/hello_country.py", line 30\n'
+            '    print(f"\n'
+            "          ^\n"
+            "SyntaxError: unterminated f-string literal (detected at line 30)\n"
+        )
+        payload = _build_nonzero_exit_error_payload(
+            process_name="Python",
+            exit_code=1,
+            stdout="",
+            stderr=stderr,
+        )
+
+        self.assertEqual(payload.get("status"), "error")
+        self.assertEqual(payload.get("exit_code"), 1)
+        self.assertEqual(payload.get("message"), "SyntaxError: unterminated f-string literal (detected at line 30)")
+        self.assertEqual(payload.get("detail"), stderr)
+
+    def test_nonzero_exit_error_falls_back_when_stderr_missing(self):
+        payload = _build_nonzero_exit_error_payload(
+            process_name="Command",
+            exit_code=7,
+            stdout="",
+            stderr="",
+        )
+
+        self.assertEqual(payload.get("status"), "error")
+        self.assertEqual(payload.get("message"), "Command exited with status 7.")
+        self.assertEqual(payload.get("stderr"), "")
+        self.assertNotIn("detail", payload)
+
+    def test_nonzero_exit_error_preserves_streams(self):
+        payload = _build_nonzero_exit_error_payload(
+            process_name="Python",
+            exit_code=3,
+            stdout="partial output",
+            stderr="ValueError: boom\n",
+        )
+
+        self.assertEqual(payload.get("stdout"), "partial output")
+        self.assertEqual(payload.get("stderr"), "ValueError: boom\n")
+        self.assertEqual(payload.get("message"), "ValueError: boom")
