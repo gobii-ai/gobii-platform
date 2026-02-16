@@ -36,6 +36,22 @@ class GoogleAnalyticsMP:
         return transaction_id[:100]
 
     @staticmethod
+    def _extract_transaction_value(properties: dict | None) -> float | int | None:
+        if not properties:
+            return None
+        candidate = properties.get("transaction_value")
+        if candidate is None or isinstance(candidate, bool):
+            return None
+        if isinstance(candidate, (int, float)):
+            return candidate
+        if isinstance(candidate, str):
+            try:
+                return float(candidate.strip())
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
     def _sanitize_params(properties: dict | None) -> dict:
         if not properties:
             return {}
@@ -106,6 +122,10 @@ class GoogleAnalyticsMP:
             if not transaction_id:
                 return
             params["transaction_id"] = transaction_id
+            transaction_value = self._extract_transaction_value(properties)
+            if transaction_value is not None:
+                params["value"] = transaction_value
+            params.pop("transaction_value", None)
         params["event_id"] = str(evt.get("event_id") or "")
         params.setdefault("engagement_time_msec", 1)
 

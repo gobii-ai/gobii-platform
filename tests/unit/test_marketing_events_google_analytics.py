@@ -140,6 +140,35 @@ class GoogleAnalyticsMPTests(SimpleTestCase):
         self.assertEqual(params["currency"], "USD")
         self.assertNotIn("stripe.invoice_id", params)
 
+    def test_send_subscribe_purchase_uses_transaction_value_over_ltv_value(self):
+        provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
+        evt = {
+            "event_name": "Subscribe",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-sub-raw-value",
+            "properties": {
+                "plan": "startup",
+                "stripe.invoice_id": "in_456",
+                "value": 150.0,
+                "transaction_value": 50.0,
+                "currency": "USD",
+            },
+            "ids": {"external_id": "hashed-user-id"},
+            "network": {"ga_client_id": "GA1.2.111.222"},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.google_analytics.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        params = mock_post.call_args.kwargs["json"]["events"][0]["params"]
+        self.assertEqual(params["transaction_id"], "in_456")
+        self.assertEqual(params["value"], 50.0)
+        self.assertNotIn("transaction_value", params)
+
     def test_send_subscribe_skips_when_invoice_id_missing(self):
         provider = GoogleAnalyticsMP(measurement_id="G-TEST123", api_secret="secret-123")
         evt = {

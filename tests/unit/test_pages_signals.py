@@ -1593,8 +1593,51 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
         self.assertEqual(props["subscription_id"], "sub_user_succeeded")
         self.assertEqual(props["stripe.invoice_id"], payload["id"])
+        self.assertEqual(props["transaction_value"], 30.0)
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], "evt-123")
+
+    def test_invoice_payment_succeeded_emits_ga_only_subscribe_for_standard_renewal(self):
+        payload = _build_invoice_payload(
+            customer_id="cus_user_succeeded",
+            subscription_id="sub_user_succeeded",
+            amount_paid=3000,
+            status="paid",
+            billing_reason="subscription_cycle",
+            product_id="prod_plan",
+        )
+        payload["lines"]["data"][0]["amount"] = 3000
+        payload["lines"]["data"][0]["price"]["unit_amount"] = 3000
+        payload["lines"]["data"][0]["price"]["currency"] = "usd"
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
+            subscription=SimpleNamespace(id="sub_user_succeeded", stripe_data={"metadata": {"gobii_event_id": "evt-renew"}}),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_invoice_payment_succeeded(event)
+
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
+        self.assertEqual(capi_kwargs["provider_targets"], ["google_analytics"])
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
+        self.assertEqual(props["subscription_id"], "sub_user_succeeded")
+        self.assertEqual(props["stripe.invoice_id"], payload["id"])
+        self.assertEqual(props["transaction_value"], 30.0)
+        self.assertEqual(props["currency"], "USD")
+        self.assertEqual(props["event_id"], "evt-renew")
 
     def test_invoice_payment_succeeded_does_not_emit_subscribe_for_trial_start(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)

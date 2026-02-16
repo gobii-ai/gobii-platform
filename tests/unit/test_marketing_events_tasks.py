@@ -64,3 +64,36 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["properties"]["provider"], "MetaCAPI")
         self.assertEqual(kwargs["properties"]["event_id"], "evt-456")
         self.assertEqual(kwargs["properties"]["error_type"], "permanent")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks.get_providers")
+    def test_enqueue_respects_provider_targets(self, mock_get_providers, mock_track):
+        meta_provider = MagicMock()
+        meta_provider.__class__.__name__ = "MetaCAPI"
+        meta_provider.send.return_value = {}
+
+        ga_provider = MagicMock()
+        ga_provider.__class__.__name__ = "GoogleAnalyticsMP"
+        ga_provider.send.return_value = {}
+
+        mock_get_providers.return_value = [meta_provider, ga_provider]
+
+        enqueue_marketing_event(
+            {
+                "event_name": "Subscribe",
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-789"},
+                "user": {"id": "88", "email": "test@example.com"},
+                "context": {},
+                "provider_targets": ["google_analytics"],
+            }
+        )
+
+        meta_provider.send.assert_not_called()
+        ga_provider.send.assert_called_once()
+
+        mock_track.assert_called_once()
+        kwargs = mock_track.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], 88)
+        self.assertEqual(kwargs["event"], "CAPI Event Sent")
+        self.assertEqual(kwargs["properties"]["provider"], "GoogleAnalyticsMP")

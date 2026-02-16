@@ -1494,10 +1494,12 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             )
             # Stripe can emit invoice.payment_succeeded when a trial starts (often amount=0).
             # Keep Subscribe for non-trial subscription starts and trial conversion billing.
+            # Standard renewals are also sent to GA as purchase events, but not to other CAPI providers.
             should_subscribe = trial_conversion or (
                 billing_reason == "subscription_create" and not trial_start_invoice
             )
-            if should_subscribe and owner_type == "user" and owner:
+            should_send_ga_renewal = billing_reason == "subscription_cycle" and not trial_conversion
+            if (should_subscribe or should_send_ga_renewal) and owner_type == "user" and owner:
                 marketing_properties = {
                     "plan": plan_value,
                     "subscription_id": subscription_id,
@@ -1516,6 +1518,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                 value, currency = _calculate_subscription_value_from_lines(lines)
                 ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
                 if value is not None:
+                    marketing_properties["transaction_value"] = value
                     marketing_properties["value"] = value * ltv_multiple
                 if currency:
                     marketing_properties["currency"] = currency
@@ -1532,6 +1535,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     properties=marketing_properties,
                     request=None,
                     context=subscribe_context,
+                    provider_targets=["google_analytics"] if should_send_ga_renewal else None,
                 )
         except Exception:
             logger.exception(
