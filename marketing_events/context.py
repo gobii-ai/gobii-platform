@@ -32,6 +32,7 @@ def extract_click_context(request):
 
     fbp = c.get("_fbp")
     fbc = c.get("_fbc")
+    ga_client_id = c.get("_ga")
     fbclid = q.get("fbclid")
     if not fbc and fbclid:
         # synthesize per Meta guidance: fb.1.<ts_ms>.<fbclid>
@@ -54,6 +55,7 @@ def extract_click_context(request):
             "rdt_cid": rdt_cid,
             "ttclid": ttclid,
         },
+        "ga_client_id": ga_client_id,
         "page": {"url": request.build_absolute_uri()},
         # optional feature flag you can pass from caller: context={"consent": True/False}
     }

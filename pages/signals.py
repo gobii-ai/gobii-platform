@@ -593,6 +593,10 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     if last_user_agent:
         context["user_agent"] = last_user_agent
 
+    ga_client_id = getattr(attribution, "ga_client_id", None)
+    if ga_client_id:
+        context["ga_client_id"] = ga_client_id
+
     return context
 
 
@@ -1490,13 +1494,16 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             )
             # Stripe can emit invoice.payment_succeeded when a trial starts (often amount=0).
             # Keep Subscribe for non-trial subscription starts and trial conversion billing.
+            # Standard renewals are also sent to GA as purchase events, but not to other CAPI providers.
             should_subscribe = trial_conversion or (
                 billing_reason == "subscription_create" and not trial_start_invoice
             )
-            if should_subscribe and owner_type == "user" and owner:
+            should_send_ga_renewal = billing_reason == "subscription_cycle" and not trial_conversion
+            if (should_subscribe or should_send_ga_renewal) and owner_type == "user" and owner:
                 marketing_properties = {
                     "plan": plan_value,
                     "subscription_id": subscription_id,
+                    "stripe.invoice_id": payload.get("id"),
                 }
 
                 metadata = {}
@@ -1504,13 +1511,21 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     metadata = _coerce_metadata_dict(subscription_data.get("metadata"))
                 if not metadata:
                     metadata = _coerce_metadata_dict(payload.get("metadata"))
-                event_id_override = metadata.get("gobii_event_id")
-                if isinstance(event_id_override, str) and event_id_override.strip():
-                    marketing_properties["event_id"] = event_id_override.strip()
+                if should_send_ga_renewal:
+                    # Use invoice-scoped event_id for renewals so repeated webhook deliveries dedupe safely
+                    # while avoiding reuse of the original checkout event_id stored on the subscription.
+                    renewal_event_id = payload.get("id")
+                    if renewal_event_id:
+                        marketing_properties["event_id"] = str(renewal_event_id).strip()
+                else:
+                    event_id_override = metadata.get("gobii_event_id")
+                    if isinstance(event_id_override, str) and event_id_override.strip():
+                        marketing_properties["event_id"] = event_id_override.strip()
 
                 value, currency = _calculate_subscription_value_from_lines(lines)
                 ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
                 if value is not None:
+                    marketing_properties["transaction_value"] = value
                     marketing_properties["value"] = value * ltv_multiple
                 if currency:
                     marketing_properties["currency"] = currency
@@ -1527,6 +1542,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     properties=marketing_properties,
                     request=None,
                     context=subscribe_context,
+                    provider_targets=["google_analytics"] if should_send_ga_renewal else None,
                 )
         except Exception:
             logger.exception(

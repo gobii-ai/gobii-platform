@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Zap } from 'lucide-react'
 import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
@@ -15,6 +15,8 @@ type AppRoute =
   | { kind: 'agent-select' }
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
+
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -81,6 +83,53 @@ function parseRoute(pathname: string): AppRoute {
   }
 
   return { kind: 'not-found' }
+}
+
+function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
+  if (route.kind === 'command-center') {
+    return 'command_center'
+  }
+  if (route.kind === 'agent-select') {
+    return 'agent_select'
+  }
+  if (route.kind === 'agent-chat') {
+    return route.agentId ? 'agent_chat' : 'agent_new'
+  }
+  return 'not_found'
+}
+
+function getAnalyticsPath(route: AppRoute, pathname: string): string {
+  if (route.kind === 'command-center') {
+    return '/app'
+  }
+  if (route.kind === 'agent-select') {
+    return '/app/agents'
+  }
+  if (route.kind === 'agent-chat') {
+    return route.agentId ? '/app/agents/:id' : '/app/agents/new'
+  }
+  return pathname
+}
+
+function getAnalyticsTitle(route: AppRoute): string {
+  if (route.kind === 'command-center') {
+    return 'Command Center · Gobii'
+  }
+  if (route.kind === 'agent-select') {
+    return 'Select a conversation · Gobii'
+  }
+  if (route.kind === 'agent-chat') {
+    return route.agentId ? 'Agent · Gobii' : 'New Agent · Gobii'
+  }
+  return 'Not found · Gobii'
+}
+
+function cleanQueryForTracking(search: string): string {
+  const params = new URLSearchParams(search)
+  params.delete('embed')
+  params.delete('return_to')
+  const cleaned = params.toString()
+  return cleaned ? `?${cleaned}` : ''
 }
 
 function parseBooleanFlag(value: string | null): boolean {
@@ -249,6 +298,7 @@ export function ImmersiveApp() {
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
+  const hasSkippedInitialSegmentPage = useRef(false)
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
@@ -269,6 +319,33 @@ export function ImmersiveApp() {
       window.location.origin,
     )
   }, [embed, location.pathname, location.search])
+
+  useEffect(() => {
+    const analyticsRoute = getAnalyticsRoute(route)
+    const analyticsPath = `${getAnalyticsPath(route, location.pathname)}${cleanQueryForTracking(location.search)}`
+    const analyticsUrl = `${window.location.origin}${analyticsPath}`
+    const analyticsTitle = getAnalyticsTitle(route)
+
+    window.gtag?.('event', 'page_view', {
+      page_title: analyticsTitle,
+      page_path: analyticsPath,
+      page_location: analyticsUrl,
+      app_route: analyticsRoute,
+      app_embed: embed ? 'true' : 'false',
+    })
+
+    if (!hasSkippedInitialSegmentPage.current) {
+      hasSkippedInitialSegmentPage.current = true
+      return
+    }
+
+    window.analytics?.page('App', analyticsRoute, {
+      path: analyticsPath,
+      url: analyticsUrl,
+      app_route: analyticsRoute,
+      embed,
+    })
+  }, [route, location.pathname, location.search, embed])
 
   useEffect(() => {
     if (route.kind === 'agent-chat') {

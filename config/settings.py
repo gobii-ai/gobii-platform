@@ -364,7 +364,6 @@ TEMPLATES = [
     },
 ]
 
-
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
@@ -992,6 +991,10 @@ SEGMENT_WEB_WRITE_KEY = env(
         "SEGMENT_WEB_WRITE_KEY",
         fallback=SEGMENT_WRITE_KEY,
     ),
+)
+GA_MEASUREMENT_API_SECRET = env(
+    "GA_MEASUREMENT_API_SECRET",
+    default=_proprietary_default("analytics", "GA_MEASUREMENT_API_SECRET"),
 )
 
 # Ad/Pixel IDs (empty disables)

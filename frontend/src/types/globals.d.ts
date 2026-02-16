@@ -36,9 +36,14 @@ interface SegmentAnalytics {
   ready(callback: () => void): void
 }
 
+type GtagParams = Record<string, string | number | boolean | undefined>
+type GtagCommand = 'config' | 'event' | 'js' | 'set' | 'consent'
+type Gtag = (command: GtagCommand, targetOrValue: string | Date, params?: GtagParams) => void
+
 declare global {
   interface Window {
     analytics?: SegmentAnalytics
+    gtag?: Gtag
   }
 }
 

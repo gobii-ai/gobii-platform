@@ -79,6 +79,9 @@
   </script>
   {% endif %}
 
+  <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  <script src="{% static 'js/signup_tracking.js' %}"></script>
+
   {# Signup tracking events - uses shared include with fetch-based retry #}
   {% with signup_tracking_source='react_shell' %}
     {% include "includes/_signup_tracking.html" %}

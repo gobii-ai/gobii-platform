@@ -39,6 +39,13 @@ DATABASES = {
     }
 }
 
+# Tests can toggle GOBII_PROPRIETARY_MODE with override_settings after Django
+# has already loaded template app directories. Keep proprietary templates in
+# test-only DIRS so proprietary views can still render in those cases.
+_proprietary_template_dir = BASE_DIR / "proprietary" / "templates"
+if _proprietary_template_dir.exists():
+    TEMPLATES[0]["DIRS"].append(_proprietary_template_dir)
+
 # Disable all migrations to avoid PostgreSQL-specific SQL (e.g., CASCADE, EXTENSION) when running
 # the suite in SQLite. Django will instead create the schema directly from models.
 
