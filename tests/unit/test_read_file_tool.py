@@ -89,6 +89,38 @@ class ReadFileToolTests(TestCase):
         self.assertEqual(result.get("format"), "raw_text")
         self.assertEqual(result.get("text"), "octet-stream text\n")
 
+    def test_raw_text_allows_vendor_json_mime_type(self):
+        self._write_file(
+            path="/exports/vendor.json",
+            content=b'{"hello":"world"}\n',
+            mime_type="application/vnd.api+json",
+        )
+
+        result = execute_read_file(
+            self.agent,
+            {"path": "/exports/vendor.json", "response_format": "raw_text"},
+        )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("format"), "raw_text")
+        self.assertEqual(result.get("text"), "{\"hello\":\"world\"}\n")
+
+    def test_raw_text_rejects_office_vnd_mime_even_without_extension(self):
+        self._write_file(
+            path="/exports/word_blob",
+            content=b"PK\x03\x04",
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+        result = execute_read_file(
+            self.agent,
+            {"path": "/exports/word_blob", "response_format": "raw_text"},
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("raw_text", result.get("message", ""))
+        self.assertIn("markdown", result.get("message", ""))
+
     def test_raw_text_rejects_pdf_and_points_to_markdown(self):
         self._write_file(
             path="/exports/report.pdf",

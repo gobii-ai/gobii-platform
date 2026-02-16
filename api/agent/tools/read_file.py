@@ -1,3 +1,4 @@
+import codecs
 import logging
 import os
 import tempfile
@@ -40,6 +41,18 @@ RAW_TEXT_HARD_BLOCKED_EXTENSIONS = {
     ".xls",
     ".xlsx",
 }
+
+RAW_TEXT_HARD_BLOCKED_MIME_TYPES = {
+    "application/pdf",
+    "application/msword",
+}
+
+RAW_TEXT_HARD_BLOCKED_MIME_PREFIXES = (
+    "image/",
+    "application/vnd.ms-",
+    "application/vnd.openxmlformats-officedocument.",
+    "application/vnd.oasis.opendocument.",
+)
 
 
 class _MarkItDownChatCompletions:
@@ -131,13 +144,9 @@ def _resolve_response_format(params: Dict[str, Any]) -> str:
 def _is_hard_blocked_for_raw_text(node: AgentFsNode) -> bool:
     mime_type = (node.mime_type or "").strip().lower()
     if mime_type:
-        if mime_type.startswith("image/"):
+        if mime_type.startswith(RAW_TEXT_HARD_BLOCKED_MIME_PREFIXES):
             return True
-        if mime_type == "application/pdf":
-            return True
-        if mime_type.startswith("application/vnd."):
-            return True
-        if mime_type in {"application/msword"}:
+        if mime_type in RAW_TEXT_HARD_BLOCKED_MIME_TYPES:
             return True
 
     extension = os.path.splitext(node.name or "")[1].lower()
@@ -145,21 +154,21 @@ def _is_hard_blocked_for_raw_text(node: AgentFsNode) -> bool:
 
 
 def _read_node_text(node: AgentFsNode, max_size: int | None) -> str:
-    chunks: list[bytes] = []
+    decoder = codecs.getincrementaldecoder("utf-8")("strict")
+    text_chunks: list[str] = []
     total_bytes = 0
     with default_storage.open(node.content.name, "rb") as src:
         for chunk in iter(lambda: src.read(BUFFER_SIZE), b""):
-            chunks.append(chunk)
+            if b"\x00" in chunk:
+                raise UnicodeDecodeError("utf-8", chunk, 0, 1, "binary-like content with null bytes")
             total_bytes += len(chunk)
             if max_size and total_bytes > max_size:
                 raise ValueError(
                     f"File exceeds maximum allowed size while reading ({total_bytes} bytes > {max_size} bytes)."
                 )
-
-    data = b"".join(chunks)
-    if b"\x00" in data:
-        raise UnicodeDecodeError("utf-8", data, 0, 1, "binary-like content with null bytes")
-    return data.decode("utf-8")
+            text_chunks.append(decoder.decode(chunk))
+    text_chunks.append(decoder.decode(b"", final=True))
+    return "".join(text_chunks)
 
 
 def get_read_file_tool() -> Dict[str, Any]:
