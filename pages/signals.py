@@ -1511,9 +1511,16 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     metadata = _coerce_metadata_dict(subscription_data.get("metadata"))
                 if not metadata:
                     metadata = _coerce_metadata_dict(payload.get("metadata"))
-                event_id_override = metadata.get("gobii_event_id")
-                if isinstance(event_id_override, str) and event_id_override.strip():
-                    marketing_properties["event_id"] = event_id_override.strip()
+                if should_send_ga_renewal:
+                    # Use invoice-scoped event_id for renewals so repeated webhook deliveries dedupe safely
+                    # while avoiding reuse of the original checkout event_id stored on the subscription.
+                    renewal_event_id = payload.get("id")
+                    if renewal_event_id:
+                        marketing_properties["event_id"] = str(renewal_event_id).strip()
+                else:
+                    event_id_override = metadata.get("gobii_event_id")
+                    if isinstance(event_id_override, str) and event_id_override.strip():
+                        marketing_properties["event_id"] = event_id_override.strip()
 
                 value, currency = _calculate_subscription_value_from_lines(lines)
                 ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)

@@ -1637,7 +1637,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["stripe.invoice_id"], payload["id"])
         self.assertEqual(props["transaction_value"], 30.0)
         self.assertEqual(props["currency"], "USD")
-        self.assertEqual(props["event_id"], "evt-renew")
+        self.assertEqual(props["event_id"], payload["id"])
 
     def test_invoice_payment_succeeded_does_not_emit_subscribe_for_trial_start(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
