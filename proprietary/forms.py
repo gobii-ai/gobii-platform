@@ -65,7 +65,7 @@ class PrequalifyForm(forms.Form):
     budget_range = forms.ChoiceField(choices=BUDGET_CHOICES, label="Budget range")
     timeline = forms.ChoiceField(choices=TIMELINE_CHOICES, label="Timeline")
     use_case = forms.CharField(widget=forms.Textarea, label="Primary use case")
-    website = forms.URLField(required=False, label="Website or LinkedIn")
+    website = forms.CharField(max_length=254, required=False, label="Website or LinkedIn")
     notes = forms.CharField(required=False, widget=forms.Textarea, label="Additional context")
 
     def __init__(self, *args, **kwargs):
