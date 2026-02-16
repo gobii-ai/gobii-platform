@@ -1592,6 +1592,7 @@ class PaymentSucceededSignalTests(TestCase):
         props = capi_kwargs["properties"]
         self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
         self.assertEqual(props["subscription_id"], "sub_user_succeeded")
+        self.assertEqual(props["stripe.invoice_id"], payload["id"])
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], "evt-123")
 
