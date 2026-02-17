@@ -48,6 +48,7 @@ class PublicTemplateViewsTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, template.display_name)
+        self.assertContains(response, f'href="{reverse("pages:library")}"')
 
     @tag("batch_public_templates")
     def test_public_template_hire_sets_session(self):
