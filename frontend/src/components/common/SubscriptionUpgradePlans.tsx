@@ -70,7 +70,7 @@ export function SubscriptionUpgradePlans({
   source,
   allowDowngrade = false,
 }: SubscriptionUpgradePlansProps) {
-  const { trialDaysByPlan } = useSubscriptionStore()
+  const { trialDaysByPlan, trialEligible } = useSubscriptionStore()
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const canSelectPlan = useCallback(
     (planId: PlanTier) => {
@@ -98,7 +98,12 @@ export function SubscriptionUpgradePlans({
     ? 'mt-4 text-center'
     : 'border-t border-slate-200 bg-white px-6 py-4 sm:px-8'
   const hasAnyTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale) > 0
-  const useTrialCopy = !allowDowngrade && hasAnyTrialDays && (source === 'trial_onboarding' || currentPlan === 'free')
+  const useTrialCopy = (
+    trialEligible
+    && !allowDowngrade
+    && hasAnyTrialDays
+    && (source === 'trial_onboarding' || currentPlan === 'free')
+  )
 
   return (
     <>
@@ -108,9 +113,10 @@ export function SubscriptionUpgradePlans({
             const isCurrent = isCurrentPlan(plan.id)
             const canUpgrade = canSelectPlan(plan.id)
             const trialDays = plan.id === 'startup' ? trialDaysByPlan.startup : trialDaysByPlan.scale
+            const subscribeLabel = `Subscribe to ${plan.name}`
             const ctaLabel = useTrialCopy
-              ? (trialDays > 0 ? `Start ${trialDays}-day Free Trial` : `Get ${plan.name}`)
-              : (allowDowngrade ? `Select ${plan.name}` : `Get ${plan.name}`)
+              ? (trialDays > 0 ? `Start ${trialDays}-day Free Trial` : subscribeLabel)
+              : (allowDowngrade ? `Select ${plan.name}` : subscribeLabel)
 
             return (
               <div

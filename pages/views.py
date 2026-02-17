@@ -1344,6 +1344,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
         subscription_data = {
             "metadata": metadata,
+            "collection_method": "charge_automatically",
         }
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
@@ -1493,6 +1494,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
 
         subscription_data = {
             "metadata": metadata,
+            "collection_method": "charge_automatically",
         }
         if include_trial:
             subscription_data["trial_period_days"] = trial_days

@@ -33,7 +33,7 @@ class PricingPageCtaCopyTests(TestCase):
     @patch("proprietary.views.get_stripe_customer")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.get_stripe_settings")
-    def test_free_user_pricing_cta_uses_trial_copy_even_with_prior_subscription_history(
+    def test_free_user_pricing_cta_uses_subscribe_copy_with_prior_subscription_history(
         self,
         mock_get_stripe_settings,
         _mock_get_user_plan,
@@ -60,5 +60,5 @@ class PricingPageCtaCopyTests(TestCase):
             plan["code"]: plan
             for plan in response.context["pricing_plans"]
         }
-        self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Start 7-day Free Trial")
-        self.assertEqual(plans[PlanNames.SCALE]["cta"], "Start 14-day Free Trial")
+        self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Subscribe to Pro")
+        self.assertEqual(plans[PlanNames.SCALE]["cta"], "Subscribe to Scale")

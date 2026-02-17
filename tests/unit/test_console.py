@@ -79,8 +79,40 @@ class ConsoleViewsTest(TestCase):
         )
 
     @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription")
+    @patch("console.views.get_stripe_customer")
     @patch("console.views.get_stripe_settings")
-    def test_user_plan_api_includes_trial_days(self, mock_get_stripe_settings):
+    def test_user_plan_api_includes_trial_days(
+        self,
+        mock_get_stripe_settings,
+        mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=14,
+            scale_trial_days=30,
+        )
+        mock_get_stripe_customer.return_value = None
+
+        response = self.client.get(reverse("get_user_plan"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("startup_trial_days"), 14)
+        self.assertEqual(payload.get("scale_trial_days"), 30)
+        self.assertTrue(payload.get("trial_eligible"))
+        mock_customer_has_any_individual_subscription.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription", return_value=True)
+    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_trial_history"))
+    @patch("console.views.get_stripe_settings")
+    def test_user_plan_api_marks_trial_ineligible_for_prior_subscription(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=14,
             scale_trial_days=30,
@@ -90,18 +122,26 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload.get("startup_trial_days"), 14)
-        self.assertEqual(payload.get("scale_trial_days"), 30)
+        self.assertFalse(payload.get("trial_eligible"))
+        mock_customer_has_any_individual_subscription.assert_called_once_with("cus_trial_history")
 
     @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription")
+    @patch("console.views.get_stripe_customer")
     @patch("console.views.get_stripe_settings")
-    def test_agent_chat_shell_exposes_trial_days_in_data_attributes(self, mock_get_stripe_settings):
+    def test_agent_chat_shell_exposes_trial_days_in_data_attributes(
+        self,
+        mock_get_stripe_settings,
+        mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
         from api.models import BrowserUseAgent, PersistentAgent
 
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=9,
             scale_trial_days=18,
         )
+        mock_get_stripe_customer.return_value = None
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -119,7 +159,43 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-startup-trial-days="9"')
         self.assertContains(response, 'data-scale-trial-days="18"')
+        self.assertContains(response, 'data-trial-eligible="true"')
         self.assertContains(response, 'data-is-staff="false"')
+        mock_customer_has_any_individual_subscription.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription", return_value=True)
+    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_trial_history"))
+    @patch("console.views.get_stripe_settings")
+    def test_agent_chat_shell_exposes_trial_ineligible_data_attribute(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=9,
+            scale_trial_days=18,
+        )
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Trial Eligibility Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Trial Eligibility Agent",
+            charter="Trial eligibility charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-trial-eligible="false"')
+        mock_customer_has_any_individual_subscription.assert_called_once_with("cus_trial_history")
 
     @tag("batch_console_agents")
     def test_agent_chat_shell_exposes_audit_url_for_staff(self):

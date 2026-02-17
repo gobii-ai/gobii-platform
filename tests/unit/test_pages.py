@@ -1044,6 +1044,7 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+        self.assertEqual(kwargs["subscription_data"]["collection_method"], "charge_automatically")
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
@@ -1091,6 +1092,78 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
+        self.assertEqual(kwargs["subscription_data"]["collection_method"], "charge_automatically")
+
+
+@tag("batch_pages")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
+class ProprietaryPricingTrialCopyTests(TestCase):
+    def _get_pricing_context_for_user(self, user):
+        from django.test.client import RequestFactory
+        from proprietary.views import PricingView
+
+        request = RequestFactory().get("/pricing/")
+        request.user = user
+
+        view = PricingView()
+        view.setup(request)
+        return view.get_context_data()
+
+    @tag("batch_pages")
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=True)
+    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_prior_trial"))
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_cta_uses_subscribe_copy_when_trial_ineligible(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_stripe_customer,
+        _mock_has_any_subscription,
+        _mock_get_user_plan,
+    ):
+        user = get_user_model().objects.create_user(
+            email="pricing_ineligible@test.com",
+            password="pw",
+            username="pricing_ineligible_user",
+        )
+        self.client.force_login(user)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        context = self._get_pricing_context_for_user(user)
+        plans = context["pricing_plans"]
+        self.assertEqual(plans[0]["cta"], "Subscribe to Pro")
+        self.assertEqual(plans[1]["cta"], "Subscribe to Scale")
+
+    @tag("batch_pages")
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=False)
+    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_new_trial"))
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_cta_shows_trial_copy_when_trial_eligible(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_stripe_customer,
+        _mock_has_any_subscription,
+        _mock_get_user_plan,
+    ):
+        user = get_user_model().objects.create_user(
+            email="pricing_eligible@test.com",
+            password="pw",
+            username="pricing_eligible_user",
+        )
+        self.client.force_login(user)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        context = self._get_pricing_context_for_user(user)
+        plans = context["pricing_plans"]
+        self.assertEqual(plans[0]["cta"], "Start 7-day Free Trial")
+        self.assertEqual(plans[1]["cta"], "Start 14-day Free Trial")
 
 
 @tag("batch_pages")

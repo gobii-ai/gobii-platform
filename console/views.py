@@ -134,7 +134,7 @@ from tasks.services import TaskCreditService
 from billing.addons import AddonEntitlementService
 from util import sms
 from util.payments_helper import PaymentsHelper
-from util.integrations import stripe_status
+from util.integrations import stripe_status, IntegrationDisabledError
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     clear_trial_onboarding_intent,
@@ -148,6 +148,7 @@ from util.subscription_helper import (
     allow_user_extra_tasks,
     calculate_extra_tasks_used_during_subscription_period,
     get_user_extra_task_limit,
+    customer_has_any_individual_subscription,
     get_stripe_customer,
     get_or_create_stripe_customer,
     get_organization_plan,
@@ -506,6 +507,23 @@ def _get_checkout_trial_days() -> tuple[int, int]:
         getattr(stripe_settings, "scale_trial_days", 0)
     )
     return startup_trial_days, scale_trial_days
+
+
+def _is_checkout_trial_eligible(user) -> bool:
+    """Return whether a user can start an individual-plan free trial."""
+    customer = get_stripe_customer(user)
+    if not customer or not getattr(customer, "id", None):
+        return True
+
+    try:
+        return not customer_has_any_individual_subscription(str(customer.id))
+    except (IntegrationDisabledError, stripe.error.StripeError, TypeError, ValueError):
+        logger.warning(
+            "Failed to resolve trial eligibility for user %s; defaulting to ineligible.",
+            getattr(user, "id", None),
+            exc_info=True,
+        )
+        return False
 
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
@@ -1961,6 +1979,7 @@ def get_user_plan_api(request):
     from constants.plans import PlanNames
 
     startup_trial_days, scale_trial_days = _get_checkout_trial_days()
+    trial_eligible = _is_checkout_trial_eligible(request.user)
 
     try:
         plan = get_user_plan(request.user)
@@ -1976,6 +1995,7 @@ def get_user_plan_api(request):
             'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
             'startup_trial_days': startup_trial_days,
             'scale_trial_days': scale_trial_days,
+            'trial_eligible': trial_eligible,
         })
     except Exception as e:
         return JsonResponse({
@@ -1983,6 +2003,7 @@ def get_user_plan_api(request):
             'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
             'startup_trial_days': startup_trial_days,
             'scale_trial_days': scale_trial_days,
+            'trial_eligible': trial_eligible,
             'error': str(e),
         })
 
@@ -5564,6 +5585,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["is_collaborator"] = self.is_collaborator
         context["startup_trial_days"] = startup_trial_days
         context["scale_trial_days"] = scale_trial_days
+        context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user)
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
 
