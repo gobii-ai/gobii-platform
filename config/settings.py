@@ -102,7 +102,7 @@ LITELLM_TIMEOUT_SECONDS = env.int("LITELLM_TIMEOUT_SECONDS", default=300)
 # Default timeout (seconds) for MCP tool execution over HTTP
 MCP_HTTP_REQUEST_TIMEOUT_SECONDS = env.float(
     "MCP_HTTP_REQUEST_TIMEOUT_SECONDS",
-    default=60.0,
+    default=180.0,
 )
 # Default timeout (seconds) for MCP tool execution over stdio (command-based)
 MCP_STDIO_REQUEST_TIMEOUT_SECONDS = env.float(
