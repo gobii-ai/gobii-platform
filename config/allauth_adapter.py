@@ -1,7 +1,7 @@
 """Custom allauth adapter hooks."""
 
 import logging
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from functools import lru_cache
 
 from allauth.account.adapter import DefaultAccountAdapter
@@ -21,63 +21,31 @@ from api.services.system_settings import (
 from util.onboarding import set_trial_onboarding_requires_plan_selection
 
 try:
-    import mailchecker as _mailchecker_module
+    from MailChecker import MailChecker as _MailChecker
 except ImportError:  # pragma: no cover - dependency is expected in production
-    _mailchecker_module = None
+    try:
+        from mailchecker import MailChecker as _MailChecker  # type: ignore[attr-defined]
+    except ImportError:
+        _MailChecker = None
 
 logger = logging.getLogger(__name__)
 
 
-def _resolve_mailchecker_callable(target: object) -> Callable[[str], bool] | None:
-    for attribute in (
-        "is_disposable",
-        "is_disposable_domain",
-        "is_temporary_domain",
-        "is_temp_domain",
-    ):
-        detector = getattr(target, attribute, None)
-        if not callable(detector):
-            continue
-
-        def _wrapped(domain: str, *, _detector: Callable[[str], bool]) -> bool:
-            try:
-                return bool(_detector(domain))
-            except (TypeError, ValueError):
-                return bool(_detector(f"u@{domain}"))
-
-        return lambda domain, _detector=detector: _wrapped(domain, _detector=_detector)
-
-    return None
-
-
 @lru_cache(maxsize=1)
-def _get_mailchecker_callable() -> Callable[[str], bool] | None:
-    if _mailchecker_module is None:
+def _get_mailchecker() -> object | None:
+    if _MailChecker is None:
         return None
-
-    module_callable = _resolve_mailchecker_callable(_mailchecker_module)
-    if module_callable:
-        return module_callable
-
-    checker_cls = getattr(_mailchecker_module, "MailChecker", None)
-    if not callable(checker_cls):
-        return None
-
-    checker = checker_cls()
-    return _resolve_mailchecker_callable(checker)
+    return _MailChecker()
 
 
-class _MailcheckerFacade:
-    """Encapsulates disposable-domain checks with one-time detector resolution."""
-
-    def is_disposable(self, domain: str) -> bool:
-        detector = _get_mailchecker_callable()
-        if detector is None:
-            return False
-        return detector(domain)
-
-
-mailchecker = _MailcheckerFacade()
+def is_disposable_domain(domain: str) -> bool:
+    checker = _get_mailchecker()
+    if checker is None:
+        return False
+    checker_fn = getattr(checker, "is_blacklisted", None)
+    if not callable(checker_fn):
+        return False
+    return bool(checker_fn(f"u@{domain}"))
 
 
 class GobiiAccountAdapter(DefaultAccountAdapter):
@@ -96,7 +64,7 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
             self._log_email_block(reason="blocklist", domain=domain, email=cleaned_email)
             raise ValidationError(self.DISPOSABLE_EMAIL_ERROR)
 
-        if settings.GOBII_EMAIL_BLOCK_DISPOSABLE and mailchecker.is_disposable(domain):
+        if settings.GOBII_EMAIL_BLOCK_DISPOSABLE and is_disposable_domain(domain):
             self._log_email_block(reason="disposable", domain=domain, email=cleaned_email)
             raise ValidationError(self.DISPOSABLE_EMAIL_ERROR)
 

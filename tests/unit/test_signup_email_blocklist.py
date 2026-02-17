@@ -23,7 +23,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
         GOBII_EMAIL_DOMAIN_BLOCKLIST=set(),
         GOBII_EMAIL_BLOCK_DISPOSABLE=True,
     )
-    @patch("config.allauth_adapter.mailchecker.is_disposable", return_value=True)
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=True)
     def test_blocks_disposable_domain(self, is_disposable_mock) -> None:
         adapter = get_adapter()
 
@@ -41,7 +41,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
         GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
         GOBII_EMAIL_BLOCK_DISPOSABLE=True,
     )
-    @patch("config.allauth_adapter.mailchecker.is_disposable", return_value=True)
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=True)
     def test_allowlist_overrides_disposable_detection(self, is_disposable_mock) -> None:
         adapter = get_adapter()
 
@@ -55,7 +55,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
         GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
         GOBII_EMAIL_BLOCK_DISPOSABLE=True,
     )
-    @patch("config.allauth_adapter.mailchecker.is_disposable", return_value=False)
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
     def test_blocklist_blocks_non_disposable_domain(self, is_disposable_mock) -> None:
         adapter = get_adapter()
 
@@ -73,7 +73,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
         GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
         GOBII_EMAIL_BLOCK_DISPOSABLE=True,
     )
-    @patch("config.allauth_adapter.mailchecker.is_disposable", return_value=False)
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
     @patch("config.allauth_adapter.logger.warning")
     def test_blocklist_logs_reason_domain_and_redacted_email(
         self,
@@ -97,7 +97,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
         GOBII_EMAIL_DOMAIN_BLOCKLIST=set(),
         GOBII_EMAIL_BLOCK_DISPOSABLE=True,
     )
-    @patch("config.allauth_adapter.mailchecker.is_disposable", return_value=False)
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
     def test_allows_normal_domain(self, is_disposable_mock) -> None:
         adapter = get_adapter()
 
