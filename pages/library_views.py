@@ -1,11 +1,11 @@
 import json
 import uuid
-from collections import Counter
 from json import JSONDecodeError
 from typing import Any
 
 from django.core.cache import cache
-from django.db.models import Count
+from django.db.models import BooleanField, Case, CharField, Count, Exists, F, OuterRef, Q, Value, When
+from django.db.models.functions import Lower
 from django.http import HttpRequest, JsonResponse
 from django.urls import reverse
 from django.utils.decorators import method_decorator
@@ -22,6 +22,22 @@ LIBRARY_MAX_PAGE_SIZE = 100
 
 def _normalize_category(value: str | None) -> str:
     return (value or "").strip() or "Uncategorized"
+
+
+def _library_queryset():
+    return (
+        PersistentAgentTemplate.objects.select_related("public_profile")
+        .filter(public_profile__isnull=False, is_active=True)
+        .exclude(slug="")
+    )
+
+
+def _normalized_category_expression():
+    return Case(
+        When(Q(category__isnull=True) | Q(category=""), then=Value("Uncategorized")),
+        default=F("category"),
+        output_field=CharField(),
+    )
 
 
 def _parse_query_int(
@@ -41,137 +57,35 @@ def _parse_query_int(
     return parsed
 
 
-def _build_library_payload() -> dict[str, Any]:
-    templates = list(
-        PersistentAgentTemplate.objects.select_related("public_profile")
-        .filter(public_profile__isnull=False, is_active=True)
-        .exclude(slug="")
-        .order_by("priority", "display_name")
+def _build_top_categories() -> list[dict[str, Any]]:
+    category_rows = (
+        _library_queryset()
+        .annotate(normalized_category=_normalized_category_expression())
+        .values("normalized_category")
+        .annotate(count=Count("id"))
+        .order_by("-count", Lower("normalized_category"))[:10]
     )
-
-    category_counts: Counter[str] = Counter()
-    agents: list[dict[str, Any]] = []
-
-    for template in templates:
-        if template.public_profile is None:
-            continue
-
-        category = _normalize_category(template.category)
-        category_counts[category] += 1
-        agents.append(
-            {
-                "id": str(template.id),
-                "name": template.display_name,
-                "tagline": template.tagline,
-                "description": template.description,
-                "category": category,
-                "publicProfileHandle": template.public_profile.handle,
-                "templateSlug": template.slug,
-                "templateUrl": reverse(
-                    "pages:public_template_detail",
-                    kwargs={
-                        "handle": template.public_profile.handle,
-                        "template_slug": template.slug,
-                    },
-                ),
-                "_priority": template.priority,
-            }
-        )
-
-    ranked_categories = sorted(
-        category_counts.items(),
-        key=lambda item: (-item[1], item[0].lower()),
-    )
-    top_categories = [
-        {"name": name, "count": count}
-        for name, count in ranked_categories[:10]
+    return [
+        {"name": row["normalized_category"], "count": row["count"]}
+        for row in category_rows
     ]
-    return {
-        "agents": agents,
-        "topCategories": top_categories,
-    }
 
 
-def _get_library_payload() -> dict[str, Any]:
+def _get_top_categories() -> list[dict[str, Any]]:
     cached = cache.get(LIBRARY_CACHE_KEY)
-    if isinstance(cached, dict):
-        cached_agents = cached.get("agents")
-        cached_categories = cached.get("topCategories")
-        if isinstance(cached_agents, list) and isinstance(cached_categories, list):
+    if isinstance(cached, list):
+        valid_items = all(
+            isinstance(item, dict)
+            and isinstance(item.get("name"), str)
+            and isinstance(item.get("count"), int)
+            for item in cached
+        )
+        if valid_items:
             return cached
 
-    payload = _build_library_payload()
-    cache.set(LIBRARY_CACHE_KEY, payload, timeout=LIBRARY_CACHE_TTL_SECONDS)
-    return payload
-
-
-def _attach_like_state(
-    agents: list[dict[str, Any]],
-    *,
-    viewer_user_id: int | None,
-) -> tuple[list[dict[str, Any]], int]:
-    if not agents:
-        return [], 0
-
-    template_ids = [agent["id"] for agent in agents]
-    like_rows = (
-        PersistentAgentTemplateLike.objects
-        .filter(template_id__in=template_ids)
-        .values("template_id")
-        .annotate(count=Count("id"))
-    )
-    like_counts_by_template_id = {
-        str(row["template_id"]): int(row["count"])
-        for row in like_rows
-    }
-
-    liked_template_ids: set[str] = set()
-    if viewer_user_id is not None:
-        liked_template_ids = {
-            str(template_id)
-            for template_id in PersistentAgentTemplateLike.objects.filter(
-                template_id__in=template_ids,
-                user_id=viewer_user_id,
-            ).values_list("template_id", flat=True)
-        }
-
-    total_likes = 0
-    enriched_agents: list[dict[str, Any]] = []
-    for agent in agents:
-        agent_id = agent["id"]
-        like_count = like_counts_by_template_id.get(agent_id, 0)
-        total_likes += like_count
-        enriched_agents.append(
-            {
-                **agent,
-                "likeCount": like_count,
-                "isLiked": agent_id in liked_template_ids,
-            }
-        )
-
-    return enriched_agents, total_likes
-
-
-def _sort_agents_by_popularity(agents: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return sorted(
-        agents,
-        key=lambda agent: (
-            -int(agent.get("likeCount", 0)),
-            int(agent.get("_priority", 100)),
-            str(agent.get("name", "")).casefold(),
-        ),
-    )
-
-
-def _matches_search_query(agent: dict[str, Any], normalized_query: str) -> bool:
-    searchable_fields = (
-        agent.get("name", ""),
-        agent.get("tagline", ""),
-        agent.get("description", ""),
-        agent.get("category", ""),
-        agent.get("publicProfileHandle", ""),
-    )
-    return any(normalized_query in str(field).casefold() for field in searchable_fields)
+    top_categories = _build_top_categories()
+    cache.set(LIBRARY_CACHE_KEY, top_categories, timeout=LIBRARY_CACHE_TTL_SECONDS)
+    return top_categories
 
 
 def _parse_json_payload(request: HttpRequest) -> dict[str, Any]:
@@ -200,8 +114,8 @@ class LibraryAgentsAPIView(View):
     http_method_names = ["get"]
 
     def get(self, request, *args, **kwargs):
-        payload = _get_library_payload()
         viewer_user_id = request.user.id if request.user.is_authenticated else None
+        top_categories = _get_top_categories()
 
         category = _normalize_category(request.GET.get("category")) if request.GET.get("category") else ""
         search_query = str(request.GET.get("q") or "").strip()
@@ -217,44 +131,87 @@ class LibraryAgentsAPIView(View):
             min_value=0,
         )
 
-        all_agents_with_likes, library_total_likes = _attach_like_state(
-            payload["agents"],
-            viewer_user_id=viewer_user_id,
+        library_queryset = _library_queryset().annotate(
+            normalized_category=_normalized_category_expression(),
         )
-        ranked_agents = _sort_agents_by_popularity(all_agents_with_likes)
+        library_total_agents = library_queryset.count()
+        library_total_likes = (
+            PersistentAgentTemplateLike.objects.filter(
+                template__public_profile__isnull=False,
+                template__is_active=True,
+            )
+            .exclude(template__slug="")
+            .count()
+        )
 
+        filtered_queryset = library_queryset
         if category:
-            normalized_category = category.casefold()
-            filtered_agents = [
-                agent for agent in ranked_agents
-                if agent["category"].casefold() == normalized_category
-            ]
-        else:
-            filtered_agents = ranked_agents
+            filtered_queryset = filtered_queryset.filter(
+                normalized_category__iexact=category
+            )
 
         if search_query:
-            normalized_query = search_query.casefold()
-            filtered_agents = [
-                agent for agent in filtered_agents
-                if _matches_search_query(agent, normalized_query)
-            ]
+            filtered_queryset = filtered_queryset.filter(
+                Q(display_name__icontains=search_query)
+                | Q(tagline__icontains=search_query)
+                | Q(description__icontains=search_query)
+                | Q(normalized_category__icontains=search_query)
+                | Q(public_profile__handle__icontains=search_query)
+            )
 
-        total_agents = len(filtered_agents)
+        total_agents = filtered_queryset.count()
+        annotated_queryset = filtered_queryset.annotate(
+            like_count=Count("template_likes"),
+        )
+        if viewer_user_id is not None:
+            annotated_queryset = annotated_queryset.annotate(
+                is_liked=Exists(
+                    PersistentAgentTemplateLike.objects.filter(
+                        template_id=OuterRef("pk"),
+                        user_id=viewer_user_id,
+                    ),
+                )
+            )
+        else:
+            annotated_queryset = annotated_queryset.annotate(
+                is_liked=Value(False, output_field=BooleanField()),
+            )
+
+        page_templates = annotated_queryset.order_by(
+            "-like_count",
+            "priority",
+            Lower("display_name"),
+            "id",
+        )[offset:offset + limit]
+
         page_agents = [
             {
-                key: value
-                for key, value in agent.items()
-                if key != "_priority"
+                "id": str(template.id),
+                "name": template.display_name,
+                "tagline": template.tagline,
+                "description": template.description,
+                "category": template.normalized_category,
+                "publicProfileHandle": template.public_profile.handle,
+                "templateSlug": template.slug,
+                "templateUrl": reverse(
+                    "pages:public_template_detail",
+                    kwargs={
+                        "handle": template.public_profile.handle,
+                        "template_slug": template.slug,
+                    },
+                ),
+                "likeCount": template.like_count,
+                "isLiked": template.is_liked,
             }
-            for agent in filtered_agents[offset:offset + limit]
+            for template in page_templates
         ]
 
         return JsonResponse(
             {
                 "agents": page_agents,
-                "topCategories": payload["topCategories"],
+                "topCategories": top_categories,
                 "totalAgents": total_agents,
-                "libraryTotalAgents": len(ranked_agents),
+                "libraryTotalAgents": library_total_agents,
                 "libraryTotalLikes": library_total_likes,
                 "offset": offset,
                 "limit": limit,

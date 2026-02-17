@@ -11,6 +11,12 @@ type LibraryScreenProps = {
   canLike: boolean
 }
 
+type SearchInputProps = {
+  value: string
+  onChange: (value: string) => void
+  inputClassName: string
+}
+
 const MOST_POPULAR_LABEL = 'Most Popular'
 const MOST_POPULAR_KEY = '__most_popular__'
 const PAGE_SIZE = 24
@@ -27,6 +33,22 @@ function categorySidebarButtonClassName(isActive: boolean): string {
     return 'flex w-full items-center justify-between rounded-lg border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition'
   }
   return 'flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50'
+}
+
+function SearchInput({ value, onChange, inputClassName }: SearchInputProps) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-indigo-400" aria-hidden="true" />
+      <input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder="Search agents..."
+        className={inputClassName}
+        autoComplete="off"
+      />
+    </div>
+  )
 }
 
 function updateLikeInCachedPayload(
@@ -69,11 +91,22 @@ function updateLikeInCachedPayload(
 export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const normalizedSearchQuery = searchQuery.trim()
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const normalizedSearchQuery = debouncedSearchQuery.trim()
   const queryClient = useQueryClient()
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 400)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [searchQuery])
+
   const libraryQuery = useInfiniteQuery({
-    queryKey: ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY, normalizedSearchQuery || '__all__'],
+    queryKey: ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY, normalizedSearchQuery],
     queryFn: ({ signal, pageParam }) =>
       fetchLibraryAgents(listUrl, {
         signal,
@@ -195,17 +228,11 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
       <section className="space-y-3 md:hidden">
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Search</p>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-indigo-400" aria-hidden="true" />
-            <input
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.currentTarget.value)}
-              placeholder="Search agents..."
-              className="w-full rounded-lg border border-indigo-200 bg-white py-2.5 pl-9 pr-3 text-base text-slate-800 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              autoComplete="off"
-            />
-          </div>
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            inputClassName="w-full rounded-lg border border-indigo-200 bg-white py-2.5 pl-9 pr-3 text-base text-slate-800 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
         </div>
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
@@ -242,17 +269,11 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
           <div className="gobii-card-base sticky top-24 space-y-4 p-4">
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Search</p>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-indigo-400" aria-hidden="true" />
-                <input
-                  type="search"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.currentTarget.value)}
-                  placeholder="Search agents..."
-                  className="w-full rounded-lg border border-indigo-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  autoComplete="off"
-                />
-              </div>
+              <SearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                inputClassName="w-full rounded-lg border border-indigo-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
             </div>
 
             <div>
