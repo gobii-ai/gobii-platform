@@ -54,7 +54,7 @@ AGENT_EMAIL_ACCOUNT_COPY_FIELDS = tuple(
 
 def _resolve_owned_agent_for_email_settings(request: HttpRequest, agent_id: str) -> PersistentAgent:
     return get_object_or_404(
-        PersistentAgent.objects.non_eval(),
+        PersistentAgent.objects.non_eval().alive(),
         pk=agent_id,
         user=request.user,
     )

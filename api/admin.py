@@ -2360,20 +2360,21 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     change_list_template = "admin/persistentagent_change_list.html"
     list_display = (
         'name', 'user_email', 'ownership_scope', 'organization', 'browser_use_agent_link',
-        'is_active', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
+        'is_active', 'is_deleted', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
         'message_count', 'created_at'
     )
-    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'created_at')
+    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'is_deleted', 'execution_environment', 'created_at')
     search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description', 'visual_description')
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
         'id', 'ownership_scope', 'created_at', 'updated_at',
         'browser_use_agent_link', 'agent_actions', 'messages_summary_link', 'audit_link',
-        'last_expired_at', 'sleep_email_sent_at',
+        'last_expired_at', 'sleep_email_sent_at', 'deleted_at',
         'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
         'avatar_charter_hash', 'avatar_requested_hash',
         'visual_description', 'visual_description_charter_hash', 'visual_description_requested_hash',
     )
+    actions = ("soft_delete_selected_agents", "undelete_selected_agents")
     inlines = [
         PersistentAgentCommsEndpointInline,
         PersistentAgentWebhookInline,
@@ -2409,6 +2410,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 'is_active',
                 'execution_environment',
             )
+        }),
+        ('Soft Delete', {
+            'description': 'Soft-deleted agents are hidden from user-facing views but remain available for audit/history.',
+            'fields': ('is_deleted', 'deleted_at'),
         }),
         ('Soft Expiration (Testing)', {
             'description': 'Override last_interaction_at to simulate inactivity windows. last_expired_at and notices are read-only for audit.',
@@ -2494,6 +2499,13 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         return form
 
     def save_model(self, request, obj, form, change):
+        from django.utils import timezone
+
+        if obj.is_deleted and obj.deleted_at is None:
+            obj.deleted_at = timezone.now()
+        if not obj.is_deleted:
+            obj.deleted_at = None
+
         if change and obj.pk and 'preferred_llm_tier' in form.changed_data:
             previous = (
                 PersistentAgent.objects.select_related('preferred_llm_tier')
@@ -2524,6 +2536,28 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         obj.daily_credit_limit = int(slider_bounds['slider_limit_max'])
 
         super().save_model(request, obj, form, change)
+
+    @admin.action(description="Soft-delete selected agents")
+    def soft_delete_selected_agents(self, request, queryset):
+        from django.utils import timezone
+
+        now = timezone.now()
+        updated = queryset.filter(is_deleted=False).update(
+            is_active=False,
+            life_state=PersistentAgent.LifeState.EXPIRED,
+            schedule=None,
+            is_deleted=True,
+            deleted_at=now,
+        )
+        self.message_user(request, f"Soft-deleted {updated} agent(s).", level=messages.SUCCESS)
+
+    @admin.action(description="Undelete selected agents")
+    def undelete_selected_agents(self, request, queryset):
+        updated = queryset.filter(is_deleted=True).update(
+            is_deleted=False,
+            deleted_at=None,
+        )
+        self.message_user(request, f"Undeleted {updated} agent(s).", level=messages.SUCCESS)
 
     @admin.display(description='Browser Use Agent')
     def browser_use_agent_link(self, obj):

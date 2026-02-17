@@ -156,6 +156,7 @@ export type ToolChartOption = EChartsOption
 export type UsageAgent = {
   id: string
   name: string
+  is_deleted?: boolean
 }
 
 export type UsageAgentsResponse = {
@@ -170,6 +171,7 @@ export type UsageAgentLeaderboardEntry = {
   success_count: number
   error_count: number
   persistent_id?: string | null
+  is_deleted?: boolean
 }
 
 export type UsageAgentLeaderboardResponse = {

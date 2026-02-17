@@ -79,6 +79,7 @@ def _build_console_home_metrics_for_owner(owner, *, is_org: bool) -> dict[str, o
     if is_org:
         pa_browser_ids = (
             PersistentAgent.objects.non_eval()
+            .alive()
             .filter(organization_id=owner.id)
             .values_list("browser_use_agent_id", flat=True)
         )

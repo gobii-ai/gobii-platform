@@ -120,8 +120,9 @@ export function UsageTrendSection({
     const agentSeries = trendData.agents.map((agent, index) => {
       const color = agentSeriesColors[index % agentSeriesColors.length]
       const data = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.agents?.[agent.id] ?? 0)
+      const agentLabel = agent.is_deleted ? `${agent.name} (Deleted)` : agent.name
       return {
-        name: agent.name,
+        name: agentLabel,
         type: 'line' as const,
         smooth: true,
         showSymbol: false,

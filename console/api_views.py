@@ -1862,7 +1862,7 @@ class AgentCollaboratorLeaveAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = PersistentAgent.objects.non_eval().filter(pk=agent_id).first()
+        agent = PersistentAgent.objects.non_eval().alive().filter(pk=agent_id).first()
         if not agent:
             return JsonResponse({"error": "Agent not found"}, status=404)
 
@@ -2282,7 +2282,10 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         return user_is_collaborator(user, agent)
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = get_object_or_404(PersistentAgent.objects.select_related("organization"), pk=agent_id)
+        agent = get_object_or_404(
+            PersistentAgent.objects.select_related("organization").filter(is_deleted=False),
+            pk=agent_id,
+        )
         if not self._has_access(request.user, agent):
             return HttpResponseForbidden("Not authorized to access this file.")
 

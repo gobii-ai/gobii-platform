@@ -1194,6 +1194,28 @@ class PersistentAgentActivationTests(APITestCase):
         self.assertTrue(self.agent.is_active)
         self.assertEqual(self.agent.life_state, PersistentAgent.LifeState.ACTIVE)
 
+    def test_destroy_soft_deletes_agent(self):
+        url = reverse("api:persistentagent-detail", kwargs={"id": self.agent.id})
+        response = self.client.delete(url)
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.agent.refresh_from_db()
+        self.assertTrue(self.agent.is_deleted)
+        self.assertIsNotNone(self.agent.deleted_at)
+        self.assertFalse(self.agent.is_active)
+        self.assertEqual(self.agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertIsNone(self.agent.schedule)
+
+    def test_deleted_agent_cannot_be_activated(self):
+        self.agent.is_deleted = True
+        self.agent.deleted_at = timezone.now()
+        self.agent.save(update_fields=["is_deleted", "deleted_at"])
+
+        url = reverse("api:persistentagent-activate", kwargs={"id": self.agent.id})
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
 
 @tag("batch_api_agents")
 class AgentApiExceptionHandlingTests(APITestCase):

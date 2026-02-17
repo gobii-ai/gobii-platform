@@ -76,14 +76,14 @@ def _assignable_agents_queryset(server: MCPServerConfig):
     if server.scope == MCPServerConfig.Scope.USER:
         if not server.user_id:
             return PersistentAgent.objects.none()
-        return PersistentAgent.objects.non_eval().filter(
+        return PersistentAgent.objects.non_eval().alive().filter(
             user_id=server.user_id,
             organization_id__isnull=True,
         )
     if server.scope == MCPServerConfig.Scope.ORGANIZATION:
         if not server.organization_id:
             return PersistentAgent.objects.none()
-        return PersistentAgent.objects.non_eval().filter(organization_id=server.organization_id)
+        return PersistentAgent.objects.non_eval().alive().filter(organization_id=server.organization_id)
     return PersistentAgent.objects.none()
 
 

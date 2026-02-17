@@ -695,7 +695,11 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
     destroy=extend_schema(operation_id='deletePersistentAgent', tags=['persistent-agents'])
 )
 class PersistentAgentViewSet(viewsets.ModelViewSet):
-    queryset = PersistentAgent.objects.non_eval().select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
+    queryset = (
+        PersistentAgent.objects.non_eval()
+        .alive()
+        .select_related('browser_use_agent', 'organization', 'preferred_contact_endpoint')
+    )
     serializer_class = PersistentAgentSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = StandardResultsSetPagination
@@ -811,7 +815,9 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         agent.is_active = False
         agent.life_state = PersistentAgent.LifeState.EXPIRED
         agent.schedule = None
-        agent.save(update_fields=['is_active', 'life_state', 'schedule'])
+        agent.is_deleted = True
+        agent.deleted_at = timezone.now()
+        agent.save(update_fields=['is_active', 'life_state', 'schedule', 'is_deleted', 'deleted_at'])
         invalidate_account_info_cache(request.user.id)
         self._track_agent_event(
             agent,

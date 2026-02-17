@@ -2472,13 +2472,13 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         current_context = context.get('current_context', {})
         if current_context.get('type') == 'organization':
             # Show organization's agents
-            persistent_agents = PersistentAgent.objects.non_eval().filter(
+            persistent_agents = PersistentAgent.objects.non_eval().alive().filter(
                 organization_id=current_context.get('id')
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
             if can_user_use_personal_agents_and_api(self.request.user):
-                persistent_agents = PersistentAgent.objects.non_eval().filter(
+                persistent_agents = PersistentAgent.objects.non_eval().alive().filter(
                     user=self.request.user,
                     organization__isnull=True,  # Only personal agents
                 ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
@@ -2489,6 +2489,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         shared_agents_qs = (
             PersistentAgent.objects
             .non_eval()
+            .alive()
             .filter(collaborators__user=self.request.user)
             .select_related('browser_use_agent', 'agent_color')
             .prefetch_related(email_prefetch)
@@ -2944,7 +2945,7 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
 
     def dispatch(self, request, *args, **kwargs):
         self.agent = get_object_or_404(
-            PersistentAgent.objects.non_eval(),
+            PersistentAgent.objects.non_eval().alive(),
             pk=kwargs["pk"],
             user=request.user,
         )
@@ -2999,7 +3000,7 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
         if not agent_id or not action:
             raise Http404()
 
-        agent = get_object_or_404(PersistentAgent.objects.non_eval(), pk=agent_id)
+        agent = get_object_or_404(PersistentAgent.objects.non_eval().alive(), pk=agent_id)
         _enforce_personal_agent_access_or_raise(request.user, agent)
         if not user_can_manage_agent(request.user, agent):
             raise PermissionDenied("You do not have permission to manage this agent.")
@@ -3080,7 +3081,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
           is an active member of that organization.
         - Personal context: user-owned agents without an organization.
         """
-        qs = super().get_queryset().select_related('user__billing')
+        qs = super().get_queryset().filter(is_deleted=False).select_related('user__billing')
 
         context_type = self.request.session.get('context_type', 'personal')
         if context_type == 'organization':
@@ -3315,11 +3316,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         linked_agent_ids.discard(agent.id)
         if agent.organization_id:
-            candidate_qs = PersistentAgent.objects.non_eval().filter(
+            candidate_qs = PersistentAgent.objects.non_eval().alive().filter(
                 organization_id=agent.organization_id
             )
         else:
-            candidate_qs = PersistentAgent.objects.non_eval().filter(
+            candidate_qs = PersistentAgent.objects.non_eval().alive().filter(
                 user=agent.user,
                 organization__isnull=True,
             )
@@ -3641,9 +3642,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         linked_agent_ids.discard(str(agent.id))
 
         if agent.organization_id:
-            candidate_qs = PersistentAgent.objects.non_eval().filter(organization_id=agent.organization_id)
+            candidate_qs = PersistentAgent.objects.non_eval().alive().filter(organization_id=agent.organization_id)
         else:
-            candidate_qs = PersistentAgent.objects.non_eval().filter(user=agent.user, organization__isnull=True)
+            candidate_qs = PersistentAgent.objects.non_eval().alive().filter(user=agent.user, organization__isnull=True)
 
         if linked_agent_ids:
             candidate_qs = candidate_qs.exclude(id__in=linked_agent_ids)
@@ -5276,7 +5277,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     return _error_response('Quotas must be positive integers.')
 
                 try:
-                    peer_agent = PersistentAgent.objects.non_eval().get(id=peer_agent_id)
+                    peer_agent = PersistentAgent.objects.non_eval().alive().get(id=peer_agent_id)
                 except PersistentAgent.DoesNotExist:
                     return _error_response('Selected agent no longer exists.')
 
@@ -5638,7 +5639,7 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
     def _get_agent(self):
         pk = self.kwargs.get('pk')
         agent = (
-            PersistentAgent.objects.non_eval()
+            PersistentAgent.objects.non_eval().alive()
             .filter(pk=pk)
             .select_related('organization')
             .first()
@@ -5738,7 +5739,7 @@ class AgentFilesView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     pk_url_kwarg = "pk"
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('organization')
+        qs = super().get_queryset().filter(is_deleted=False).select_related('organization')
 
         context_type = self.request.session.get('context_type', 'personal')
         if context_type == 'organization':
@@ -5791,9 +5792,10 @@ class AgentDeleteView(LoginRequiredMixin, View):
     @tracer.start_as_current_span("CONSOLE Agent Delete View - delete")
     def delete(self, request, *args, **kwargs):
         try:
-            agent = PersistentAgent.objects.non_eval().get(
+            agent = PersistentAgent.objects.non_eval().alive().get(
                 pk=self.kwargs['pk'],
-                user=request.user
+                user=request.user,
+                is_deleted=False,
             )
             _enforce_personal_agent_access_or_raise(request.user, agent)
 
@@ -5801,34 +5803,27 @@ class AgentDeleteView(LoginRequiredMixin, View):
             agent_id = str(agent.pk)
             agent_org = agent.organization
 
-            # Persist the referenced BrowserUseAgent ID before deleting the PersistentAgent.
-            browser_agent_id = agent.browser_use_agent_id
-            if browser_agent_id and not BrowserUseAgent.objects.filter(pk=browser_agent_id).exists():
-                logger.warning(
-                    "BrowserUseAgent %s not found while deleting PersistentAgent %s",
-                    browser_agent_id,
-                    agent_id,
-                )
-                browser_agent_id = None
+            # Soft-delete behavior: preserve rows for audit and usage history while
+            # disabling execution/scheduling for this agent.
+            update_fields: list[str] = []
+            if agent.is_active:
+                agent.is_active = False
+                update_fields.append("is_active")
+            if agent.life_state != PersistentAgent.LifeState.EXPIRED:
+                agent.life_state = PersistentAgent.LifeState.EXPIRED
+                update_fields.append("life_state")
+            if agent.schedule is not None:
+                agent.schedule = None
+                update_fields.append("schedule")
+            if not agent.is_deleted:
+                agent.is_deleted = True
+                update_fields.append("is_deleted")
+            if agent.deleted_at is None:
+                agent.deleted_at = timezone.now()
+                update_fields.append("deleted_at")
+            if update_fields:
+                agent.save(update_fields=update_fields)
 
-            # Delete the persistent agent using a queryset delete to avoid triggering
-            # BrowserUseAgent lookups that can explode when historical data is missing.
-            deleted_count, _ = PersistentAgent.objects.non_eval().filter(
-                pk=agent.pk,
-                user=request.user,
-            ).delete()
-
-            if deleted_count == 0:
-                logger.warning(
-                    "PersistentAgent %s not deleted via queryset path; returning 404",
-                    agent_id,
-                )
-                return HttpResponse("Agent not found or you don't have permission.", status=404)
-
-            # Now delete the browser use agent if it still exists
-            if browser_agent_id:
-                BrowserUseAgent.objects.filter(pk=browser_agent_id).delete()
-            
             messages.success(request, f"Agent '{agent_name}' has been deleted.")
 
             base_props = {
@@ -5865,8 +5860,6 @@ class AgentDeleteView(LoginRequiredMixin, View):
             return HttpResponse("Agent not found or you don't have permission.", status=404)
         except PermissionDenied:
             raise
-        except Exception as e:
-            return HttpResponse(f"An error occurred: {e}", status=500)
 
 class AgentSecretsView(LoginRequiredMixin, TemplateView):
     """Secrets management page for a single agent."""
@@ -6884,7 +6877,7 @@ class AgentSecretRerequestView(LoginRequiredMixin, View):
     """Mark a fulfilled secret as requested again and clear its stored value."""
     def post(self, request, *args, **kwargs):
         agent = get_object_or_404(
-            PersistentAgent.objects.non_eval(),
+            PersistentAgent.objects.non_eval().alive(),
             pk=self.kwargs['pk'],
             user=request.user,
         )
@@ -6914,7 +6907,7 @@ class AgentSecretsRequestThanksView(LoginRequiredMixin, TemplateView):
     def get_object(self):
         """Get the agent or raise 404."""
         agent = get_object_or_404(
-            PersistentAgent.objects.non_eval(),
+            PersistentAgent.objects.non_eval().alive(),
             pk=self.kwargs['pk'],
             user=self.request.user
         )
@@ -6942,6 +6935,7 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
             super()
             .get_queryset()
             .filter(user=self.request.user)
+            .filter(is_deleted=False)
             .select_related('organization__billing')
         )
         if can_user_use_personal_agents_and_api(self.request.user):
@@ -7027,7 +7021,7 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         pk = self.kwargs['pk']
         current_span = trace.get_current_span()
         agent = (
-            PersistentAgent.objects.non_eval()
+            PersistentAgent.objects.non_eval().alive()
             .filter(pk=pk)
             .select_related('user')
             .first()
@@ -7318,14 +7312,14 @@ class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
     def _resolve_agent_or_issue(self):
         pk = self.kwargs['pk']
         current_span = trace.get_current_span()
-        exists = PersistentAgent.objects.non_eval().filter(pk=pk).exists()
+        exists = PersistentAgent.objects.non_eval().alive().filter(pk=pk).exists()
         if not exists:
             if current_span:
                 current_span.set_attribute("approval.issue", "invalid")
             logger.info("Agent contact-requests-thanks invalid agent id", extra={"agent_id": str(pk)})
             return None, 'invalid'
         agent = (
-            PersistentAgent.objects.non_eval()
+            PersistentAgent.objects.non_eval().alive()
             .filter(pk=pk, user=self.request.user)
             .first()
         )

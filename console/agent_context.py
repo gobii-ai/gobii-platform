@@ -19,6 +19,7 @@ def resolve_context_override_for_agent(
     try:
         agent = (
             PersistentAgent.objects.non_eval()
+            .alive()
             .select_related("organization")
             .get(pk=agent_id)
         )

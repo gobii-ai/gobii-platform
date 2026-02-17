@@ -102,7 +102,7 @@ def queue_owner_task_pack_resume(
     if not owner_id or normalized_owner_type not in {"organization", "user"}:
         return 0
 
-    agents = PersistentAgent.objects.non_eval().filter(
+    agents = PersistentAgent.objects.non_eval().alive().filter(
         is_active=True,
         life_state=PersistentAgent.LifeState.ACTIVE,
     )

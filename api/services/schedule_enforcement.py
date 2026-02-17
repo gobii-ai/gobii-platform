@@ -278,7 +278,7 @@ def agents_for_plan(plan_name: str):
         OrganizationBilling.objects.filter(organization_id=OuterRef("organization_id")).values("subscription")[:1]
     )
 
-    agents_with_plans = PersistentAgent.objects.non_eval().annotate(
+    agents_with_plans = PersistentAgent.objects.non_eval().alive().annotate(
         owner_plan=Coalesce(
             org_plan_subquery,
             user_plan_subquery,

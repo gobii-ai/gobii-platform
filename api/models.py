@@ -320,6 +320,10 @@ def get_default_execution_environment() -> str:
 class PersistentAgentQuerySet(models.QuerySet):
     """Custom queryset helpers for PersistentAgent."""
 
+    def alive(self):
+        """Exclude soft-deleted agents."""
+        return self.filter(is_deleted=False)
+
     def non_eval(self):
         """Exclude agents created for eval runs."""
         return self.exclude(execution_environment="eval")
@@ -5220,6 +5224,8 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="Snapshot of cron schedule for restoration."
     )
+    is_deleted = models.BooleanField(default=False, db_index=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
     last_expired_at = models.DateTimeField(null=True, blank=True)
     sleep_email_sent_at = models.DateTimeField(null=True, blank=True)
     sent_expiration_email = models.BooleanField(
@@ -5293,13 +5299,13 @@ class PersistentAgent(models.Model):
             UniqueConstraint(
                 fields=['user', 'name'],
                 name='unique_persistent_agent_user_name',
-                condition=models.Q(organization__isnull=True),
+                condition=models.Q(organization__isnull=True, is_deleted=False),
             ),
             # Unique per organization when organization is set
             UniqueConstraint(
                 fields=['organization', 'name'],
                 name='unique_persistent_agent_org_name',
-                condition=models.Q(organization__isnull=False),
+                condition=models.Q(organization__isnull=False, is_deleted=False),
             ),
         ]
 
@@ -9806,10 +9812,25 @@ def create_default_filespace_for_agent(sender, instance: PersistentAgent, create
     if not created:
         return
     try:
-        fs = AgentFileSpace.objects.create(
-            name=f"{instance.name} Files",
-            owner_user=instance.user,
-        )
+        base_name = f"{instance.name} Files"
+        fs = None
+        # Keep filespace names unique per owner_user; recreate with numeric suffix
+        # when an agent with the same display name is re-created after soft-delete.
+        for suffix in range(1, 101):
+            candidate_name = base_name if suffix == 1 else f"{base_name} ({suffix})"
+            if AgentFileSpace.objects.filter(owner_user=instance.user, name=candidate_name).exists():
+                continue
+            try:
+                fs = AgentFileSpace.objects.create(
+                    name=candidate_name,
+                    owner_user=instance.user,
+                )
+                break
+            except IntegrityError:
+                continue
+        if fs is None:
+            logger.error("Failed creating default filespace name for agent %s after retries", instance.id)
+            return
         AgentFileSpaceAccess.objects.create(
             filespace=fs,
             agent=instance,

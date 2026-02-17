@@ -79,6 +79,130 @@ class ConsoleViewsTest(TestCase):
         )
 
     @tag("batch_console_agents")
+    def test_staff_agent_audit_page_accessible_for_soft_deleted_agent(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-soft-delete@example.com",
+            email="admin-soft-delete@example.com",
+            password="testpass123",
+        )
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Soft Delete Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Soft Delete Agent",
+            charter="Audit after soft delete",
+            browser_use_agent=browser_agent,
+        )
+
+        delete_response = self.client.delete(reverse("agent_delete", kwargs={"pk": persistent_agent.id}))
+        self.assertEqual(delete_response.status_code, 200)
+
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("console-agent-audit", kwargs={"agent_id": persistent_agent.id}))
+        self.assertEqual(response.status_code, 200)
+
+    @tag("batch_console_agents")
+    def test_admin_action_can_undelete_soft_deleted_agent(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-undelete@example.com",
+            email="admin-undelete@example.com",
+            password="testpass123",
+        )
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Undelete Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Undelete Agent",
+            charter="Admin undelete test",
+            browser_use_agent=browser_agent,
+            is_deleted=True,
+            deleted_at=timezone.now(),
+            is_active=False,
+            life_state=PersistentAgent.LifeState.EXPIRED,
+            schedule=None,
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.post(
+            reverse("admin:api_persistentagent_changelist"),
+            {
+                "action": "undelete_selected_agents",
+                "_selected_action": [str(persistent_agent.id)],
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        persistent_agent.refresh_from_db()
+        self.assertFalse(persistent_agent.is_deleted)
+        self.assertIsNone(persistent_agent.deleted_at)
+
+    @tag("batch_console_agents")
+    def test_deleted_agent_not_accessible_on_agent_detail_for_owner(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Deleted Detail Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Deleted Detail Agent",
+            charter="Owner should no longer access detail after delete",
+            browser_use_agent=browser_agent,
+        )
+
+        delete_response = self.client.delete(reverse("agent_delete", kwargs={"pk": persistent_agent.id}))
+        self.assertEqual(delete_response.status_code, 200)
+
+        detail_response = self.client.get(reverse("agent_detail", kwargs={"pk": persistent_agent.id}))
+        self.assertEqual(detail_response.status_code, 404)
+
+    @tag("batch_console_agents")
+    def test_can_create_new_agent_with_same_name_after_soft_delete(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        original_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Original Same Name Browser Agent",
+        )
+        original_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Reusable Agent Name",
+            charter="Original agent",
+            browser_use_agent=original_browser_agent,
+        )
+
+        delete_response = self.client.delete(reverse("agent_delete", kwargs={"pk": original_agent.id}))
+        self.assertEqual(delete_response.status_code, 200)
+
+        replacement_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Replacement Same Name Browser Agent",
+        )
+        replacement_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Reusable Agent Name",
+            charter="Replacement agent",
+            browser_use_agent=replacement_browser_agent,
+        )
+
+        self.assertNotEqual(original_agent.id, replacement_agent.id)
+        self.assertTrue(PersistentAgent.objects.filter(id=replacement_agent.id).exists())
+
+    @tag("batch_console_agents")
     @patch("console.views.customer_has_any_individual_subscription")
     @patch("console.views.get_stripe_customer")
     @patch("console.views.get_stripe_settings")
@@ -234,9 +358,9 @@ class ConsoleViewsTest(TestCase):
         )
 
     @tag("batch_console_agents")
-    def test_delete_persistent_agent_also_deletes_browser_agent(self):
-        """Test that deleting a persistent agent also deletes its browser agent."""
-        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+    def test_delete_persistent_agent_soft_deletes_and_preserves_browser_agent(self):
+        """Deleting from console should soft-delete the persistent agent and keep browser rows."""
+        from api.models import PersistentAgent, BrowserUseAgent
 
         # Create a browser use agent
         browser_agent = BrowserUseAgent.objects.create(
@@ -249,7 +373,8 @@ class ConsoleViewsTest(TestCase):
             user=self.user,
             name='Test Persistent Agent',
             charter='Test charter',
-            browser_use_agent=browser_agent
+            schedule='0 12 * * *',
+            browser_use_agent=browser_agent,
         )
         
         # Store IDs for verification after deletion
@@ -267,14 +392,20 @@ class ConsoleViewsTest(TestCase):
         # Verify the response is successful
         self.assertEqual(response.status_code, 200)
         
-        # Verify both the persistent agent and browser agent are deleted
-        self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent_id).exists())
-        self.assertFalse(BrowserUseAgent.objects.filter(id=browser_agent_id).exists())
+        # Verify the persistent agent was soft-deleted and browser agent row is retained.
+        persistent_agent.refresh_from_db()
+        self.assertTrue(PersistentAgent.objects.filter(id=persistent_agent_id).exists())
+        self.assertTrue(BrowserUseAgent.objects.filter(id=browser_agent_id).exists())
+        self.assertFalse(persistent_agent.is_active)
+        self.assertEqual(persistent_agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertIsNone(persistent_agent.schedule)
+        self.assertTrue(persistent_agent.is_deleted)
+        self.assertIsNotNone(persistent_agent.deleted_at)
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_handles_missing_browser_agent(self):
-        """Deletion should succeed even if the BrowserUseAgent record is missing."""
-        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+        """Deletion should succeed even if BrowserUseAgent queries fail."""
+        from api.models import PersistentAgent, BrowserUseAgent
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -294,13 +425,17 @@ class ConsoleViewsTest(TestCase):
             response = self.client.delete(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
+        persistent_agent.refresh_from_db()
+        self.assertFalse(persistent_agent.is_active)
+        self.assertEqual(persistent_agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertTrue(persistent_agent.is_deleted)
+        self.assertIsNotNone(persistent_agent.deleted_at)
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_missing_browser_row(self):
-        """Actual missing BrowserUseAgent row should not cause deletion to fail."""
+        """A corrupted missing BrowserUseAgent row should not block soft deletion."""
         from django.db import connection
-        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+        from api.models import PersistentAgent, BrowserUseAgent
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -334,12 +469,16 @@ class ConsoleViewsTest(TestCase):
         response = self.client.delete(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
+        persistent_agent.refresh_from_db()
+        self.assertFalse(persistent_agent.is_active)
+        self.assertEqual(persistent_agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertTrue(persistent_agent.is_deleted)
+        self.assertIsNotNone(persistent_agent.deleted_at)
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_handles_delete_raises_browser_agent_missing(self):
-        """Deletion should succeed even if PersistentAgent.delete raises BrowserUseAgent.DoesNotExist."""
-        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
+        """Soft-delete path should not call PersistentAgent.delete()."""
+        from api.models import PersistentAgent, BrowserUseAgent
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -354,16 +493,21 @@ class ConsoleViewsTest(TestCase):
 
         url = reverse('agent_delete', kwargs={'pk': persistent_agent.id})
 
-        with patch.object(PersistentAgent, 'delete', side_effect=BrowserUseAgent.DoesNotExist):
+        with patch.object(PersistentAgent, 'delete', side_effect=BrowserUseAgent.DoesNotExist) as mock_delete:
             response = self.client.delete(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
-        self.assertFalse(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
+        mock_delete.assert_not_called()
+        persistent_agent.refresh_from_db()
+        self.assertFalse(persistent_agent.is_active)
+        self.assertEqual(persistent_agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertTrue(persistent_agent.is_deleted)
+        self.assertIsNotNone(persistent_agent.deleted_at)
+        self.assertTrue(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_with_tasks(self):
-        """Deleting an agent with BrowserUseAgentTask rows should not error."""
+        """Soft-deleting an agent with BrowserUseAgentTask rows should not error."""
         from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask
 
         browser_agent = BrowserUseAgent.objects.create(
@@ -383,8 +527,12 @@ class ConsoleViewsTest(TestCase):
         response = self.client.delete(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
-        self.assertFalse(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
+        persistent_agent.refresh_from_db()
+        self.assertFalse(persistent_agent.is_active)
+        self.assertEqual(persistent_agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertTrue(persistent_agent.is_deleted)
+        self.assertIsNotNone(persistent_agent.deleted_at)
+        self.assertTrue(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_invalidates_account_info_cache(self):
@@ -439,6 +587,9 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 403)
         self.assertTrue(PersistentAgent.objects.filter(id=persistent_agent.id).exists())
+        persistent_agent.refresh_from_db()
+        self.assertFalse(persistent_agent.is_deleted)
+        self.assertIsNone(persistent_agent.deleted_at)
         self.assertTrue(BrowserUseAgent.objects.filter(id=browser_agent.id).exists())
 
     @patch("console.views.AgentService.has_agents_available", return_value=True)
