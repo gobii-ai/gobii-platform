@@ -1538,6 +1538,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # List of all static view names that should be included in the sitemap
         items = [
             'pages:home',
+            'pages:library',
             'pages:docs_index',
         ]
         # Include pricing only when proprietary mode is enabled
@@ -1572,6 +1573,30 @@ class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
 
     def location(self, template):
         return reverse('pages:pretrained_worker_detail', kwargs={'slug': template.code})
+
+    def lastmod(self, template):
+        return getattr(template, "updated_at", None)
+
+
+class PublicTemplateSitemap(sitemaps.Sitemap):
+    changefreq = "weekly"
+    priority = 0.7
+
+    def items(self):
+        return (
+            PersistentAgentTemplate.objects.select_related("public_profile")
+            .filter(public_profile__isnull=False, is_active=True)
+            .exclude(slug="")
+        )
+
+    def location(self, template):
+        return reverse(
+            "pages:public_template_detail",
+            kwargs={
+                "handle": template.public_profile.handle,
+                "template_slug": template.slug,
+            },
+        )
 
     def lastmod(self, template):
         return getattr(template, "updated_at", None)

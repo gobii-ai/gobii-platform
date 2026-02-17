@@ -49,6 +49,10 @@ class PublicTemplateViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, template.display_name)
         self.assertContains(response, f'href="{reverse("pages:library")}"')
+        self.assertContains(response, '<meta name="description"')
+        self.assertContains(response, '<meta property="og:url"')
+        self.assertContains(response, '<script type="application/ld+json">')
+        self.assertContains(response, '"@type": "SoftwareApplication"')
 
     @tag("batch_public_templates")
     def test_public_template_hire_sets_session(self):
@@ -111,12 +115,41 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="gobii-frontend-root"')
         self.assertContains(response, 'data-app="library"')
+        self.assertContains(response, '<meta name="description"')
+        self.assertContains(response, '<meta property="og:url"')
+        self.assertContains(response, '<script type="application/ld+json">')
+        self.assertContains(response, '"@type": "CollectionPage"')
 
     @tag("batch_public_templates")
     def test_libary_path_redirects_to_library(self):
         response = self.client.get("/libary/")
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 301)
         self.assertEqual(response.url, reverse("pages:library"))
+
+    @tag("batch_public_templates")
+    def test_sitemap_includes_library_and_public_template_urls(self):
+        user = get_user_model().objects.create_user(username="library-sitemap-owner", email="library-sitemap-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="library-sitemap-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="lib-sitemap-template",
+            public_profile=profile,
+            slug="sitemap-template",
+            display_name="Sitemap Template",
+            tagline="Sitemap coverage",
+            description="Ensures sitemap coverage.",
+            charter="Ensure sitemap coverage.",
+            category="Operations",
+            is_active=True,
+        )
+
+        response = self.client.get("/sitemap.xml")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("http://example.com/library/", content)
+        self.assertIn(
+            f"http://example.com/{profile.handle}/{template.slug}/",
+            content,
+        )
 
     @tag("batch_public_templates")
     def test_library_api_returns_public_active_templates(self):
