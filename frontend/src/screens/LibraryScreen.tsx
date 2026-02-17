@@ -159,7 +159,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Library</p>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Most popular shared Gobii agents</h1>
             <p className="max-w-3xl text-sm text-slate-600 sm:text-base">
-              Browse and like publicly shared agents from across Gobii.
+              Browse publicly shared agents from across Gobii.
             </p>
             {!canLike ? (
               <p className="text-sm font-medium text-indigo-700">Sign in to like templates.</p>
@@ -296,7 +296,6 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
                         <a href={agent.templateUrl}>{agent.name}</a>
                       </h2>
                       {agent.tagline ? <p className="mt-2 text-sm font-medium text-slate-700">{agent.tagline}</p> : null}
-                      {agent.description ? <p className="mt-2 text-sm text-slate-600">{agent.description}</p> : null}
 
                       <div className="mt-auto pt-4">
                         <a href={agent.templateUrl} className="text-sm font-medium text-indigo-600 transition group-hover:text-indigo-700">
