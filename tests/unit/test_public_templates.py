@@ -1,7 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase, tag
+from django.templatetags.static import static
 from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
@@ -43,11 +45,82 @@ class PublicTemplateViewsTests(TestCase):
             category="Operations",
         )
 
+        detail_path = reverse(
+            "pages:public_template_detail",
+            kwargs={"handle": profile.handle, "template_slug": template.slug},
+        )
+        response = self.client.get(detail_path)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, template.display_name)
+
+        expected_url = f"{settings.PUBLIC_SITE_URL.rstrip('/')}{detail_path}"
+        expected_image = f"{settings.PUBLIC_SITE_URL.rstrip('/')}{static('images/noBgBlue.png')}"
+        self.assertContains(
+            response,
+            f'<meta property="og:title" content="{template.display_name} Template by @{profile.handle}">',
+            html=True,
+        )
+        self.assertContains(response, f'<meta property="og:url" content="{expected_url}">', html=True)
+        self.assertContains(response, f'<meta property="og:image" content="{expected_image}">', html=True)
+        self.assertContains(response, f'<meta property="og:image:secure_url" content="{expected_image}">', html=True)
+        self.assertContains(response, '<meta name="twitter:card" content="summary_large_image">', html=True)
+        self.assertContains(response, f'<meta name="twitter:url" content="{expected_url}">', html=True)
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_falls_back_to_default_image_for_svg_share_metadata(self):
+        user = get_user_model().objects.create_user(username="owner-image", email="owner-image@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="steady-orbit")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-image",
+            public_profile=profile,
+            slug="launch-update",
+            display_name="Launch Update",
+            tagline="Weekly launch notes",
+            description="Summarizes launch status and blockers.",
+            charter="Compile launch updates each week.",
+            base_schedule="@weekly",
+            recommended_contact_channel="email",
+            category="Operations",
+            hero_image_path="images/ai-directory/standup.svg",
+        )
+
         response = self.client.get(
             reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, template.display_name)
+        self.assertContains(
+            response,
+            f'<meta property="og:image" content="{settings.PUBLIC_SITE_URL.rstrip("/")}{static("images/noBgBlue.png")}">',
+            html=True,
+        )
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_uses_raster_hero_image_for_share_metadata(self):
+        user = get_user_model().objects.create_user(username="owner-image-raster", email="owner-image-raster@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="north-star")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-image-raster",
+            public_profile=profile,
+            slug="sales-digest",
+            display_name="Sales Digest",
+            tagline="Daily sales updates",
+            description="Summarizes pipeline updates.",
+            charter="Compile pipeline updates.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Sales",
+            hero_image_path="images/noBgBlue.png",
+        )
+
+        response = self.client.get(
+            reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'<meta property="og:image" content="{settings.PUBLIC_SITE_URL.rstrip("/")}{static("images/noBgBlue.png")}">',
+            html=True,
+        )
 
     @tag("batch_public_templates")
     def test_public_template_hire_sets_session(self):
