@@ -4989,6 +4989,40 @@ class PersistentAgentTemplate(models.Model):
         return f"PretrainedWorkerTemplate<{self.display_name}>"
 
 
+class PersistentAgentTemplateLike(models.Model):
+    """User-scoped like for a shared template."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    template = models.ForeignKey(
+        PersistentAgentTemplate,
+        on_delete=models.CASCADE,
+        related_name="template_likes",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="liked_persistent_agent_templates",
+        help_text="Authenticated user that liked the template.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            UniqueConstraint(
+                fields=["template", "user"],
+                name="unique_template_like_per_user",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["template", "user"]),
+            models.Index(fields=["-created_at"]),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"TemplateLike<{self.template_id}:{self.user_id}>"
+
+
 class ToolFriendlyName(models.Model):
     """Human-friendly labels for tool identifiers surfaced in templates."""
 

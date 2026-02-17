@@ -15,6 +15,7 @@ const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
 const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
+const LibraryScreen = lazy(async () => ({ default: (await import('./screens/LibraryScreen')).LibraryScreen }))
 const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
 const SystemSettingsScreen = lazy(async () => ({ default: (await import('./screens/SystemSettingsScreen')).SystemSettingsScreen }))
 const BillingScreen = lazy(async () => ({ default: (await import('./screens/BillingScreen')).BillingScreen }))
@@ -37,10 +38,13 @@ if (!mountNode) {
   throw new Error('Gobii frontend mount element not found')
 }
 
-// Initialize subscription state from data attributes
-initializeSubscriptionStore(mountNode)
-
 const appName = mountNode.dataset.app ?? 'agent-chat'
+const shouldInitializeSubscriptionStore = appName !== 'library'
+
+if (shouldInitializeSubscriptionStore) {
+  // Initialize subscription state from data attributes
+  initializeSubscriptionStore(mountNode)
+}
 const isStaff = mountNode.dataset.isStaff === 'true'
 
 const agentId = mountNode.dataset.agentId || null
@@ -162,6 +166,16 @@ switch (appName) {
     const propsId = mountNode.dataset.propsJsonId
     const initialData = readJsonScript<PersistentAgentsScreenProps['initialData']>(propsId)
     screen = <PersistentAgentsScreen initialData={initialData} />
+    break
+  }
+  case 'library': {
+    const listUrl = mountNode.dataset.libraryListUrl
+    const likeUrl = mountNode.dataset.libraryLikeUrl
+    const canLike = mountNode.dataset.libraryCanLike === 'true'
+    if (!listUrl || !likeUrl) {
+      throw new Error('Library API URLs are required')
+    }
+    screen = <LibraryScreen listUrl={listUrl} likeUrl={likeUrl} canLike={canLike} />
     break
   }
   case 'mcp-servers': {
