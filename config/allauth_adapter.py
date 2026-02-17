@@ -56,11 +56,13 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
     def clean_email(self, email: str) -> str:
         cleaned_email = super().clean_email(email)
         domain = self._extract_domain(cleaned_email)
+        allowlist = self._normalize_domains(settings.GOBII_EMAIL_DOMAIN_ALLOWLIST)
 
-        if self._matches_domain_rule(domain, settings.GOBII_EMAIL_DOMAIN_ALLOWLIST):
+        if self._matches_domain_rule(domain, allowlist):
             return cleaned_email
 
-        if self._matches_domain_rule(domain, settings.GOBII_EMAIL_DOMAIN_BLOCKLIST):
+        blocklist = self._effective_blocklist_domains()
+        if self._matches_domain_rule(domain, blocklist):
             self._log_email_block(reason="blocklist", domain=domain, email=cleaned_email)
             raise ValidationError(self.GENERIC_EMAIL_BLOCK_ERROR)
 
@@ -123,11 +125,30 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
         return email.rsplit("@", 1)[-1].strip().lower()
 
     @classmethod
+    def _normalize_domains(cls, domains: Iterable[str] | str | None) -> set[str]:
+        if not domains:
+            return set()
+        if isinstance(domains, str):
+            domain_iterable: Iterable[str] = domains.split(",")
+        else:
+            domain_iterable = domains
+        return {
+            domain.strip().lower()
+            for domain in domain_iterable
+            if domain and domain.strip()
+        }
+
+    @classmethod
+    def _effective_blocklist_domains(cls) -> set[str]:
+        # Keep legacy SIGNUP_BLOCKED_EMAIL_DOMAINS additive so existing overrides
+        # continue to block domains while projects migrate to the new setting name.
+        return cls._normalize_domains(settings.GOBII_EMAIL_DOMAIN_BLOCKLIST) | cls._normalize_domains(
+            settings.SIGNUP_BLOCKED_EMAIL_DOMAINS
+        )
+
+    @classmethod
     def _matches_domain_rule(cls, domain: str, rules: Iterable[str]) -> bool:
-        for raw_rule in rules:
-            rule = raw_rule.strip().lower()
-            if not rule:
-                continue
+        for rule in rules:
             if domain == rule or domain.endswith(f".{rule}"):
                 return True
         return False

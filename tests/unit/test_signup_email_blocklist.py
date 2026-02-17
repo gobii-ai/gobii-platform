@@ -95,6 +95,25 @@ class SignupEmailBlocklistTests(SimpleTestCase):
     @override_settings(
         GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
         GOBII_EMAIL_DOMAIN_BLOCKLIST=set(),
+        SIGNUP_BLOCKED_EMAIL_DOMAINS=["legacy-block.test"],
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
+    def test_legacy_signup_blocked_domains_setting_still_blocks(self, is_disposable_mock) -> None:
+        adapter = get_adapter()
+
+        with self.assertRaises(ValidationError) as exc:
+            adapter.clean_email("user@legacy-block.test")
+
+        self.assertEqual(
+            exc.exception.messages[0],
+            "Please use a non-disposable email address.",
+        )
+        is_disposable_mock.assert_not_called()
+
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST=set(),
         GOBII_EMAIL_BLOCK_DISPOSABLE=True,
     )
     @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
