@@ -2355,8 +2355,56 @@ class SystemMessageForm(forms.Form):
         return data
 
 
+class PersistentAgentAdminForm(forms.ModelForm):
+    class Meta:
+        model = PersistentAgent
+        fields = "__all__"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        is_deleted = cleaned_data.get("is_deleted", self.instance.is_deleted)
+        if not self.instance.pk or is_deleted:
+            return cleaned_data
+
+        was_deleted = (
+            PersistentAgent.objects.filter(pk=self.instance.pk)
+            .values_list("is_deleted", flat=True)
+            .first()
+        )
+        if not was_deleted:
+            return cleaned_data
+
+        user = cleaned_data["user"] if "user" in cleaned_data else self.instance.user
+        if user is None:
+            return cleaned_data
+        organization = (
+            cleaned_data["organization"]
+            if "organization" in cleaned_data
+            else self.instance.organization
+        )
+        name = (
+            cleaned_data["name"]
+            if "name" in cleaned_data
+            else self.instance.name
+        )
+        name = (name or "").strip()
+        has_conflict = PersistentAgent.has_active_name_conflict(
+            user_id=getattr(user, "id", None),
+            organization_id=getattr(organization, "id", None),
+            name=name,
+            exclude_id=self.instance.pk,
+        )
+        if has_conflict:
+            self.add_error(
+                "name",
+                "Cannot restore agent because another active agent with this name already exists for this owner.",
+            )
+        return cleaned_data
+
+
 @admin.register(PersistentAgent)
 class PersistentAgentAdmin(admin.ModelAdmin):
+    form = PersistentAgentAdminForm
     change_list_template = "admin/persistentagent_change_list.html"
     list_display = (
         'name', 'user_email', 'ownership_scope', 'organization', 'browser_use_agent_link',
@@ -2499,11 +2547,9 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         return form
 
     def save_model(self, request, obj, form, change):
-        from django.utils import timezone
-
-        if obj.is_deleted and obj.deleted_at is None:
-            obj.deleted_at = timezone.now()
-        if not obj.is_deleted:
+        if obj.is_deleted:
+            obj.soft_delete(save=False)
+        else:
             obj.deleted_at = None
 
         if change and obj.pk and 'preferred_llm_tier' in form.changed_data:
@@ -2539,25 +2585,32 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
     @admin.action(description="Soft-delete selected agents")
     def soft_delete_selected_agents(self, request, queryset):
-        from django.utils import timezone
-
-        now = timezone.now()
-        updated = queryset.filter(is_deleted=False).update(
-            is_active=False,
-            life_state=PersistentAgent.LifeState.EXPIRED,
-            schedule=None,
-            is_deleted=True,
-            deleted_at=now,
-        )
+        updated = 0
+        for agent in queryset:
+            if agent.soft_delete():
+                updated += 1
         self.message_user(request, f"Soft-deleted {updated} agent(s).", level=messages.SUCCESS)
 
     @admin.action(description="Undelete selected agents")
     def undelete_selected_agents(self, request, queryset):
-        updated = queryset.filter(is_deleted=True).update(
-            is_deleted=False,
-            deleted_at=None,
-        )
-        self.message_user(request, f"Undeleted {updated} agent(s).", level=messages.SUCCESS)
+        restored = 0
+        skipped = 0
+        for agent in queryset.filter(is_deleted=True):
+            try:
+                if agent.restore():
+                    restored += 1
+            except ValidationError:
+                skipped += 1
+        self.message_user(request, f"Undeleted {restored} agent(s).", level=messages.SUCCESS)
+        if skipped:
+            self.message_user(
+                request,
+                (
+                    f"Skipped {skipped} agent(s) because an active agent with the same owner/name "
+                    "already exists."
+                ),
+                level=messages.WARNING,
+            )
 
     @admin.display(description='Browser Use Agent')
     def browser_use_agent_link(self, obj):

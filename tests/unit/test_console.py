@@ -150,6 +150,59 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(persistent_agent.deleted_at)
 
     @tag("batch_console_agents")
+    def test_admin_action_undelete_skips_agent_with_name_conflict(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-undelete-conflict@example.com",
+            email="admin-undelete-conflict@example.com",
+            password="testpass123",
+        )
+
+        deleted_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Conflict Deleted Browser Agent",
+        )
+        deleted_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Conflict Agent",
+            charter="Deleted copy",
+            browser_use_agent=deleted_browser_agent,
+            is_deleted=True,
+            deleted_at=timezone.now(),
+            is_active=False,
+            life_state=PersistentAgent.LifeState.EXPIRED,
+            schedule=None,
+        )
+
+        active_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Conflict Active Browser Agent",
+        )
+        PersistentAgent.objects.create(
+            user=self.user,
+            name="Conflict Agent",
+            charter="Active copy",
+            browser_use_agent=active_browser_agent,
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.post(
+            reverse("admin:api_persistentagent_changelist"),
+            {
+                "action": "undelete_selected_agents",
+                "_selected_action": [str(deleted_agent.id)],
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        deleted_agent.refresh_from_db()
+        self.assertTrue(deleted_agent.is_deleted)
+        self.assertIsNotNone(deleted_agent.deleted_at)
+
+    @tag("batch_console_agents")
     def test_deleted_agent_not_accessible_on_agent_detail_for_owner(self):
         from api.models import BrowserUseAgent, PersistentAgent
 

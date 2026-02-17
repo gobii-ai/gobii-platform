@@ -5400,6 +5400,90 @@ class PersistentAgent(models.Model):
         schedule_display = self.schedule if self.schedule else "No schedule"
         return f"PersistentAgent: {self.name} (Schedule: {schedule_display})"
 
+    @classmethod
+    def has_active_name_conflict(
+        cls,
+        *,
+        user_id,
+        organization_id,
+        name: str,
+        exclude_id=None,
+    ) -> bool:
+        conflict_qs = cls.objects.alive().filter(name=name)
+        if organization_id:
+            conflict_qs = conflict_qs.filter(organization_id=organization_id)
+        else:
+            conflict_qs = conflict_qs.filter(user_id=user_id, organization__isnull=True)
+        if exclude_id is not None:
+            conflict_qs = conflict_qs.exclude(pk=exclude_id)
+        return conflict_qs.exists()
+
+    def validate_restore_available(self) -> None:
+        if not self.user_id:
+            return
+        has_conflict = type(self).has_active_name_conflict(
+            user_id=self.user_id,
+            organization_id=self.organization_id,
+            name=self.name,
+            exclude_id=self.pk,
+        )
+        if has_conflict:
+            raise ValidationError(
+                {
+                    "name": (
+                        "Cannot restore agent because another active agent with this name "
+                        "already exists for this owner."
+                    )
+                }
+            )
+
+    def soft_delete(self, *, deleted_at: datetime.datetime | None = None, save: bool = True) -> bool:
+        timestamp = deleted_at or timezone.now()
+        update_fields: list[str] = []
+        if self.is_active:
+            self.is_active = False
+            update_fields.append("is_active")
+        if self.life_state != self.LifeState.EXPIRED:
+            self.life_state = self.LifeState.EXPIRED
+            update_fields.append("life_state")
+        if self.schedule is not None:
+            self.schedule = None
+            update_fields.append("schedule")
+        if not self.is_deleted:
+            self.is_deleted = True
+            update_fields.append("is_deleted")
+        if self.deleted_at is None:
+            self.deleted_at = timestamp
+            update_fields.append("deleted_at")
+        if save and update_fields:
+            self.save(update_fields=update_fields)
+        return bool(update_fields)
+
+    def restore(self, *, save: bool = True) -> bool:
+        if self.is_deleted:
+            self.validate_restore_available()
+
+        update_fields: list[str] = []
+        if self.is_deleted:
+            self.is_deleted = False
+            update_fields.append("is_deleted")
+        if self.deleted_at is not None:
+            self.deleted_at = None
+            update_fields.append("deleted_at")
+        if save and update_fields:
+            try:
+                self.save(update_fields=update_fields)
+            except IntegrityError as exc:
+                raise ValidationError(
+                    {
+                        "name": (
+                            "Cannot restore agent because another active agent with this name "
+                            "already exists for this owner."
+                        )
+                    }
+                ) from exc
+        return bool(update_fields)
+
     def get_daily_credit_soft_target(self) -> Decimal | None:
         """Return the configured soft daily credit target, or None if unlimited."""
         limit = self.daily_credit_limit

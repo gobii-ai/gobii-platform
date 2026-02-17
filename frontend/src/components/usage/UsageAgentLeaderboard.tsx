@@ -175,7 +175,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
     }
 
     return data.agents
-      .filter((agent) => Number(agent.tasks_total ?? 0) > 0 || Boolean(agent.is_deleted))
+      .filter((agent) => Number(agent.tasks_total ?? 0) > 0)
       .map((agent) => {
         const tasksTotal = Number(agent.tasks_total ?? 0)
         const tasksPerDay = Number(agent.tasks_per_day ?? 0)

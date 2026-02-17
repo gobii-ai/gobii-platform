@@ -5803,26 +5803,8 @@ class AgentDeleteView(LoginRequiredMixin, View):
             agent_id = str(agent.pk)
             agent_org = agent.organization
 
-            # Soft-delete behavior: preserve rows for audit and usage history while
-            # disabling execution/scheduling for this agent.
-            update_fields: list[str] = []
-            if agent.is_active:
-                agent.is_active = False
-                update_fields.append("is_active")
-            if agent.life_state != PersistentAgent.LifeState.EXPIRED:
-                agent.life_state = PersistentAgent.LifeState.EXPIRED
-                update_fields.append("life_state")
-            if agent.schedule is not None:
-                agent.schedule = None
-                update_fields.append("schedule")
-            if not agent.is_deleted:
-                agent.is_deleted = True
-                update_fields.append("is_deleted")
-            if agent.deleted_at is None:
-                agent.deleted_at = timezone.now()
-                update_fields.append("deleted_at")
-            if update_fields:
-                agent.save(update_fields=update_fields)
+            # Keep historical rows and usage while removing the agent from active views.
+            agent.soft_delete()
 
             messages.success(request, f"Agent '{agent_name}' has been deleted.")
 

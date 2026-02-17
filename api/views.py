@@ -812,12 +812,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
 
     def destroy(self, request, *args, **kwargs):
         agent = self.get_object()
-        agent.is_active = False
-        agent.life_state = PersistentAgent.LifeState.EXPIRED
-        agent.schedule = None
-        agent.is_deleted = True
-        agent.deleted_at = timezone.now()
-        agent.save(update_fields=['is_active', 'life_state', 'schedule', 'is_deleted', 'deleted_at'])
+        agent.soft_delete()
         invalidate_account_info_cache(request.user.id)
         self._track_agent_event(
             agent,
