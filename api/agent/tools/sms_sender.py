@@ -36,6 +36,7 @@ from ...models import (
 from opentelemetry import trace
 from urlextract import URLExtract
 from api.services.email_verification import require_verified_email, EmailVerificationError
+from api.services.sms_suppression import get_active_sms_suppression
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
@@ -112,6 +113,13 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     
     if not all([to_number, body]):
         return {"status": "error", "message": "Missing required parameters: to_number or body"}
+
+    suppression = get_active_sms_suppression(to_number)
+    if suppression is not None:
+        return {
+            "status": "error",
+            "message": f"Recipient number {to_number} is blocked because it has opted out of SMS.",
+        }
 
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)

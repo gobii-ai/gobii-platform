@@ -232,6 +232,8 @@ class AnalyticsEvent(StrEnum):
     SMS_VERIFIED = 'SMS - Verified'
     SMS_DELETED = 'SMS - Deleted'
     SMS_RESEND_VERIFICATION_CODE = 'SMS - Resend Verification Code'
+    SMS_OPTED_OUT = 'SMS - Opted Out'
+    SMS_OPTED_IN = 'SMS - Opted In'
     SMS_SHORTENED_LINK_CREATED = 'SMS - Shortened Link Created'
     SMS_SHORTENED_LINK_DELETED = 'SMS - Shortened Link Deleted'
     SMS_SHORTENED_LINK_CLICKED = 'SMS - Shortened Link Clicked'

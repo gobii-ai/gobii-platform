@@ -39,7 +39,7 @@ from .models import (
     PersistentAgent, PersistentAgentTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
-    CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
+    CommsChannel, UserBilling, OrganizationBilling, SmsNumber, SmsSuppression, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
     EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
@@ -4077,6 +4077,14 @@ class SmsNumberAdmin(admin.ModelAdmin):
         )
 
         return TemplateResponse(request, "admin/test_sms_form.html", context)
+
+
+@admin.register(SmsSuppression)
+class SmsSuppressionAdmin(admin.ModelAdmin):
+    list_display = ("phone_number", "is_active", "source", "created_at", "updated_at")
+    list_filter = ("is_active", "source", "created_at", "updated_at")
+    search_fields = ("phone_number", "source")
+    readonly_fields = ("id", "created_at", "updated_at")
 
 
 @admin.register(LinkShortener)

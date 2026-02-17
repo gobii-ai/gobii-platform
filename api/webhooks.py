@@ -20,6 +20,7 @@ from api.models import (
     OutboundMessageAttempt,
     DeliveryStatus,
     PipedreamConnectSession,
+    SmsSuppression,
 )
 from opentelemetry import trace
 import json
@@ -28,9 +29,65 @@ from config import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.email_verification import has_verified_email
+from api.services.sms_suppression import (
+    get_user_for_phone_number,
+    suppress_sms_number,
+    unsuppress_sms_number,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+_SMS_OPT_OUT_KEYWORDS = {"STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"}
+_SMS_OPT_IN_KEYWORDS = {"START", "UNSTOP"}
+
+
+def _normalize_sms_keyword(value: str | None) -> str:
+    return re.sub(r"[^A-Z0-9]", "", (value or "").upper())
+
+
+def _resolve_sms_opt_action(body: str, opt_out_type: str | None) -> tuple[str | None, str | None, str | None]:
+    normalized_opt_out_type = _normalize_sms_keyword(opt_out_type)
+    if normalized_opt_out_type == "STOP":
+        return "opt_out", "STOP", "twilio_opt_out_type"
+    if normalized_opt_out_type == "START":
+        return "opt_in", "START", "twilio_opt_out_type"
+
+    normalized_body = _normalize_sms_keyword(body)
+    if normalized_body in _SMS_OPT_OUT_KEYWORDS:
+        return "opt_out", normalized_body, "inbound_keyword"
+    if normalized_body in _SMS_OPT_IN_KEYWORDS:
+        return "opt_in", normalized_body, "inbound_keyword"
+    return None, None, None
+
+
+def _track_user_sms_opt_event(
+    phone_number: str,
+    *,
+    opted_in: bool,
+    trigger: str,
+    keyword: str | None,
+) -> None:
+    user = get_user_for_phone_number(phone_number)
+    if user is None:
+        return
+
+    event = AnalyticsEvent.SMS_OPTED_IN if opted_in else AnalyticsEvent.SMS_OPTED_OUT
+    properties = {
+        "phone_number": phone_number,
+        "trigger": trigger,
+        "user_id": user.id,
+    }
+    if keyword:
+        properties["keyword"] = keyword
+
+    Analytics.track_event(
+        user_id=user.id,
+        event=event,
+        source=AnalyticsSource.SMS,
+        properties=properties,
+    )
+
 
 @csrf_exempt
 @require_POST
@@ -54,15 +111,53 @@ def sms_webhook(request):
         return HttpResponse(status=403)
 
     try:
-        from_number = request.POST.get('From', "Unknown")
-        to_number = request.POST.get('To', "Unknown")
-        body = request.POST.get('Body', "Empty").strip()
+        from_number = request.POST.get("From", "").strip()
+        to_number = request.POST.get("To", "").strip()
+        body = request.POST.get("Body", "").strip()
+        opt_out_type = request.POST.get("OptOutType", "").strip()
 
         span.set_attribute("from_number", from_number)
         span.set_attribute("to_number", to_number)
         span.set_attribute("body", body)
 
         logger.info(f"Received SMS from {from_number} to {to_number}: {body}")
+
+        opt_action, keyword, trigger = _resolve_sms_opt_action(body, opt_out_type)
+        if opt_action == "opt_out":
+            suppress_sms_number(
+                from_number,
+                source=(
+                    f"inbound_opt_out:{(keyword or '').lower()}"
+                    if trigger == "inbound_keyword"
+                    else "inbound_opt_out:opt_out_type"
+                ),
+            )
+            _track_user_sms_opt_event(
+                from_number,
+                opted_in=False,
+                trigger=trigger or "inbound_keyword",
+                keyword=keyword,
+            )
+            logger.info("Suppressed SMS number %s from inbound keyword %s", from_number, keyword or "STOP")
+            return HttpResponse(status=200)
+
+        if opt_action == "opt_in":
+            unsuppress_sms_number(
+                from_number,
+                source=(
+                    f"inbound_opt_in:{(keyword or '').lower()}"
+                    if trigger == "inbound_keyword"
+                    else "inbound_opt_in:opt_out_type"
+                ),
+            )
+            _track_user_sms_opt_event(
+                from_number,
+                opted_in=True,
+                trigger=trigger or "inbound_keyword",
+                keyword=keyword,
+            )
+            logger.info("Unsuppressed SMS number %s from inbound keyword %s", from_number, keyword or "START")
+            return HttpResponse(status=200)
 
         with tracer.start_as_current_span("COMM sms whitelist check") as whitelist_span:
             try:
@@ -82,7 +177,6 @@ def sms_webhook(request):
                 whitelist_span.add_event('SMS - No Agent/User', {'to_number': to_number})
                 return HttpResponse(status=200)
 
-            from api.services.email_verification import has_verified_email
             if not has_verified_email(agent.user):
                 logger.info(f"Discarding inbound SMS to agent '{agent.name}' - owner email not verified.")
                 whitelist_span.add_event('SMS - Owner Email Not Verified', {
@@ -219,6 +313,21 @@ def sms_status_webhook(request):
                 source=AnalyticsSource.AGENT,
                 properties=failed_props.copy(),
             )
+            if str(error_code) == "21610":
+                suppressed_number = (request.POST.get("To") or "").strip()
+                if not suppressed_number:
+                    suppressed_number = (getattr(message.to_endpoint, "address", "") or "").strip()
+                if suppressed_number:
+                    suppress_sms_number(
+                        suppressed_number,
+                        source=SmsSuppression.Source.TWILIO_ERROR_21610,
+                    )
+                    _track_user_sms_opt_event(
+                        suppressed_number,
+                        opted_in=False,
+                        trigger="twilio_error_21610",
+                        keyword="21610",
+                    )
         else:
             # Unknown or intermediate status
             return HttpResponse(status=200)

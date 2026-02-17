@@ -22,6 +22,7 @@ from api.models import (
     PersistentAgentMessage,
 )
 from api.services.system_settings import get_max_file_size
+from api.services.sms_suppression import is_sms_suppressed
 from api.agent.files.attachment_helpers import track_file_send_failed, track_file_unsupported
 from opentelemetry.trace import get_current_span
 from opentelemetry import trace
@@ -1075,6 +1076,44 @@ def deliver_agent_sms(message: PersistentAgentMessage):
             recipient_numbers
         )
 
+    blocked_numbers = [recipient for recipient in recipient_numbers if is_sms_suppressed(recipient)]
+    if blocked_numbers:
+        blocked_number = blocked_numbers[0]
+        blocked_error = f"SMS blocked: recipient {blocked_number} has opted out of SMS."
+        logger.warning(
+            "Blocking SMS delivery for message %s due to suppressed recipient %s",
+            message.id,
+            blocked_number,
+        )
+        attempt.status = DeliveryStatus.FAILED
+        attempt.error_code = "suppressed"
+        attempt.error_message = blocked_error
+        attempt.save(update_fields=["status", "error_code", "error_message"])
+
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_code = "suppressed"
+        message.latest_error_message = blocked_error
+        message.save(update_fields=["latest_status", "latest_error_code", "latest_error_message"])
+
+        blocked_props = Analytics.with_org_properties(
+            {
+                "agent_id": str(message.owner_agent_id),
+                "message_id": str(message.id),
+                "from_address": message.from_endpoint.address,
+                "to_address": message.to_endpoint.address,
+                "error_code": "suppressed",
+                "blocked_number": blocked_number,
+            },
+            organization=getattr(message.owner_agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=message.owner_agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SMS_FAILED,
+            source=AnalyticsSource.AGENT,
+            properties=blocked_props.copy(),
+        )
+        return False
+
     # Send to all recipients
     # Note: This sends individual messages to each recipient
     # For true group messaging, you'd need a different approach with your SMS provider
@@ -1111,6 +1150,7 @@ def deliver_agent_sms(message: PersistentAgentMessage):
 
         message.latest_status = DeliveryStatus.SENT
         message.latest_sent_at = now
+        message.latest_error_code = ""
         message.latest_error_message = ""
 
         sms_props = Analytics.with_org_properties(
@@ -1134,10 +1174,12 @@ def deliver_agent_sms(message: PersistentAgentMessage):
     else:
         logger.error("Failed to send agent SMS message %s via Twilio.", message.id)
         attempt.status = DeliveryStatus.FAILED
+        attempt.error_code = "send_failed"
         attempt.error_message = "Failed to send SMS via Twilio."
-        attempt.save(update_fields=["status", "error_message"])
+        attempt.save(update_fields=["status", "error_code", "error_message"])
 
         message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_code = "send_failed"
         message.latest_error_message = "Failed to send SMS via Twilio."
 
         failure_props = Analytics.with_org_properties(
@@ -1156,6 +1198,6 @@ def deliver_agent_sms(message: PersistentAgentMessage):
             properties=failure_props.copy(),
         )
 
-    message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+    message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_code", "latest_error_message"])
 
     return send_result

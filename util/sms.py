@@ -5,6 +5,7 @@ import random
 from typing import Optional
 from opentelemetry import trace
 from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
+from api.services.sms_suppression import is_sms_suppressed
 from config import settings
 from config.settings import TWILIO_MESSAGING_SERVICE_SID
 from util.integrations import twilio_status, twilio_verify_available
@@ -129,6 +130,10 @@ def send_sms(to_number: str, from_number: str, body: str) -> bool|str:
     Send an SMS message using Twilio.
     Returns True if sent successfully, False otherwise.
     """
+    if is_sms_suppressed(to_number):
+        logger.warning("Suppressed SMS recipient %s; blocking outbound send.", to_number)
+        return False
+
     client = _get_client()
     span = trace.get_current_span()
 

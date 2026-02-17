@@ -11,12 +11,15 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
     OutboundMessageAttempt,
+    SmsSuppression,
+    UserPhoneNumber,
     CommsChannel,
     BrowserUseAgent,
     DeliveryStatus,
 )
 from api.webhooks import email_webhook_postmark, email_webhook_mailgun, sms_status_webhook
 from config import settings
+from util.analytics import AnalyticsEvent
 
 User = get_user_model()
 
@@ -250,13 +253,15 @@ class SmsStatusWebhookTest(TestCase):
             status=DeliveryStatus.SENT,
         )
 
-    def _req(self, status, code=None):
+    def _req(self, status, code=None, to_number=None):
         data = {
             "MessageSid": "SM123",
             "MessageStatus": status,
         }
         if code:
             data["ErrorCode"] = code
+        if to_number:
+            data["To"] = to_number
         return self.factory.post(
             f"/api/v1/webhooks/status/sms/?t={settings.TWILIO_INCOMING_WEBHOOK_TOKEN}",
             data=data
@@ -282,3 +287,24 @@ class SmsStatusWebhookTest(TestCase):
         self.assertEqual(self.message.latest_status, DeliveryStatus.FAILED)
         self.assertEqual(self.message.latest_error_code, "30007")
         self.assertEqual(self.attempt.error_code, "30007")
+
+    @tag("batch_sms")
+    def test_21610_adds_sms_suppression_entry(self):
+        request = self._req("failed", code="21610", to_number="+15558675310")
+        resp: HttpResponse = sms_status_webhook(request)
+        self.assertEqual(resp.status_code, 200)
+        suppression = SmsSuppression.objects.get(phone_number="+15558675310")
+        self.assertTrue(suppression.is_active)
+
+    @tag("batch_sms")
+    @patch("api.webhooks.Analytics.track_event")
+    def test_21610_tracks_opt_out_when_number_maps_to_user(self, mock_track_event):
+        UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+15558675310",
+            is_verified=True,
+        )
+        request = self._req("failed", code="21610", to_number="+15558675310")
+        resp: HttpResponse = sms_status_webhook(request)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(any(call.kwargs.get("event") == AnalyticsEvent.SMS_OPTED_OUT for call in mock_track_event.call_args_list))

@@ -7,6 +7,7 @@ from twilio.rest import Client
 from api.models import SmsNumber
 from opentelemetry import trace
 from util.integrations import twilio_status
+from api.services.sms_suppression import is_sms_suppressed
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -72,6 +73,9 @@ def send_test_sms(sms_number_id: int, to: str, body: str):
         return
     if Client is None:
         logger.warning("Twilio SDK unavailable. Skipping send_test_sms.")
+        return
+    if is_sms_suppressed(to):
+        logger.warning("Suppressed SMS recipient %s; skipping send_test_sms.", to)
         return
     sms_number = SmsNumber.objects.get(pk=sms_number_id)
 

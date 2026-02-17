@@ -4057,6 +4057,52 @@ class UserPhoneNumber(models.Model):
     def __str__(self) -> str:
         return f"{self.user_id}:{self.phone_number}"
 
+
+class SmsSuppression(models.Model):
+    """Global suppression list for phone numbers that should not receive SMS."""
+
+    class Source(models.TextChoices):
+        TWILIO_ERROR_21610 = "twilio_error_21610", "Twilio Error 21610"
+        INBOUND_KEYWORD = "inbound_keyword", "Inbound keyword"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    phone_number = models.CharField(
+        max_length=32,
+        unique=True,
+        validators=[RegexValidator(
+            regex=E164_PHONE_REGEX,
+            message="Phone number must be in E.164 format (e.g., +1234567890)",
+        )],
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="Whether outbound SMS delivery is currently blocked for this number.",
+    )
+    source = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Source for the last suppression state change (keyword, webhook code, etc.).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["phone_number"]
+        indexes = [
+            models.Index(fields=["is_active", "phone_number"], name="sms_supp_active_num_idx"),
+        ]
+
+    def save(self, *args, **kwargs):
+        self.phone_number = (self.phone_number or "").strip()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        state = "active" if self.is_active else "inactive"
+        return f"{self.phone_number} ({state})"
+
+
 class StripeConfig(models.Model):
     """Per-environment Stripe credentials and identifiers."""
 
