@@ -824,11 +824,10 @@ class PublicTemplateDetailView(TemplateView):
         if not share_description:
             share_description = f"Spawn the {self.template.display_name} public template on Gobii."
 
+        template_path = f"/{self.template.public_profile.handle}/{self.template.slug}/"
         context["template"] = self.template
         context["public_profile_handle"] = self.template.public_profile.handle
-        context["template_url"] = self.request.build_absolute_uri(
-            f"/{self.template.public_profile.handle}/{self.template.slug}/"
-        )
+        context["template_url"] = self._build_public_url(template_path)
         context["seo_title"] = (
             f"{self.template.display_name} Template by @{self.template.public_profile.handle}"
         )
@@ -848,16 +847,36 @@ class PublicTemplateDetailView(TemplateView):
         )
         return context
 
+    def _build_public_url(self, path: str) -> str:
+        parsed_input = urlsplit(path)
+        if parsed_input.scheme in {"http", "https"} and parsed_input.netloc:
+            return path
+
+        normalized_path = path if path.startswith("/") else f"/{path}"
+        site_base = (settings.PUBLIC_SITE_URL or "").strip().rstrip("/")
+        if site_base:
+            parsed_base = urlsplit(site_base)
+            if parsed_base.scheme in {"http", "https"} and parsed_base.netloc:
+                return f"{site_base}{normalized_path}"
+        return self.request.build_absolute_uri(normalized_path)
+
     def _build_share_image_url(self) -> str:
+        fallback = self._build_public_url(static("images/noBgBlue.png"))
         image_path = (self.template.hero_image_path or "").strip()
-        if image_path:
-            parsed_url = urlsplit(image_path)
-            if parsed_url.scheme in {"http", "https"}:
-                return image_path
-            if image_path.startswith("/"):
-                return self.request.build_absolute_uri(image_path)
-            return self.request.build_absolute_uri(static(image_path))
-        return self.request.build_absolute_uri(static("images/noBgBlue.png"))
+        if not image_path:
+            return fallback
+
+        parsed_url = urlsplit(image_path)
+        image_ref = image_path if parsed_url.scheme in {"http", "https"} else static(image_path)
+        lowered_path = urlsplit(image_ref).path.lower()
+
+        # Some social crawlers reject SVG/unknown formats for preview cards.
+        if lowered_path.endswith(".svg"):
+            return fallback
+        if not any(lowered_path.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp")):
+            return fallback
+
+        return self._build_public_url(image_ref)
 
 
 class PublicTemplateHireView(View):

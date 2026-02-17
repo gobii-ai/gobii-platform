@@ -10,10 +10,14 @@
   <meta property="og:url" content="{{ template_url }}">
   <meta property="og:site_name" content="Gobii">
   <meta property="og:image" content="{{ og_image_url }}">
+  <meta property="og:image:secure_url" content="{{ og_image_url }}">
+  <meta property="og:image:alt" content="{{ template.display_name }} template preview">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="{{ template_url }}">
   <meta name="twitter:title" content="{{ seo_title }}">
   <meta name="twitter:description" content="{{ seo_description|truncatechars:200 }}">
   <meta name="twitter:image" content="{{ og_image_url }}">
+  <meta name="twitter:image:alt" content="{{ template.display_name }} template preview">
 {% endblock %}
 
 {% block content %}
