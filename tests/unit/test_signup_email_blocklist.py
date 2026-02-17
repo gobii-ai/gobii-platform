@@ -1,4 +1,7 @@
+from unittest.mock import patch
+
 from allauth.account.adapter import get_adapter
+from allauth.account.adapter import DefaultAccountAdapter
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -6,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 from django.test import SimpleTestCase, TestCase, override_settings, tag
 
-from config.account_adapter import GobiiAccountAdapter
+from config.allauth_adapter import GobiiAccountAdapter
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
@@ -16,29 +19,141 @@ from util.onboarding import (
 
 @tag("batch_email_blocklist")
 class SignupEmailBlocklistTests(SimpleTestCase):
-    @override_settings(SIGNUP_BLOCKED_EMAIL_DOMAINS=["mailslurp.biz"])
-    def test_blocks_exact_domain(self) -> None:
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST=set(),
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=True)
+    def test_blocks_disposable_domain(self, is_disposable_mock) -> None:
+        adapter = get_adapter()
+
+        with self.assertRaises(ValidationError) as exc:
+            adapter.clean_email("user@disposable.test")
+
+        self.assertEqual(
+            exc.exception.messages[0],
+            "We are unable to create an account with this email address. Please use a different one.",
+        )
+        is_disposable_mock.assert_called_once_with("disposable.test")
+
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST={"mailslurp.biz"},
+        GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=True)
+    def test_allowlist_overrides_disposable_detection(self, is_disposable_mock) -> None:
+        adapter = get_adapter()
+
+        cleaned = adapter.clean_email("user@mailslurp.biz")
+
+        self.assertEqual(cleaned, "user@mailslurp.biz")
+        is_disposable_mock.assert_not_called()
+
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
+    def test_blocklist_blocks_non_disposable_domain(self, is_disposable_mock) -> None:
         adapter = get_adapter()
 
         with self.assertRaises(ValidationError) as exc:
             adapter.clean_email("user@mailslurp.biz")
 
-        self.assertIn("mailslurp.biz", exc.exception.messages[0])
+        self.assertEqual(
+            exc.exception.messages[0],
+            "We are unable to create an account with this email address. Please use a different one.",
+        )
+        is_disposable_mock.assert_not_called()
 
-    @override_settings(SIGNUP_BLOCKED_EMAIL_DOMAINS=["mailslurp.biz"])
-    def test_blocks_subdomain(self) -> None:
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
+    @patch("config.allauth_adapter.logger.warning")
+    def test_blocklist_logs_reason_domain_and_redacted_email(
+        self,
+        warning_mock,
+        is_disposable_mock,
+    ) -> None:
         adapter = get_adapter()
 
         with self.assertRaises(ValidationError):
-            adapter.clean_email("user@inbox.mailslurp.biz")
+            adapter.clean_email("user@mailslurp.biz")
 
-    @override_settings(SIGNUP_BLOCKED_EMAIL_DOMAINS=["mailslurp.biz"])
-    def test_allows_other_domains(self) -> None:
+        warning_mock.assert_called_once()
+        _, kwargs = warning_mock.call_args
+        self.assertEqual(kwargs["extra"]["reason"], "blocklist")
+        self.assertEqual(kwargs["extra"]["domain"], "mailslurp.biz")
+        self.assertEqual(kwargs["extra"]["email"], "u***@mailslurp.biz")
+        is_disposable_mock.assert_not_called()
+
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST=set(),
+        SIGNUP_BLOCKED_EMAIL_DOMAINS=["legacy-block.test"],
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
+    def test_legacy_signup_blocked_domains_setting_still_blocks(self, is_disposable_mock) -> None:
+        adapter = get_adapter()
+
+        with self.assertRaises(ValidationError) as exc:
+            adapter.clean_email("user@legacy-block.test")
+
+        self.assertEqual(
+            exc.exception.messages[0],
+            "We are unable to create an account with this email address. Please use a different one.",
+        )
+        is_disposable_mock.assert_not_called()
+
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST=set(),
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
+    def test_allows_normal_domain(self, is_disposable_mock) -> None:
         adapter = get_adapter()
 
         cleaned = adapter.clean_email("user@example.com")
 
         self.assertEqual(cleaned, "user@example.com")
+        is_disposable_mock.assert_called_once_with("example.com")
+
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
+    @patch.object(
+        DefaultAccountAdapter,
+        "clean_email",
+        side_effect=ValidationError(
+            "We are unable to create an account with this email address. Please use a different one."
+        ),
+    )
+    def test_blocklist_uses_custom_message_even_if_super_raises_generic(
+        self,
+        _super_clean_email_mock,
+        is_disposable_mock,
+    ) -> None:
+        adapter = get_adapter()
+
+        with self.assertRaises(ValidationError) as exc:
+            adapter.clean_email("user@mailslurp.biz")
+
+        self.assertEqual(
+            exc.exception.messages[0],
+            "We are unable to create an account with this email address. Please use a different one.",
+        )
+        is_disposable_mock.assert_not_called()
 
 
 @tag("batch_email_blocklist")

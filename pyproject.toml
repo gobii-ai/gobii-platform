@@ -112,6 +112,7 @@ dependencies = [
   "opentelemetry-semantic-conventions-ai==0.4.9",
   "opentelemetry-util-http==0.55b1",
   "mail-parser==4.1.4",
+  "mailchecker~=6.0.0",
   "exa-py==1.14.16",
   # Email and SMS integration
   "aiohttp-retry==2.9.1",
