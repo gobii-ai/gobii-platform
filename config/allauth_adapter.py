@@ -54,7 +54,15 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
     GENERIC_EMAIL_BLOCK_ERROR = "We are unable to create an account with this email address. Please use a different one."
 
     def clean_email(self, email: str) -> str:
-        cleaned_email = super().clean_email(email)
+        super_error: ValidationError | None = None
+        try:
+            cleaned_email = super().clean_email(email)
+        except ValidationError as exc:
+            # Keep our explicit domain policy message stable even if upstream
+            # allauth starts rejecting these domains with a generic message.
+            super_error = exc
+            cleaned_email = email
+
         domain = self._extract_domain(cleaned_email)
         allowlist = self._normalize_domains(settings.GOBII_EMAIL_DOMAIN_ALLOWLIST)
 
@@ -69,6 +77,9 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
         if settings.GOBII_EMAIL_BLOCK_DISPOSABLE and is_disposable_domain(domain):
             self._log_email_block(reason="disposable", domain=domain, email=cleaned_email)
             raise ValidationError(self.GENERIC_EMAIL_BLOCK_ERROR)
+
+        if super_error is not None:
+            raise super_error
 
         return cleaned_email
 

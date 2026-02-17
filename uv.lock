@@ -1689,7 +1689,7 @@ requires-dist = [
     { name = "json5", specifier = ">=0.13.0" },
     { name = "litellm", specifier = "==1.80.15" },
     { name = "mail-parser", specifier = "==4.1.4" },
-    { name = "mailchecker" },
+    { name = "mailchecker", specifier = "~=6.0.0" },
     { name = "markdown", specifier = "~=3.8" },
     { name = "markitdown", extras = ["all"], specifier = "==0.1.4" },
     { name = "matplotlib", specifier = ">=3.8.0" },

@@ -1,6 +1,7 @@
 from unittest.mock import patch
 
 from allauth.account.adapter import get_adapter
+from allauth.account.adapter import DefaultAccountAdapter
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -124,6 +125,35 @@ class SignupEmailBlocklistTests(SimpleTestCase):
 
         self.assertEqual(cleaned, "user@example.com")
         is_disposable_mock.assert_called_once_with("example.com")
+
+    @override_settings(
+        GOBII_EMAIL_DOMAIN_ALLOWLIST=set(),
+        GOBII_EMAIL_DOMAIN_BLOCKLIST={"mailslurp.biz"},
+        GOBII_EMAIL_BLOCK_DISPOSABLE=True,
+    )
+    @patch("config.allauth_adapter.is_disposable_domain", return_value=False)
+    @patch.object(
+        DefaultAccountAdapter,
+        "clean_email",
+        side_effect=ValidationError(
+            "We are unable to create an account with this email address. Please use a different one."
+        ),
+    )
+    def test_blocklist_uses_custom_message_even_if_super_raises_generic(
+        self,
+        _super_clean_email_mock,
+        is_disposable_mock,
+    ) -> None:
+        adapter = get_adapter()
+
+        with self.assertRaises(ValidationError) as exc:
+            adapter.clean_email("user@mailslurp.biz")
+
+        self.assertEqual(
+            exc.exception.messages[0],
+            "Please use a non-disposable email address.",
+        )
+        is_disposable_mock.assert_not_called()
 
 
 @tag("batch_email_blocklist")
