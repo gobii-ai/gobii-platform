@@ -51,7 +51,7 @@ def is_disposable_domain(domain: str) -> bool:
 class GobiiAccountAdapter(DefaultAccountAdapter):
     """Signup and login policy hooks for django-allauth."""
 
-    DISPOSABLE_EMAIL_ERROR = "Please use a non-disposable email address."
+    GENERIC_EMAIL_BLOCK_ERROR = "We are unable to create an account with this email address. Please use a different one."
 
     def clean_email(self, email: str) -> str:
         cleaned_email = super().clean_email(email)
@@ -62,11 +62,11 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
 
         if self._matches_domain_rule(domain, settings.GOBII_EMAIL_DOMAIN_BLOCKLIST):
             self._log_email_block(reason="blocklist", domain=domain, email=cleaned_email)
-            raise ValidationError(self.DISPOSABLE_EMAIL_ERROR)
+            raise ValidationError(self.GENERIC_EMAIL_BLOCK_ERROR)
 
         if settings.GOBII_EMAIL_BLOCK_DISPOSABLE and is_disposable_domain(domain):
             self._log_email_block(reason="disposable", domain=domain, email=cleaned_email)
-            raise ValidationError(self.DISPOSABLE_EMAIL_ERROR)
+            raise ValidationError(self.GENERIC_EMAIL_BLOCK_ERROR)
 
         return cleaned_email
 
