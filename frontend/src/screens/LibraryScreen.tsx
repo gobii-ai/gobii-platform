@@ -156,7 +156,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
       <section className="gobii-card-base px-6 py-6 sm:px-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Library</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Discover</p>
             <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Most popular shared Gobii agents</h1>
             <p className="max-w-3xl text-sm text-slate-600 sm:text-base">
               Browse publicly shared agents from across Gobii.
