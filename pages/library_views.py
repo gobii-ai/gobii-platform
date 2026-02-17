@@ -163,6 +163,17 @@ def _sort_agents_by_popularity(agents: list[dict[str, Any]]) -> list[dict[str, A
     )
 
 
+def _matches_search_query(agent: dict[str, Any], normalized_query: str) -> bool:
+    searchable_fields = (
+        agent.get("name", ""),
+        agent.get("tagline", ""),
+        agent.get("description", ""),
+        agent.get("category", ""),
+        agent.get("publicProfileHandle", ""),
+    )
+    return any(normalized_query in str(field).casefold() for field in searchable_fields)
+
+
 def _parse_json_payload(request: HttpRequest) -> dict[str, Any]:
     if not request.body:
         return {}
@@ -193,6 +204,7 @@ class LibraryAgentsAPIView(View):
         viewer_user_id = request.user.id if request.user.is_authenticated else None
 
         category = _normalize_category(request.GET.get("category")) if request.GET.get("category") else ""
+        search_query = str(request.GET.get("q") or "").strip()
         limit = _parse_query_int(
             request.GET.get("limit"),
             default=LIBRARY_DEFAULT_PAGE_SIZE,
@@ -219,6 +231,13 @@ class LibraryAgentsAPIView(View):
             ]
         else:
             filtered_agents = ranked_agents
+
+        if search_query:
+            normalized_query = search_query.casefold()
+            filtered_agents = [
+                agent for agent in filtered_agents
+                if _matches_search_query(agent, normalized_query)
+            ]
 
         total_agents = len(filtered_agents)
         page_agents = [

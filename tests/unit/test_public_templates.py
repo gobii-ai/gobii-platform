@@ -253,6 +253,184 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(filtered_payload["agents"][0]["category"], "Research")
 
     @tag("batch_public_templates")
+    def test_library_api_supports_search_across_fields(self):
+        user = get_user_model().objects.create_user(username="library-search-owner", email="library-search-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="search-owner")
+
+        name_match = PersistentAgentTemplate.objects.create(
+            code="lib-search-name",
+            public_profile=profile,
+            slug="budget-beacon",
+            display_name="Budget Beacon",
+            tagline="Cost insights",
+            description="Tracks weekly spending posture.",
+            charter="Track weekly spending posture.",
+            category="Operations",
+            is_active=True,
+        )
+        tagline_match = PersistentAgentTemplate.objects.create(
+            code="lib-search-tagline",
+            public_profile=profile,
+            slug="release-sentinel",
+            display_name="Release Sentinel",
+            tagline="Compliance signal monitor",
+            description="Monitors release readiness.",
+            charter="Monitor release readiness.",
+            category="Operations",
+            is_active=True,
+        )
+        description_match = PersistentAgentTemplate.objects.create(
+            code="lib-search-description",
+            public_profile=profile,
+            slug="market-watch",
+            display_name="Market Watch",
+            tagline="Trend alerts",
+            description="Tracks competitor positioning and activity.",
+            charter="Track competitor positioning and activity.",
+            category="Research",
+            is_active=True,
+        )
+        category_match = PersistentAgentTemplate.objects.create(
+            code="lib-search-category",
+            public_profile=profile,
+            slug="invoice-tracker",
+            display_name="Invoice Tracker",
+            tagline="Payment controls",
+            description="Keeps invoice workflows moving.",
+            charter="Track invoice workflows.",
+            category="Finance",
+            is_active=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="lib-search-extra",
+            public_profile=profile,
+            slug="ops-scheduler",
+            display_name="Ops Scheduler",
+            tagline="Scheduling assistant",
+            description="Coordinates scheduled jobs.",
+            charter="Coordinate scheduled jobs.",
+            category="Operations",
+            is_active=True,
+        )
+
+        def fetch_ids(query: str) -> tuple[int, set[str]]:
+            response = self.client.get(reverse("pages:library_agents_api"), data={"q": query})
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            return payload["totalAgents"], {agent["id"] for agent in payload["agents"]}
+
+        total_agents, agent_ids = fetch_ids("budget")
+        self.assertEqual(total_agents, 1)
+        self.assertEqual(agent_ids, {str(name_match.id)})
+
+        total_agents, agent_ids = fetch_ids("compliance")
+        self.assertEqual(total_agents, 1)
+        self.assertEqual(agent_ids, {str(tagline_match.id)})
+
+        total_agents, agent_ids = fetch_ids("competitor")
+        self.assertEqual(total_agents, 1)
+        self.assertEqual(agent_ids, {str(description_match.id)})
+
+        total_agents, agent_ids = fetch_ids("finance")
+        self.assertEqual(total_agents, 1)
+        self.assertEqual(agent_ids, {str(category_match.id)})
+
+        response = self.client.get(reverse("pages:library_agents_api"), data={"q": "search-owner"})
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["totalAgents"], 5)
+
+        total_agents, agent_ids = fetch_ids("BuDgEt")
+        self.assertEqual(total_agents, 1)
+        self.assertEqual(agent_ids, {str(name_match.id)})
+
+    @tag("batch_public_templates")
+    def test_library_api_combines_search_with_category_and_pagination(self):
+        user = get_user_model().objects.create_user(
+            username="library-search-filter-owner",
+            email="library-search-filter-owner@example.com",
+            password="pw",
+        )
+        profile = PublicProfile.objects.create(user=user, handle="search-filter-owner")
+
+        alpha_ops_a = PersistentAgentTemplate.objects.create(
+            code="lib-search-alpha-ops-a",
+            public_profile=profile,
+            slug="alpha-ops-a",
+            display_name="Alpha Ops A",
+            tagline="Operations alpha",
+            description="Operations alpha coverage.",
+            charter="Operations alpha coverage.",
+            category="Operations",
+            is_active=True,
+        )
+        alpha_ops_b = PersistentAgentTemplate.objects.create(
+            code="lib-search-alpha-ops-b",
+            public_profile=profile,
+            slug="alpha-ops-b",
+            display_name="Alpha Ops B",
+            tagline="Operations alpha detail",
+            description="Operations alpha detail coverage.",
+            charter="Operations alpha detail coverage.",
+            category="Operations",
+            is_active=True,
+        )
+        alpha_research = PersistentAgentTemplate.objects.create(
+            code="lib-search-alpha-research",
+            public_profile=profile,
+            slug="alpha-research",
+            display_name="Alpha Research",
+            tagline="Research alpha",
+            description="Research alpha coverage.",
+            charter="Research alpha coverage.",
+            category="Research",
+            is_active=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="lib-search-beta-ops",
+            public_profile=profile,
+            slug="beta-ops",
+            display_name="Beta Ops",
+            tagline="Operations beta",
+            description="Operations beta coverage.",
+            charter="Operations beta coverage.",
+            category="Operations",
+            is_active=True,
+        )
+
+        query_response = self.client.get(reverse("pages:library_agents_api"), data={"q": "alpha"})
+        self.assertEqual(query_response.status_code, 200)
+        query_payload = query_response.json()
+        self.assertEqual(query_payload["totalAgents"], 3)
+        self.assertEqual(query_payload["libraryTotalAgents"], 4)
+
+        category_response = self.client.get(
+            reverse("pages:library_agents_api"),
+            data={"q": "alpha", "category": "operations"},
+        )
+        self.assertEqual(category_response.status_code, 200)
+        category_payload = category_response.json()
+        self.assertEqual(category_payload["totalAgents"], 2)
+        self.assertEqual({agent["id"] for agent in category_payload["agents"]}, {str(alpha_ops_a.id), str(alpha_ops_b.id)})
+
+        paged_response = self.client.get(
+            reverse("pages:library_agents_api"),
+            data={"q": "alpha", "category": "operations", "limit": 1, "offset": 1},
+        )
+        self.assertEqual(paged_response.status_code, 200)
+        paged_payload = paged_response.json()
+        self.assertEqual(paged_payload["totalAgents"], 2)
+        self.assertEqual(len(paged_payload["agents"]), 1)
+        self.assertFalse(paged_payload["hasMore"])
+        self.assertEqual(paged_payload["agents"][0]["id"], str(alpha_ops_b.id))
+
+        casefold_response = self.client.get(reverse("pages:library_agents_api"), data={"q": "ALPHA"})
+        self.assertEqual(casefold_response.status_code, 200)
+        casefold_payload = casefold_response.json()
+        self.assertEqual(casefold_payload["totalAgents"], 3)
+        self.assertIn(str(alpha_research.id), {agent["id"] for agent in casefold_payload["agents"]})
+
+    @tag("batch_public_templates")
     def test_library_api_orders_by_like_count_for_most_popular_default(self):
         owner = get_user_model().objects.create_user(username="library-like-owner", email="library-like-owner@example.com", password="pw")
         profile = PublicProfile.objects.create(user=owner, handle="library-like-owner")
