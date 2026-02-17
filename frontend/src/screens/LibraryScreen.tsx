@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
-import { AlertTriangle, Heart, Library as LibraryIcon, Loader2 } from 'lucide-react'
+import { AlertTriangle, Heart, Library as LibraryIcon, Loader2, Search } from 'lucide-react'
 
 import { fetchLibraryAgents, type LibraryAgentsPayload, toggleLibraryAgentLike } from '../api/library'
 
@@ -9,6 +9,12 @@ type LibraryScreenProps = {
   listUrl: string
   likeUrl: string
   canLike: boolean
+}
+
+type SearchInputProps = {
+  value: string
+  onChange: (value: string) => void
+  inputClassName: string
 }
 
 const MOST_POPULAR_LABEL = 'Most Popular'
@@ -27,6 +33,22 @@ function categorySidebarButtonClassName(isActive: boolean): string {
     return 'flex w-full items-center justify-between rounded-lg border border-indigo-600 bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition'
   }
   return 'flex w-full items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-indigo-200 hover:bg-indigo-50'
+}
+
+function SearchInput({ value, onChange, inputClassName }: SearchInputProps) {
+  return (
+    <div className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-indigo-400" aria-hidden="true" />
+      <input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.currentTarget.value)}
+        placeholder="Search agents..."
+        className={inputClassName}
+        autoComplete="off"
+      />
+    </div>
+  )
 }
 
 function updateLikeInCachedPayload(
@@ -68,16 +90,30 @@ function updateLikeInCachedPayload(
 
 export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
+  const normalizedSearchQuery = debouncedSearchQuery.trim()
   const queryClient = useQueryClient()
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery)
+    }, 400)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [searchQuery])
+
   const libraryQuery = useInfiniteQuery({
-    queryKey: ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY],
+    queryKey: ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY, normalizedSearchQuery],
     queryFn: ({ signal, pageParam }) =>
       fetchLibraryAgents(listUrl, {
         signal,
         offset: pageParam,
         limit: PAGE_SIZE,
         category: selectedCategory,
+        query: normalizedSearchQuery || null,
       }),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.offset + lastPage.limit : undefined),
@@ -150,6 +186,17 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
   }
 
   const isMostPopularSelected = selectedCategory === null
+  const isSearchActive = normalizedSearchQuery.length > 0
+  const emptyHeading = isSearchActive
+    ? `No shared agents match "${normalizedSearchQuery}".`
+    : selectedCategory
+      ? 'No shared agents found in this category.'
+      : 'No shared agents found right now.'
+  const emptyDescription = isSearchActive
+    ? 'Try another keyword or clear search.'
+    : selectedCategory
+      ? 'Try another category.'
+      : 'Check back soon for newly shared agents.'
 
   return (
     <div className="space-y-6 pb-10">
@@ -179,6 +226,14 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
       </section>
 
       <section className="space-y-3 md:hidden">
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Search</p>
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            inputClassName="w-full rounded-lg border border-indigo-200 bg-white py-2.5 pl-9 pr-3 text-base text-slate-800 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
           <button
@@ -212,6 +267,15 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
       <section className="grid gap-6 md:grid-cols-[16rem_minmax(0,1fr)]">
         <aside className="hidden md:block">
           <div className="gobii-card-base sticky top-24 space-y-4 p-4">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Search</p>
+              <SearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                inputClassName="w-full rounded-lg border border-indigo-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
             <div>
               <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-indigo-700">Most Popular</p>
               <button
@@ -253,8 +317,8 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
         <div className="space-y-4">
           {agents.length === 0 ? (
             <div className="gobii-card-base p-8 text-center">
-              <p className="text-sm font-semibold text-slate-800">No shared agents found in this category.</p>
-              <p className="mt-1 text-sm text-slate-600">Try another category.</p>
+              <p className="text-sm font-semibold text-slate-800">{emptyHeading}</p>
+              <p className="mt-1 text-sm text-slate-600">{emptyDescription}</p>
             </div>
           ) : (
             <>

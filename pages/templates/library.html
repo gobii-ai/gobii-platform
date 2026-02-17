@@ -1,7 +1,53 @@
 {% extends "base.html" %}
 {% load vite_tags %}
 
-{% block title %}Gobii Library{% endblock %}
+{% block title %}Gobii Agent Discovery{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Discover public Gobii agent templates by category, then deploy and customize them for your workflows.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Gobii Agent Discovery">
+  <meta property="og:description" content="Discover public Gobii agent templates by category, then deploy and customize them for your workflows.">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:site_name" content="Gobii">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Gobii Agent Discovery">
+  <meta name="twitter:description" content="Discover public Gobii agent templates by category, then deploy and customize them for your workflows.">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "name": "Gobii Agent Discovery",
+      "description": "Discover public Gobii agent templates by category, then deploy and customize them for your workflows.",
+      "url": "{{ canonical_url|escapejs }}",
+      "isPartOf": {
+        "@type": "WebSite",
+        "name": "Gobii",
+        "url": "{{ request.scheme }}://{{ request.get_host }}"
+      }
+    }
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:home' %}"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Agent Discovery",
+          "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
+        }
+      ]
+    }
+  </script>
+{% endblock %}
 
 {% block content %}
 <div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">

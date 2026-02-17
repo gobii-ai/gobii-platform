@@ -23,6 +23,7 @@ from .views import (
     PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
+    PublicTemplateSitemap,
     PublicTemplateDetailView,
     PublicTemplateHireView,
     EngineeringProSignupView,
@@ -45,11 +46,12 @@ if GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
 sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
+sitemaps['public_templates'] = PublicTemplateSitemap
 sitemaps['solutions'] = SolutionsSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
-    path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=False)),
+    path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=True)),
     path("library/", LibraryView.as_view(), name="library"),
     path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
     path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),

@@ -1,9 +1,66 @@
 {% extends "base.html" %}
 {% block title %}{{ template.display_name }} – Public Template{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ template.display_name }} – Public Template">
+  <meta property="og:description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
+  <meta property="og:url" content="{{ template_url }}">
+  <meta property="og:site_name" content="Gobii">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ template.display_name }} – Public Template">
+  <meta name="twitter:description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "{{ template.display_name|escapejs }}",
+      "description": "{{ template.description|default:template.tagline|truncatechars:160|escapejs }}",
+      "applicationCategory": "{{ template.category|default:'BusinessApplication'|escapejs }}",
+      "creator": {
+        "@type": "Person",
+        "name": "{{ public_profile_handle|escapejs }}"
+      },
+      "url": "{{ template_url|escapejs }}",
+      "isPartOf": {
+        "@type": "CollectionPage",
+        "name": "Gobii Library",
+        "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
+      }
+    }
+  </script>
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        {
+          "@type": "ListItem",
+          "position": 1,
+          "name": "Home",
+          "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:home' %}"
+        },
+        {
+          "@type": "ListItem",
+          "position": 2,
+          "name": "Library",
+          "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
+        },
+        {
+          "@type": "ListItem",
+          "position": 3,
+          "name": "{{ template.display_name|escapejs }}",
+          "item": "{{ template_url|escapejs }}"
+        }
+      ]
+    }
+  </script>
+{% endblock %}
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-amber-50/50 via-white via-60% to-white">
   <section class="max-w-5xl mx-auto px-6 pt-16 pb-16">
-    <a href="{% url 'pages:home' %}#pretrained-workers" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
+    <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
       &larr; Back to templates
     </a>
 

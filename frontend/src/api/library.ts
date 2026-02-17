@@ -39,6 +39,7 @@ type FetchLibraryAgentsOptions = {
   offset?: number
   limit?: number
   category?: string | null
+  query?: string | null
   signal?: AbortSignal
 }
 
@@ -48,6 +49,9 @@ export function fetchLibraryAgents(listUrl: string, options: FetchLibraryAgentsO
   params.set('limit', String(options.limit ?? 24))
   if (options.category) {
     params.set('category', options.category)
+  }
+  if (options.query?.trim()) {
+    params.set('q', options.query.trim())
   }
 
   const separator = listUrl.includes('?') ? '&' : '?'
