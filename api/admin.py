@@ -2366,11 +2366,7 @@ class PersistentAgentAdminForm(forms.ModelForm):
         if not self.instance.pk or is_deleted:
             return cleaned_data
 
-        was_deleted = (
-            PersistentAgent.objects.filter(pk=self.instance.pk)
-            .values_list("is_deleted", flat=True)
-            .first()
-        )
+        was_deleted = self.instance.is_deleted
         if not was_deleted:
             return cleaned_data
 
@@ -2586,7 +2582,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     @admin.action(description="Soft-delete selected agents")
     def soft_delete_selected_agents(self, request, queryset):
         updated = 0
-        for agent in queryset:
+        for agent in queryset.filter(is_deleted=False):
             if agent.soft_delete():
                 updated += 1
         self.message_user(request, f"Soft-deleted {updated} agent(s).", level=messages.SUCCESS)

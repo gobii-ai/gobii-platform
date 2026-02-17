@@ -526,6 +526,23 @@ class PersistentAgentAPITests(TestCase):
         self.assertFalse(agent.is_active)
         self.assertIsNone(agent.schedule)
 
+    def test_soft_delete_releases_owned_comms_endpoints(self):
+        payload = self._create_agent_via_api({'name': 'Endpoint Owner Agent'})
+        agent = PersistentAgent.objects.get(id=payload['id'])
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address='release-me@example.com',
+            is_primary=True,
+        )
+
+        delete_response = self.client.delete(f'{PERSISTENT_AGENT_BASE_URL}{agent.id}/')
+        self.assertEqual(delete_response.status_code, 204, delete_response.content)
+
+        endpoint.refresh_from_db()
+        self.assertIsNone(endpoint.owner_agent_id)
+        self.assertFalse(endpoint.is_primary)
+
     def test_message_submission_populates_timeline(self):
         payload = self._create_agent_via_api({'name': 'Timeline Agent'})
         agent = PersistentAgent.objects.get(id=payload['id'])

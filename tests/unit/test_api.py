@@ -404,6 +404,17 @@ class OrganizationApiKeyTests(APITestCase):
         self.assertIn(self.org_browser.name, names)
         self.assertNotIn(self.personal_browser.name, names)
 
+    def test_org_key_excludes_soft_deleted_persistent_agents(self):
+        self.org_agent.soft_delete()
+
+        self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
+        url = reverse('api:browseruseagent-list')
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        returned_ids = {agent['id'] for agent in response.data['results']}
+        self.assertNotIn(str(self.org_browser.id), returned_ids)
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_org_key_still_works_when_personal_trial_enforcement_enabled(self):
         self.client.credentials(HTTP_X_API_KEY=self.raw_org_key)
@@ -499,6 +510,17 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         self.agent1_user2 = BrowserUseAgent.objects.create(user=self.user2, name='Task Agent 1 User 2')
         self.task1_agent1_user2 = BrowserUseAgentTask.objects.create(agent=self.agent1_user2, user=self.user2, prompt={'detail': 'Task 1 for Agent 1 User 2'})
 
+        self.deleted_persistent_browser = BrowserUseAgent.objects.create(
+            user=self.user1,
+            name='Deleted Persistent Browser Agent',
+        )
+        self.deleted_persistent_agent = PersistentAgent.objects.create(
+            user=self.user1,
+            name='Deleted Persistent Agent',
+            charter='Used for soft-delete API checks',
+            browser_use_agent=self.deleted_persistent_browser,
+        )
+
         self.client.credentials(HTTP_X_API_KEY=self.raw_api_key1)
 
     def test_list_tasks_for_specific_agent_owned_by_user(self):
@@ -584,6 +606,28 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         if response.status_code != status.HTTP_404_NOT_FOUND:
             print(f"test_create_task_for_agent_not_owned_by_user response data (status {response.status_code}): {response.data}")
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_create_task_for_soft_deleted_persistent_agent_returns_404(self):
+        self.deleted_persistent_agent.soft_delete()
+
+        url = reverse('api:agent-tasks-list', kwargs={'agentId': self.deleted_persistent_browser.id})
+        response = self.client.post(url, {'prompt': 'Task should be rejected'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_user_level_create_rejects_soft_deleted_persistent_agent(self):
+        self.deleted_persistent_agent.soft_delete()
+
+        url = reverse('api:user-tasks-list')
+        response = self.client.post(
+            url,
+            {'prompt': 'Task should be rejected', 'agent': str(self.deleted_persistent_browser.id)},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('deleted', str(response.data.get('agent', '')).lower())
+
     def test_wait_parameter_validation(self):
         """Test validation of wait parameter."""
         url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user1.id})

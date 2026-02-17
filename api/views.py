@@ -124,6 +124,9 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
         org = self._request_organization()
         _enforce_personal_api_access_or_raise(self.request.user, organization=org)
         properties = {}
+        visible_agents = self.queryset.filter(
+            models.Q(persistent_agent__isnull=True) | models.Q(persistent_agent__is_deleted=False)
+        )
 
         if org is not None:
             properties['owner_type'] = 'organization'
@@ -136,14 +139,14 @@ class BrowserUseAgentViewSet(viewsets.ModelViewSet):
                 properties=properties,
             )
 
-            return self.queryset.filter(persistent_agent__organization=org)
+            return visible_agents.filter(persistent_agent__organization=org)
 
         Analytics.track_event(
             user_id=self.request.user.id,
             event=AnalyticsEvent.AGENTS_LISTED,
             source=AnalyticsSource.API,
         )
-        return self.queryset.filter(user=self.request.user)
+        return visible_agents.filter(user=self.request.user)
 
     def get_serializer_class(self):
         """Return appropriate serializer based on action"""
@@ -222,8 +225,10 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
     def _validate_agent_access(self, agent):
         org = self._request_organization()
         _enforce_personal_api_access_or_raise(self.request.user, organization=org)
+        persistent = getattr(agent, 'persistent_agent', None)
+        if persistent and persistent.is_deleted:
+            raise Http404
         if org is not None:
-            persistent = getattr(agent, 'persistent_agent', None)
             if not persistent or persistent.organization_id != org.id:
                 raise Http404
             return

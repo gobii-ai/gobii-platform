@@ -5440,6 +5440,7 @@ class PersistentAgent(models.Model):
     def soft_delete(self, *, deleted_at: datetime.datetime | None = None, save: bool = True) -> bool:
         timestamp = deleted_at or timezone.now()
         update_fields: list[str] = []
+        endpoints_released = False
         if self.is_active:
             self.is_active = False
             update_fields.append("is_active")
@@ -5457,7 +5458,14 @@ class PersistentAgent(models.Model):
             update_fields.append("deleted_at")
         if save and update_fields:
             self.save(update_fields=update_fields)
-        return bool(update_fields)
+        if self.pk:
+            # Release endpoint ownership so deleted agents do not reserve globally unique addresses.
+            released_count = self.comms_endpoints.filter(owner_agent_id=self.pk).update(
+                owner_agent=None,
+                is_primary=False,
+            )
+            endpoints_released = released_count > 0
+        return bool(update_fields) or endpoints_released
 
     def restore(self, *, save: bool = True) -> bool:
         if self.is_deleted:
