@@ -33,7 +33,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
 
         self.assertEqual(
             exc.exception.messages[0],
-            "Please use a non-disposable email address.",
+            "We are unable to create an account with this email address. Please use a different one.",
         )
         is_disposable_mock.assert_called_once_with("disposable.test")
 
@@ -65,7 +65,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
 
         self.assertEqual(
             exc.exception.messages[0],
-            "Please use a non-disposable email address.",
+            "We are unable to create an account with this email address. Please use a different one.",
         )
         is_disposable_mock.assert_not_called()
 
@@ -108,7 +108,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
 
         self.assertEqual(
             exc.exception.messages[0],
-            "Please use a non-disposable email address.",
+            "We are unable to create an account with this email address. Please use a different one.",
         )
         is_disposable_mock.assert_not_called()
 
@@ -151,7 +151,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
 
         self.assertEqual(
             exc.exception.messages[0],
-            "Please use a non-disposable email address.",
+            "We are unable to create an account with this email address. Please use a different one.",
         )
         is_disposable_mock.assert_not_called()
 
