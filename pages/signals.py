@@ -2050,7 +2050,7 @@ def handle_subscription_event(event, **kwargs):
                             topoff = _owner_plan_topoff_amount(
                                 owner=owner,
                                 monthly_credits=monthly_credits,
-                                as_of=current_period_start_dt or timezone.now(),
+                                as_of=timezone.now(),
                             )
                             if topoff <= 0:
                                 should_grant = False
