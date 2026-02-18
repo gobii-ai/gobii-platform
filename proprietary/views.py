@@ -396,14 +396,18 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
     """Static support page."""
 
     template_name = "support.html"
+    email_template_name = "emails/support_request.html"
+    email_subject_prefix = "Support Request"
+    missing_recipient_message = "Support email is not configured."
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-
-        if not self.request.user.is_authenticated:
-            context["support_form"] = SupportForm()
+        context["support_form"] = SupportForm()
 
         return context
+
+    def get_recipient_email(self) -> str:
+        return settings.SUPPORT_EMAIL
 
     def post(self, request, *args, **kwargs):
         form = SupportForm(request.POST)
@@ -433,16 +437,25 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
             'message': cleaned['message'],
         }
 
-        html_message = render_to_string('emails/support_request.html', context)
+        recipient_email = self.get_recipient_email()
+        if not recipient_email:
+            return HttpResponse(
+                '<div class="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg" role="alert">'
+                f"{escape(self.missing_recipient_message)}"
+                "</div>",
+                status=500,
+            )
+
+        html_message = render_to_string(self.email_template_name, context)
         plain_message = strip_tags(html_message)
 
         # Send email
         try:
             send_mail(
-                subject=f"Support Request: {cleaned['subject']}",
+                subject=f"{self.email_subject_prefix}: {cleaned['subject']}",
                 message=plain_message,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[settings.SUPPORT_EMAIL],  # Use a support email address
+                recipient_list=[recipient_email],
                 html_message=html_message,
                 fail_silently=False,
             )
@@ -454,8 +467,8 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
                 '</div>'
             )
 
-        except Exception as e:
-            logger.error(f"Error sending support request email: {e}")
+        except (BadHeaderError, SMTPException):
+            logger.exception("Error sending %s email.", self.email_subject_prefix.lower())
 
             # Return error message (for HTMX response)
             return HttpResponse(
@@ -464,6 +477,19 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
                 '</div>',
                 status=500
             )
+
+
+class ContactView(SupportView):
+    """Contact page that reuses support request form handling."""
+
+    template_name = "contact.html"
+    email_template_name = "emails/contact_request.html"
+    email_subject_prefix = "Contact Request"
+    missing_recipient_message = "Contact email is not configured."
+
+    def get_recipient_email(self) -> str:
+        return settings.PUBLIC_CONTACT_EMAIL
+
 
 class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "blog/index.html"
