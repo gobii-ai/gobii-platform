@@ -39,7 +39,9 @@
     <div>
       <h3 class="font-semibold mb-4">Support</h3>
       <ul class="space-y-2">
-        {% if settings.PUBLIC_SUPPORT_EMAIL %}
+        {% if settings.GOBII_PROPRIETARY_MODE %}
+          <li><a href="{% url 'proprietary:support' %}" class="text-slate-700 hover:text-blue-600">Email</a></li>
+        {% elif settings.PUBLIC_SUPPORT_EMAIL %}
           <li><a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}" class="text-slate-700 hover:text-blue-600">Email</a></li>
         {% endif %}
         {% if settings.PUBLIC_DISCORD_URL %}
