@@ -1645,22 +1645,39 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
 class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
-    def _resolve_override_for_agent(self, request: HttpRequest, agent_id: str) -> tuple[dict[str, str] | None, JsonResponse | None]:
-        override, error_code = resolve_context_override_for_agent(request.user, agent_id)
+    def _resolve_override_for_agent(
+        self,
+        request: HttpRequest,
+        agent_id: str,
+    ) -> tuple[dict[str, str] | None, JsonResponse | None, str | None]:
+        override, error_code = resolve_context_override_for_agent(
+            request.user,
+            agent_id,
+            include_deleted=True,
+        )
+        if error_code is None:
+            return override, None, None
         if error_code == "not_found":
-            return None, JsonResponse({"error": "Agent not found"}, status=404)
+            return None, None, "missing"
         if error_code == "forbidden":
-            return None, JsonResponse({"error": "Not permitted"}, status=403)
-        return override, None
+            return None, JsonResponse({"error": "Not permitted"}, status=403), None
+        if error_code == "deleted":
+            return override, None, "deleted"
+        return None, None, "missing"
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         override = get_context_override(request)
         for_agent_id = request.GET.get("for_agent")
+        requested_agent_status = None
         if for_agent_id:
-            override_for_agent, error_response = self._resolve_override_for_agent(request, for_agent_id)
+            override_for_agent, error_response, requested_agent_status = self._resolve_override_for_agent(
+                request,
+                for_agent_id,
+            )
             if error_response:
                 return error_response
-            override = override_for_agent
+            if override_for_agent is not None:
+                override = override_for_agent
 
         context_info = resolve_console_context(
             request.user,
@@ -1787,6 +1804,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "id": context_info.current_context.id,
                     "name": context_info.current_context.name,
                 },
+                "requested_agent_status": requested_agent_status,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,
             }

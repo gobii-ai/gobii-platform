@@ -15,6 +15,7 @@ export type CreateAgentResponse = {
 
 type AgentRosterPayload = {
   context: ConsoleContext
+  requested_agent_status?: 'deleted' | 'missing' | null
   llmIntelligence?: LlmIntelligenceConfig | null
   agents: {
     id: string
@@ -37,7 +38,12 @@ type AgentRosterPayload = {
 
 export async function fetchAgentRoster(
   options: { forAgentId?: string } = {},
-): Promise<{ context: ConsoleContext; agents: AgentRosterEntry[]; llmIntelligence?: LlmIntelligenceConfig | null }> {
+): Promise<{
+  context: ConsoleContext
+  agents: AgentRosterEntry[]
+  requestedAgentStatus?: 'deleted' | 'missing' | null
+  llmIntelligence?: LlmIntelligenceConfig | null
+}> {
   const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
   const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`)
   const agents = payload.agents.map((agent) => ({
@@ -57,7 +63,12 @@ export async function fetchAgentRoster(
     email: agent.email,
     sms: agent.sms,
   }))
-  return { context: payload.context, agents, llmIntelligence: payload.llmIntelligence }
+  return {
+    context: payload.context,
+    agents,
+    requestedAgentStatus: payload.requested_agent_status ?? null,
+    llmIntelligence: payload.llmIntelligence,
+  }
 }
 
 export function updateAgent(agentId: string, payload: UpdateAgentPayload): Promise<void> {

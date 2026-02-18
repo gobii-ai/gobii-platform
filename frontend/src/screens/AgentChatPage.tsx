@@ -16,6 +16,7 @@ import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useAgentAddons } from '../hooks/useAgentAddons'
+import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
@@ -333,20 +334,25 @@ function deriveConnectionIndicator({
 
 type AgentNotFoundStateProps = {
   hasOtherAgents: boolean
+  deleted?: boolean
   onCreateAgent: () => void
 }
 
-function AgentNotFoundState({ hasOtherAgents, onCreateAgent }: AgentNotFoundStateProps) {
+function AgentNotFoundState({ hasOtherAgents, deleted = false, onCreateAgent }: AgentNotFoundStateProps) {
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
       <div className="mb-6 flex size-16 items-center justify-center rounded-full bg-amber-100 text-amber-600">
         <AlertTriangle className="size-8" aria-hidden="true" />
       </div>
-      <h2 className="mb-2 text-xl font-semibold text-gray-800">Agent not found</h2>
+      <h2 className="mb-2 text-xl font-semibold text-gray-800">{deleted ? 'Agent deleted' : 'Agent not found'}</h2>
       <p className="mb-6 max-w-md text-center text-sm text-gray-600">
-        {hasOtherAgents
-          ? 'This agent may have been deleted or you may not have access to it. Select another agent from the sidebar or create a new one.'
-          : 'This agent may have been deleted or you may not have access to it. Create a new agent to get started.'}
+        {deleted
+          ? (hasOtherAgents
+              ? 'This agent has been deleted. Select another agent from the sidebar or create a new one.'
+              : 'This agent has been deleted. Create a new agent to get started.')
+          : (hasOtherAgents
+              ? 'This agent may have been deleted or you may not have access to it. Select another agent from the sidebar or create a new one.'
+              : 'This agent may have been deleted or you may not have access to it. Create a new agent to get started.')}
       </p>
       <button
         type="button"
@@ -452,20 +458,6 @@ export function AgentChatPage({
 }: AgentChatPageProps) {
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const routeAgentId = typeof agentId === 'string' ? agentId : null
-  const {
-    data: quickSettingsPayload,
-    isLoading: quickSettingsLoading,
-    error: quickSettingsError,
-    refetch: refetchQuickSettings,
-    updateQuickSettings,
-    updating: quickSettingsUpdating,
-  } = useAgentQuickSettings(activeAgentId)
-  const {
-    data: addonsPayload,
-    refetch: refetchAddons,
-    updateAddons,
-    updating: addonsUpdating,
-  } = useAgentAddons(activeAgentId)
   const queryClient = useQueryClient()
   const {
     currentPlan,
@@ -591,9 +583,11 @@ export function AgentChatPage({
   }, [])
 
   const handleCreditEvent = useCallback(() => {
-    void refetchQuickSettings()
+    if (activeAgentId) {
+      void queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', activeAgentId], exact: true })
+    }
     void queryClient.invalidateQueries({ queryKey: ['usage-summary', 'agent-chat'], exact: false })
-  }, [refetchQuickSettings, queryClient])
+  }, [activeAgentId, queryClient])
   const handleAgentProfileEvent = useCallback(
     (rawPayload: Record<string, unknown>) => {
       const agentIdFromEvent = typeof rawPayload.agent_id === 'string' ? rawPayload.agent_id : null
@@ -1256,6 +1250,27 @@ export function AgentChatPage({
   const hasSelectedAgent = Boolean(activeAgentId)
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
   const rosterLoading = rosterQuery.isLoading || !agentContextReady || rosterContextMismatch
+  const { allowAgentPanelRequests } = useAgentPanelRequestsEnabled({
+    activeAgentId,
+    isNewAgent,
+    rosterLoading: rosterQuery.isLoading,
+    allowAgentRefresh,
+    rosterAgents,
+  })
+  const {
+    data: quickSettingsPayload,
+    isLoading: quickSettingsLoading,
+    error: quickSettingsError,
+    refetch: refetchQuickSettings,
+    updateQuickSettings,
+    updating: quickSettingsUpdating,
+  } = useAgentQuickSettings(activeAgentId, { enabled: allowAgentPanelRequests })
+  const {
+    data: addonsPayload,
+    refetch: refetchAddons,
+    updateAddons,
+    updating: addonsUpdating,
+  } = useAgentAddons(activeAgentId, { enabled: allowAgentPanelRequests })
   const contextSwitcher = useMemo(() => {
     if (!showContextSwitcher) {
       return null
@@ -1502,10 +1517,16 @@ export function AgentChatPage({
   }, [])
 
   // Detect if the requested agent doesn't exist (deleted or never existed)
+  const requestedAgentDeleted = Boolean(
+    routeAgentId
+      && activeAgentId === routeAgentId
+      && rosterQuery.data?.requestedAgentStatus === 'deleted',
+  )
   const agentNotFound = useMemo(() => {
     if (!contextReady) return false
     // Not applicable for new agent creation
     if (isNewAgent) return false
+    if (requestedAgentDeleted) return true
     // Wait for both roster and initial load to complete
     if (rosterQuery.isLoading || initialLoading || rosterContextMismatch) return false
     // Check if agent exists in roster
@@ -1516,7 +1537,19 @@ export function AgentChatPage({
     // If roster loaded, agent isn't in roster, and we have no events (failed to load), mark as not found
     if (!agentInRoster && !loading && timelineEvents.length === 0) return true
     return false
-  }, [activeAgentId, contextReady, error, initialLoading, isNewAgent, loading, rosterAgents, rosterContextMismatch, rosterQuery.isLoading, timelineEvents.length])
+  }, [
+    activeAgentId,
+    contextReady,
+    error,
+    initialLoading,
+    isNewAgent,
+    loading,
+    requestedAgentDeleted,
+    rosterAgents,
+    rosterContextMismatch,
+    rosterQuery.isLoading,
+    timelineEvents.length,
+  ])
 
   useEffect(() => {
     if (!switchingAgentId) {
@@ -2147,6 +2180,7 @@ export function AgentChatPage({
   if (agentNotFound) {
     return renderSelectionLayout(
       <AgentNotFoundState
+        deleted={requestedAgentDeleted}
         hasOtherAgents={rosterAgents.length > 0}
         onCreateAgent={handleCreateAgent}
       />,

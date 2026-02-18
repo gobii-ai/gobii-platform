@@ -181,6 +181,48 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json().get("error"), "Not permitted")
 
+    def test_roster_for_deleted_agent_returns_remaining_agents(self):
+        extra_browser = BrowserUseAgent.objects.create(user=self.owner, name="Org Agent Two")
+        extra_org_agent = PersistentAgent.objects.create(
+            user=self.owner,
+            organization=self.org,
+            name="Org PA Two",
+            charter="",
+            browser_use_agent=extra_browser,
+        )
+        self.org_agent.soft_delete()
+        self._set_personal_context()
+
+        resp = self.client.get(
+            reverse("console_agent_roster"),
+            {"for_agent": str(self.org_agent.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload.get("requested_agent_status"), "deleted")
+        self.assertEqual(payload.get("context", {}).get("type"), "organization")
+        self.assertEqual(payload.get("context", {}).get("id"), str(self.org.id))
+        roster_ids = {entry["id"] for entry in payload.get("agents", [])}
+        self.assertIn(str(extra_org_agent.id), roster_ids)
+        self.assertNotIn(str(self.org_agent.id), roster_ids)
+
+    def test_switch_context_for_deleted_agent_returns_org_context(self):
+        self.org_agent.soft_delete()
+        self._set_personal_context()
+
+        resp = self.client.get(
+            reverse("switch_context"),
+            {"for_agent": str(self.org_agent.id)},
+        )
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload.get("context", {}).get("type"), "organization")
+        self.assertEqual(payload.get("context", {}).get("id"), str(self.org.id))
+
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(self.owner.id))
+
     def test_switch_context_for_org_agent_allows_collaborator_without_membership(self):
         AgentCollaborator.objects.create(agent=self.org_agent, user=self.stranger)
 
