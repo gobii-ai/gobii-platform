@@ -595,7 +595,7 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         # In API responses prompt is returned as a string
         self.assertEqual(response.data['prompt'], '{"url": "http://example.com/task_for_agent1"}')
         self.assertEqual(response.data['agent'], str(self.agent1_user1.id))
-        self.assertTrue(BrowserUseAgentTask.objects.filter(agent=self.agent1_user1, user=self.user1, is_deleted=False).exists())
+        self.assertTrue(BrowserUseAgentTask.objects.alive().filter(agent=self.agent1_user1, user=self.user1).exists())
 
     def test_create_task_for_agent_not_owned_by_user(self):
         url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user2.id})

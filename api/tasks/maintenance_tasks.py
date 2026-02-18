@@ -72,13 +72,12 @@ def garbage_collect_timed_out_tasks(self) -> None:
             logger.info("Starting garbage collection of timed-out tasks created before %s", cutoff_time)
             
             # Find tasks that are still running but should have timed out
-            timed_out_tasks = BrowserUseAgentTask.objects.filter(
+            timed_out_tasks = BrowserUseAgentTask.objects.alive().filter(
                 created_at__lt=cutoff_time,
                 status__in=[
                     BrowserUseAgentTask.StatusChoices.PENDING,
                     BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
                 ],
-                is_deleted=False,
             )
             
             task_count = timed_out_tasks.count()

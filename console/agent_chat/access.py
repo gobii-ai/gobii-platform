@@ -20,7 +20,7 @@ def _is_blocked_personal_owner(user, agent: PersistentAgent) -> bool:
 
 def agent_queryset_for(user, context: ConsoleContext) -> QuerySet:
     """Return queryset of agents visible to the user within the console context."""
-    qs = PersistentAgent.objects.non_eval().select_related("browser_use_agent").filter(is_deleted=False)
+    qs = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent")
     if context.type == "organization":
         return qs.filter(organization_id=context.id)
     if not can_user_use_personal_agents_and_api(user):
@@ -31,8 +31,8 @@ def shared_agent_queryset_for(user) -> QuerySet:
     return (
         PersistentAgent.objects
         .non_eval()
+        .alive()
         .select_related("browser_use_agent")
-        .filter(is_deleted=False)
         .filter(collaborators__user=user)
     )
 
@@ -76,11 +76,10 @@ def resolve_agent(
                 return agent
         if (
             not can_user_use_personal_agents_and_api(user)
-            and PersistentAgent.objects.non_eval().filter(
+            and PersistentAgent.objects.non_eval().alive().filter(
                 pk=agent_id,
                 user=user,
                 organization__isnull=True,
-                is_deleted=False,
             ).exists()
         ):
             raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE) from exc

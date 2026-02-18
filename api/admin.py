@@ -2582,7 +2582,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     @admin.action(description="Soft-delete selected agents")
     def soft_delete_selected_agents(self, request, queryset):
         updated = 0
-        for agent in queryset.filter(is_deleted=False):
+        for agent in queryset.alive():
             if agent.soft_delete():
                 updated += 1
         self.message_user(request, f"Soft-deleted {updated} agent(s).", level=messages.SUCCESS)

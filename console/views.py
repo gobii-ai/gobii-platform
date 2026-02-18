@@ -2111,10 +2111,9 @@ def tasks_view(request):
                 return HttpResponseForbidden("You do not have access to this organization.")
 
             tasks_queryset = (
-                BrowserUseAgentTask.objects.filter(
+                BrowserUseAgentTask.objects.alive().filter(
                     models.Q(organization_id=context_id) |
                     models.Q(agent__persistent_agent__organization_id=context_id),
-                    is_deleted=False,
                 )
                 .distinct()
                 .order_by('-created_at')
@@ -2122,9 +2121,8 @@ def tasks_view(request):
         else:
             # For personal context, show user's personal tasks only
             tasks_queryset = (
-                BrowserUseAgentTask.objects.filter(
+                BrowserUseAgentTask.objects.alive().filter(
                     user=request.user,
-                    is_deleted=False,
                     organization__isnull=True,
                 )
                 .exclude(agent__persistent_agent__organization__isnull=False)
@@ -2177,10 +2175,9 @@ def task_detail_view(request, task_id):
         span.set_attribute('task.id', str(task_id))
         with traced("CONSOLE Task Detail Fetch Task"):
             task = get_object_or_404(
-                BrowserUseAgentTask.objects.prefetch_related('steps'),
+                BrowserUseAgentTask.objects.alive().prefetch_related('steps'),
                 id=task_id,
                 user=request.user,
-                is_deleted=False
             )
 
         return render(request, 'task_detail.html', {'task': task})
@@ -2191,10 +2188,9 @@ def task_cancel_view(request, task_id):
         with traced("CONSOLE Task Cancel", user_id=request.user.id) as span:
             # Get the task
             task = get_object_or_404(
-                BrowserUseAgentTask,
+                BrowserUseAgentTask.objects.alive(),
                 id=task_id,
                 user=request.user,
-                is_deleted=False
             )
 
             # Only allow cancelling tasks that are pending or in_progress
@@ -2231,10 +2227,9 @@ def task_result_view(request, task_id):
     span.set_attribute('user.id', str(request.user.id))
     with traced("CONSOLE Task Result Fetch Task"):
         task = get_object_or_404(
-            BrowserUseAgentTask.objects.prefetch_related('steps'),
+            BrowserUseAgentTask.objects.alive().prefetch_related('steps'),
             id=task_id,
             user=request.user,
-            is_deleted=False
         )
 
     span.set_attribute('task.status', task.status)
@@ -3081,7 +3076,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
           is an active member of that organization.
         - Personal context: user-owned agents without an organization.
         """
-        qs = super().get_queryset().filter(is_deleted=False).select_related('user__billing')
+        qs = super().get_queryset().alive().select_related('user__billing')
 
         context_type = self.request.session.get('context_type', 'personal')
         if context_type == 'organization':
@@ -5739,7 +5734,7 @@ class AgentFilesView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     pk_url_kwarg = "pk"
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(is_deleted=False).select_related('organization')
+        qs = super().get_queryset().alive().select_related('organization')
 
         context_type = self.request.session.get('context_type', 'personal')
         if context_type == 'organization':
@@ -5795,7 +5790,6 @@ class AgentDeleteView(LoginRequiredMixin, View):
             agent = PersistentAgent.objects.non_eval().alive().get(
                 pk=self.kwargs['pk'],
                 user=request.user,
-                is_deleted=False,
             )
             _enforce_personal_agent_access_or_raise(request.user, agent)
 
@@ -6916,8 +6910,8 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
         qs = (
             super()
             .get_queryset()
+            .alive()
             .filter(user=self.request.user)
-            .filter(is_deleted=False)
             .select_related('organization__billing')
         )
         if can_user_use_personal_agents_and_api(self.request.user):

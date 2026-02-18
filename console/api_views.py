@@ -2301,7 +2301,7 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = get_object_or_404(
-            PersistentAgent.objects.select_related("organization").filter(is_deleted=False),
+            PersistentAgent.objects.alive().select_related("organization"),
             pk=agent_id,
         )
         if not self._has_access(request.user, agent):
@@ -2316,21 +2316,19 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         try:
             if node_id:
                 node = (
-                    AgentFsNode.objects
+                    AgentFsNode.objects.alive()
                     .filter(
                         id=node_id,
                         filespace_id__in=filespace_ids,
                         node_type=AgentFsNode.NodeType.FILE,
-                        is_deleted=False,
                     )
                     .first()
                 )
             else:
-                matches = AgentFsNode.objects.filter(
+                matches = AgentFsNode.objects.alive().filter(
                     filespace_id__in=filespace_ids,
                     path=path,
                     node_type=AgentFsNode.NodeType.FILE,
-                    is_deleted=False,
                 )
                 if matches.count() > 1:
                     return HttpResponseBadRequest("Multiple files match path; use node_id instead.")
@@ -2385,12 +2383,11 @@ class SignedAgentFsNodeDownloadAPIView(View):
             agent_id=agent_uuid
         ).values_list("filespace_id", flat=True)
         node = (
-            AgentFsNode.objects
+            AgentFsNode.objects.alive()
             .filter(
                 id=node_uuid,
                 filespace_id__in=filespace_ids,
                 node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
             )
             .first()
         )
@@ -2441,8 +2438,8 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
         agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         filespace = get_or_create_default_filespace(agent)
         nodes = (
-            AgentFsNode.objects
-            .filter(filespace=filespace, is_deleted=False)
+            AgentFsNode.objects.alive()
+            .filter(filespace=filespace)
             .only(
                 "id",
                 "parent_id",
@@ -2515,12 +2512,11 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
 
         if parent_id:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     id=parent_id,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
@@ -2541,12 +2537,11 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
                 return HttpResponseBadRequest("parent_id is invalid")
         elif parent_path:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     path=parent_path,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
@@ -2628,12 +2623,11 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
 
         filespace = get_or_create_default_filespace(agent)
         nodes = (
-            AgentFsNode.objects
+            AgentFsNode.objects.alive()
             .filter(
                 filespace=filespace,
                 id__in=node_ids,
                 node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
             )
         )
 
@@ -2682,19 +2676,18 @@ class AgentFsNodeCreateDirAPIView(LoginRequiredMixin, View):
         parent = None
         if parent_id:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     id=parent_id,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
             if not parent:
                 return HttpResponseBadRequest("parent_id is invalid")
 
-        if AgentFsNode.objects.filter(filespace=filespace, parent=parent, name=name, is_deleted=False).exists():
+        if AgentFsNode.objects.alive().filter(filespace=filespace, parent=parent, name=name).exists():
             return HttpResponseBadRequest("folder already exists")
 
         node = AgentFsNode(
@@ -2757,8 +2750,8 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
 
         filespace = get_or_create_default_filespace(agent)
         node = (
-            AgentFsNode.objects
-            .filter(filespace=filespace, id=node_id, is_deleted=False)
+            AgentFsNode.objects.alive()
+            .filter(filespace=filespace, id=node_id)
             .first()
         )
         if not node:
@@ -2769,12 +2762,11 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
         parent = None
         if parent_id:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     id=parent_id,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
@@ -2785,8 +2777,8 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
             return JsonResponse({"node": _serialize_agent_fs_node(node)})
 
         name_conflict = (
-            AgentFsNode.objects
-            .filter(filespace=filespace, parent=parent, name=node.name, is_deleted=False)
+            AgentFsNode.objects.alive()
+            .filter(filespace=filespace, parent=parent, name=node.name)
             .exclude(id=node.id)
             .exists()
         )

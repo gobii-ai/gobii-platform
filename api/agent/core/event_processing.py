@@ -2590,7 +2590,7 @@ def process_agent_events(
 
             agent_obj = processed_agent
             if agent_obj is None:
-                agent_obj = PersistentAgent.objects.filter(id=persistent_agent_id, is_deleted=False).first()
+                agent_obj = PersistentAgent.objects.alive().filter(id=persistent_agent_id).first()
             if agent_obj is not None:
                 _broadcast_processing(agent_obj)
         except Exception as e:
@@ -2607,13 +2607,13 @@ def _process_agent_events_locked(
     """Core event processing logic, called while holding the distributed lock."""
     try:
         agent = (
-            PersistentAgent.objects.select_related(
+            PersistentAgent.objects.alive().select_related(
                 "user",
                 "preferred_contact_endpoint",
                 "browser_use_agent",
             )
             .prefetch_related("webhooks")
-            .get(id=persistent_agent_id, is_deleted=False)
+            .get(id=persistent_agent_id)
         )
     except PersistentAgent.DoesNotExist:
         logger.warning("Persistent agent %s not found; skipping processing.", persistent_agent_id)

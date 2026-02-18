@@ -776,9 +776,9 @@ def ingest_inbound_message(
             try:
                 with transaction.atomic():
                     agent_locked: PersistentAgent = (
-                        PersistentAgent.objects.select_for_update()
+                        PersistentAgent.objects.alive().select_for_update()
                         .select_related("user")
-                        .get(id=owner_id, is_deleted=False)
+                        .get(id=owner_id)
                     )
                     # Update last interaction
                     agent_locked.last_interaction_at = timezone.now()
@@ -804,7 +804,7 @@ def ingest_inbound_message(
                 logging.exception("Failed updating last interaction for agent %s", owner_id, exc_info=True)
 
             if agent_obj is None:
-                agent_obj = PersistentAgent.objects.filter(id=owner_id, is_deleted=False).select_related("user").first()
+                agent_obj = PersistentAgent.objects.alive().filter(id=owner_id).select_related("user").first()
 
             # Before triggering agent processing, check if the agent owner's
             # account is out of credits. If so, send a reply email to the sender

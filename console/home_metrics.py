@@ -84,13 +84,13 @@ def _build_console_home_metrics_for_owner(owner, *, is_org: bool) -> dict[str, o
             .values_list("browser_use_agent_id", flat=True)
         )
         task_stats = (
-            BrowserUseAgentTask.objects.filter(agent_id__in=pa_browser_ids, is_deleted=False)
+            BrowserUseAgentTask.objects.alive().filter(agent_id__in=pa_browser_ids)
             .values("status")
             .annotate(count=Count("status"))
         )
     else:
         task_stats = (
-            BrowserUseAgentTask.objects.filter(user=owner, is_deleted=False)
+            BrowserUseAgentTask.objects.alive().filter(user=owner)
             .values("status")
             .annotate(count=Count("status"))
         )

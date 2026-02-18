@@ -1079,10 +1079,9 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
     web_tasks: list[dict] = []
     if getattr(agent, "browser_use_agent_id", None):
         task_qs: BrowserUseAgentTaskQuerySet = BrowserUseAgentTask.objects
-        active_tasks = task_qs.filter(
+        active_tasks = task_qs.alive().filter(
             agent=agent.browser_use_agent,
             status__in=WEB_TASK_ACTIVE_STATUSES,
-            is_deleted=False,
         ).order_by("created_at")
         now = timezone.now()
         max_age_seconds = int(getattr(settings, "AGENT_WEB_TASK_ACTIVE_MAX_AGE_SECONDS", 0))

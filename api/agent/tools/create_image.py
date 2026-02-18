@@ -208,12 +208,11 @@ def _resolve_source_image_path(
         if not node_id:
             return None
         node = (
-            AgentFsNode.objects
+            AgentFsNode.objects.alive()
             .filter(
                 id=node_id,
                 filespace=filespace,
                 node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
             )
             .only("path")
             .first()
@@ -271,12 +270,11 @@ def _resolve_source_image_data_uris(
             seen_paths.add(path)
 
     nodes = (
-        AgentFsNode.objects
+        AgentFsNode.objects.alive()
         .filter(
             filespace=filespace,
             path__in=normalized_paths,
             node_type=AgentFsNode.NodeType.FILE,
-            is_deleted=False,
         )
         .only("id", "path", "mime_type", "content")
     )

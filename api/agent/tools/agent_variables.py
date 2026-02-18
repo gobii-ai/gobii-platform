@@ -165,11 +165,10 @@ def substitute_variables_with_filespace(text: str, agent) -> str:
             from api.models import AgentFsNode
             from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 
-            node = AgentFsNode.objects.filter(
+            node = AgentFsNode.objects.alive().filter(
                 filespace=filespace,
                 path=path,
                 node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
             ).only("id").first()
             if not node:
                 return None
@@ -283,11 +282,10 @@ def substitute_variables_as_data_uris(text: str, agent) -> str:
         if path in data_uri_cache:
             return data_uri_cache[path]
         try:
-            node = AgentFsNode.objects.filter(
+            node = AgentFsNode.objects.alive().filter(
                 filespace=filespace,
                 path=path,
                 node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
             ).first()
 
             if node and node.content:

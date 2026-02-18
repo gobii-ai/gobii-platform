@@ -123,8 +123,8 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
         return format_agent_filesystem_prompt([], has_filespace=False)
 
     files: QuerySet[AgentFsNode] = (
-        AgentFsNode.objects
-        .filter(filespace_id=fs_id, is_deleted=False, node_type=AgentFsNode.NodeType.FILE)
+        AgentFsNode.objects.alive()
+        .filter(filespace_id=fs_id, node_type=AgentFsNode.NodeType.FILE)
         .only("id", "path", "size_bytes", "mime_type", "updated_at")
         .order_by("-updated_at", "-created_at", "path")[:MAX_RECENT_FILES_IN_PROMPT]
     )

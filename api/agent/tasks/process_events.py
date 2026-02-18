@@ -361,7 +361,7 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
         )
 
         agent = (
-            PersistentAgent.objects
+            PersistentAgent.objects.alive()
             .select_related(
                 "organization",
                 "organization__billing",
@@ -369,7 +369,7 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
                 "user__billing",
                 "preferred_contact_endpoint",
             )
-            .filter(id=persistent_agent_id, is_deleted=False)
+            .filter(id=persistent_agent_id)
             .first()
         )
         if agent is None:
@@ -423,7 +423,7 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
 
         # Create the cron trigger record first
         with transaction.atomic():
-            agent = PersistentAgent.objects.select_for_update().get(id=persistent_agent_id, is_deleted=False)
+            agent = PersistentAgent.objects.alive().select_for_update().get(id=persistent_agent_id)
             
             # Create a step for this cron trigger
             step = PersistentAgentStep.objects.create(
