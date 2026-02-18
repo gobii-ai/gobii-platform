@@ -5458,7 +5458,7 @@ class PersistentAgent(models.Model):
             update_fields.append("deleted_at")
         if save and update_fields:
             self.save(update_fields=update_fields)
-        if self.pk:
+        if save and self.pk:
             # Release endpoint ownership so deleted agents do not reserve globally unique addresses.
             released_count = self.comms_endpoints.filter(owner_agent_id=self.pk).update(
                 owner_agent=None,

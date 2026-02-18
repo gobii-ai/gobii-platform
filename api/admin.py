@@ -2543,8 +2543,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         return form
 
     def save_model(self, request, obj, form, change):
+        should_release_endpoints = False
         if obj.is_deleted:
             obj.soft_delete(save=False)
+            should_release_endpoints = bool(obj.pk)
         else:
             obj.deleted_at = None
 
@@ -2578,6 +2580,11 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         obj.daily_credit_limit = int(slider_bounds['slider_limit_max'])
 
         super().save_model(request, obj, form, change)
+        if should_release_endpoints:
+            obj.comms_endpoints.filter(owner_agent_id=obj.pk).update(
+                owner_agent=None,
+                is_primary=False,
+            )
 
     @admin.action(description="Soft-delete selected agents")
     def soft_delete_selected_agents(self, request, queryset):
