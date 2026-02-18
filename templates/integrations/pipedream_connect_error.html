@@ -153,7 +153,11 @@
     </div>
     {% if show_support|default:True %}
     <div class="support-text">
+      {% if settings.GOBII_PROPRIETARY_MODE %}
       Still having trouble? <a href="{% url 'proprietary:support' %}">Contact support</a>
+      {% else %}
+      Still having trouble? <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}">Contact support</a>
+      {% endif %}
     </div>
     {% endif %}
   </div>
