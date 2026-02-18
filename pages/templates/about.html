@@ -25,11 +25,9 @@
     <p class="text-lg leading-relaxed mb-4">
       If you believe the browser should be as programmable as an API, we'd love to hear from you.
     </p>
-    {% if settings.PUBLIC_CONTACT_EMAIL %}
-      <p class="text-lg leading-relaxed">
-        <a href="mailto:{{ settings.PUBLIC_CONTACT_EMAIL }}" class="text-blue-600 hover:underline">Say hello ↗</a>
-      </p>
-    {% endif %}
+    <p class="text-lg leading-relaxed">
+      <a href="{% url 'proprietary:contact' %}" class="text-blue-600 hover:underline">Say hello ↗</a>
+    </p>
   </div>
 </section>
 

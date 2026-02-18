@@ -47,7 +47,9 @@
           </div>
           <div class="mt-8 text-sm text-slate-600">
             <p class="font-medium text-slate-900">Questions?</p>
-            {% if settings.PUBLIC_SUPPORT_EMAIL %}
+            {% if settings.PUBLIC_CONTACT_EMAIL %}
+              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_CONTACT_EMAIL }}" class="text-blue-600 hover:text-blue-700 font-medium">{{ settings.PUBLIC_CONTACT_EMAIL }}</a>.</p>
+            {% elif settings.PUBLIC_SUPPORT_EMAIL %}
               <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}" class="text-blue-600 hover:text-blue-700 font-medium">{{ settings.PUBLIC_SUPPORT_EMAIL }}</a>.</p>
             {% else %}
               <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.SUPPORT_EMAIL }}" class="text-blue-600 hover:text-blue-700 font-medium">{{ settings.SUPPORT_EMAIL }}</a>.</p>
