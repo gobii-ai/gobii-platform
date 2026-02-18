@@ -1342,10 +1342,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         trial_days = _normalize_trial_days(getattr(stripe_settings, "startup_trial_days", 0))
         include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
 
-        subscription_data = {
-            "metadata": metadata,
-            "collection_method": "charge_automatically",
-        }
+        subscription_data = {"metadata": metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
 
@@ -1492,10 +1489,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         trial_days = _normalize_trial_days(getattr(stripe_settings, "scale_trial_days", 0))
         include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
 
-        subscription_data = {
-            "metadata": metadata,
-            "collection_method": "charge_automatically",
-        }
+        subscription_data = {"metadata": metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
 
