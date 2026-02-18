@@ -22,9 +22,7 @@
         <li><a href="{% url 'proprietary:team' %}" class="text-slate-700 hover:text-blue-600">Team</a></li>
         <li><a href="{% url 'proprietary:careers' %}" class="text-slate-700 hover:text-blue-600">Careers</a></li>
         <li><a href="{% url 'proprietary:blog_index' %}" class="text-slate-700 hover:text-blue-600">Blog</a></li>
-        {% if settings.PUBLIC_CONTACT_EMAIL %}
-          <li><a href="mailto:{{ settings.PUBLIC_CONTACT_EMAIL }}" class="text-slate-700 hover:text-blue-600">Contact</a></li>
-        {% endif %}
+        <li><a href="{% url 'proprietary:contact' %}" class="text-slate-700 hover:text-blue-600">Contact</a></li>
       </ul>
     </div>
     {% endif %}

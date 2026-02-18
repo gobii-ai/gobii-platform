@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Gobii – Contact{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Get in touch with Gobii via Discord, email, or our contact form.">
+{% endblock %}
+{% block content %}
+
+<div class="max-w-4xl mx-auto px-4 py-10 sm:px-6 lg:px-8">
+  <div class="text-center mb-10">
+    <h1 class="text-3xl font-semibold text-gray-900 sm:text-4xl">Contact</h1>
+    <p class="mt-4 text-lg text-gray-600">We'd love to hear from you. Reach out and our team will follow up.</p>
+  </div>
+
+  <div class="mb-10">
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- Discord Card -->
+      <div class="gobii-card-base">
+        <div class="p-6">
+          <div class="flex items-center">
+            <div class="flex-shrink-0">
+              <svg class="h-8 w-8 text-purple-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+              </svg>
+            </div>
+            <div class="ml-4">
+              <p class="text-lg font-medium text-gray-900">Discord Community</p>
+              <p class="text-gray-600">Join our Discord community where you'll find Gobii staff ready to help.</p>
+            </div>
+          </div>
+          {% if settings.PUBLIC_DISCORD_URL %}
+            <a href="{{ settings.PUBLIC_DISCORD_URL }}" class="mt-4 inline-flex items-center justify-center w-full px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
+              Join Discord
+            </a>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Email/Form Card -->
+      <div class="gobii-card-base">
+        <div class="p-6">
+          <h3 class="text-lg font-medium text-gray-900 mb-4">Send us a message</h3>
+          <form class="space-y-4" hx-post="{% url 'proprietary:contact' %}" hx-swap="innerHTML" hx-target="#form-response">
+            {% csrf_token %}
+            <div>
+              <label for="name" class="sr-only">Name</label>
+              <input type="text" id="name" name="name" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Name" required>
+            </div>
+            <div>
+              <label for="email" class="sr-only">Email</label>
+              <input type="email" id="email" name="email" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Email" required>
+            </div>
+            <div>
+              <label for="subject" class="sr-only">Subject</label>
+              <input type="text" id="subject" name="subject" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Subject" required>
+            </div>
+            <div>
+              <label for="message" class="sr-only">Message</label>
+              <textarea id="message" name="message" rows="4" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" placeholder="Message" required></textarea>
+            </div>
+            {% if settings.TURNSTILE_ENABLED and support_form %}
+            <div class="flex justify-center">
+              {{ support_form.turnstile }}
+            </div>
+            {% endif %}
+            <div>
+              <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                Send Message
+              </button>
+            </div>
+            <div id="form-response"></div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
