@@ -352,6 +352,20 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertAlmostEqual(api_row["tasks_per_day"], 3.5)
         self.assertIsNone(api_row["persistent_id"])
 
+    def test_soft_deleted_agent_is_flagged_in_leaderboard(self):
+        delete_response = self.client.delete(reverse("agent_delete", kwargs={"pk": self.persistent_primary.id}))
+        self.assertEqual(delete_response.status_code, 200)
+
+        response = self.client.get(reverse("console_usage_agents_leaderboard"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agent_map = {entry["id"]: entry for entry in payload.get("agents", [])}
+
+        primary = agent_map[str(self.agent_primary.id)]
+        secondary = agent_map[str(self.agent_secondary.id)]
+        self.assertTrue(primary.get("is_deleted"))
+        self.assertFalse(secondary.get("is_deleted"))
+
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
 class UsageToolBreakdownAPITests(TestCase):
@@ -677,6 +691,24 @@ class UsageAgentsAPITests(TestCase):
         reset_session["context_id"] = str(self.user.id)
         reset_session["context_name"] = self.user.username
         reset_session.save()
+
+    def test_agent_list_excludes_soft_deleted_agents(self):
+        persistent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Agent A Persistent",
+            charter="Delete me",
+            browser_use_agent=self.personal_agent,
+        )
+
+        delete_response = self.client.delete(reverse("agent_delete", kwargs={"pk": persistent.id}))
+        self.assertEqual(delete_response.status_code, 200)
+
+        response = self.client.get(reverse("console_usage_agents"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agent_ids = {agent["id"] for agent in payload.get("agents", [])}
+        self.assertNotIn(str(self.personal_agent.id), agent_ids)
+        self.assertIn(str(self.personal_agent_two.id), agent_ids)
 
 
 @tag("batch_usage_api")

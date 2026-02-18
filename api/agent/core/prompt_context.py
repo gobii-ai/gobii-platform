@@ -4469,9 +4469,8 @@ def _redact_signed_filespace_urls(text: str, agent: PersistentAgent) -> str:
             if str(payload.get("agent_id")) != str(agent.id):
                 return match.group(0)
             node = (
-                AgentFsNode.objects.filter(
+                AgentFsNode.objects.alive().filter(
                     id=payload.get("node_id"),
-                    is_deleted=False,
                 )
                 .only("path")
                 .first()
@@ -4661,10 +4660,9 @@ def _build_sqlite_files_snapshot(agent: PersistentAgent) -> _FileSnapshotBundle:
         return _FileSnapshotBundle(has_filespace=False, records=records)
 
     files_qs = (
-        AgentFsNode.objects
+        AgentFsNode.objects.alive()
         .filter(
             filespace_id=access.filespace_id,
-            is_deleted=False,
             node_type=AgentFsNode.NodeType.FILE,
         )
         .only(

@@ -1645,22 +1645,39 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
 class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
-    def _resolve_override_for_agent(self, request: HttpRequest, agent_id: str) -> tuple[dict[str, str] | None, JsonResponse | None]:
-        override, error_code = resolve_context_override_for_agent(request.user, agent_id)
+    def _resolve_override_for_agent(
+        self,
+        request: HttpRequest,
+        agent_id: str,
+    ) -> tuple[dict[str, str] | None, JsonResponse | None, str | None]:
+        override, error_code = resolve_context_override_for_agent(
+            request.user,
+            agent_id,
+            include_deleted=True,
+        )
+        if error_code is None:
+            return override, None, None
         if error_code == "not_found":
-            return None, JsonResponse({"error": "Agent not found"}, status=404)
+            return None, None, "missing"
         if error_code == "forbidden":
-            return None, JsonResponse({"error": "Not permitted"}, status=403)
-        return override, None
+            return None, JsonResponse({"error": "Not permitted"}, status=403), None
+        if error_code == "deleted":
+            return override, None, "deleted"
+        return None, None, "missing"
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         override = get_context_override(request)
         for_agent_id = request.GET.get("for_agent")
+        requested_agent_status = None
         if for_agent_id:
-            override_for_agent, error_response = self._resolve_override_for_agent(request, for_agent_id)
+            override_for_agent, error_response, requested_agent_status = self._resolve_override_for_agent(
+                request,
+                for_agent_id,
+            )
             if error_response:
                 return error_response
-            override = override_for_agent
+            if override_for_agent is not None:
+                override = override_for_agent
 
         context_info = resolve_console_context(
             request.user,
@@ -1787,6 +1804,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "id": context_info.current_context.id,
                     "name": context_info.current_context.name,
                 },
+                "requested_agent_status": requested_agent_status,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,
             }
@@ -1862,7 +1880,7 @@ class AgentCollaboratorLeaveAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = PersistentAgent.objects.non_eval().filter(pk=agent_id).first()
+        agent = PersistentAgent.objects.non_eval().alive().filter(pk=agent_id).first()
         if not agent:
             return JsonResponse({"error": "Agent not found"}, status=404)
 
@@ -2282,7 +2300,10 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         return user_is_collaborator(user, agent)
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = get_object_or_404(PersistentAgent.objects.select_related("organization"), pk=agent_id)
+        agent = get_object_or_404(
+            PersistentAgent.objects.alive().select_related("organization"),
+            pk=agent_id,
+        )
         if not self._has_access(request.user, agent):
             return HttpResponseForbidden("Not authorized to access this file.")
 
@@ -2295,21 +2316,19 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         try:
             if node_id:
                 node = (
-                    AgentFsNode.objects
+                    AgentFsNode.objects.alive()
                     .filter(
                         id=node_id,
                         filespace_id__in=filespace_ids,
                         node_type=AgentFsNode.NodeType.FILE,
-                        is_deleted=False,
                     )
                     .first()
                 )
             else:
-                matches = AgentFsNode.objects.filter(
+                matches = AgentFsNode.objects.alive().filter(
                     filespace_id__in=filespace_ids,
                     path=path,
                     node_type=AgentFsNode.NodeType.FILE,
-                    is_deleted=False,
                 )
                 if matches.count() > 1:
                     return HttpResponseBadRequest("Multiple files match path; use node_id instead.")
@@ -2364,12 +2383,11 @@ class SignedAgentFsNodeDownloadAPIView(View):
             agent_id=agent_uuid
         ).values_list("filespace_id", flat=True)
         node = (
-            AgentFsNode.objects
+            AgentFsNode.objects.alive()
             .filter(
                 id=node_uuid,
                 filespace_id__in=filespace_ids,
                 node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
             )
             .first()
         )
@@ -2420,8 +2438,8 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
         agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         filespace = get_or_create_default_filespace(agent)
         nodes = (
-            AgentFsNode.objects
-            .filter(filespace=filespace, is_deleted=False)
+            AgentFsNode.objects.alive()
+            .filter(filespace=filespace)
             .only(
                 "id",
                 "parent_id",
@@ -2494,12 +2512,11 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
 
         if parent_id:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     id=parent_id,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
@@ -2520,12 +2537,11 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
                 return HttpResponseBadRequest("parent_id is invalid")
         elif parent_path:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     path=parent_path,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
@@ -2607,12 +2623,11 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
 
         filespace = get_or_create_default_filespace(agent)
         nodes = (
-            AgentFsNode.objects
+            AgentFsNode.objects.alive()
             .filter(
                 filespace=filespace,
                 id__in=node_ids,
                 node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
             )
         )
 
@@ -2661,19 +2676,18 @@ class AgentFsNodeCreateDirAPIView(LoginRequiredMixin, View):
         parent = None
         if parent_id:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     id=parent_id,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
             if not parent:
                 return HttpResponseBadRequest("parent_id is invalid")
 
-        if AgentFsNode.objects.filter(filespace=filespace, parent=parent, name=name, is_deleted=False).exists():
+        if AgentFsNode.objects.alive().filter(filespace=filespace, parent=parent, name=name).exists():
             return HttpResponseBadRequest("folder already exists")
 
         node = AgentFsNode(
@@ -2736,8 +2750,8 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
 
         filespace = get_or_create_default_filespace(agent)
         node = (
-            AgentFsNode.objects
-            .filter(filespace=filespace, id=node_id, is_deleted=False)
+            AgentFsNode.objects.alive()
+            .filter(filespace=filespace, id=node_id)
             .first()
         )
         if not node:
@@ -2748,12 +2762,11 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
         parent = None
         if parent_id:
             parent = (
-                AgentFsNode.objects
+                AgentFsNode.objects.alive()
                 .filter(
                     filespace=filespace,
                     id=parent_id,
                     node_type=AgentFsNode.NodeType.DIR,
-                    is_deleted=False,
                 )
                 .first()
             )
@@ -2764,8 +2777,8 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
             return JsonResponse({"node": _serialize_agent_fs_node(node)})
 
         name_conflict = (
-            AgentFsNode.objects
-            .filter(filespace=filespace, parent=parent, name=node.name, is_deleted=False)
+            AgentFsNode.objects.alive()
+            .filter(filespace=filespace, parent=parent, name=node.name)
             .exclude(id=node.id)
             .exists()
         )

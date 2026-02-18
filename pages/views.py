@@ -512,7 +512,7 @@ class HomePage(TemplateView):
         )
 
         if self.request.user.is_authenticated:
-            recent_agents_qs = PersistentAgent.objects.non_eval().filter(user_id=self.request.user.id)
+            recent_agents_qs = PersistentAgent.objects.non_eval().alive().filter(user_id=self.request.user.id)
             total_agents = recent_agents_qs.count()
             recent_agents = list(recent_agents_qs.order_by('-updated_at')[:3])
 

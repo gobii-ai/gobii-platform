@@ -31,10 +31,12 @@ class FilesystemPromptTests(SimpleTestCase):
         qs = MagicMock()
         qs.only.return_value = qs
         qs.order_by.return_value = nodes
+        alive_qs = MagicMock()
+        alive_qs.filter.return_value = qs
 
         with patch("api.agent.files.filesystem_prompt._get_default_filespace_id", return_value="fs-1"), patch(
-            "api.agent.files.filesystem_prompt.AgentFsNode.objects.filter",
-            return_value=qs,
+            "api.agent.files.filesystem_prompt.AgentFsNode.objects.alive",
+            return_value=alive_qs,
         ):
             text = get_agent_filesystem_prompt(agent)
 
@@ -52,10 +54,12 @@ class FilesystemPromptTests(SimpleTestCase):
         qs = MagicMock()
         qs.only.return_value = qs
         qs.order_by.return_value = []
+        alive_qs = MagicMock()
+        alive_qs.filter.return_value = qs
 
         with patch("api.agent.files.filesystem_prompt._get_default_filespace_id", return_value="fs-1"), patch(
-            "api.agent.files.filesystem_prompt.AgentFsNode.objects.filter",
-            return_value=qs,
+            "api.agent.files.filesystem_prompt.AgentFsNode.objects.alive",
+            return_value=alive_qs,
         ):
             text = get_agent_filesystem_prompt(agent)
 

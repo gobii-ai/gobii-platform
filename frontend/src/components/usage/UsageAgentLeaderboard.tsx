@@ -31,6 +31,7 @@ type LeaderboardRow = {
   successRate: number | null
   persistentId: string | null
   isApi: boolean
+  isDeleted: boolean
 }
 
 type UsageAgentLeaderboardProps = {
@@ -192,6 +193,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
           successRate,
           persistentId: agent.persistent_id ?? null,
           isApi: agent.id === API_AGENT_ID,
+          isDeleted: Boolean(agent.is_deleted),
         }
       })
   }, [data])
@@ -204,9 +206,17 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds 
         header: ({ column }) => <SortableHeader column={column}>Agent</SortableHeader>,
         cell: ({ row, getValue }) => {
           const label = getValue<string>()
+          const isDeleted = row.original.isDeleted
           return (
             <div className="flex flex-col gap-0.5">
-              <span className="text-sm font-medium text-slate-900">{label}</span>
+              <span className="inline-flex items-center gap-2 text-sm font-medium text-slate-900">
+                <span>{label}</span>
+                {isDeleted ? (
+                  <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                    Deleted
+                  </span>
+                ) : null}
+              </span>
               <span className="text-xs text-slate-500">#{row.index + 1}</span>
             </div>
           )

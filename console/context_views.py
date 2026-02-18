@@ -21,6 +21,7 @@ class SwitchContextView(LoginRequiredMixin, View):
             override, error_code = resolve_context_override_for_agent(
                 request.user,
                 for_agent_id,
+                include_deleted=True,
             )
             if error_code == "not_found":
                 return JsonResponse({"error": "Agent not found"}, status=404)

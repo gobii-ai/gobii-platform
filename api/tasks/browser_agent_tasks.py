@@ -653,10 +653,9 @@ def build_available_file_paths(persistent_agent_id: Optional[str]) -> list[str]:
         filespace = get_or_create_default_filespace(agent)
 
         qs = (
-            AgentFsNode.objects
+            AgentFsNode.objects.alive()
             .filter(
                 filespace_id=filespace.id,
-                is_deleted=False,
                 node_type=AgentFsNode.NodeType.FILE,
             )
             .only("path")

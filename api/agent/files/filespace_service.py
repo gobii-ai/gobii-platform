@@ -57,8 +57,8 @@ def get_or_create_default_filespace(agent) -> AgentFileSpace:
 
 def get_or_create_dir(fs: AgentFileSpace, parent: AgentFsNode | None, name: str) -> AgentFsNode:
     node = (
-        AgentFsNode.objects
-        .filter(filespace=fs, parent=parent, name=name, node_type=AgentFsNode.NodeType.DIR, is_deleted=False)
+        AgentFsNode.objects.alive()
+        .filter(filespace=fs, parent=parent, name=name, node_type=AgentFsNode.NodeType.DIR)
         .first()
     )
     if node:
@@ -75,9 +75,7 @@ def get_or_create_dir(fs: AgentFileSpace, parent: AgentFsNode | None, name: str)
 
 def dedupe_name(fs: AgentFileSpace, parent: AgentFsNode | None, base_name: str) -> str:
     """Ensure unique filename within the parent by appending a suffix when needed."""
-    if not AgentFsNode.objects.filter(
-        filespace=fs, parent=parent, name=base_name, is_deleted=False
-    ).exists():
+    if not AgentFsNode.objects.alive().filter(filespace=fs, parent=parent, name=base_name).exists():
         return base_name
 
     # Split extension
@@ -88,8 +86,8 @@ def dedupe_name(fs: AgentFileSpace, parent: AgentFsNode | None, base_name: str) 
         stem, ext = base_name, ""
 
     # Fetch all existing names matching the pattern
-    conflicting_names = set(AgentFsNode.objects.filter(
-        filespace=fs, parent=parent, name__startswith=stem, name__endswith=ext, is_deleted=False
+    conflicting_names = set(AgentFsNode.objects.alive().filter(
+        filespace=fs, parent=parent, name__startswith=stem, name__endswith=ext
     ).values_list('name', flat=True))
 
     # Find the first available number in memory
@@ -158,8 +156,7 @@ def _ensure_nested_dirs(
             filespace=filespace,
             parent=current,
             name=part,
-            is_deleted=False,
-        ).first()
+        ).alive().first()
         if existing:
             if existing.node_type != AgentFsNode.NodeType.DIR:
                 return None
@@ -262,8 +259,7 @@ def write_bytes_to_dir(
     existing = AgentFsNode.objects.filter(
         filespace=filespace,
         path=full_path,
-        is_deleted=False,
-    ).first()
+    ).alive().first()
     if existing:
         if existing.node_type != AgentFsNode.NodeType.FILE:
             return {"status": "error", "message": "Path points to a directory, not a file."}

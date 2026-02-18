@@ -235,8 +235,8 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
 
     try:
         node = (
-            AgentFsNode.objects
-            .filter(filespace=filespace, path=path, is_deleted=False)
+            AgentFsNode.objects.alive()
+            .filter(filespace=filespace, path=path)
             .first()
         )
         if not node:

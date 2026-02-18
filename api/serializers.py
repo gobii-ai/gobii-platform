@@ -291,9 +291,11 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
         if not self.instance and request is not None:
             agent_obj = attrs.get('agent')
             if agent_obj:
+                persistent = getattr(agent_obj, 'persistent_agent', None)
+                if persistent and persistent.is_deleted:
+                    raise serializers.ValidationError({'agent': 'Specified agent has been deleted.'})
                 auth = getattr(request, 'auth', None)
                 if isinstance(auth, ApiKey) and getattr(auth, 'organization_id', None):
-                    persistent = getattr(agent_obj, 'persistent_agent', None)
                     if not persistent or persistent.organization_id != auth.organization_id:
                         raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated organization.'})
                 elif agent_obj.user != request.user:

@@ -3,8 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchAgentQuickSettings, updateAgentQuickSettings } from '../api/agentQuickSettings'
 import type { AgentQuickSettingsUpdatePayload } from '../types/agentQuickSettings'
 
-export function useAgentQuickSettings(agentId?: string | null) {
-  const enabled = Boolean(agentId)
+type UseAgentQuickSettingsOptions = {
+  enabled?: boolean
+}
+
+export function useAgentQuickSettings(agentId?: string | null, options?: UseAgentQuickSettingsOptions) {
+  const enabled = Boolean(agentId) && (options?.enabled ?? true)
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['agent-quick-settings', agentId ?? null],

@@ -3,8 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchAgentAddons, updateAgentAddons } from '../api/agentAddons'
 import type { AgentAddonsUpdatePayload } from '../types/agentAddons'
 
-export function useAgentAddons(agentId?: string | null) {
-  const enabled = Boolean(agentId)
+type UseAgentAddonsOptions = {
+  enabled?: boolean
+}
+
+export function useAgentAddons(agentId?: string | null, options?: UseAgentAddonsOptions) {
+  const enabled = Boolean(agentId) && (options?.enabled ?? true)
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: ['agent-addons', agentId ?? null],

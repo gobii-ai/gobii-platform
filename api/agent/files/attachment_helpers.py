@@ -261,12 +261,11 @@ def resolve_filespace_attachments(agent, raw_paths: object) -> List[ResolvedAtta
         raise AttachmentResolutionError("Agent lacks access to the default filespace.")
 
     nodes = (
-        AgentFsNode.objects
+        AgentFsNode.objects.alive()
         .filter(
             filespace=filespace,
             path__in=paths,
             node_type=AgentFsNode.NodeType.FILE,
-            is_deleted=False,
         )
     )
     nodes_by_path = {node.path: node for node in nodes}

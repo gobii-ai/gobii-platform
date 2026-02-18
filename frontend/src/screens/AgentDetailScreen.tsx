@@ -1269,7 +1269,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
   const confirmDeleteAgent = useCallback(() => {
     openConfirmAction({
       title: 'Delete agent',
-      body: 'Are you sure you want to delete this agent? This action cannot be undone and will permanently remove all agent data and stop any running tasks.',
+      body: 'Are you sure you want to delete this agent? This action cannot be undone.',
       confirmLabel: 'Delete agent',
       tone: 'danger',
       onConfirm: deleteAgent,

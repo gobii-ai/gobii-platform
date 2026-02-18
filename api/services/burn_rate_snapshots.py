@@ -72,8 +72,7 @@ def _compute_rates(total: Decimal, window_minutes: int) -> tuple[Decimal, Decima
 def _collect_task_totals(window_start, window_end) -> tuple[dict, dict]:
     zero_value = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
     credit_expr = _per_task_credit_expression()
-    tasks_qs = BrowserUseAgentTask.objects.filter(
-        is_deleted=False,
+    tasks_qs = BrowserUseAgentTask.objects.alive().filter(
         created_at__gte=window_start,
         created_at__lt=window_end,
     )

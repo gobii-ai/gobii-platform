@@ -46,6 +46,7 @@ class UsageAgentDescriptor:
     browser_agent_id: Optional[uuid.UUID]
     persistent_agent_id: Optional[uuid.UUID] = None
     is_api: bool = False
+    is_deleted: bool = False
 
 
 def _parse_query_date(value: str | None) -> date | None:
@@ -186,7 +187,18 @@ def _exclude_eval_tool_calls(qs):
     return qs.exclude(step__agent__execution_environment=EVAL_ENVIRONMENT)
 
 
-def _get_accessible_agents(request: HttpRequest, organization: Organization | None) -> list[UsageAgentDescriptor]:
+def _is_deleted_persistent_agent(persistent_agent) -> bool:
+    if persistent_agent is None:
+        return False
+    return bool(getattr(persistent_agent, "is_deleted", False))
+
+
+def _get_accessible_agents(
+        request: HttpRequest,
+        organization: Organization | None,
+        *,
+        include_deleted: bool = True,
+) -> list[UsageAgentDescriptor]:
     if organization is not None:
         qs = BrowserUseAgent.objects.filter(
             Q(persistent_agent__organization=organization)
@@ -210,12 +222,16 @@ def _get_accessible_agents(request: HttpRequest, organization: Organization | No
     for agent in qs.select_related("persistent_agent").order_by("name"):
         persistent_obj = getattr(agent, "persistent_agent", None)
         persistent_agent_id = getattr(persistent_obj, "id", None)
+        is_deleted = _is_deleted_persistent_agent(persistent_obj)
+        if is_deleted and not include_deleted:
+            continue
         descriptors.append(
             UsageAgentDescriptor(
                 id=str(agent.id),
                 name=agent.name,
                 browser_agent_id=agent.id,
                 persistent_agent_id=persistent_agent_id,
+                is_deleted=is_deleted,
             )
         )
 
@@ -730,6 +746,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 {
                     "id": str(agent.id),
                     "name": agent.name,
+                    "is_deleted": bool(agent.is_deleted),
                 }
                 for agent in active_agents
             ],
@@ -1049,6 +1066,7 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
                     "success_count": float(success),
                     "error_count": float(error),
                     "persistent_id": str(agent.persistent_agent_id) if agent.persistent_agent_id else None,
+                    "is_deleted": bool(agent.is_deleted),
                 }
             )
 
@@ -1078,12 +1096,13 @@ class UsageAgentsAPIView(LoginRequiredMixin, View):
         if resolved.current_context.type == "organization" and resolved.current_membership:
             organization = resolved.current_membership.org
 
-        accessible_agents = _get_accessible_agents(request, organization)
+        accessible_agents = _get_accessible_agents(request, organization, include_deleted=False)
 
         agents = [
             {
                 "id": agent.id,
                 "name": agent.name,
+                "is_deleted": bool(agent.is_deleted),
             }
             for agent in accessible_agents
         ]

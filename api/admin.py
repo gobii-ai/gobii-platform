@@ -2355,25 +2355,70 @@ class SystemMessageForm(forms.Form):
         return data
 
 
+class PersistentAgentAdminForm(forms.ModelForm):
+    class Meta:
+        model = PersistentAgent
+        fields = "__all__"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        is_deleted = cleaned_data.get("is_deleted", self.instance.is_deleted)
+        if not self.instance.pk or is_deleted:
+            return cleaned_data
+
+        was_deleted = self.instance.is_deleted
+        if not was_deleted:
+            return cleaned_data
+
+        user = cleaned_data["user"] if "user" in cleaned_data else self.instance.user
+        if user is None:
+            return cleaned_data
+        organization = (
+            cleaned_data["organization"]
+            if "organization" in cleaned_data
+            else self.instance.organization
+        )
+        name = (
+            cleaned_data["name"]
+            if "name" in cleaned_data
+            else self.instance.name
+        )
+        name = (name or "").strip()
+        has_conflict = PersistentAgent.has_active_name_conflict(
+            user_id=getattr(user, "id", None),
+            organization_id=getattr(organization, "id", None),
+            name=name,
+            exclude_id=self.instance.pk,
+        )
+        if has_conflict:
+            self.add_error(
+                "name",
+                "Cannot restore agent because another active agent with this name already exists for this owner.",
+            )
+        return cleaned_data
+
+
 @admin.register(PersistentAgent)
 class PersistentAgentAdmin(admin.ModelAdmin):
+    form = PersistentAgentAdminForm
     change_list_template = "admin/persistentagent_change_list.html"
     list_display = (
         'name', 'user_email', 'ownership_scope', 'organization', 'browser_use_agent_link',
-        'is_active', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
+        'is_active', 'is_deleted', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
         'message_count', 'created_at'
     )
-    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'created_at')
+    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'is_deleted', 'execution_environment', 'created_at')
     search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description', 'visual_description')
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
         'id', 'ownership_scope', 'created_at', 'updated_at',
         'browser_use_agent_link', 'agent_actions', 'messages_summary_link', 'audit_link',
-        'last_expired_at', 'sleep_email_sent_at',
+        'last_expired_at', 'sleep_email_sent_at', 'deleted_at',
         'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
         'avatar_charter_hash', 'avatar_requested_hash',
         'visual_description', 'visual_description_charter_hash', 'visual_description_requested_hash',
     )
+    actions = ("soft_delete_selected_agents", "undelete_selected_agents")
     inlines = [
         PersistentAgentCommsEndpointInline,
         PersistentAgentWebhookInline,
@@ -2409,6 +2454,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 'is_active',
                 'execution_environment',
             )
+        }),
+        ('Soft Delete', {
+            'description': 'Soft-deleted agents are hidden from user-facing views but remain available for audit/history.',
+            'fields': ('is_deleted', 'deleted_at'),
         }),
         ('Soft Expiration (Testing)', {
             'description': 'Override last_interaction_at to simulate inactivity windows. last_expired_at and notices are read-only for audit.',
@@ -2494,6 +2543,13 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         return form
 
     def save_model(self, request, obj, form, change):
+        should_release_endpoints = False
+        if obj.is_deleted:
+            obj.soft_delete(save=False)
+            should_release_endpoints = bool(obj.pk)
+        else:
+            obj.deleted_at = None
+
         if change and obj.pk and 'preferred_llm_tier' in form.changed_data:
             previous = (
                 PersistentAgent.objects.select_related('preferred_llm_tier')
@@ -2524,6 +2580,40 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         obj.daily_credit_limit = int(slider_bounds['slider_limit_max'])
 
         super().save_model(request, obj, form, change)
+        if should_release_endpoints:
+            obj.comms_endpoints.filter(owner_agent_id=obj.pk).update(
+                owner_agent=None,
+                is_primary=False,
+            )
+
+    @admin.action(description="Soft-delete selected agents")
+    def soft_delete_selected_agents(self, request, queryset):
+        updated = 0
+        for agent in queryset.alive():
+            if agent.soft_delete():
+                updated += 1
+        self.message_user(request, f"Soft-deleted {updated} agent(s).", level=messages.SUCCESS)
+
+    @admin.action(description="Undelete selected agents")
+    def undelete_selected_agents(self, request, queryset):
+        restored = 0
+        skipped = 0
+        for agent in queryset.filter(is_deleted=True):
+            try:
+                if agent.restore():
+                    restored += 1
+            except ValidationError:
+                skipped += 1
+        self.message_user(request, f"Undeleted {restored} agent(s).", level=messages.SUCCESS)
+        if skipped:
+            self.message_user(
+                request,
+                (
+                    f"Skipped {skipped} agent(s) because an active agent with the same owner/name "
+                    "already exists."
+                ),
+                level=messages.WARNING,
+            )
 
     @admin.display(description='Browser Use Agent')
     def browser_use_agent_link(self, obj):
