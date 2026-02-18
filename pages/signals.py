@@ -2039,11 +2039,10 @@ def handle_subscription_event(event, **kwargs):
                     elif plan_changed_for_user:
                         monthly_credits = None
                         if isinstance(plan, Mapping):
-                            monthly_credits = plan.get("monthly_task_credits")
-                        try:
-                            monthly_credits = int(monthly_credits) if monthly_credits is not None else None
-                        except (TypeError, ValueError):
-                            monthly_credits = None
+                            try:
+                                monthly_credits = int(plan.get("monthly_task_credits"))
+                            except (TypeError, ValueError):
+                                pass
 
                         if monthly_credits is None:
                             should_grant = False
