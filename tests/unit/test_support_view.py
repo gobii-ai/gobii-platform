@@ -94,3 +94,19 @@ class SupportViewTurnstileTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["contact@example.com"])
         self.assertEqual(mail.outbox[0].subject, "Contact Request: Need help")
+
+    @tag(BATCH_TAG)
+    @override_settings(SUPPORT_EMAIL=None)
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_support_post_with_no_recipient_email_fails(self, _mock_validate):
+        response = self.client.post(reverse("proprietary:support"), self._payload(include_turnstile=True))
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Support email is not configured.", response.content.decode())
+
+    @tag(BATCH_TAG)
+    @override_settings(PUBLIC_CONTACT_EMAIL=None)
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_contact_post_with_no_recipient_email_fails(self, _mock_validate):
+        response = self.client.post(reverse("proprietary:contact"), self._payload(include_turnstile=True))
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Contact email is not configured.", response.content.decode())
