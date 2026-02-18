@@ -700,10 +700,13 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
-    def test_subscription_update_skips_credit_grant(self):
+    def test_subscription_update_without_plan_change_skips_credit_grant(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_update")
         event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        self.billing.subscription = PlanNamesChoices.STARTUP.value
+        self.billing.save(update_fields=["subscription"])
 
         fresh_user = User.objects.get(pk=self.user.pk)
         sub = self._mock_subscription(current_period_day=15, subscriber=fresh_user)
@@ -721,6 +724,71 @@ class SubscriptionSignalTests(TestCase):
             handle_subscription_event(event)
 
         mock_grant.assert_not_called()
+        self.mock_capi.assert_not_called()
+
+    @tag("batch_pages")
+    def test_subscription_update_plan_change_grants_topoff(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(billing_reason=None, invoice_id="in_upgrade")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        self.billing.subscription = PlanNamesChoices.STARTUP.value
+        self.billing.save(update_fields=["subscription"])
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=15, subscriber=fresh_user)
+        sub.stripe_data["latest_invoice"] = payload["latest_invoice"]
+        sub.stripe_data["items"]["data"][0]["price"]["product"] = "prod_scale"
+        sub.stripe_data["items"]["data"][0]["price"]["unit_amount"] = 25000
+        sub.stripe_data["items"]["data"][0]["price"]["unit_amount_decimal"] = "25000"
+        sub.stripe_data.pop("billing_reason", None)
+        sub.billing_reason = None
+
+        current_period_end = timezone.make_aware(datetime(2025, 10, 15, 8, 0, 0), timezone=dt_timezone.utc)
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        TaskCredit.objects.create(
+            user=fresh_user,
+            credits=500,
+            credits_used=100,
+            expiration_date=current_period_end,
+            stripe_invoice_id="in_prev",
+            granted_date=timezone.make_aware(datetime(2025, 9, 15, 8, 0, 0), timezone=dt_timezone.utc),
+            plan=PlanNamesChoices.STARTUP,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+        )
+
+        invoice_payload = {
+            "id": payload["latest_invoice"],
+            "object": "invoice",
+            "billing_reason": "subscription_update",
+        }
+        invoice_obj = SimpleNamespace(billing_reason="subscription_update", stripe_data=invoice_payload)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch(
+                "pages.signals.get_plan_by_product_id",
+                return_value={"id": PlanNamesChoices.SCALE.value, "monthly_task_credits": 10000},
+            ), \
+            patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload) as mock_invoice_retrieve, \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        mock_invoice_retrieve.assert_called_once_with(payload["latest_invoice"])
+        mock_grant.assert_called_once()
+        _, grant_kwargs = mock_grant.call_args
+        self.assertEqual(grant_kwargs["invoice_id"], payload["latest_invoice"])
+        self.assertEqual(grant_kwargs["credit_override"], Decimal("9600"))
+        self.assertEqual(grant_kwargs["expiration_date"], current_period_end)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.billing.subscription, PlanNamesChoices.SCALE.value)
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
