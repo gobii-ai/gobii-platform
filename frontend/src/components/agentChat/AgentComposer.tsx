@@ -4,6 +4,7 @@ import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
+import { StarterPromptSuggestions, type StarterPrompt } from './StarterPromptSuggestions'
 import type { ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
@@ -101,6 +102,9 @@ const workingPanelStorageCodec = {
 
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
+  starterPrompts?: StarterPrompt[]
+  starterPromptsDisabled?: boolean
+  onStarterPromptSelect?: (prompt: StarterPrompt, position: number) => void | Promise<void>
   disabled?: boolean
   autoFocus?: boolean
   // Key that triggers re-focus when changed (e.g., agentId for switching agents)
@@ -133,6 +137,9 @@ type AgentComposerProps = {
 
 export const AgentComposer = memo(function AgentComposer({
   onSubmit,
+  starterPrompts = [],
+  starterPromptsDisabled = false,
+  onStarterPromptSelect,
   disabled = false,
   autoFocus = false,
   focusKey,
@@ -553,6 +560,8 @@ export const AgentComposer = memo(function AgentComposer({
 
   // Show the panel when processing OR when there are insights to display
   const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights)
+  const hasDraftText = Boolean(body.trim())
+  const showStarterPrompts = starterPrompts.length > 0 && attachments.length === 0
   const taskCount = processingTasks.length
 
   return (
@@ -684,6 +693,15 @@ export const AgentComposer = memo(function AgentComposer({
             </div>
           ) : null}
           <div className="composer-input-surface flex flex-col rounded-[1.25rem] border border-slate-200/60 bg-white px-4 py-3 transition">
+            {showStarterPrompts ? (
+              <div className="mb-2">
+                <StarterPromptSuggestions
+                  prompts={starterPrompts}
+                  disabled={disabled || isSending || starterPromptsDisabled || hasDraftText}
+                  onSelect={onStarterPromptSelect}
+                />
+              </div>
+            ) : null}
             <div className="flex items-center gap-3">
               <input
                 ref={fileInputRef}

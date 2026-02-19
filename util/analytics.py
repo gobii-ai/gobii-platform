@@ -280,6 +280,7 @@ class AnalyticsEvent(StrEnum):
     REFERRAL_TEMPLATE_REDEEMED_GRANT_RECEIVED = 'Referral Template Redeemed Grant Received'
 
     # Upsell Events
+    AGENT_CHAT_STARTER_PROMPT_CLICKED = 'Agent Chat Starter Prompt Clicked'
     UPSELL_MESSAGE_SHOWN = 'Upsell Message Shown'
     UPSELL_MESSAGE_DISMISSED = 'Upsell Message Dismissed'
 

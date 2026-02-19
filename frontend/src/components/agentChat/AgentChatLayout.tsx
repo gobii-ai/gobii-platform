@@ -19,6 +19,7 @@ import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
+import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
@@ -459,6 +460,7 @@ export function AgentChatLayout({
   }, [agentId, contactCapStatus?.limitReached, contactCapDismissed, contactPackShowUpgrade])
 
   const isStreaming = Boolean(streaming && !streaming.done)
+  const isWorkingNow = Boolean(processingActive || isStreaming || awaitingResponse)
   const hasStreamingContent = Boolean(streaming?.content?.trim())
   // Un-suppress the static thinking entry once streaming completes so it appears in its chronological position
   const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
@@ -492,6 +494,20 @@ export function AgentChatLayout({
     ),
   )
   const showBottomSentinel = !initialLoading && !hasMoreNewer
+  const {
+    starterPrompts,
+    starterPromptSubmitting,
+    handleStarterPromptSelect,
+  } = useStarterPrompts({
+    agentId,
+    events,
+    initialLoading,
+    spawnIntentLoading,
+    hasMoreNewer: Boolean(hasMoreNewer),
+    isWorkingNow,
+    onSendMessage,
+    promptCount: 3,
+  })
   const hasTimelineEvents = events.length > 0
   const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
   const showJumpButton = !initialLoading
@@ -900,6 +916,9 @@ export function AgentChatLayout({
           ) : (
             <AgentComposer
               onSubmit={onSendMessage}
+              starterPrompts={starterPrompts}
+              starterPromptsDisabled={starterPromptSubmitting}
+              onStarterPromptSelect={handleStarterPromptSelect}
               onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}

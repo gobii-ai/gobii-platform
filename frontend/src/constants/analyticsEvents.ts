@@ -81,6 +81,8 @@ export const AnalyticsEvent = {
   // ============================================
   // Upsell Message Events
   // ============================================
+  /** User clicked a starter prompt in agent live chat */
+  AGENT_CHAT_STARTER_PROMPT_CLICKED: 'Agent Chat Starter Prompt Clicked',
   /** Upsell message was shown to the user */
   UPSELL_MESSAGE_SHOWN: 'Upsell Message Shown',
   /** User dismissed an upsell message */
