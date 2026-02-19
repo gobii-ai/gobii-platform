@@ -38,7 +38,7 @@ export function selectStarterPrompts(pool: StarterPrompt[], targetCount = 5): St
   }
 
   const categoryOrder: StarterPrompt['category'][] = ['capabilities', 'deliverables', 'integrations', 'planning']
-  const buckets = categoryOrder.map((category) =>
+  const buckets = shuffle(categoryOrder).map((category) =>
     shuffle(pool.filter((prompt) => prompt.category === category)),
   )
 
