@@ -7733,6 +7733,210 @@ class CommsAllowlistRequest(models.Model):
         return f"ContactRequest<{self.channel}:{self.address}> for {self.agent.name} ({self.status})"
 
 
+class AgentSpawnRequest(models.Model):
+    """Request from an agent to create a specialized peer agent."""
+
+    class RequestStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="spawn_requests",
+        help_text="Source agent requesting a specialist peer.",
+    )
+    requested_name = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="Optional requested name for the spawned agent.",
+    )
+    requested_charter = models.TextField(help_text="Requested charter for the spawned agent.")
+    handoff_message = models.TextField(help_text="Initial handoff message sent from parent to spawned agent.")
+    request_reason = models.TextField(
+        blank=True,
+        help_text="Optional explanation of why this spawn is needed.",
+    )
+    request_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        editable=False,
+        help_text="Deterministic fingerprint for deduplicating equivalent pending requests.",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=RequestStatus.choices,
+        default=RequestStatus.PENDING,
+    )
+    requested_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    responded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="agent_spawn_requests_responded",
+    )
+    spawned_agent = models.ForeignKey(
+        PersistentAgent,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="spawned_from_requests",
+    )
+    peer_link = models.ForeignKey(
+        "AgentPeerLink",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="spawn_requests",
+    )
+
+    class Meta:
+        ordering = ["-requested_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "request_fingerprint"],
+                condition=models.Q(status="pending"),
+                name="uniq_pending_agent_spawn_request",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="spawn_req_agent_status_idx"),
+            models.Index(fields=["requested_at"], name="spawn_req_requested_idx"),
+        ]
+
+    @staticmethod
+    def _normalize_fingerprint_text(value: str | None) -> str:
+        return " ".join((value or "").strip().split())
+
+    @classmethod
+    def build_request_fingerprint(
+        cls,
+        *,
+        requested_name: str | None,
+        requested_charter: str | None,
+        handoff_message: str | None,
+    ) -> str:
+        payload = "||".join(
+            [
+                cls._normalize_fingerprint_text(requested_name),
+                cls._normalize_fingerprint_text(requested_charter),
+                cls._normalize_fingerprint_text(handoff_message),
+            ]
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _refresh_request_fingerprint(self) -> None:
+        self.request_fingerprint = self.build_request_fingerprint(
+            requested_name=self.requested_name,
+            requested_charter=self.requested_charter,
+            handoff_message=self.handoff_message,
+        )
+
+    def clean(self):
+        super().clean()
+        self.requested_name = (self.requested_name or "").strip()
+        self._refresh_request_fingerprint()
+
+    def save(self, *args, **kwargs):
+        if not kwargs.get("raw"):
+            self._refresh_request_fingerprint()
+            update_fields = kwargs.get("update_fields")
+            if update_fields is not None:
+                normalized_update_fields = set(update_fields)
+                normalized_update_fields.add("request_fingerprint")
+                kwargs["update_fields"] = normalized_update_fields
+        return super().save(*args, **kwargs)
+
+    def is_expired(self):
+        if not self.expires_at:
+            return False
+        return timezone.now() > self.expires_at
+
+    def can_be_approved(self):
+        return self.status == self.RequestStatus.PENDING and not self.is_expired()
+
+    def approve(self, responded_by):
+        if not self.can_be_approved():
+            raise ValueError("This request cannot be approved")
+
+        requested_charter = (self.requested_charter or "").strip()
+        if not requested_charter:
+            raise ValidationError("Requested charter cannot be blank.")
+        handoff_message = (self.handoff_message or "").strip()
+        if not handoff_message:
+            raise ValidationError("Handoff message cannot be blank.")
+
+        owner = self.agent.organization if self.agent.organization_id else self.agent.user
+        if not AgentService.has_agents_available(owner):
+            raise ValidationError("Agent limit reached. No additional agents are available.")
+
+        from api.agent.peer_comm import PeerMessagingError, PeerMessagingService
+        from api.services.persistent_agents import (
+            PersistentAgentProvisioningError,
+            PersistentAgentProvisioningService,
+        )
+
+        requested_name = (self.requested_name or "").strip() or None
+
+        try:
+            provisioning = PersistentAgentProvisioningService.provision(
+                user=self.agent.user,
+                organization=self.agent.organization,
+                name=requested_name,
+                charter=requested_charter,
+            )
+        except PersistentAgentProvisioningError as exc:
+            payload = exc.args[0] if exc.args else "Unable to create the spawned agent."
+            raise ValidationError(payload) from exc
+
+        spawned_agent = provisioning.agent
+        link = AgentPeerLink(
+            agent_a=self.agent,
+            agent_b=spawned_agent,
+            created_by=responded_by,
+        )
+        link.save()
+
+        try:
+            PeerMessagingService(self.agent, spawned_agent).send_message(handoff_message)
+        except PeerMessagingError as exc:
+            raise ValidationError(str(exc)) from exc
+
+        self.status = self.RequestStatus.APPROVED
+        self.responded_at = timezone.now()
+        self.responded_by = responded_by
+        self.spawned_agent = spawned_agent
+        self.peer_link = link
+        self.save(
+            update_fields=[
+                "status",
+                "responded_at",
+                "responded_by",
+                "spawned_agent",
+                "peer_link",
+            ]
+        )
+        return spawned_agent, link
+
+    def reject(self, responded_by):
+        if self.status != self.RequestStatus.PENDING:
+            raise ValueError("This request has already been responded to")
+
+        self.status = self.RequestStatus.REJECTED
+        self.responded_at = timezone.now()
+        self.responded_by = responded_by
+        self.save(update_fields=["status", "responded_at", "responded_by"])
+
+    def __str__(self):
+        return f"SpawnRequest<{self.agent_id}:{self.status}>"
+
+
 class PersistentAgentEmailEndpoint(models.Model):
     """Email-specific metadata for an endpoint."""
 

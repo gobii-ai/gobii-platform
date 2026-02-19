@@ -543,6 +543,42 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'spawn_agent',
+    label: 'Agent spawn request',
+    icon: BotMessageSquare,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'spawnAgent',
+    derive(entry, parameters) {
+      const result = parseResultObject(entry.result)
+      const statusRaw =
+        (result ? coerceString(result['request_status']) : null) ??
+        (result ? coerceString(result['status']) : null)
+      const status = statusRaw ? statusRaw.toLowerCase() : null
+      const requestedName = coerceString(result?.['requested_name']) || coerceString(parameters?.name)
+      const message = result ? coerceString(result['message']) : null
+
+      let caption: string | null = null
+      if (status === 'pending') {
+        caption = requestedName
+          ? `Awaiting Create/Decline for ${requestedName}`
+          : 'Awaiting Create/Decline approval'
+      } else if (status === 'approved') {
+        caption = requestedName ? `Created ${requestedName}` : 'Spawn request approved'
+      } else if (status === 'rejected') {
+        caption = 'Spawn request declined'
+      } else if (message) {
+        caption = truncate(message, 56)
+      }
+
+      return {
+        caption: caption ?? entry.caption ?? 'Agent spawn request',
+        summary: message ?? entry.summary ?? null,
+        separateFromPreview: true,
+      }
+    },
+  },
+  {
     name: 'request_contact_permission',
     label: 'Contact permission',
     icon: ContactRound,

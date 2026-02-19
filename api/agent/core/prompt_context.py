@@ -24,6 +24,7 @@ from litellm import token_counter
 from opentelemetry import trace
 
 from billing.addons import AddonEntitlementService
+from agents.services import AgentService
 from config import settings
 from config.plans import PLAN_CONFIG
 from tasks.services import TaskCreditService
@@ -91,6 +92,7 @@ from ..tools.spawn_web_task import (
     get_browser_daily_task_limit,
     get_spawn_web_task_tool,
 )
+from ..tools.spawn_agent import get_spawn_agent_tool
 from ..tools.sqlite_kanban import format_kanban_friendly_id
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
@@ -2628,6 +2630,13 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
         allowed_lines.append("External contacts are unavailable until your owner verifies their email address.")
         allowed_lines.append("You can communicate with users via web chat only.")
 
+    owner = agent.organization if agent.organization_id else agent.user
+    if AgentService.has_agents_available(owner):
+        allowed_lines.append(
+            "If work is truly outside your charter/scope, use spawn_agent to request a specialist peer. "
+            "It requires explicit human Create/Decline approval."
+        )
+
     contacts_group.section_text(
         "allowed_contacts",
         "\n".join(allowed_lines),
@@ -5111,6 +5120,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
     """Get all available tools for an agent, including dynamically enabled MCP tools."""
+    can_spawn_agent = False
+    if agent:
+        owner = agent.organization if agent.organization_id else agent.user
+        can_spawn_agent = AgentService.has_agents_available(owner)
+
     # Static tools always available
     static_tools = [
         {
@@ -5125,11 +5139,14 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_send_sms_tool(),
         get_send_chat_tool(),
         get_spawn_web_task_tool(agent),
-        get_secure_credentials_request_tool(),
         # MCP management tools
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
+        get_secure_credentials_request_tool(),
     ]
+
+    if can_spawn_agent:
+        static_tools.append(get_spawn_agent_tool(agent))
 
     if agent and agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

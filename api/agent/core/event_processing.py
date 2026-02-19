@@ -114,6 +114,7 @@ from console.agent_chat.signals import broadcast_kanban_changes
 from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
+from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
 from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, should_skip_auto_substitution
 from ..tools.web_chat_sender import execute_send_chat_message
@@ -3709,6 +3710,8 @@ def _run_agent_loop(
                             )
                         elif tool_name == "request_contact_permission":
                             result = execute_request_contact_permission(agent, exec_params)
+                        elif tool_name == "spawn_agent":
+                            result = execute_spawn_agent(agent, exec_params)
                         elif tool_name == "search_tools":
                             result = execute_search_tools(agent, exec_params)
                             # After search_tools auto-enables relevant tools, refresh tool definitions
