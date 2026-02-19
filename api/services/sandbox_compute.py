@@ -11,11 +11,15 @@ from typing import Any, Dict, Optional
 
 import requests
 from django.conf import settings
-from django.utils.dateparse import parse_datetime
 from django.db import DatabaseError
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig
+from api.services.mcp_remote import (
+    normalize_mcp_remote_args,
+)
+from api.services.mcp_remote_bridge import build_mcp_remote_bridge_payload
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
@@ -748,17 +752,25 @@ def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]],
     if auth_headers:
         headers.update(auth_headers)
 
+    command = runtime.command or ""
+    command_args = list(runtime.args or [])
+    env_vars = dict(runtime.env or {})
+    bridge_payload = build_mcp_remote_bridge_payload()
+    is_remote, command_args = normalize_mcp_remote_args(command, command_args, bridge_payload)
+
     payload = {
         "config_id": runtime.config_id,
         "name": runtime.name,
-        "command": runtime.command or "",
-        "command_args": list(runtime.args or []),
+        "command": command,
+        "command_args": command_args,
         "url": runtime.url or "",
-        "env": runtime.env or {},
+        "env": env_vars,
         "headers": headers,
         "auth_method": runtime.auth_method,
         "scope": runtime.scope,
     }
+    if is_remote and bridge_payload:
+        payload["mcp_remote_bridge"] = bridge_payload
     return payload, runtime
 
 

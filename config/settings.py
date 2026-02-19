@@ -109,6 +109,31 @@ MCP_STDIO_REQUEST_TIMEOUT_SECONDS = env.float(
     "MCP_STDIO_REQUEST_TIMEOUT_SECONDS",
     default=300.0,
 )
+# Enable bridge-mode OAuth flow for command-based MCP remote clients.
+MCP_REMOTE_BRIDGE_ENABLED = env.bool(
+    "MCP_REMOTE_BRIDGE_ENABLED",
+    default=True,
+)
+# How long bridge sessions stay valid while waiting for OAuth callback completion.
+MCP_REMOTE_BRIDGE_SESSION_TTL_SECONDS = env.int(
+    "MCP_REMOTE_BRIDGE_SESSION_TTL_SECONDS",
+    default=15 * 60,
+)
+# Poll interval forwarded to mcp-remote when bridge mode is enabled.
+MCP_REMOTE_BRIDGE_POLL_INTERVAL_SECONDS = env.int(
+    "MCP_REMOTE_BRIDGE_POLL_INTERVAL_SECONDS",
+    default=2,
+)
+# OAuth callback timeout forwarded to mcp-remote in bridge mode.
+MCP_REMOTE_BRIDGE_AUTH_TIMEOUT_SECONDS = env.int(
+    "MCP_REMOTE_BRIDGE_AUTH_TIMEOUT_SECONDS",
+    default=180,
+)
+# Optional shared secret used to validate bridge-mode notify/poll/callback requests.
+MCP_REMOTE_BRIDGE_SHARED_SECRET = env(
+    "MCP_REMOTE_BRIDGE_SHARED_SECRET",
+    default="",
+)
 # Retry configuration for transient LiteLLM failures
 LITELLM_MAX_RETRIES = env.int("LITELLM_MAX_RETRIES", default=2)
 LITELLM_RETRY_BACKOFF_SECONDS = env.float("LITELLM_RETRY_BACKOFF_SECONDS", default=1.0)

@@ -3,14 +3,15 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db.models import Max
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
-from api.models import AgentComputeSession, AgentFsNode, BrowserUseAgent, PersistentAgent
+from api.models import AgentComputeSession, AgentFsNode, BrowserUseAgent, MCPServerConfig, PersistentAgent
 from api.services.sandbox_compute import (
     SandboxComputeService,
     SandboxSessionUpdate,
+    _build_mcp_server_payload,
     _build_nonzero_exit_error_payload,
 )
 from api.services.sandbox_filespace_sync import build_filespace_pull_manifest
@@ -160,3 +161,48 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(payload.get("stdout"), "partial output")
         self.assertEqual(payload.get("stderr"), "ValueError: boom\n")
         self.assertEqual(payload.get("message"), "ValueError: boom")
+
+    @override_settings(
+        MCP_REMOTE_BRIDGE_ENABLED=True,
+        PUBLIC_SITE_URL="https://app.example.com",
+        MCP_REMOTE_BRIDGE_POLL_INTERVAL_SECONDS=3,
+        MCP_REMOTE_BRIDGE_AUTH_TIMEOUT_SECONDS=222,
+        MCP_REMOTE_BRIDGE_SHARED_SECRET="bridge-secret",
+    )
+    def test_build_mcp_server_payload_rewrites_mcp_remote_and_injects_bridge(self):
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            server = MCPServerConfig.objects.create(
+                scope=MCPServerConfig.Scope.USER,
+                user=self.user,
+                name="remote-test-server",
+                display_name="Remote Test",
+                command="npx",
+                command_args=["@modelcontextprotocol/mcp-remote", "https://remote.example.com/mcp"],
+                auth_method=MCPServerConfig.AuthMethod.NONE,
+            )
+
+        payload, runtime = _build_mcp_server_payload(str(server.id))
+
+        self.assertIsNotNone(runtime)
+        self.assertIsInstance(payload, dict)
+
+        payload = payload or {}
+        self.assertIn("@gobii-ai/remote-mcp-remote", payload["command_args"])
+        self.assertIn("--auth-mode", payload["command_args"])
+        self.assertIn("bridge", payload["command_args"])
+        self.assertIn("--redirect-url", payload["command_args"])
+        self.assertIn("--auth-bridge-poll-url", payload["command_args"])
+        self.assertIn("--auth-bridge-notify-url", payload["command_args"])
+
+        bridge = payload.get("mcp_remote_bridge") or {}
+        self.assertTrue(
+            str(bridge.get("redirect_url", "")).startswith("https://app.example.com/api/mcp/auth/callback/")
+        )
+        self.assertIn("https://app.example.com/api/mcp/auth/poll/", str(bridge.get("poll_url", "")))
+        self.assertIn("session_id=", str(bridge.get("poll_url", "")))
+        self.assertTrue(
+            str(bridge.get("notify_url", "")).startswith("https://app.example.com/api/mcp/auth/notify/")
+        )
+        self.assertIn("bridge_token=bridge-secret", bridge.get("redirect_url", ""))
+        self.assertIn("bridge_token=bridge-secret", bridge.get("poll_url", ""))
+        self.assertIn("bridge_token=bridge-secret", bridge.get("notify_url", ""))
