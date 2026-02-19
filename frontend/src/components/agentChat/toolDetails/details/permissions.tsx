@@ -159,14 +159,8 @@ function parseErrorMessage(error: unknown): string {
 export function SpawnAgentDetail({ entry }: ToolDetailProps) {
   const params = (entry.parameters as Record<string, unknown>) || {}
   const result = parseResultObject(entry.result)
-
-  const requestedName = typeof result?.['requested_name'] === 'string' ? (result['requested_name'] as string) : null
   const charterRaw = typeof params['charter'] === 'string' ? (params['charter'] as string) : null
-  const handoffRaw = typeof params['handoff_message'] === 'string' ? (params['handoff_message'] as string) : null
-  const reasonRaw = typeof params['reason'] === 'string' ? (params['reason'] as string) : null
-  const approvalRaw = typeof result?.['approval_url'] === 'string' ? (result['approval_url'] as string) : null
-  const approvalUrl =
-    approvalRaw && (/^https?:\/\//i.test(approvalRaw) || approvalRaw.startsWith('/')) ? approvalRaw : null
+
   const decisionRaw = typeof result?.['decision_api_url'] === 'string' ? (result['decision_api_url'] as string) : null
   const decisionApiUrl =
     decisionRaw && (/^https?:\/\//i.test(decisionRaw) || decisionRaw.startsWith('/')) ? decisionRaw : null
@@ -176,11 +170,6 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
       : typeof result?.['status'] === 'string'
         ? (result['status'] as string)
         : 'pending'
-  const initialMessage =
-    typeof result?.['message'] === 'string' && result['message'].trim().length
-      ? (result['message'] as string)
-      : entry.summary || entry.caption || null
-
   const [requestStatus, setRequestStatus] = useState(initialStatus.toLowerCase())
   const [busyDecision, setBusyDecision] = useState<SpawnDecision | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
@@ -219,34 +208,20 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
     }
   }
 
-  const infoItems: Array<{ label: string; value: ReactNode } | null> = [
-    { label: 'Status', value: requestStatus.toUpperCase() },
-    requestedName ? { label: 'Requested agent', value: requestedName } : null,
-    approvalRaw
-      ? {
-          label: 'Approval link',
-          value: approvalUrl ? (
-            <a href={approvalUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
-              {approvalRaw}
-            </a>
-          ) : (
-            approvalRaw
-          ),
-        }
-      : null,
-  ]
-
   return (
     <div className="space-y-4 text-sm text-slate-600">
-      {initialMessage ? <p className="whitespace-pre-line text-slate-700">{initialMessage}</p> : null}
-      <KeyValueList items={infoItems} />
+      {charterRaw ? (
+        <Section title="Charter">
+          <p className="whitespace-pre-line text-slate-700">{charterRaw}</p>
+        </Section>
+      ) : null}
       {canDecide ? (
-        <div className="flex flex-wrap gap-2">
+        <div className="spawn-agent-actions">
           <button
             type="button"
             onClick={() => void submitDecision('approve')}
             disabled={Boolean(busyDecision)}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="spawn-agent-action-btn spawn-agent-action-btn--primary"
           >
             {busyDecision === 'approve' ? 'Creating...' : 'Create'}
           </button>
@@ -254,29 +229,14 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
             type="button"
             onClick={() => void submitDecision('decline')}
             disabled={Boolean(busyDecision)}
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="spawn-agent-action-btn spawn-agent-action-btn--secondary"
           >
             {busyDecision === 'decline' ? 'Declining...' : 'Decline'}
           </button>
         </div>
       ) : null}
-      {actionMessage ? <p className="text-sm text-emerald-700">{actionMessage}</p> : null}
-      {actionError ? <p className="text-sm text-rose-700">{actionError}</p> : null}
-      {charterRaw ? (
-        <Section title="Requested charter">
-          <p className="whitespace-pre-line text-slate-700">{charterRaw}</p>
-        </Section>
-      ) : null}
-      {handoffRaw ? (
-        <Section title="Initial handoff">
-          <p className="whitespace-pre-line text-slate-700">{handoffRaw}</p>
-        </Section>
-      ) : null}
-      {reasonRaw ? (
-        <Section title="Reason">
-          <p className="whitespace-pre-line text-slate-700">{reasonRaw}</p>
-        </Section>
-      ) : null}
+      {actionMessage ? <p className="spawn-agent-action-note">{actionMessage}</p> : null}
+      {actionError ? <p className="spawn-agent-action-error">{actionError}</p> : null}
     </div>
   )
 }

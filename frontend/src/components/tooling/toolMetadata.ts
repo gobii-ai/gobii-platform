@@ -544,7 +544,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   },
   {
     name: 'spawn_agent',
-    label: 'Agent spawn request',
+    label: 'Create agent',
     icon: BotMessageSquare,
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-700',
@@ -572,7 +572,8 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       }
 
       return {
-        caption: caption ?? entry.caption ?? 'Agent spawn request',
+        label: requestedName ? `Create ${requestedName}` : 'Create agent',
+        caption: caption ?? entry.caption ?? 'Create agent',
         summary: message ?? entry.summary ?? null,
         separateFromPreview: true,
       }
