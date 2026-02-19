@@ -3,6 +3,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from django.urls.conf import re_path
+from django.shortcuts import redirect
 from drf_spectacular.views import (
     SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 )
@@ -222,6 +223,23 @@ from console.views import (
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView, PersistentAgentViewSet, PipedreamConnectRedirectView
+
+API_REFERENCE_DOCS_URL = "https://docs.gobii.ai/api-reference"
+
+_schema_swagger_view = SpectacularSwaggerView.as_view(url_name="schema")
+_schema_redoc_view = SpectacularRedocView.as_view(url_name="schema")
+
+
+def schema_swagger_view(request, *args, **kwargs):
+    if settings.GOBII_PROPRIETARY_MODE:
+        return redirect(API_REFERENCE_DOCS_URL)
+    return _schema_swagger_view(request, *args, **kwargs)
+
+
+def schema_redoc_view(request, *args, **kwargs):
+    if settings.GOBII_PROPRIETARY_MODE:
+        return redirect(API_REFERENCE_DOCS_URL)
+    return _schema_redoc_view(request, *args, **kwargs)
 
 urlpatterns = [
     path("setup/", include("setup.urls")),
@@ -491,11 +509,11 @@ urlpatterns = [
 
     # API docs
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-    path("api/schema/swagger-ui/", SpectacularSwaggerView.as_view(url_name="schema"), name="schema-swagger-ui"),
-    path("api/schema/redoc/", SpectacularRedocView.as_view(url_name="schema"), name="schema-redoc"),
+    path("api/schema/swagger-ui/", schema_swagger_view, name="schema-swagger-ui"),
+    path("api/schema/redoc/", schema_redoc_view, name="schema-redoc"),
     
     # Legacy API docs URL (keeping for backward compatibility)
-    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="api_docs"),
+    path("api/docs/", schema_swagger_view, name="api_docs"),
 
     # Evals & Simulations
     path("eval/", include("api.evals.urls", namespace="evals")),
