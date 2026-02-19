@@ -34,6 +34,7 @@ from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPToolInfo,
     MCPServerRuntime,
+    GobiiStdioTransport,
     get_mcp_manager,
     execute_mcp_tool,
 )
@@ -445,6 +446,104 @@ class MCPToolManagerTests(TestCase):
         mock_post.assert_not_called()
         self.assertEqual(runtime.oauth_access_token, "valid-token")
         self.assertEqual(runtime.oauth_token_type, "Bearer")
+
+    @override_settings(
+        MCP_REMOTE_BRIDGE_ENABLED=True,
+        PUBLIC_SITE_URL="https://app.example.com",
+        MCP_REMOTE_BRIDGE_POLL_INTERVAL_SECONDS=4,
+        MCP_REMOTE_BRIDGE_AUTH_TIMEOUT_SECONDS=120,
+        MCP_REMOTE_BRIDGE_SHARED_SECRET="bridge-secret",
+    )
+    def test_build_runtime_rewrites_mcp_remote_to_gobii_package(self):
+        user = get_user_model().objects.create_user(username=f"remote-runtime-{uuid.uuid4().hex[:8]}")
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"remote-runtime-{uuid.uuid4().hex[:8]}",
+            display_name="Remote Runtime",
+            description="",
+            command="npx",
+            command_args=["@modelcontextprotocol/mcp-remote", "https://remote.example.com/mcp"],
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+        )
+
+        runtime = self.manager._build_runtime_from_config(config)
+
+        self.assertIn("@gobii-ai/remote-mcp-remote", runtime.args)
+        self.assertIn("--auth-mode", runtime.args)
+        self.assertIn("bridge", runtime.args)
+        self.assertIn("--auth-bridge-notify-url", runtime.args)
+        self.assertIn("--auth-bridge-poll-url", runtime.args)
+        self.assertIn("--redirect-url", runtime.args)
+        self.assertTrue(any("bridge_token=bridge-secret" in arg for arg in runtime.args))
+
+    def test_execute_mcp_tool_returns_action_required_for_mcp_remote_auth_event(self):
+        User = get_user_model()
+        user = User.objects.create_user(username=f"mcp-remote-auth-{uuid.uuid4().hex[:8]}")
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="mcp-remote-auth-agent",
+            charter="test",
+            browser_use_agent=browser_agent,
+        )
+
+        tool = MCPToolInfo(
+            self.config_id,
+            "mcp_test_remote_tool",
+            self.server_name,
+            "remote_tool",
+            "Remote tool",
+            {"type": "object", "properties": {}},
+        )
+        self.manager._tools_cache = {self.config_id: [tool]}
+        self.manager._initialized = True
+
+        runtime = MCPServerRuntime(
+            config_id=self.config_id,
+            name=self.server_name,
+            display_name=self.server_config.display_name,
+            description=self.server_config.description,
+            command="npx",
+            args=["@gobii-ai/remote-mcp-remote", "https://remote.example.com/mcp"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=self.server_config.updated_at,
+        )
+        self.manager._server_cache = {self.config_id: runtime}
+
+        transport = GobiiStdioTransport(command="npx", args=[])
+        transport._capture_auth_event(
+            'MCP_REMOTE_AUTH_URL {"authorization_url":"https://auth.example.com/connect","session_id":"sess-123"}'
+        )
+        mock_client = MagicMock()
+        mock_client.transport = transport
+        self.manager._clients = {self.config_id: mock_client}
+
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="mcp_test_remote_tool",
+        )
+
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = RuntimeError("authorization required")
+
+        with patch.object(self.manager, "_ensure_event_loop", return_value=loop), patch.object(
+            self.manager,
+            "_execute_async",
+            new=MagicMock(return_value="ignored"),
+        ):
+            result = self.manager.execute_mcp_tool(agent, "mcp_test_remote_tool", {"q": "x"})
+
+        self.assertEqual(result.get("status"), "action_required")
+        self.assertEqual(result.get("connect_url"), "https://auth.example.com/connect")
+        self.assertEqual(result.get("auth_session_id"), "sess-123")
         
     def test_default_enabled_tools_defined(self):
         """Test that default enabled tools list is defined."""

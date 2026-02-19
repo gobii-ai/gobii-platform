@@ -221,7 +221,14 @@ from console.views import (
 )
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
-from api.views import LinkShortenerRedirectView, PersistentAgentViewSet, PipedreamConnectRedirectView
+from api.views import (
+    LinkShortenerRedirectView,
+    MCPRemoteBridgeCallbackView,
+    MCPRemoteBridgeNotifyView,
+    MCPRemoteBridgePollView,
+    PersistentAgentViewSet,
+    PipedreamConnectRedirectView,
+)
 
 urlpatterns = [
     path("setup/", include("setup.urls")),
@@ -231,6 +238,9 @@ urlpatterns = [
 
     # Pipedream JIT connect redirect - generates fresh auth links on-demand
     path("connect/pipedream/<uuid:agent_id>/<slug:app_slug>/", PipedreamConnectRedirectView.as_view(), name="pipedream_jit_connect"),
+    path("api/mcp/auth/notify/", MCPRemoteBridgeNotifyView.as_view(), name="api-mcp-bridge-notify"),
+    path("api/mcp/auth/poll/", MCPRemoteBridgePollView.as_view(), name="api-mcp-bridge-poll"),
+    path("api/mcp/auth/callback/", MCPRemoteBridgeCallbackView.as_view(), name="api-mcp-bridge-callback"),
 
     # Plan landing pages (must be before console to avoid conflict)
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),

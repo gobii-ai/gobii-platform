@@ -19,7 +19,7 @@ import fnmatch
 import contextlib
 import contextvars
 import sys
-from urllib.parse import urlparse
+import threading
 from typing import Dict, Any, Iterable, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
@@ -61,6 +61,12 @@ from ...services.sandbox_compute import (
     SandboxComputeService,
     SandboxComputeUnavailable,
     sandbox_compute_enabled_for_agent,
+)
+from ...services.mcp_remote import (
+    normalize_mcp_remote_args,
+)
+from ...services.mcp_remote_bridge import (
+    build_mcp_remote_bridge_payload,
 )
 from ...services.mcp_tool_cache import (
     build_mcp_tool_cache_fingerprint,
@@ -138,6 +144,31 @@ def _build_jit_connect_url(agent_id: str, app_slug: str) -> str:
     return f"https://{domain}{path}"
 
 
+def _extract_mcp_remote_auth_url(event: Dict[str, Any]) -> str:
+    for key in ("authorization_url", "auth_url", "url"):
+        value = event.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _build_mcp_remote_action_required(event: Dict[str, Any]) -> Dict[str, Any]:
+    connect_url = _extract_mcp_remote_auth_url(event)
+    message = "Authorization required. Open the provided connect URL to continue."
+    response: Dict[str, Any] = {
+        "status": "action_required",
+        "result": message,
+        "message": message,
+        "auth": event,
+    }
+    if connect_url:
+        response["connect_url"] = connect_url
+    session_id = event.get("session_id")
+    if isinstance(session_id, str) and session_id.strip():
+        response["auth_session_id"] = session_id.strip()
+    return response
+
+
 @dataclass
 class MCPServerRuntime:
     """Runtime representation of an MCP server configuration."""
@@ -197,14 +228,76 @@ class GobiiStdioTransport(FastMCPStdioTransport):
     ):
         super().__init__(command=command, args=args, env=env, cwd=cwd, keep_alive=keep_alive)
         self._errlog_fallback = None
+        self._stderr_reader = None
+        self._stderr_writer = None
+        self._stderr_sink = None
+        self._stderr_thread = None
+        self._auth_event: Optional[Dict[str, Any]] = None
+        self._auth_lock = threading.Lock()
 
     def _resolve_errlog(self):
+        if self._stderr_writer is not None:
+            return self._stderr_writer
+
+        sink = None
         for candidate in (getattr(sys, "__stderr__", None), sys.stderr):
-            if candidate and hasattr(candidate, "fileno"):
-                return candidate
-        if self._errlog_fallback is None:
-            self._errlog_fallback = open(os.devnull, "w")
-        return self._errlog_fallback
+            if candidate and hasattr(candidate, "write"):
+                sink = candidate
+                break
+        if sink is None:
+            if self._errlog_fallback is None:
+                self._errlog_fallback = open(os.devnull, "w")
+            sink = self._errlog_fallback
+
+        read_fd, write_fd = os.pipe()
+        self._stderr_reader = os.fdopen(read_fd, "r", buffering=1, encoding="utf-8", errors="replace")
+        self._stderr_writer = os.fdopen(write_fd, "w", buffering=1, encoding="utf-8", errors="replace")
+        self._stderr_sink = sink
+        self._stderr_thread = threading.Thread(target=self._drain_stderr, name="mcp-stderr-drain", daemon=True)
+        self._stderr_thread.start()
+        return self._stderr_writer
+
+    def _drain_stderr(self):
+        if self._stderr_reader is None:
+            return
+        try:
+            for line in self._stderr_reader:
+                if line:
+                    self._capture_auth_event(line)
+                    if self._stderr_sink:
+                        try:
+                            self._stderr_sink.write(line)
+                            self._stderr_sink.flush()
+                        except OSError:
+                            pass
+        except OSError:
+            return
+
+    def _capture_auth_event(self, line: str):
+        marker = "MCP_REMOTE_AUTH_URL "
+        index = line.find(marker)
+        if index < 0:
+            return
+        payload = line[index + len(marker) :].strip()
+        if not payload:
+            return
+        try:
+            event = json.loads(payload)
+        except json.JSONDecodeError:
+            logger.debug("Failed parsing MCP_REMOTE_AUTH_URL payload: %s", payload)
+            return
+        if not isinstance(event, dict):
+            return
+        with self._auth_lock:
+            self._auth_event = event
+
+    def pop_auth_event(self) -> Optional[Dict[str, Any]]:
+        with self._auth_lock:
+            if not self._auth_event:
+                return None
+            event = dict(self._auth_event)
+            self._auth_event = None
+            return event
 
     async def connect(self, **session_kwargs):
         if self._connect_task is not None:
@@ -260,6 +353,22 @@ class GobiiStdioTransport(FastMCPStdioTransport):
         self._cleanup_errlog()
 
     def _cleanup_errlog(self):
+        if self._stderr_writer:
+            try:
+                self._stderr_writer.close()
+            except OSError:
+                pass
+            self._stderr_writer = None
+        if self._stderr_thread and self._stderr_thread.is_alive():
+            self._stderr_thread.join(timeout=0.2)
+        self._stderr_thread = None
+        if self._stderr_reader:
+            try:
+                self._stderr_reader.close()
+            except OSError:
+                pass
+            self._stderr_reader = None
+        self._stderr_sink = None
         if self._errlog_fallback:
             try:
                 self._errlog_fallback.close()
@@ -601,13 +710,22 @@ class MCPToolManager:
             if fallback_value:
                 env[key] = fallback_value
 
+        command = cfg.command or None
+        args = list(cfg.command_args or [])
+        if command:
+            _is_remote, args = normalize_mcp_remote_args(
+                command,
+                args,
+                build_mcp_remote_bridge_payload(),
+            )
+
         return MCPServerRuntime(
             config_id=str(cfg.id),
             name=cfg.name,
             display_name=cfg.display_name,
             description=cfg.description,
-            command=cfg.command or None,
-            args=list(cfg.command_args or []),
+            command=command,
+            args=args,
             url=cfg.url or None,
             auth_method=cfg.auth_method,
             env=env,
@@ -1382,6 +1500,11 @@ class MCPToolManager:
 
             return {"status": "success", "result": content}
         except Exception as exc:
+            transport = getattr(client, "transport", None)
+            if isinstance(transport, GobiiStdioTransport):
+                auth_event = transport.pop_auth_event()
+                if auth_event:
+                    return _build_mcp_remote_action_required(auth_event)
             logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
             return {"status": "error", "message": str(exc)}
 
@@ -1693,6 +1816,11 @@ class MCPToolManager:
             return response
             
         except Exception as e:
+            transport = getattr(client, "transport", None)
+            if isinstance(transport, GobiiStdioTransport):
+                auth_event = transport.pop_auth_event()
+                if auth_event:
+                    return _build_mcp_remote_action_required(auth_event)
             logger.error(f"Failed to execute MCP tool {tool_name}: {e}")
             return {
                 "status": "error",

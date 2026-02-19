@@ -1,3 +1,7 @@
+import json
+import logging
+from datetime import datetime, timedelta, timezone as dt_timezone
+
 from rest_framework import status, viewsets, serializers, mixins
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.permissions import IsAuthenticated
@@ -5,10 +9,13 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.conf import settings
+from django.core.cache import cache
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from django.http import HttpResponseRedirect, Http404
+from django.http import HttpResponseRedirect, Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.utils.decorators import method_decorator
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
 from django.db import models
 
 from observability import traced, dict_to_attributes
@@ -40,9 +47,9 @@ from .tasks import process_browser_use_task
 from .services.task_webhooks import trigger_task_webhook
 from .services.persistent_agents import maybe_sync_agent_email_display_name
 from .services.agent_settings_resume import queue_settings_change_resume
+from .services.mcp_remote_bridge import validate_mcp_remote_bridge_request
 from opentelemetry import baggage, context, trace
 from tasks.services import TaskCreditService
-import logging
 
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -68,6 +75,22 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, inline_seri
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
+
+_MCP_BRIDGE_STATE_KEY_PREFIX = "mcp_remote_bridge:state:"
+_MCP_BRIDGE_SESSION_KEY_PREFIX = "mcp_remote_bridge:session:"
+_MCP_BRIDGE_CODE_KEY_PREFIX = "mcp_remote_bridge:code:"
+
+
+def _bridge_state_key(state: str) -> str:
+    return f"{_MCP_BRIDGE_STATE_KEY_PREFIX}{state}"
+
+
+def _bridge_session_key(session_id: str) -> str:
+    return f"{_MCP_BRIDGE_SESSION_KEY_PREFIX}{session_id}"
+
+
+def _bridge_code_key(session_id: str) -> str:
+    return f"{_MCP_BRIDGE_CODE_KEY_PREFIX}{session_id}"
 
 
 def _enforce_personal_api_access_or_raise(user, *, organization=None):
@@ -1018,6 +1041,155 @@ class LinkShortenerRedirectView(View):
 
         link.increment_hits()
         return HttpResponseRedirect(url)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPRemoteBridgeNotifyView(View):
+    """Receive bridge-mode auth URL events emitted by mcp-remote."""
+
+    http_method_names = ["post"]
+
+    def post(self, request):
+        if not validate_mcp_remote_bridge_request(request):
+            return HttpResponse("Forbidden", status=403)
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        session_id = str(body.get("session_id") or "").strip()
+        state = str(body.get("state") or "").strip()
+        if not session_id or not state:
+            return HttpResponseBadRequest("session_id and state are required")
+
+        ttl_seconds = max(1, int(settings.MCP_REMOTE_BRIDGE_SESSION_TTL_SECONDS))
+        expires_at = timezone.now() + timedelta(seconds=ttl_seconds)
+        session_payload = {
+            "session_id": session_id,
+            "state": state,
+            "authorization_url": str(body.get("authorization_url") or "").strip(),
+            "redirect_url": str(body.get("redirect_url") or "").strip(),
+            "expires_at": expires_at.isoformat(),
+        }
+
+        # Keep state/session records beyond the active TTL so poll can emit 410 on expiry.
+        record_ttl_seconds = ttl_seconds * 4
+        cache.set(_bridge_state_key(state), session_id, timeout=record_ttl_seconds)
+        cache.set(_bridge_session_key(session_id), session_payload, timeout=record_ttl_seconds)
+
+        return JsonResponse({"status": "ok", "session_id": session_id})
+
+
+class MCPRemoteBridgePollView(View):
+    """Return pending OAuth codes for mcp-remote bridge polling."""
+
+    http_method_names = ["get"]
+
+    def get(self, request):
+        if not validate_mcp_remote_bridge_request(request):
+            return HttpResponse("Forbidden", status=403)
+
+        session_id = str(request.GET.get("session_id") or "").strip()
+        if not session_id:
+            return HttpResponseBadRequest("session_id is required")
+
+        code = cache.get(_bridge_code_key(session_id))
+        if isinstance(code, str) and code.strip():
+            cache.delete(_bridge_code_key(session_id))
+            return JsonResponse({"code": code.strip()}, status=200)
+
+        session_payload = cache.get(_bridge_session_key(session_id))
+        if not isinstance(session_payload, dict):
+            return JsonResponse({"status": "pending"}, status=404)
+
+        expires_at_raw = str(session_payload.get("expires_at") or "").strip()
+        try:
+            expires_at = datetime.fromisoformat(expires_at_raw) if expires_at_raw else None
+        except ValueError:
+            expires_at = None
+        if expires_at and timezone.is_naive(expires_at):
+            expires_at = timezone.make_aware(expires_at, dt_timezone.utc)
+
+        if expires_at and timezone.now() >= expires_at:
+            state = str(session_payload.get("state") or "").strip()
+            cache.delete(_bridge_session_key(session_id))
+            cache.delete(_bridge_code_key(session_id))
+            if state:
+                cache.delete(_bridge_state_key(state))
+            return JsonResponse({"error": "Auth session expired"}, status=410)
+
+        return JsonResponse({"status": "pending"}, status=202)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class MCPRemoteBridgeCallbackView(View):
+    """Capture OAuth callback code and make it available to bridge pollers."""
+
+    http_method_names = ["get", "post"]
+
+    def get(self, request):
+        return self._complete(request)
+
+    def post(self, request):
+        return self._complete(request)
+
+    def _complete(self, request):
+        if not validate_mcp_remote_bridge_request(request):
+            return HttpResponse("Forbidden", status=403)
+
+        state = str(request.GET.get("state") or request.POST.get("state") or "").strip()
+        if not state:
+            return HttpResponseBadRequest("state is required")
+
+        session_id = cache.get(_bridge_state_key(state))
+        if not isinstance(session_id, str) or not session_id.strip():
+            return HttpResponseBadRequest("Unknown or expired OAuth state")
+        session_id = session_id.strip()
+
+        session_payload = cache.get(_bridge_session_key(session_id))
+        if isinstance(session_payload, dict):
+            expires_at_raw = str(session_payload.get("expires_at") or "").strip()
+            if expires_at_raw:
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_raw)
+                except ValueError:
+                    expires_at = None
+                if expires_at is None:
+                    cache.delete(_bridge_session_key(session_id))
+                    cache.delete(_bridge_state_key(state))
+                    return HttpResponseBadRequest("OAuth session is invalid. Restart authentication.")
+                if timezone.is_naive(expires_at):
+                    expires_at = timezone.make_aware(expires_at, dt_timezone.utc)
+                if timezone.now() >= expires_at:
+                    cache.delete(_bridge_session_key(session_id))
+                    cache.delete(_bridge_state_key(state))
+                    cache.delete(_bridge_code_key(session_id))
+                    return HttpResponse("OAuth session expired. Please retry from Gobii.", status=410)
+
+        error = str(request.GET.get("error") or request.POST.get("error") or "").strip()
+        if error:
+            message = str(request.GET.get("error_description") or request.POST.get("error_description") or "").strip()
+            detail = f"{error}: {message}" if message else error
+            return HttpResponse(f"OAuth failed: {detail}", status=400)
+
+        code = str(request.GET.get("code") or request.POST.get("code") or "").strip()
+        if not code:
+            return HttpResponseBadRequest("code is required")
+
+        ttl_seconds = max(1, int(settings.MCP_REMOTE_BRIDGE_SESSION_TTL_SECONDS))
+        cache.set(_bridge_code_key(session_id), code, timeout=ttl_seconds)
+
+        return HttpResponse(
+            (
+                "<html><body>"
+                "<h2>Authorization complete</h2>"
+                "<p>You can return to Gobii. This window may be closed.</p>"
+                "<script>window.close();</script>"
+                "</body></html>"
+            ),
+            content_type="text/html",
+        )
 
 
 class PipedreamConnectRedirectView(View):

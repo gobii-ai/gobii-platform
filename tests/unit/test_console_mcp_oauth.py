@@ -3,7 +3,8 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.core.cache import cache
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
@@ -249,3 +250,84 @@ class MCPOAuthApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         session.refresh_from_db()
         self.assertEqual(session.code_verifier, "updated-verifier")
+
+    def test_bridge_notify_callback_poll_flow(self):
+        notify_url = reverse("api-mcp-bridge-notify")
+        poll_url = reverse("api-mcp-bridge-poll")
+        callback_url = reverse("api-mcp-bridge-callback")
+
+        notify_response = self.client.post(
+            notify_url,
+            data=json.dumps(
+                {
+                    "session_id": "session-1",
+                    "state": "state-1",
+                    "authorization_url": "https://oauth.example.com/auth",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(notify_response.status_code, 200, notify_response.content)
+
+        pending_response = self.client.get(poll_url, {"session_id": "session-1"})
+        self.assertEqual(pending_response.status_code, 202, pending_response.content)
+
+        callback_response = self.client.get(
+            callback_url,
+            {"state": "state-1", "code": "code-123"},
+        )
+        self.assertEqual(callback_response.status_code, 200, callback_response.content)
+        self.assertContains(callback_response, "Authorization complete")
+
+        ready_response = self.client.get(poll_url, {"session_id": "session-1"})
+        self.assertEqual(ready_response.status_code, 200, ready_response.content)
+        self.assertEqual(ready_response.json().get("code"), "code-123")
+
+        consumed_response = self.client.get(poll_url, {"session_id": "session-1"})
+        self.assertEqual(consumed_response.status_code, 202, consumed_response.content)
+
+    def test_bridge_poll_returns_expired_when_session_elapsed(self):
+        notify_url = reverse("api-mcp-bridge-notify")
+        poll_url = reverse("api-mcp-bridge-poll")
+
+        notify_response = self.client.post(
+            notify_url,
+            data=json.dumps({"session_id": "session-expired", "state": "state-expired"}),
+            content_type="application/json",
+        )
+        self.assertEqual(notify_response.status_code, 200, notify_response.content)
+
+        session_cache_key = "mcp_remote_bridge:session:session-expired"
+        cached_session = cache.get(session_cache_key)
+        self.assertIsInstance(cached_session, dict)
+        cached_session["expires_at"] = (timezone.now() - timedelta(seconds=1)).isoformat()
+        cache.set(session_cache_key, cached_session, timeout=60)
+
+        response = self.client.get(poll_url, {"session_id": "session-expired"})
+        self.assertEqual(response.status_code, 410, response.content)
+
+    @override_settings(MCP_REMOTE_BRIDGE_SHARED_SECRET="bridge-secret")
+    def test_bridge_endpoints_require_shared_secret_when_configured(self):
+        notify_url = reverse("api-mcp-bridge-notify")
+        poll_url = reverse("api-mcp-bridge-poll")
+        callback_url = reverse("api-mcp-bridge-callback")
+
+        denied_notify = self.client.post(
+            notify_url,
+            data=json.dumps({"session_id": "session-secure", "state": "state-secure"}),
+            content_type="application/json",
+        )
+        self.assertEqual(denied_notify.status_code, 403, denied_notify.content)
+
+        allowed_notify = self.client.post(
+            f"{notify_url}?bridge_token=bridge-secret",
+            data=json.dumps({"session_id": "session-secure", "state": "state-secure"}),
+            content_type="application/json",
+        )
+        self.assertEqual(allowed_notify.status_code, 200, allowed_notify.content)
+
+        denied_poll = self.client.get(poll_url, {"session_id": "session-secure"})
+        self.assertEqual(denied_poll.status_code, 403, denied_poll.content)
+
+        denied_callback = self.client.get(callback_url, {"state": "state-secure", "code": "abc"})
+        self.assertEqual(denied_callback.status_code, 403, denied_callback.content)
