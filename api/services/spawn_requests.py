@@ -89,7 +89,6 @@ class SpawnRequestService:
         with transaction.atomic():
             spawn_request = (
                 AgentSpawnRequest.objects.select_for_update()
-                .select_related("agent", "spawned_agent", "peer_link")
                 .filter(id=spawn_request_id, agent=agent)
                 .first()
             )

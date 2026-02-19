@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { HttpError, jsonRequest } from '../../../../api/http'
 import type { ToolDetailProps } from '../../tooling/types'
@@ -144,19 +145,13 @@ type SpawnDecisionResponse = {
 
 function parseErrorMessage(error: unknown): string {
   if (error instanceof HttpError) {
-    const payload = error.body
-    if (typeof payload === 'string' && payload.trim()) {
-      return payload.trim()
-    }
-    if (isRecord(payload) && typeof payload['error'] === 'string' && payload['error'].trim()) {
-      return payload['error'].trim()
-    }
-    return `Request failed (${error.status}).`
+    return 'Something went wrong. Please try again.'
   }
-  return 'Request failed. Please try again.'
+  return 'Something went wrong. Please try again.'
 }
 
 export function SpawnAgentDetail({ entry }: ToolDetailProps) {
+  const queryClient = useQueryClient()
   const params = (entry.parameters as Record<string, unknown>) || {}
   const result = parseResultObject(entry.result)
   const charterRaw = typeof params['charter'] === 'string' ? (params['charter'] as string) : null
@@ -200,6 +195,9 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
         setActionMessage('Created specialist agent.')
       } else {
         setActionMessage('Declined spawn request.')
+      }
+      if (decision === 'approve') {
+        void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
       }
     } catch (error) {
       setActionError(parseErrorMessage(error))
