@@ -195,16 +195,33 @@ def _trial_topoff_amount(
     monthly_credits: int,
     as_of: datetime,
 ) -> Decimal:
+    return _owner_plan_topoff_amount(
+        owner=owner,
+        monthly_credits=monthly_credits,
+        as_of=as_of,
+        plan_id=plan_id,
+    )
+
+
+def _owner_plan_topoff_amount(
+    *,
+    owner,
+    monthly_credits: int,
+    as_of: datetime,
+    plan_id: str | None = None,
+) -> Decimal:
     TaskCredit = apps.get_model("api", "TaskCredit")
     UserModel = get_user_model()
     remaining = Decimal(0)
     filters = {
-        "plan": plan_id,
         "grant_type": GrantTypeChoices.PLAN,
         "additional_task": False,
         "voided": False,
+        "granted_date__lte": as_of,
         "expiration_date__gte": as_of,
     }
+    if plan_id:
+        filters["plan"] = plan_id
     if isinstance(owner, UserModel):
         filters["user"] = owner
     else:
@@ -1962,9 +1979,17 @@ def handle_subscription_event(event, **kwargs):
             stripe_settings = get_stripe_settings()
 
             if owner_type == "user":
+                prior_plan_value = plan_before_cancellation
                 mark_user_billing_with_plan(owner, plan_value, update_anchor=False, plan_version=plan_version)
+                plan_changed_for_user = (
+                    event_type == "customer.subscription.updated"
+                    and bool(prior_plan_value)
+                    and prior_plan_value != plan_value
+                )
                 should_grant = billing_reason in {"subscription_create", "subscription_cycle"}
                 if billing_reason is None and event_type == "customer.subscription.created":
+                    should_grant = True
+                if plan_changed_for_user:
                     should_grant = True
                 trial_conversion = False
                 if sub.status == "active" and trial_end_dt and current_period_start_dt:
@@ -2010,6 +2035,34 @@ def handle_subscription_event(event, **kwargs):
                                         else "start"
                                     )
                                     grant_invoice_id = f"trial-topoff:{subscription_id}:{anchor}"
+                                expiration_override = current_period_end_dt
+                    elif plan_changed_for_user:
+                        monthly_credits = None
+                        if isinstance(plan, Mapping):
+                            try:
+                                monthly_credits = int(plan.get("monthly_task_credits"))
+                            except (TypeError, ValueError):
+                                pass
+
+                        if monthly_credits is None:
+                            should_grant = False
+                        else:
+                            topoff = _owner_plan_topoff_amount(
+                                owner=owner,
+                                monthly_credits=monthly_credits,
+                                as_of=timezone.now(),
+                            )
+                            if topoff <= 0:
+                                should_grant = False
+                            else:
+                                credit_override = topoff
+                                if not grant_invoice_id:
+                                    anchor = (
+                                        current_period_start_dt.date().isoformat()
+                                        if current_period_start_dt
+                                        else "start"
+                                    )
+                                    grant_invoice_id = f"plan-topoff:{subscription_id}:{anchor}:{plan_value}"
                                 expiration_override = current_period_end_dt
 
                     if not should_grant:
