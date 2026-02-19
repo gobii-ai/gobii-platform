@@ -195,9 +195,15 @@
           <h3 class="ml-2 text-md font-medium">API Documentation</h3>
         </div>
         <p class="text-sm text-gray-600 mb-auto">Explore our API documentation to learn how to integrate with our services.</p>
+        {%  if settings.GOBII_PROPRIETARY_MODE %}
+        <a href="https://docs.gobii.ai/api-reference/" class="mt-4 inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800">
+          View API Docs <span class="ml-1">→</span>
+        </a>
+        {% elif %}
         <a href="/api/schema/swagger-ui/" class="mt-4 inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800">
           View API Docs <span class="ml-1">→</span>
         </a>
+        {% endif %}
       </div>
 
       <!-- Quick Start Card -->
@@ -209,9 +215,15 @@
           <h3 class="ml-2 text-md font-medium">Quick Start</h3>
         </div>
         <p class="text-sm text-gray-600 mb-auto">Get started quickly with example code and tutorials.</p>
+        {%  if settings.GOBII_PROPRIETARY_MODE %}
         <a href="https://docs.gobii.ai/developers/developer-basics" class="mt-4 inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800">
           View Developer Guide <span class="ml-1">→</span>
         </a>
+        {% elif %}
+        <a href="/api/schema/swagger-ui/" class="mt-4 inline-flex items-center text-sm font-medium text-blue-600 hover:text-blue-800">
+          View Developer Guide <span class="ml-1">→</span>
+        </a>
+        {% endif %}
       </div>
     </div>
   </div>
