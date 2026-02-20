@@ -30,6 +30,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
 )
+from djstripe.models import Subscription
 
 try:
     import stripe
@@ -101,6 +102,17 @@ def _stripe_action_url_from_latest_invoice(subscription_data: Mapping[str, Any] 
     if intent_status in {"requires_action", "requires_payment_method"}:
         return str(hosted_url)
     return None
+
+
+def _sync_subscription_after_direct_update(subscription_payload: Any) -> None:
+    """Best-effort sync so post-update billing reads the latest subscription state."""
+    try:
+        Subscription.sync_from_stripe_data(subscription_payload)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        logger.warning(
+            "Failed to sync subscription payload after direct Stripe update",
+            exc_info=True,
+        )
 
 
 def apply_addon_price_quantities(
@@ -215,6 +227,7 @@ def apply_addon_price_quantities(
             if end_trial_on_purchase and is_trialing and is_purchase:
                 modify_kwargs["trial_end"] = "now"
             updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
+            _sync_subscription_after_direct_update(updated_subscription)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             stripe_action_url = _stripe_action_url_from_latest_invoice(updated_subscription)
 
@@ -747,6 +760,7 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                 updated_id,
                 expand=["latest_invoice.payment_intent", "latest_invoice"],
             )
+            _sync_subscription_after_direct_update(refreshed)
             action_url = _stripe_action_url_from_latest_invoice(refreshed)
             if action_url:
                 response_dict["stripeActionUrl"] = action_url

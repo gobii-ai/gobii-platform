@@ -468,6 +468,7 @@ from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferI
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
+from djstripe.models import Subscription
 
 User = get_user_model()
 logger = logging.getLogger(__name__)
@@ -2051,6 +2052,17 @@ def _build_cancellation_feedback_properties(request: HttpRequest) -> dict[str, A
     return properties
 
 
+def _sync_subscription_after_direct_update(subscription_payload: Any) -> None:
+    """Best-effort sync so billing UI reads latest cancel/resume state immediately."""
+    try:
+        Subscription.sync_from_stripe_data(subscription_payload)
+    except (TypeError, ValueError, KeyError, AttributeError):
+        logger.warning(
+            "Failed to sync subscription payload after direct Stripe update",
+            exc_info=True,
+        )
+
+
 @login_required
 @require_POST
 @tracer.start_as_current_span("BILLING Cancel Subscription")
@@ -2068,7 +2080,8 @@ def cancel_subscription(request):
     if sub:
         try:
             _assign_stripe_api_key()
-            stripe.Subscription.modify(sub.id, cancel_at_period_end=True)
+            updated_subscription = stripe.Subscription.modify(sub.id, cancel_at_period_end=True)
+            _sync_subscription_after_direct_update(updated_subscription)
 
             Analytics.track_event(
                 user_id=request.user.id,
@@ -2118,7 +2131,8 @@ def resume_subscription(request):
 
     try:
         _assign_stripe_api_key()
-        stripe.Subscription.modify(sub.id, cancel_at_period_end=False)
+        updated_subscription = stripe.Subscription.modify(sub.id, cancel_at_period_end=False)
+        _sync_subscription_after_direct_update(updated_subscription)
 
         Analytics.track_event(
             user_id=request.user.id,

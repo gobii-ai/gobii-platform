@@ -80,6 +80,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
     @patch("console.billing_update_service._get_owner_plan_id", return_value="startup")
     @patch("console.billing_update_service.get_active_subscription", return_value=SimpleNamespace(id="sub_trial"))
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
+    @patch("console.billing_update_service._sync_subscription_after_direct_update")
     @patch("console.billing_update_service.stripe.Subscription.modify")
     @patch("console.billing_update_service.stripe.Subscription.retrieve")
     @patch("console.billing_update_service.stripe_status")
@@ -88,6 +89,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
         mock_stripe_status,
         mock_retrieve,
         mock_modify,
+        mock_sync_subscription,
         mock_assign_key,
         mock_get_active_subscription,
         mock_get_plan_id,
@@ -129,6 +131,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
 
         _, kwargs = mock_modify.call_args
         self.assertEqual(kwargs.get("trial_end"), "now")
+        mock_sync_subscription.assert_called_once_with(mock_modify.return_value)
 
     @patch("console.billing_update_service.AddonEntitlementService.get_price_options", return_value=[SimpleNamespace(price_id="price_task_pack")])
     @patch("console.billing_update_service._get_owner_plan_id", return_value="startup")
@@ -184,6 +187,56 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertEqual(resp.status_code, 400)
         payload = resp.json()
         self.assertEqual(payload.get("error"), "seats_required")
+
+    @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
+    @patch("console.billing_update_service.stripe.Subscription.retrieve")
+    @patch("console.billing_update_service._sync_subscription_after_direct_update")
+    @patch(
+        "console.billing_update_service.ensure_single_individual_subscription",
+        return_value=({"id": "sub_plan_change"}, "updated"),
+    )
+    @patch(
+        "console.billing_update_service.get_or_create_stripe_customer",
+        return_value=SimpleNamespace(id="cus_plan_change"),
+    )
+    @patch("console.billing_update_service.stripe_status")
+    def test_plan_change_syncs_subscription_immediately(
+        self,
+        mock_stripe_status,
+        _mock_get_customer,
+        _mock_ensure_single_subscription,
+        mock_sync_subscription,
+        mock_retrieve_subscription,
+        _mock_assign_key,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_retrieve_subscription.return_value = {
+            "id": "sub_plan_change",
+            "latest_invoice": None,
+        }
+
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["context_name"] = self.user.get_full_name() or self.user.email
+        session.save()
+
+        resp = self.client.post(
+            self.url,
+            data=json.dumps(
+                {
+                    "ownerType": "user",
+                    "planTarget": "startup",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload.get("ok"))
+        mock_retrieve_subscription.assert_called_once()
+        mock_sync_subscription.assert_called_once_with(mock_retrieve_subscription.return_value)
 
     @patch("console.billing_update_service._update_stripe_dedicated_ip_quantity")
     @patch("console.billing_update_service.stripe_status")

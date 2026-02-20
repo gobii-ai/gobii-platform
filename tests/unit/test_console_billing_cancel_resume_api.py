@@ -22,10 +22,12 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
     @patch("console.views._assign_stripe_api_key", return_value=None)
     @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("console.views.Analytics.track_event")
+    @patch("console.views._sync_subscription_after_direct_update")
     @patch("console.views.stripe.Subscription.modify")
     def test_cancel_subscription_sets_cancel_at_period_end(
         self,
         mock_modify,
+        mock_sync_subscription,
         mock_track_event,
         mock_get_active_subscription,
         mock_assign_key,
@@ -47,6 +49,7 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         self.assertTrue(resp.json().get("success"))
 
         mock_modify.assert_called_once()
+        mock_sync_subscription.assert_called_once_with(mock_modify.return_value)
         _, kwargs = mock_modify.call_args
         self.assertEqual(kwargs.get("cancel_at_period_end"), True)
         mock_track_event.assert_called_once()
@@ -64,10 +67,12 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
     @patch("console.views._assign_stripe_api_key", return_value=None)
     @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("console.views.Analytics.track_event")
+    @patch("console.views._sync_subscription_after_direct_update")
     @patch("console.views.stripe.Subscription.modify")
     def test_cancel_subscription_sanitizes_feedback_payload(
         self,
         mock_modify,
+        mock_sync_subscription,
         mock_track_event,
         mock_get_active_subscription,
         mock_assign_key,
@@ -90,6 +95,7 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         self.assertTrue(resp.json().get("success"))
 
         mock_modify.assert_called_once()
+        mock_sync_subscription.assert_called_once_with(mock_modify.return_value)
         mock_track_event.assert_called_once()
         _, analytics_kwargs = mock_track_event.call_args
         properties = analytics_kwargs.get("properties")
@@ -100,10 +106,12 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
     @patch("console.views.stripe_status")
     @patch("console.views._assign_stripe_api_key", return_value=None)
     @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
+    @patch("console.views._sync_subscription_after_direct_update")
     @patch("console.views.stripe.Subscription.modify")
     def test_resume_subscription_clears_cancel_at_period_end(
         self,
         mock_modify,
+        mock_sync_subscription,
         mock_get_active_subscription,
         mock_assign_key,
         mock_stripe_status,
@@ -115,6 +123,7 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         self.assertTrue(resp.json().get("success"))
 
         mock_modify.assert_called_once()
+        mock_sync_subscription.assert_called_once_with(mock_modify.return_value)
         _, kwargs = mock_modify.call_args
         self.assertEqual(kwargs.get("cancel_at_period_end"), False)
 
