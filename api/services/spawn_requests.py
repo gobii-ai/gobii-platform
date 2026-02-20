@@ -21,17 +21,47 @@ class SpawnRequestResolutionError(Exception):
 
 class SpawnRequestService:
     @staticmethod
+    def get_request_status(
+        *,
+        agent: PersistentAgent,
+        spawn_request_id: str,
+    ) -> dict:
+        spawn_request = (
+            AgentSpawnRequest.objects.select_related("spawned_agent")
+            .filter(id=spawn_request_id, agent=agent)
+            .first()
+        )
+        if not spawn_request:
+            raise SpawnRequestResolutionError("Spawn request not found.", status_code=404)
+
+        if (
+            spawn_request.status == AgentSpawnRequest.RequestStatus.PENDING
+            and spawn_request.is_expired()
+        ):
+            spawn_request.status = AgentSpawnRequest.RequestStatus.EXPIRED
+            spawn_request.responded_at = timezone.now()
+            spawn_request.save(update_fields=["status", "responded_at"])
+
+        payload = {
+            "status": "ok",
+            "request_status": spawn_request.status,
+            "spawn_request_id": str(spawn_request.id),
+        }
+        if spawn_request.spawned_agent_id:
+            payload["spawned_agent_id"] = str(spawn_request.spawned_agent_id)
+            payload["spawned_agent_name"] = spawn_request.spawned_agent.name
+        return payload
+
+    @staticmethod
     def create_or_reuse_pending_request(
         *,
         agent: PersistentAgent,
-        requested_name: str,
         requested_charter: str,
         handoff_message: str,
         request_reason: str = "",
         expires_in_days: int = 7,
     ) -> tuple[AgentSpawnRequest, bool]:
         fingerprint = AgentSpawnRequest.build_request_fingerprint(
-            requested_name=requested_name,
             requested_charter=requested_charter,
             handoff_message=handoff_message,
         )
@@ -51,7 +81,6 @@ class SpawnRequestService:
         try:
             spawn_request = AgentSpawnRequest.objects.create(
                 agent=agent,
-                requested_name=requested_name,
                 requested_charter=requested_charter,
                 handoff_message=handoff_message,
                 request_reason=request_reason,
@@ -118,7 +147,6 @@ class SpawnRequestService:
                     "agent_id": str(agent.id),
                     "agent_name": agent.name,
                     "spawn_request_id": str(spawn_request.id),
-                    "requested_name": spawn_request.requested_name or "",
                 },
                 organization=agent.organization,
             )

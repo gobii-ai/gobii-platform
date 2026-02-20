@@ -18,7 +18,6 @@ class Migration(migrations.Migration):
             name='AgentSpawnRequest',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('requested_name', models.CharField(blank=True, help_text='Optional requested name for the spawned agent.', max_length=255)),
                 ('requested_charter', models.TextField(help_text='Requested charter for the spawned agent.')),
                 ('handoff_message', models.TextField(help_text='Initial handoff message sent from parent to spawned agent.')),
                 ('request_reason', models.TextField(blank=True, help_text='Optional explanation of why this spawn is needed.')),

@@ -7749,11 +7749,6 @@ class AgentSpawnRequest(models.Model):
         related_name="spawn_requests",
         help_text="Source agent requesting a specialist peer.",
     )
-    requested_name = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="Optional requested name for the spawned agent.",
-    )
     requested_charter = models.TextField(help_text="Requested charter for the spawned agent.")
     handoff_message = models.TextField(help_text="Initial handoff message sent from parent to spawned agent.")
     request_reason = models.TextField(
@@ -7818,13 +7813,11 @@ class AgentSpawnRequest(models.Model):
     def build_request_fingerprint(
         cls,
         *,
-        requested_name: str | None,
         requested_charter: str | None,
         handoff_message: str | None,
     ) -> str:
         payload = "||".join(
             [
-                cls._normalize_fingerprint_text(requested_name),
                 cls._normalize_fingerprint_text(requested_charter),
                 cls._normalize_fingerprint_text(handoff_message),
             ]
@@ -7833,14 +7826,12 @@ class AgentSpawnRequest(models.Model):
 
     def _refresh_request_fingerprint(self) -> None:
         self.request_fingerprint = self.build_request_fingerprint(
-            requested_name=self.requested_name,
             requested_charter=self.requested_charter,
             handoff_message=self.handoff_message,
         )
 
     def clean(self):
         super().clean()
-        self.requested_name = (self.requested_name or "").strip()
         self._refresh_request_fingerprint()
 
     def save(self, *args, **kwargs):
@@ -7882,13 +7873,10 @@ class AgentSpawnRequest(models.Model):
             PersistentAgentProvisioningService,
         )
 
-        requested_name = (self.requested_name or "").strip() or None
-
         try:
             provisioning = PersistentAgentProvisioningService.provision(
                 user=self.agent.user,
                 organization=self.agent.organization,
-                name=requested_name,
                 charter=requested_charter,
             )
         except PersistentAgentProvisioningError as exc:
@@ -7896,6 +7884,24 @@ class AgentSpawnRequest(models.Model):
             raise ValidationError(payload) from exc
 
         spawned_agent = provisioning.agent
+        preferred_email_endpoint = None
+        owner_email = (spawned_agent.user.email or "").strip().lower()
+        if owner_email:
+            preferred_email_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                channel=CommsChannel.EMAIL,
+                address=owner_email,
+                defaults={"owner_agent": None},
+            )
+        elif (
+            self.agent.preferred_contact_endpoint_id
+            and self.agent.preferred_contact_endpoint.channel == CommsChannel.EMAIL
+        ):
+            preferred_email_endpoint = self.agent.preferred_contact_endpoint
+
+        if preferred_email_endpoint and spawned_agent.preferred_contact_endpoint_id != preferred_email_endpoint.id:
+            spawned_agent.preferred_contact_endpoint = preferred_email_endpoint
+            spawned_agent.save(update_fields=["preferred_contact_endpoint"])
+
         link = AgentPeerLink(
             agent_a=self.agent,
             agent_b=spawned_agent,

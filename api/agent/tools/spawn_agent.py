@@ -85,10 +85,6 @@ def get_spawn_agent_tool(agent: PersistentAgent | None = None) -> Dict[str, Any]
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Optional display name for the new specialist agent.",
-                    },
                     "charter": {
                         "type": "string",
                         "description": "Full charter/instructions for the specialist agent to run with.",
@@ -115,7 +111,6 @@ def get_spawn_agent_tool(agent: PersistentAgent | None = None) -> Dict[str, Any]
 def execute_spawn_agent(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     charter = str(params.get("charter") or "").strip()
     handoff_message = str(params.get("handoff_message") or "").strip()
-    requested_name = str(params.get("name") or "").strip()
     request_reason = str(params.get("reason") or "").strip()
     will_continue = _should_continue_work(params)
 
@@ -133,7 +128,6 @@ def execute_spawn_agent(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
 
     spawn_request, created = SpawnRequestService.create_or_reuse_pending_request(
         agent=agent,
-        requested_name=requested_name,
         requested_charter=charter,
         handoff_message=handoff_message,
         request_reason=request_reason,
@@ -145,7 +139,6 @@ def execute_spawn_agent(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
                 "agent_id": str(agent.id),
                 "agent_name": agent.name,
                 "spawn_request_id": str(spawn_request.id),
-                "requested_name": requested_name,
             },
             organization=agent.organization,
         )
@@ -160,7 +153,7 @@ def execute_spawn_agent(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
             logger.debug("Failed to track spawn request created analytics for agent %s", agent.id, exc_info=True)
 
     approval_url, decision_api_url = _build_urls(agent, spawn_request)
-    request_label = requested_name or "specialist agent"
+    request_label = "specialist agent"
 
     if created:
         message = (
@@ -180,7 +173,6 @@ def execute_spawn_agent(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
         "created_count": 1 if created else 0,
         "already_pending_count": 0 if created else 1,
         "spawn_request_id": str(spawn_request.id),
-        "requested_name": requested_name or None,
         "approval_url": approval_url,
         "decision_api_url": decision_api_url,
         "auto_sleep_ok": not will_continue,

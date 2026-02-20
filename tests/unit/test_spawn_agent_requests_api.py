@@ -89,7 +89,6 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
     def _create_spawn_request(self) -> AgentSpawnRequest:
         return AgentSpawnRequest.objects.create(
             agent=self.agent,
-            requested_name="Pricing Specialist",
             requested_charter="Own competitive pricing monitoring and weekly deltas.",
             handoff_message="Take over pricing analysis and send me the first summary.",
         )
@@ -109,6 +108,30 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
         self.assertEqual(response.status_code, 403)
         spawn_request.refresh_from_db()
         self.assertEqual(spawn_request.status, AgentSpawnRequest.RequestStatus.PENDING)
+
+    def test_spawn_request_status_get_reflects_current_state(self):
+        spawn_request = self._create_spawn_request()
+        self.client.force_login(self.owner)
+        self._set_org_context(self.client)
+
+        pending_response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/spawn-requests/{spawn_request.id}/decision/"
+        )
+        self.assertEqual(pending_response.status_code, 200)
+        self.assertEqual(
+            pending_response.json().get("request_status"),
+            AgentSpawnRequest.RequestStatus.PENDING,
+        )
+
+        spawn_request.reject(self.owner)
+        rejected_response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/spawn-requests/{spawn_request.id}/decision/"
+        )
+        self.assertEqual(rejected_response.status_code, 200)
+        self.assertEqual(
+            rejected_response.json().get("request_status"),
+            AgentSpawnRequest.RequestStatus.REJECTED,
+        )
 
     def test_org_admin_can_decline_spawn_request(self):
         spawn_request = self._create_spawn_request()

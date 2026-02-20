@@ -7,7 +7,14 @@ from django.test import TestCase, tag
 
 from api.agent.core.prompt_context import get_agent_tools
 from api.agent.tools.spawn_agent import execute_spawn_agent
-from api.models import AgentSpawnRequest, BrowserUseAgent, Organization, OrganizationMembership, PersistentAgent
+from api.models import (
+    AgentSpawnRequest,
+    BrowserUseAgent,
+    CommsChannel,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+)
 
 
 @tag("batch_agent_tools")
@@ -57,12 +64,14 @@ class SpawnAgentToolTests(TestCase):
         with patch("api.agent.core.prompt_context.AgentService.has_agents_available", return_value=True):
             tools = get_agent_tools(self.personal_agent)
 
-        tool_names = [
-            entry.get("function", {}).get("name")
-            for entry in tools
-            if isinstance(entry, dict)
-        ]
+        tool_names = [entry.get("function", {}).get("name") for entry in tools if isinstance(entry, dict)]
         self.assertIn("spawn_agent", tool_names)
+        spawn_tool = next(
+            entry for entry in tools
+            if isinstance(entry, dict) and entry.get("function", {}).get("name") == "spawn_agent"
+        )
+        spawn_properties = spawn_tool.get("function", {}).get("parameters", {}).get("properties", {})
+        self.assertNotIn("name", spawn_properties)
 
     def test_get_agent_tools_hides_spawn_agent_without_capacity(self):
         with patch("api.agent.core.prompt_context.AgentService.has_agents_available", return_value=False):
@@ -77,7 +86,6 @@ class SpawnAgentToolTests(TestCase):
 
     def test_execute_spawn_agent_creates_pending_request_with_org_context_urls(self):
         params = {
-            "name": "Contract Specialist",
             "charter": "Own contract review and summarize legal risk.",
             "handoff_message": "Review attached SOW and return redlines.",
             "reason": "Contract law review is outside my normal scope.",
@@ -106,7 +114,6 @@ class SpawnAgentToolTests(TestCase):
 
         spawn_request = AgentSpawnRequest.objects.get(id=result["spawn_request_id"])
         self.assertEqual(spawn_request.agent_id, self.org_agent.id)
-        self.assertEqual(spawn_request.requested_name, "Contract Specialist")
         self.assertEqual(
             spawn_request.requested_charter,
             "Own contract review and summarize legal risk.",
@@ -114,7 +121,6 @@ class SpawnAgentToolTests(TestCase):
 
     def test_execute_spawn_agent_reuses_matching_pending_request(self):
         params = {
-            "name": "Ops Specialist",
             "charter": "Own outbound vendor coordination and contract follow-ups.",
             "handoff_message": "Pick up vendor renewals this week and report blockers.",
             "reason": "Vendor operations are outside my charter.",
@@ -139,7 +145,6 @@ class SpawnAgentToolTests(TestCase):
 
     def test_execute_spawn_agent_after_decline_creates_new_request(self):
         params = {
-            "name": "Ops Specialist",
             "charter": "Own outbound vendor coordination and contract follow-ups.",
             "handoff_message": "Pick up vendor renewals this week and report blockers.",
             "reason": "Vendor operations are outside my charter.",
@@ -163,7 +168,6 @@ class SpawnAgentToolTests(TestCase):
     def test_spawn_request_approve_creates_peer_link_and_handoff(self):
         spawn_request = AgentSpawnRequest.objects.create(
             agent=self.personal_agent,
-            requested_name="Ops Specialist",
             requested_charter="Own outbound vendor coordination and contract follow-ups.",
             handoff_message="Pick up vendor renewals this week and report blockers.",
         )
@@ -191,3 +195,7 @@ class SpawnAgentToolTests(TestCase):
         send_message.assert_called_once_with(
             "Pick up vendor renewals this week and report blockers."
         )
+        child_agent.refresh_from_db()
+        self.assertIsNotNone(child_agent.preferred_contact_endpoint)
+        self.assertEqual(child_agent.preferred_contact_endpoint.channel, CommsChannel.EMAIL)
+        self.assertEqual(child_agent.preferred_contact_endpoint.address, self.user.email)

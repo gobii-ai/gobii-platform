@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { HttpError, jsonRequest } from '../../../../api/http'
@@ -139,7 +139,6 @@ type SpawnDecision = 'approve' | 'decline'
 type SpawnDecisionResponse = {
   status?: string
   request_status?: string
-  message?: string
   spawned_agent_name?: string
 }
 
@@ -167,15 +166,21 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
         : 'pending'
   const [requestStatus, setRequestStatus] = useState(initialStatus.toLowerCase())
   const [busyDecision, setBusyDecision] = useState<SpawnDecision | null>(null)
-  const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const canDecide = requestStatus === 'pending' && Boolean(decisionApiUrl)
+  const normalizedStatus = requestStatus.toLowerCase()
+  const resolvedDecision: SpawnDecision | null =
+    normalizedStatus === 'approved'
+      ? 'approve'
+      : normalizedStatus === 'rejected' || normalizedStatus === 'declined'
+        ? 'decline'
+        : null
+  const showActions = Boolean(decisionApiUrl) && resolvedDecision === null
+  const actionsLocked = Boolean(busyDecision)
 
   const submitDecision = async (decision: SpawnDecision) => {
-    if (!decisionApiUrl || busyDecision) return
+    if (!decisionApiUrl || actionsLocked) return
     setBusyDecision(decision)
-    setActionMessage(null)
     setActionError(null)
 
     try {
@@ -189,13 +194,6 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
       if (responseStatus) {
         setRequestStatus(responseStatus)
       }
-      if (typeof response?.message === 'string' && response.message.trim()) {
-        setActionMessage(response.message)
-      } else if (decision === 'approve') {
-        setActionMessage('Created specialist agent.')
-      } else {
-        setActionMessage('Declined spawn request.')
-      }
       if (decision === 'approve') {
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
       }
@@ -206,6 +204,30 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
     }
   }
 
+  useEffect(() => {
+    if (!decisionApiUrl) return
+    let cancelled = false
+
+    const fetchLatestStatus = async () => {
+      try {
+        const response = await jsonRequest<SpawnDecisionResponse>(decisionApiUrl, { method: 'GET' })
+        if (cancelled) return
+        const responseStatus =
+          typeof response?.request_status === 'string' ? response.request_status.toLowerCase() : null
+        if (responseStatus) {
+          setRequestStatus(responseStatus)
+        }
+      } catch {
+        // Ignore passive status refresh errors; user actions already show explicit feedback.
+      }
+    }
+
+    void fetchLatestStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [decisionApiUrl])
+
   return (
     <div className="space-y-4 text-sm text-slate-600">
       {charterRaw ? (
@@ -213,12 +235,12 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
           <p className="whitespace-pre-line text-slate-700">{charterRaw}</p>
         </Section>
       ) : null}
-      {canDecide ? (
+      {showActions ? (
         <div className="spawn-agent-actions">
           <button
             type="button"
             onClick={() => void submitDecision('approve')}
-            disabled={Boolean(busyDecision)}
+            disabled={actionsLocked}
             className="spawn-agent-action-btn spawn-agent-action-btn--primary"
           >
             {busyDecision === 'approve' ? 'Creating...' : 'Create'}
@@ -226,14 +248,20 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
           <button
             type="button"
             onClick={() => void submitDecision('decline')}
-            disabled={Boolean(busyDecision)}
+            disabled={actionsLocked}
             className="spawn-agent-action-btn spawn-agent-action-btn--secondary"
           >
             {busyDecision === 'decline' ? 'Declining...' : 'Decline'}
           </button>
         </div>
       ) : null}
-      {actionMessage ? <p className="spawn-agent-action-note">{actionMessage}</p> : null}
+      {resolvedDecision ? (
+        <div
+          className={`spawn-agent-resolution ${resolvedDecision === 'approve' ? 'spawn-agent-resolution--created' : 'spawn-agent-resolution--declined'}`}
+        >
+          <span className="spawn-agent-resolution-text">{resolvedDecision === 'approve' ? 'Created' : 'Declined'}</span>
+        </div>
+      ) : null}
       {actionError ? <p className="spawn-agent-action-error">{actionError}</p> : null}
     </div>
   )

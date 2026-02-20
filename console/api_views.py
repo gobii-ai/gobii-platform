@@ -2218,7 +2218,22 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
 
 
 class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["post"]
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, agent_id: str, spawn_request_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        try:
+            response_payload = SpawnRequestService.get_request_status(
+                agent=agent,
+                spawn_request_id=str(spawn_request_id),
+            )
+        except SpawnRequestResolutionError as exc:
+            payload = {"error": str(exc)}
+            if exc.request_status:
+                payload["request_status"] = exc.request_status
+            return JsonResponse(payload, status=exc.status_code)
+
+        return JsonResponse(response_payload)
 
     def post(self, request: HttpRequest, agent_id: str, spawn_request_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
