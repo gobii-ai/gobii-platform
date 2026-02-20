@@ -1,10 +1,12 @@
 import logging
+import re
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.utils.crypto import get_random_string
 
 from agent_namer import AgentNameGenerator
 from agents.services import PretrainedWorkerTemplateService, AgentService
@@ -21,6 +23,7 @@ from api.models import (
     CommsChannel,
     IntelligenceTier,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
 )
 from api.services.daily_credit_limits import (
@@ -271,6 +274,106 @@ class PersistentAgentProvisioningService:
                 message_dict[cls.NAME_ERROR_KEY] = message_dict.pop("__all__")
             return message_dict
         return exc.messages
+
+
+def generate_unique_agent_email(agent_name: str, max_attempts: int = 100) -> str:
+    """Generate a unique default email address for an agent."""
+    base_username = (agent_name or "").lower().strip()
+    base_username = re.sub(r"\s+", ".", base_username)
+    base_username = re.sub(r"[^\w.]", "", base_username)
+    if not base_username:
+        base_username = "agent"
+
+    domain = getattr(settings, "DEFAULT_AGENT_EMAIL_DOMAIN", "agents.localhost")
+    email_address = f"{base_username}@{domain}"
+    if not PersistentAgentCommsEndpoint.objects.filter(
+        channel=CommsChannel.EMAIL,
+        address__iexact=email_address,
+    ).exists():
+        return email_address
+
+    for index in range(2, max_attempts):
+        email_address = f"{base_username}{index}@{domain}"
+        if not PersistentAgentCommsEndpoint.objects.filter(
+            channel=CommsChannel.EMAIL,
+            address__iexact=email_address,
+        ).exists():
+            return email_address
+
+    random_suffix = get_random_string(4).lower()
+    email_address = f"{base_username}-{random_suffix}@{domain}"
+    if not PersistentAgentCommsEndpoint.objects.filter(
+        channel=CommsChannel.EMAIL,
+        address__iexact=email_address,
+    ).exists():
+        return email_address
+
+    raise PersistentAgentProvisioningError("Unable to generate a unique email address for the agent.")
+
+
+def ensure_default_agent_email_endpoint(
+    agent: PersistentAgent,
+    *,
+    is_primary: bool = False,
+) -> PersistentAgentCommsEndpoint | None:
+    """
+    Ensure an agent-owned email endpoint exists when default agent email is enabled.
+
+    Returns the existing or created endpoint, or None when default agent email is disabled.
+    """
+    existing_endpoint = (
+        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL)
+        .order_by("-is_primary", "address")
+        .first()
+    )
+    if existing_endpoint:
+        endpoint_updates: list[str] = []
+        if existing_endpoint.owner_agent_id != agent.id:
+            existing_endpoint.owner_agent = agent
+            endpoint_updates.append("owner_agent")
+        if is_primary and not existing_endpoint.is_primary:
+            existing_endpoint.is_primary = True
+            endpoint_updates.append("is_primary")
+        if endpoint_updates:
+            existing_endpoint.save(update_fields=endpoint_updates)
+        if is_primary:
+            agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).exclude(
+                id=existing_endpoint.id
+            ).update(is_primary=False)
+        PersistentAgentEmailEndpoint.objects.get_or_create(
+            endpoint=existing_endpoint,
+            defaults={
+                "display_name": (agent.name or "").strip() or "Agent",
+                "verified": True,
+            },
+        )
+        return existing_endpoint
+
+    if not settings.ENABLE_DEFAULT_AGENT_EMAIL:
+        return None
+
+    display_name = (agent.name or "").strip() or "Agent"
+    for _ in range(3):
+        email_address = generate_unique_agent_email(display_name)
+        try:
+            endpoint = PersistentAgentCommsEndpoint.objects.create(
+                owner_agent=agent,
+                channel=CommsChannel.EMAIL,
+                address=email_address,
+                is_primary=is_primary,
+            )
+        except IntegrityError:
+            # Address races are rare; retry with a fresh generated value.
+            continue
+
+        PersistentAgentEmailEndpoint.objects.create(
+            endpoint=endpoint,
+            display_name=display_name,
+            verified=True,
+        )
+        return endpoint
+
+    raise PersistentAgentProvisioningError("Unable to provision an email endpoint for the agent.")
 
 
 def maybe_sync_agent_email_display_name(agent: PersistentAgent, previous_name: str | None = None) -> bool:

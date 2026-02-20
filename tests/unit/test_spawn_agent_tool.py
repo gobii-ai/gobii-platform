@@ -3,7 +3,7 @@ from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from api.agent.core.prompt_context import get_agent_tools
 from api.agent.tools.spawn_agent import execute_spawn_agent
@@ -165,6 +165,7 @@ class SpawnAgentToolTests(TestCase):
             2,
         )
 
+    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
     def test_spawn_request_approve_creates_peer_link_and_handoff(self):
         spawn_request = AgentSpawnRequest.objects.create(
             agent=self.personal_agent,
@@ -199,3 +200,11 @@ class SpawnAgentToolTests(TestCase):
         self.assertIsNotNone(child_agent.preferred_contact_endpoint)
         self.assertEqual(child_agent.preferred_contact_endpoint.channel, CommsChannel.EMAIL)
         self.assertEqual(child_agent.preferred_contact_endpoint.address, self.user.email)
+        agent_email_endpoint = child_agent.comms_endpoints.filter(
+            owner_agent=child_agent,
+            channel=CommsChannel.EMAIL,
+        ).first()
+        self.assertIsNotNone(agent_email_endpoint)
+        self.assertTrue(agent_email_endpoint.is_primary)
+        self.assertIn("@", agent_email_endpoint.address)
+        self.assertNotEqual(agent_email_endpoint.address, self.user.email.lower())

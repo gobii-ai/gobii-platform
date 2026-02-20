@@ -7869,6 +7869,7 @@ class AgentSpawnRequest(models.Model):
 
         from api.agent.peer_comm import PeerMessagingError, PeerMessagingService
         from api.services.persistent_agents import (
+            ensure_default_agent_email_endpoint,
             PersistentAgentProvisioningError,
             PersistentAgentProvisioningService,
         )
@@ -7884,6 +7885,12 @@ class AgentSpawnRequest(models.Model):
             raise ValidationError(payload) from exc
 
         spawned_agent = provisioning.agent
+        try:
+            ensure_default_agent_email_endpoint(spawned_agent, is_primary=True)
+        except PersistentAgentProvisioningError as exc:
+            payload = exc.args[0] if exc.args else "Unable to configure spawned agent email endpoint."
+            raise ValidationError(payload) from exc
+
         preferred_email_endpoint = None
         owner_email = (spawned_agent.user.email or "").strip().lower()
         if owner_email:

@@ -20,14 +20,16 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversationParticipant,
-    PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
     PersistentAgentSmsEndpoint,
     build_web_agent_address,
     build_web_user_address,
 )
-from api.services.persistent_agents import PersistentAgentProvisioningError, PersistentAgentProvisioningService
-from config import settings
+from api.services.persistent_agents import (
+    PersistentAgentProvisioningError,
+    PersistentAgentProvisioningService,
+    ensure_default_agent_email_endpoint,
+)
 from console.context_helpers import build_console_context
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -52,38 +54,6 @@ class AgentCreationResult:
     contact_sms: str | None
     preferred_contact_method: str
     initial_message: str
-
-
-def generate_unique_agent_email(agent_name: str, max_attempts: int = 100) -> str:
-    import re
-    from django.utils.crypto import get_random_string
-
-    base_username = agent_name.lower().strip()
-    base_username = re.sub(r"\s+", ".", base_username)
-    base_username = re.sub(r"[^\w.]", "", base_username)
-    domain = getattr(settings, "DEFAULT_AGENT_EMAIL_DOMAIN", "agents.localhost")
-
-    email_address = f"{base_username}@{domain}"
-    if not PersistentAgentCommsEndpoint.objects.filter(
-        channel=CommsChannel.EMAIL, address__iexact=email_address
-    ).exists():
-        return email_address
-
-    for i in range(2, max_attempts):
-        email_address = f"{base_username}{i}@{domain}"
-        if not PersistentAgentCommsEndpoint.objects.filter(
-            channel=CommsChannel.EMAIL, address__iexact=email_address
-        ).exists():
-            return email_address
-
-    random_suffix = get_random_string(4)
-    email_address = f"{base_username}-{random_suffix}@{domain}"
-    if not PersistentAgentCommsEndpoint.objects.filter(
-        channel=CommsChannel.EMAIL, address__iexact=email_address
-    ).exists():
-        return email_address
-
-    raise ValueError("Unable to generate a unique email address for the agent.")
 
 
 def create_persistent_agent_from_charter(
@@ -229,19 +199,10 @@ def create_persistent_agent_from_charter(
             )
 
         if email_enabled:
-            if getattr(settings, "ENABLE_DEFAULT_AGENT_EMAIL", False):
-                agent_email = generate_unique_agent_email(agent_name)
-                agent_email_endpoint = PersistentAgentCommsEndpoint.objects.create(
-                    owner_agent=persistent_agent,
-                    channel=CommsChannel.EMAIL,
-                    address=agent_email,
-                    is_primary=preferred_contact_method == "email",
-                )
-                PersistentAgentEmailEndpoint.objects.create(
-                    endpoint=agent_email_endpoint,
-                    display_name=agent_name,
-                    verified=True,
-                )
+            agent_email_endpoint = ensure_default_agent_email_endpoint(
+                persistent_agent,
+                is_primary=preferred_contact_method == "email",
+            )
 
             user_email_comms_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
                 channel=CommsChannel.EMAIL,
