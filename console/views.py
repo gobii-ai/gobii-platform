@@ -157,6 +157,7 @@ from util.subscription_helper import (
     get_user_max_contacts_per_agent,
     get_subscription_base_price,
     ensure_single_individual_subscription,
+    sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
 )
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
@@ -468,8 +469,6 @@ from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferI
 from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
-from djstripe.models import Subscription
-
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
@@ -2050,17 +2049,6 @@ def _build_cancellation_feedback_properties(request: HttpRequest) -> dict[str, A
     if feedback:
         properties["cancel_reason_text"] = feedback
     return properties
-
-
-def _sync_subscription_after_direct_update(subscription_payload: Any) -> None:
-    """Best-effort sync so billing UI reads latest cancel/resume state immediately."""
-    try:
-        Subscription.sync_from_stripe_data(subscription_payload)
-    except (TypeError, ValueError, KeyError, AttributeError):
-        logger.warning(
-            "Failed to sync subscription payload after direct Stripe update",
-            exc_info=True,
-        )
 
 
 @login_required

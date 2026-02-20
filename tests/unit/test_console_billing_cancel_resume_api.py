@@ -106,6 +106,40 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
     @patch("console.views.stripe_status")
     @patch("console.views._assign_stripe_api_key", return_value=None)
     @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
+    @patch("console.views.Analytics.track_event")
+    @patch("util.subscription_helper.Subscription.sync_from_stripe_data", side_effect=RuntimeError("sync failure"))
+    @patch("console.views.stripe.Subscription.modify")
+    def test_cancel_subscription_sync_failures_are_best_effort(
+        self,
+        mock_modify,
+        mock_subscription_sync,
+        mock_track_event,
+        mock_get_active_subscription,
+        mock_assign_key,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+
+        resp = self.client.post(
+            reverse("cancel_subscription"),
+            data=json.dumps(
+                {
+                    "reason": "too_expensive",
+                    "feedback": "Sync errors should not block this response.",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("success"))
+        mock_modify.assert_called_once()
+        mock_subscription_sync.assert_called_once_with(mock_modify.return_value)
+        mock_track_event.assert_called_once()
+
+    @patch("console.views.stripe_status")
+    @patch("console.views._assign_stripe_api_key", return_value=None)
+    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("console.views._sync_subscription_after_direct_update")
     @patch("console.views.stripe.Subscription.modify")
     def test_resume_subscription_clears_cancel_at_period_end(

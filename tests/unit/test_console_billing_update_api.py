@@ -238,6 +238,53 @@ class ConsoleBillingUpdateApiTests(TestCase):
         mock_retrieve_subscription.assert_called_once()
         mock_sync_subscription.assert_called_once_with(mock_retrieve_subscription.return_value)
 
+    @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
+    @patch("console.billing_update_service.stripe.Subscription.retrieve")
+    @patch(
+        "console.billing_update_service.ensure_single_individual_subscription",
+        return_value=({"id": "sub_plan_change"}, "updated"),
+    )
+    @patch(
+        "console.billing_update_service.get_or_create_stripe_customer",
+        return_value=SimpleNamespace(id="cus_plan_change"),
+    )
+    @patch("util.subscription_helper.Subscription.sync_from_stripe_data", side_effect=RuntimeError("sync failure"))
+    @patch("console.billing_update_service.stripe_status")
+    def test_plan_change_sync_failures_are_best_effort(
+        self,
+        mock_stripe_status,
+        _mock_subscription_sync,
+        _mock_get_customer,
+        _mock_ensure_single_subscription,
+        mock_retrieve_subscription,
+        _mock_assign_key,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_retrieve_subscription.return_value = {
+            "id": "sub_plan_change",
+            "latest_invoice": None,
+        }
+
+        session = self.client.session
+        session["context_type"] = "personal"
+        session["context_id"] = str(self.user.id)
+        session["context_name"] = self.user.get_full_name() or self.user.email
+        session.save()
+
+        resp = self.client.post(
+            self.url,
+            data=json.dumps(
+                {
+                    "ownerType": "user",
+                    "planTarget": "startup",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("ok"))
+
     @patch("console.billing_update_service._update_stripe_dedicated_ip_quantity")
     @patch("console.billing_update_service.stripe_status")
     @patch("console.billing_update_service._get_owner_plan_id", return_value="org_team")
