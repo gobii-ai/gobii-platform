@@ -1,8 +1,8 @@
 from django.urls import path, include
 from django.http import HttpResponse
+from django.conf import settings
+from django.shortcuts import redirect
 
-from config import settings
-from config.settings import GOBII_PROPRIETARY_MODE
 from proprietary.views import BlogSitemap
 from .library_views import LibraryAgentLikeAPIView, LibraryAgentsAPIView, LibraryView
 from .views import (
@@ -37,12 +37,28 @@ from django.contrib.sitemaps.views import sitemap
 from django.views.generic.base import RedirectView, TemplateView
 
 app_name = "pages"
+EXTERNAL_DOCS_URL = "https://docs.gobii.ai/"
+
+_docs_index_view = DocsIndexRedirectView.as_view()
+_markdown_page_view = MarkdownPageView.as_view()
+
+
+def docs_index_view(request, *args, **kwargs):
+    if settings.GOBII_PROPRIETARY_MODE:
+        return redirect(EXTERNAL_DOCS_URL)
+    return _docs_index_view(request, *args, **kwargs)
+
+
+def markdown_page_view(request, *args, **kwargs):
+    if settings.GOBII_PROPRIETARY_MODE:
+        return redirect(EXTERNAL_DOCS_URL)
+    return _markdown_page_view(request, *args, **kwargs)
 
 sitemaps = {
     'static': StaticViewSitemap,
 }
 
-if GOBII_PROPRIETARY_MODE:
+if settings.GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
 sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
@@ -66,8 +82,8 @@ urlpatterns = [
     path("healthz/", health_check, name="health_check_k8s"),
 
     # Documentation URLs
-    path("docs/", DocsIndexRedirectView.as_view(), name="docs_index"),
-    path("docs/<path:slug>/", MarkdownPageView.as_view(), name="markdown_page"),
+    path("docs/", docs_index_view, name="docs_index"),
+    path("docs/<path:slug>/", markdown_page_view, name="markdown_page"),
 
     # Short landing page redirects
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),
@@ -93,7 +109,7 @@ urlpatterns = [
 ]
 
 # Security.txt for vulnerability disclosure (RFC 9116) - proprietary mode only
-if GOBII_PROPRIETARY_MODE:
+if settings.GOBII_PROPRIETARY_MODE:
     urlpatterns.append(
         path('.well-known/security.txt', lambda r: HttpResponse(
             f"Contact: mailto:{settings.SECURITY_TXT_EMAIL}\nExpires: {settings.SECURITY_TXT_EXPIRY}\n",
