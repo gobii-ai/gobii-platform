@@ -1,5 +1,7 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
+import { HttpError, jsonRequest } from '../../../../api/http'
 import type { ToolDetailProps } from '../../tooling/types'
 import { isRecord, parseResultObject } from '../../../../util/objectUtils'
 import { KeyValueList, Section } from '../shared'
@@ -128,6 +130,144 @@ export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
           </ol>
         </Section>
       ) : null}
+    </div>
+  )
+}
+
+type SpawnDecision = 'approve' | 'decline'
+type SpawnResolution = SpawnDecision | 'expired'
+
+type SpawnDecisionResponse = {
+  status?: string
+  request_status?: string
+  spawned_agent_name?: string
+}
+
+function parseErrorMessage(error: unknown): string {
+  if (error instanceof HttpError) {
+    return 'Something went wrong. Please try again.'
+  }
+  return 'Something went wrong. Please try again.'
+}
+
+export function SpawnAgentDetail({ entry }: ToolDetailProps) {
+  const queryClient = useQueryClient()
+  const params = (entry.parameters as Record<string, unknown>) || {}
+  const result = parseResultObject(entry.result)
+  const charterRaw = typeof params['charter'] === 'string' ? (params['charter'] as string) : null
+
+  const decisionRaw = typeof result?.['decision_api_url'] === 'string' ? (result['decision_api_url'] as string) : null
+  const decisionApiUrl =
+    decisionRaw && (/^https?:\/\//i.test(decisionRaw) || decisionRaw.startsWith('/')) ? decisionRaw : null
+  const initialStatus =
+    typeof result?.['request_status'] === 'string'
+      ? (result['request_status'] as string)
+      : typeof result?.['status'] === 'string'
+        ? (result['status'] as string)
+        : 'pending'
+  const [requestStatus, setRequestStatus] = useState(initialStatus.toLowerCase())
+  const [busyDecision, setBusyDecision] = useState<SpawnDecision | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const normalizedStatus = requestStatus.toLowerCase()
+  const resolvedDecision: SpawnResolution | null =
+    normalizedStatus === 'approved'
+      ? 'approve'
+      : normalizedStatus === 'rejected' || normalizedStatus === 'declined'
+        ? 'decline'
+        : normalizedStatus === 'expired'
+          ? 'expired'
+        : null
+  const showActions = Boolean(decisionApiUrl) && resolvedDecision === null
+  const actionsLocked = Boolean(busyDecision)
+
+  const submitDecision = async (decision: SpawnDecision) => {
+    if (!decisionApiUrl || actionsLocked) return
+    setBusyDecision(decision)
+    setActionError(null)
+
+    try {
+      const response = await jsonRequest<SpawnDecisionResponse>(decisionApiUrl, {
+        method: 'POST',
+        includeCsrf: true,
+        json: { decision },
+      })
+      const responseStatus =
+        typeof response?.request_status === 'string' ? response.request_status.toLowerCase() : null
+      if (responseStatus) {
+        setRequestStatus(responseStatus)
+      }
+      if (decision === 'approve') {
+        void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      }
+    } catch (error) {
+      setActionError(parseErrorMessage(error))
+    } finally {
+      setBusyDecision(null)
+    }
+  }
+
+  useEffect(() => {
+    if (!decisionApiUrl) return
+    let cancelled = false
+
+    const fetchLatestStatus = async () => {
+      try {
+        const response = await jsonRequest<SpawnDecisionResponse>(decisionApiUrl, { method: 'GET' })
+        if (cancelled) return
+        const responseStatus =
+          typeof response?.request_status === 'string' ? response.request_status.toLowerCase() : null
+        if (responseStatus) {
+          setRequestStatus(responseStatus)
+        }
+      } catch {
+        // Ignore passive status refresh errors; user actions already show explicit feedback.
+      }
+    }
+
+    void fetchLatestStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [decisionApiUrl])
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      {charterRaw ? (
+        <Section title="Charter">
+          <p className="whitespace-pre-line text-slate-700">{charterRaw}</p>
+        </Section>
+      ) : null}
+      {showActions ? (
+        <div className="spawn-agent-actions">
+          <button
+            type="button"
+            onClick={() => void submitDecision('approve')}
+            disabled={actionsLocked}
+            className="spawn-agent-action-btn spawn-agent-action-btn--primary"
+          >
+            {busyDecision === 'approve' ? 'Creating...' : 'Create'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void submitDecision('decline')}
+            disabled={actionsLocked}
+            className="spawn-agent-action-btn spawn-agent-action-btn--secondary"
+          >
+            {busyDecision === 'decline' ? 'Declining...' : 'Decline'}
+          </button>
+        </div>
+      ) : null}
+      {resolvedDecision ? (
+        <div
+          className={`spawn-agent-resolution ${resolvedDecision === 'approve' ? 'spawn-agent-resolution--created' : 'spawn-agent-resolution--declined'}`}
+        >
+          <span className="spawn-agent-resolution-text">
+            {resolvedDecision === 'approve' ? 'Created' : resolvedDecision === 'expired' ? 'Expired' : 'Declined'}
+          </span>
+        </div>
+      ) : null}
+      {actionError ? <p className="spawn-agent-action-error">{actionError}</p> : null}
     </div>
   )
 }

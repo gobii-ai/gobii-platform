@@ -156,6 +156,7 @@ from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
+from api.services.spawn_requests import SpawnRequestResolutionError, SpawnRequestService
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.agent_settings_resume import (
@@ -206,6 +207,24 @@ def _can_manage_contact_packs(request: HttpRequest, agent: PersistentAgent, plan
         if not membership or membership.role not in BILLING_MANAGE_ROLES:
             return False
     return True
+
+
+def _can_user_resolve_spawn_requests(user, agent: PersistentAgent) -> bool:
+    if user.is_staff:
+        return True
+    if agent.organization_id:
+        membership = OrganizationMembership.objects.filter(
+            user=user,
+            org_id=agent.organization_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).first()
+        if not membership:
+            return False
+        return membership.role in (
+            OrganizationMembership.OrgRole.OWNER,
+            OrganizationMembership.OrgRole.ADMIN,
+        )
+    return agent.user_id == user.id
 
 
 class ApiLoginRequiredMixin(LoginRequiredMixin):
@@ -2196,6 +2215,55 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_avatar_url": agent.get_avatar_url(),
         }
         return JsonResponse(payload)
+
+
+class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, agent_id: str, spawn_request_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        try:
+            response_payload = SpawnRequestService.get_request_status(
+                agent=agent,
+                spawn_request_id=str(spawn_request_id),
+            )
+        except SpawnRequestResolutionError as exc:
+            payload = {"error": str(exc)}
+            if exc.request_status:
+                payload["request_status"] = exc.request_status
+            return JsonResponse(payload, status=exc.status_code)
+
+        return JsonResponse(response_payload)
+
+    def post(self, request: HttpRequest, agent_id: str, spawn_request_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        if not _can_user_resolve_spawn_requests(request.user, agent):
+            return JsonResponse({"error": "Not permitted to approve or decline spawn requests."}, status=403)
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        decision = str(body.get("decision") or "").strip().lower()
+        try:
+            response_payload = SpawnRequestService.resolve_request(
+                agent=agent,
+                spawn_request_id=str(spawn_request_id),
+                decision=decision,
+                actor=request.user,
+            )
+        except SpawnRequestResolutionError as exc:
+            payload = {"error": str(exc)}
+            if exc.request_status:
+                payload["request_status"] = exc.request_status
+            return JsonResponse(payload, status=exc.status_code)
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else str(exc)
+            return JsonResponse({"error": message_text}, status=400)
+
+        transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
+        return JsonResponse(response_payload)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

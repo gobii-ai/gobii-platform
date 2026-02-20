@@ -168,6 +168,10 @@ class AnalyticsEvent(StrEnum):
     AGENT_CONTACTS_REQUESTED = 'Agent Contacts Requested'
     AGENT_CONTACTS_APPROVED = 'Agent Contacts Approved'
     AGENT_CONTACTS_REJECTED = 'Agent Contacts Rejected'
+    AGENT_SPAWN_REQUESTED = 'Agent Spawn Requested'
+    AGENT_SPAWN_APPROVED = 'Agent Spawn Approved'
+    AGENT_SPAWN_REJECTED = 'Agent Spawn Rejected'
+    AGENT_SPAWN_AGENT_CREATED = 'Agent Spawn Agent Created'
 
     # Collaborator Events
     AGENT_COLLABORATOR_INVITE_SENT = 'Agent Collaborator Invite Sent'

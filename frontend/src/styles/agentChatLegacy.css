@@ -3555,6 +3555,104 @@
   padding-top: 0.1rem;
 }
 
+.spawn-agent-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.spawn-agent-action-btn {
+  width: 100%;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.65rem;
+  padding: 0.43rem 0.75rem;
+  font-size: 0.71rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+  transition: all 0.16s ease;
+  cursor: pointer;
+}
+
+.spawn-agent-action-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+.spawn-agent-action-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.spawn-agent-action-btn--primary {
+  color: #ffffff;
+  border-color: rgba(79, 70, 229, 0.42);
+  background: linear-gradient(180deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.2);
+}
+
+.spawn-agent-action-btn--primary:hover:not(:disabled) {
+  border-color: rgba(67, 56, 202, 0.5);
+  background: linear-gradient(180deg, #5b5fe9 0%, #4338ca 100%);
+}
+
+.spawn-agent-action-btn--secondary {
+  color: #475569;
+  border-color: rgba(148, 163, 184, 0.35);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+}
+
+.spawn-agent-action-btn--secondary:hover:not(:disabled) {
+  color: #334155;
+  border-color: rgba(99, 115, 141, 0.4);
+  background: rgba(248, 250, 252, 0.96);
+}
+
+.spawn-agent-resolution {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border-radius: 0.65rem;
+  border: 1px dashed rgba(99, 115, 141, 0.32);
+  background: linear-gradient(180deg, rgba(241, 245, 249, 0.7) 0%, rgba(248, 250, 252, 0.75) 100%);
+}
+
+.spawn-agent-resolution--created {
+  border-color: rgba(16, 185, 129, 0.32);
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.9) 0%, rgba(240, 253, 250, 0.92) 100%);
+}
+
+.spawn-agent-resolution--declined {
+  border-color: rgba(148, 163, 184, 0.42);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.95) 0%, rgba(241, 245, 249, 0.95) 100%);
+}
+
+.spawn-agent-resolution-text {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.spawn-agent-action-error {
+  margin: 0;
+  font-size: 0.72rem;
+  color: #be123c;
+}
+
+@media (max-width: 560px) {
+  .spawn-agent-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
 .tool-cluster--collapsible:not(.tool-cluster--collapsed) .tool-cluster-live-preview {
   border-color: transparent;
   background: transparent;
