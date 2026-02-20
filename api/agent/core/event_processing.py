@@ -1317,6 +1317,54 @@ def _runtime_exceeded(started_at: float, max_runtime_seconds: int) -> bool:
     return (time.monotonic() - started_at) >= max_runtime_seconds
 
 
+def _should_abort_for_deleted_agent(
+    agent: PersistentAgent,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    heartbeat: Optional[_ProcessingHeartbeat],
+    span: Any,
+    check_context: str,
+) -> bool:
+    """
+    Return True when the agent has been deleted during processing.
+
+    We poll fresh DB state so an in-flight event-processing cycle can stop
+    promptly after a user deletes the agent.
+    """
+    try:
+        close_old_connections()
+        deleted_state = PersistentAgent.objects.filter(id=agent.id).values_list("is_deleted", flat=True).first()
+    except DatabaseError:
+        logger.debug(
+            "Deletion guard lookup failed for agent %s; continuing processing.",
+            agent.id,
+            exc_info=True,
+        )
+        return False
+
+    if deleted_state is False:
+        return False
+
+    reason = "missing" if deleted_state is None else "soft_deleted"
+    logger.info(
+        "Agent %s was deleted during processing (%s, reason=%s); aborting loop.",
+        agent.id,
+        check_context,
+        reason,
+    )
+    try:
+        span.add_event(
+            "Agent deleted during processing",
+            {"context": check_context, "reason": reason},
+        )
+    except Exception:
+        pass
+    if heartbeat:
+        heartbeat.touch("agent_deleted")
+    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+    return True
+
+
 def _estimate_message_tokens(messages: List[dict]) -> int:
     """Estimate token count for a list of messages using simple heuristics."""
     total_text = ""
@@ -2962,6 +3010,14 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
 
     for i in range(max_remaining):
+        if _should_abort_for_deleted_agent(
+            agent,
+            budget_ctx=budget_ctx,
+            heartbeat=heartbeat,
+            span=span,
+            check_context="iteration_start",
+        ):
+            return cumulative_token_usage
         if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
             logger.warning(
                 "Agent %s loop aborted after %d seconds (max=%d).",
@@ -3465,6 +3521,14 @@ def _run_agent_loop(
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
+                    if _should_abort_for_deleted_agent(
+                        agent,
+                        budget_ctx=budget_ctx,
+                        heartbeat=heartbeat,
+                        span=tool_span,
+                        check_context="tool_batch",
+                    ):
+                        return cumulative_token_usage
                     if lock_extender:
                         lock_extender.maybe_extend()
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
