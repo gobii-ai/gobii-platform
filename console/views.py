@@ -2008,6 +2008,49 @@ def get_user_plan_api(request):
         })
 
 
+_CANCEL_FEEDBACK_MAX_LENGTH = 500
+_CANCEL_FEEDBACK_REASON_CODES = frozenset(
+    {
+        "too_expensive",
+        "missing_features",
+        "reliability_issues",
+        "switching_tools",
+        "no_longer_needed",
+        "other",
+    }
+)
+
+
+def _build_cancellation_feedback_properties(request: HttpRequest) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if request.body:
+        try:
+            parsed = json.loads(request.body)
+        except json.JSONDecodeError:
+            parsed = {}
+        if isinstance(parsed, dict):
+            payload = parsed
+
+    reason = ""
+    reason_candidate = payload.get("reason")
+    if isinstance(reason_candidate, str):
+        normalized_reason = reason_candidate.strip().lower()
+        if normalized_reason in _CANCEL_FEEDBACK_REASON_CODES:
+            reason = normalized_reason
+
+    feedback = ""
+    feedback_candidate = payload.get("feedback")
+    if isinstance(feedback_candidate, str):
+        feedback = feedback_candidate.strip()[:_CANCEL_FEEDBACK_MAX_LENGTH]
+
+    properties: dict[str, Any] = {"cancel_feedback_version": 1}
+    if reason:
+        properties["cancel_reason_code"] = reason
+    if feedback:
+        properties["cancel_reason_text"] = feedback
+    return properties
+
+
 @login_required
 @require_POST
 @tracer.start_as_current_span("BILLING Cancel Subscription")
@@ -2019,6 +2062,8 @@ def cancel_subscription(request):
             'error': 'Stripe billing is not available in this deployment.'
         }, status=404)
 
+    cancellation_properties = _build_cancellation_feedback_properties(request)
+
     sub = get_active_subscription(request.user)
     if sub:
         try:
@@ -2029,7 +2074,7 @@ def cancel_subscription(request):
                 user_id=request.user.id,
                 event=AnalyticsEvent.BILLING_CANCELLATION,
                 source=AnalyticsSource.WEB,
-                properties={},
+                properties=cancellation_properties,
             )
 
             return JsonResponse({'success': True})

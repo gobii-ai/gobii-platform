@@ -24,6 +24,26 @@ type DedicatedRemovePrompt = {
   proxyLabel: string
 }
 
+const CANCEL_FEEDBACK_MAX_LENGTH = 500
+
+type CancelReasonCode =
+  | ''
+  | 'too_expensive'
+  | 'missing_features'
+  | 'reliability_issues'
+  | 'switching_tools'
+  | 'no_longer_needed'
+  | 'other'
+
+const CANCEL_REASON_OPTIONS: Array<{ value: Exclude<CancelReasonCode, ''>; label: string }> = [
+  { value: 'too_expensive', label: 'Too expensive' },
+  { value: 'missing_features', label: 'Missing features I need' },
+  { value: 'reliability_issues', label: 'Reliability or performance issues' },
+  { value: 'switching_tools', label: 'Switching to another tool' },
+  { value: 'no_longer_needed', label: 'No longer need it' },
+  { value: 'other', label: 'Other' },
+]
+
 function computeAddonsDisabledReason(initialData: BillingInitialData): string | null {
   if (!initialData.canManageBilling) return 'You do not have permission to manage billing.'
   if (initialData.addonsDisabled) return 'Add-ons are unavailable for this subscription.'
@@ -92,6 +112,8 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const [planConfirmTarget, setPlanConfirmTarget] = useState<PlanTier | null>(null)
   const [planConfirmBusy, setPlanConfirmBusy] = useState(false)
   const [planConfirmError, setPlanConfirmError] = useState<string | null>(null)
+  const [cancelReason, setCancelReason] = useState<CancelReasonCode>('')
+  const [cancelFeedback, setCancelFeedback] = useState('')
 
   const addonsDisabledReason = useMemo(() => computeAddonsDisabledReason(initialData), [initialData])
   const addonsInteractable = useMemo(() => computeAddonsInteractable(initialData), [initialData])
@@ -235,6 +257,29 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const resumeUrl = initialData.contextType === 'personal' ? initialData.endpoints.resumeSubscriptionUrl : undefined
   const cancelAction = useConfirmPostAction({ url: cancelUrl, defaultErrorMessage: 'Unable to cancel subscription.' })
   const resumeAction = useConfirmPostAction({ url: resumeUrl, defaultErrorMessage: 'Unable to resume subscription.' })
+  const {
+    openDialog: openCancelActionDialog,
+    closeDialog: closeCancelActionDialog,
+    busy: cancelActionBusy,
+  } = cancelAction
+
+  const resetCancelFeedback = useCallback(() => {
+    setCancelReason('')
+    setCancelFeedback('')
+  }, [])
+
+  const openCancelDialog = useCallback(() => {
+    resetCancelFeedback()
+    openCancelActionDialog()
+  }, [openCancelActionDialog, resetCancelFeedback])
+
+  const closeCancelDialog = useCallback(() => {
+    if (cancelActionBusy) return
+    resetCancelFeedback()
+    closeCancelActionDialog()
+  }, [cancelActionBusy, closeCancelActionDialog, resetCancelFeedback])
+
+  const cancelConfirmDisabled = cancelReason === '' || (cancelReason === 'other' && cancelFeedback.trim().length === 0)
 
   const dismissPlanConfirm = useCallback(() => {
     setPlanConfirmOpen(false)
@@ -265,7 +310,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         <BillingHeader
           initialData={initialData}
           onChangePlan={!isOrg && isProprietaryMode ? () => openUpgradeModal('unknown') : undefined}
-          onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? cancelAction.openDialog : undefined}
+          onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? openCancelDialog : undefined}
           onResume={!isOrg
             && initialData.contextType === 'personal'
             && initialData.paidSubscriber
@@ -342,12 +387,58 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         }
         confirmLabel="Cancel subscription"
         cancelLabel="Keep subscription"
+        confirmDisabled={cancelConfirmDisabled}
         icon={<ShieldAlert className="h-5 w-5" />}
         busy={cancelAction.busy}
         danger
-        onConfirm={cancelAction.confirm}
-        onClose={cancelAction.closeDialog}
-      />
+        onConfirm={() => cancelAction.confirm({ reason: cancelReason, feedback: cancelFeedback })}
+        onClose={closeCancelDialog}
+      >
+        <div className="space-y-4 pb-2">
+          <fieldset>
+            <legend className="text-sm font-semibold text-slate-900">
+              Why are you canceling? <span className="text-rose-700">*</span>
+            </legend>
+            <div className="mt-2 space-y-2">
+              {CANCEL_REASON_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition hover:border-slate-300"
+                >
+                  <input
+                    type="radio"
+                    name="cancel-reason"
+                    value={option.value}
+                    checked={cancelReason === option.value}
+                    disabled={cancelAction.busy}
+                    onChange={() => setCancelReason(option.value)}
+                    className="mt-0.5 h-4 w-4"
+                  />
+                  <span className="text-sm font-medium text-slate-800">{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div>
+            <label htmlFor="cancel-feedback" className="text-sm font-semibold text-slate-900">
+              Anything else? (optional)
+            </label>
+            <textarea
+              id="cancel-feedback"
+              value={cancelFeedback}
+              disabled={cancelAction.busy}
+              onChange={(event) => setCancelFeedback(event.target.value.slice(0, CANCEL_FEEDBACK_MAX_LENGTH))}
+              rows={4}
+              className="mt-2 block w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              placeholder="Share any details that would help us improve."
+            />
+            <div className="mt-1 text-right text-xs font-medium text-slate-500">
+              {cancelFeedback.length}/{CANCEL_FEEDBACK_MAX_LENGTH}
+            </div>
+          </div>
+        </div>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={resumeAction.open}
@@ -362,7 +453,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         cancelLabel="Keep cancellation"
         icon={<ShieldAlert className="h-5 w-5" />}
         busy={resumeAction.busy}
-        onConfirm={resumeAction.confirm}
+        onConfirm={() => resumeAction.confirm()}
         onClose={resumeAction.closeDialog}
       />
 

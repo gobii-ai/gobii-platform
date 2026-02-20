@@ -8,6 +8,15 @@ type ConfirmPostActionOptions = {
   defaultErrorMessage: string
 }
 
+function isEventLike(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.preventDefault === 'function'
+    && typeof candidate.stopPropagation === 'function'
+  )
+}
+
 export function useConfirmPostAction({ url, defaultErrorMessage }: ConfirmPostActionOptions) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -23,15 +32,17 @@ export function useConfirmPostAction({ url, defaultErrorMessage }: ConfirmPostAc
     setOpen(false)
   }, [busy])
 
-  const confirm = useCallback(async () => {
+  const confirm = useCallback(async (payloadOrEvent?: unknown) => {
     if (busy) return
     if (!url) return
     setBusy(true)
     setError(null)
     try {
+      const payload = isEventLike(payloadOrEvent) ? undefined : payloadOrEvent
       const result = await jsonRequest<{ success: boolean; error?: string }>(url, {
         method: 'POST',
         includeCsrf: true,
+        ...(payload === undefined ? {} : { json: payload }),
       })
       if (!result?.success) {
         setError(result?.error ?? defaultErrorMessage)
@@ -54,4 +65,3 @@ export function useConfirmPostAction({ url, defaultErrorMessage }: ConfirmPostAc
     confirm,
   }
 }
-
