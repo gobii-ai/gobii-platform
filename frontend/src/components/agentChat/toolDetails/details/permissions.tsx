@@ -135,6 +135,7 @@ export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {
 }
 
 type SpawnDecision = 'approve' | 'decline'
+type SpawnResolution = SpawnDecision | 'expired'
 
 type SpawnDecisionResponse = {
   status?: string
@@ -169,11 +170,13 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
   const [actionError, setActionError] = useState<string | null>(null)
 
   const normalizedStatus = requestStatus.toLowerCase()
-  const resolvedDecision: SpawnDecision | null =
+  const resolvedDecision: SpawnResolution | null =
     normalizedStatus === 'approved'
       ? 'approve'
       : normalizedStatus === 'rejected' || normalizedStatus === 'declined'
         ? 'decline'
+        : normalizedStatus === 'expired'
+          ? 'expired'
         : null
   const showActions = Boolean(decisionApiUrl) && resolvedDecision === null
   const actionsLocked = Boolean(busyDecision)
@@ -259,7 +262,9 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
         <div
           className={`spawn-agent-resolution ${resolvedDecision === 'approve' ? 'spawn-agent-resolution--created' : 'spawn-agent-resolution--declined'}`}
         >
-          <span className="spawn-agent-resolution-text">{resolvedDecision === 'approve' ? 'Created' : 'Declined'}</span>
+          <span className="spawn-agent-resolution-text">
+            {resolvedDecision === 'approve' ? 'Created' : resolvedDecision === 'expired' ? 'Expired' : 'Declined'}
+          </span>
         </div>
       ) : null}
       {actionError ? <p className="spawn-agent-action-error">{actionError}</p> : null}

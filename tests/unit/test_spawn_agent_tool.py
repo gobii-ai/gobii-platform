@@ -217,7 +217,12 @@ class SpawnAgentToolTests(TestCase):
             "api.services.persistent_agents.PersistentAgentProvisioningService.provision",
             return_value=SimpleNamespace(agent=child_agent),
         ), patch("api.agent.peer_comm.PeerMessagingService.send_message") as send_message:
-            spawned_agent, link = spawn_request.approve(self.user)
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                spawned_agent, link = spawn_request.approve(self.user)
+                send_message.assert_not_called()
+
+            for callback in callbacks:
+                callback()
 
         spawn_request.refresh_from_db()
         self.assertEqual(spawn_request.status, AgentSpawnRequest.RequestStatus.APPROVED)

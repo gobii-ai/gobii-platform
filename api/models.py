@@ -7916,11 +7916,6 @@ class AgentSpawnRequest(models.Model):
         )
         link.save()
 
-        try:
-            PeerMessagingService(self.agent, spawned_agent).send_message(handoff_message)
-        except PeerMessagingError as exc:
-            raise ValidationError(str(exc)) from exc
-
         self.status = self.RequestStatus.APPROVED
         self.responded_at = timezone.now()
         self.responded_by = responded_by
@@ -7935,6 +7930,20 @@ class AgentSpawnRequest(models.Model):
                 "peer_link",
             ]
         )
+
+        def _send_spawn_handoff():
+            try:
+                PeerMessagingService(self.agent, spawned_agent).send_message(handoff_message)
+            except PeerMessagingError:
+                logger.warning(
+                    "Spawn handoff delivery failed for spawn request %s (parent=%s child=%s)",
+                    self.id,
+                    self.agent_id,
+                    spawned_agent.id,
+                    exc_info=True,
+                )
+
+        transaction.on_commit(_send_spawn_handoff)
         return spawned_agent, link
 
     def reject(self, responded_by):
