@@ -1,9 +1,11 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
+from django.utils import timezone
 
 from api.agent.core.prompt_context import get_agent_tools
 from api.agent.tools.spawn_agent import execute_spawn_agent
@@ -61,7 +63,7 @@ class SpawnAgentToolTests(TestCase):
         )
 
     def test_get_agent_tools_includes_spawn_agent_when_capacity_exists(self):
-        with patch("api.agent.core.prompt_context.AgentService.has_agents_available", return_value=True):
+        with patch("api.agent.core.prompt_context.AgentService.get_agents_available", return_value=2):
             tools = get_agent_tools(self.personal_agent)
 
         tool_names = [entry.get("function", {}).get("name") for entry in tools if isinstance(entry, dict)]
@@ -74,7 +76,7 @@ class SpawnAgentToolTests(TestCase):
         self.assertNotIn("name", spawn_properties)
 
     def test_get_agent_tools_hides_spawn_agent_without_capacity(self):
-        with patch("api.agent.core.prompt_context.AgentService.has_agents_available", return_value=False):
+        with patch("api.agent.core.prompt_context.AgentService.get_agents_available", return_value=0):
             tools = get_agent_tools(self.personal_agent)
 
         tool_names = [
@@ -160,6 +162,36 @@ class SpawnAgentToolTests(TestCase):
         self.assertEqual(first.get("created_count"), 1)
         self.assertEqual(second.get("created_count"), 1)
         self.assertNotEqual(second.get("spawn_request_id"), first.get("spawn_request_id"))
+        self.assertEqual(
+            AgentSpawnRequest.objects.filter(agent=self.personal_agent).count(),
+            2,
+        )
+
+    def test_execute_spawn_agent_after_pending_request_expires_creates_new_request(self):
+        params = {
+            "charter": "Own outbound vendor coordination and contract follow-ups.",
+            "handoff_message": "Pick up vendor renewals this week and report blockers.",
+            "reason": "Vendor operations are outside my charter.",
+            "will_continue_work": True,
+        }
+        expired_request = AgentSpawnRequest.objects.create(
+            agent=self.personal_agent,
+            requested_charter=params["charter"],
+            handoff_message=params["handoff_message"],
+            request_reason=params["reason"],
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        with patch("api.agent.tools.spawn_agent.AgentService.has_agents_available", return_value=True):
+            result = execute_spawn_agent(self.personal_agent, params)
+
+        expired_request.refresh_from_db()
+        self.assertEqual(expired_request.status, AgentSpawnRequest.RequestStatus.EXPIRED)
+        self.assertIsNotNone(expired_request.responded_at)
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("created_count"), 1)
+        self.assertEqual(result.get("already_pending_count"), 0)
+        self.assertNotEqual(result.get("spawn_request_id"), str(expired_request.id))
         self.assertEqual(
             AgentSpawnRequest.objects.filter(agent=self.personal_agent).count(),
             2,

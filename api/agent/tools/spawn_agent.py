@@ -64,11 +64,17 @@ def _build_urls(agent: PersistentAgent, spawn_request: AgentSpawnRequest) -> tup
     return approval_url, decision_path
 
 
-def get_spawn_agent_tool(agent: PersistentAgent | None = None) -> Dict[str, Any]:
+def get_spawn_agent_tool(
+    agent: PersistentAgent | None = None,
+    *,
+    available_capacity: int | None = None,
+) -> Dict[str, Any]:
     availability_note = ""
     if agent:
-        owner = _owner_for_agent(agent)
-        available = AgentService.get_agents_available(owner)
+        available = available_capacity
+        if available is None:
+            owner = _owner_for_agent(agent)
+            available = AgentService.get_agents_available(owner)
         availability_note = f" Current owner capacity: {max(int(available), 0)} additional agent(s)."
 
     return {
@@ -142,15 +148,12 @@ def execute_spawn_agent(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
             },
             organization=agent.organization,
         )
-        try:
-            Analytics.track_event(
-                user_id=agent.user_id,
-                event=AnalyticsEvent.AGENT_SPAWN_REQUESTED,
-                source=AnalyticsSource.AGENT,
-                properties=props,
-            )
-        except Exception:
-            logger.debug("Failed to track spawn request created analytics for agent %s", agent.id, exc_info=True)
+        Analytics.track_event(
+            user_id=agent.user_id,
+            event=AnalyticsEvent.AGENT_SPAWN_REQUESTED,
+            source=AnalyticsSource.AGENT,
+            properties=props,
+        )
 
     approval_url, decision_api_url = _build_urls(agent, spawn_request)
     request_label = "specialist agent"

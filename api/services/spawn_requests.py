@@ -21,6 +21,32 @@ class SpawnRequestResolutionError(Exception):
 
 class SpawnRequestService:
     @staticmethod
+    def _get_active_pending_request(
+        *,
+        agent: PersistentAgent,
+        fingerprint: str,
+    ) -> AgentSpawnRequest | None:
+        existing_request = (
+            AgentSpawnRequest.objects.filter(
+                agent=agent,
+                status=AgentSpawnRequest.RequestStatus.PENDING,
+                request_fingerprint=fingerprint,
+            )
+            .order_by("-requested_at")
+            .first()
+        )
+        if not existing_request:
+            return None
+
+        if existing_request.is_expired():
+            existing_request.status = AgentSpawnRequest.RequestStatus.EXPIRED
+            existing_request.responded_at = timezone.now()
+            existing_request.save(update_fields=["status", "responded_at"])
+            return None
+
+        return existing_request
+
+    @staticmethod
     def get_request_status(
         *,
         agent: PersistentAgent,
@@ -66,14 +92,9 @@ class SpawnRequestService:
             handoff_message=handoff_message,
         )
 
-        existing_request = (
-            AgentSpawnRequest.objects.filter(
-                agent=agent,
-                status=AgentSpawnRequest.RequestStatus.PENDING,
-                request_fingerprint=fingerprint,
-            )
-            .order_by("-requested_at")
-            .first()
+        existing_request = SpawnRequestService._get_active_pending_request(
+            agent=agent,
+            fingerprint=fingerprint,
         )
         if existing_request:
             return existing_request, False
@@ -90,14 +111,9 @@ class SpawnRequestService:
             return spawn_request, True
         except IntegrityError:
             # Another worker may have created the same pending request concurrently.
-            existing_request = (
-                AgentSpawnRequest.objects.filter(
-                    agent=agent,
-                    status=AgentSpawnRequest.RequestStatus.PENDING,
-                    request_fingerprint=fingerprint,
-                )
-                .order_by("-requested_at")
-                .first()
+            existing_request = SpawnRequestService._get_active_pending_request(
+                agent=agent,
+                fingerprint=fingerprint,
             )
             if existing_request:
                 return existing_request, False

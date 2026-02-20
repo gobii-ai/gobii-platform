@@ -46,7 +46,6 @@ export type ToolClusterDisplay = {
 
 export type ToolDetailProps = {
   entry: ToolEntryDisplay
-  layout?: 'default' | 'inlineHeader'
 }
 
 export type ToolClusterTransform = ToolClusterDisplay & {

@@ -5120,10 +5120,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
     """Get all available tools for an agent, including dynamically enabled MCP tools."""
+    spawn_capacity = 0
     can_spawn_agent = False
     if agent:
         owner = agent.organization if agent.organization_id else agent.user
-        can_spawn_agent = AgentService.has_agents_available(owner)
+        spawn_capacity = max(int(AgentService.get_agents_available(owner)), 0)
+        can_spawn_agent = spawn_capacity > 0
 
     # Static tools always available
     static_tools = [
@@ -5146,7 +5148,7 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
     ]
 
     if can_spawn_agent:
-        static_tools.append(get_spawn_agent_tool(agent))
+        static_tools.append(get_spawn_agent_tool(agent, available_capacity=spawn_capacity))
 
     if agent and agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())
