@@ -98,6 +98,21 @@ def _normalize_stripe_object(obj):
     return obj
 
 
+def sync_subscription_after_direct_update(subscription_payload: Any) -> None:
+    """Best-effort sync so local billing state follows successful Stripe writes."""
+    if Subscription is None:
+        return
+
+    try:
+        Subscription.sync_from_stripe_data(subscription_payload)
+    except Exception:
+        # Intentionally broad: sync failures must not turn successful Stripe updates into API errors.
+        logger.warning(
+            "Failed to sync subscription payload after direct Stripe update",
+            exc_info=True,
+        )
+
+
 def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, Any]]:
     """Return all non-org subscriptions for a customer, newest first.
 

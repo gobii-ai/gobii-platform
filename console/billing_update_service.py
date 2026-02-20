@@ -23,6 +23,7 @@ from util.subscription_helper import (
     get_or_create_stripe_customer,
     get_organization_plan,
     get_user_plan,
+    sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
 )
 
 from api.models import BrowserUseAgent
@@ -30,7 +31,6 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
 )
-
 try:
     import stripe
 except Exception:  # pragma: no cover - optional dependency
@@ -215,6 +215,7 @@ def apply_addon_price_quantities(
             if end_trial_on_purchase and is_trialing and is_purchase:
                 modify_kwargs["trial_end"] = "now"
             updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
+            _sync_subscription_after_direct_update(updated_subscription)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             stripe_action_url = _stripe_action_url_from_latest_invoice(updated_subscription)
 
@@ -747,6 +748,7 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                 updated_id,
                 expand=["latest_invoice.payment_intent", "latest_invoice"],
             )
+            _sync_subscription_after_direct_update(refreshed)
             action_url = _stripe_action_url_from_latest_invoice(refreshed)
             if action_url:
                 response_dict["stripeActionUrl"] = action_url
