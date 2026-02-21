@@ -3305,7 +3305,7 @@ def _get_formatting_guidance(
             "• Lists: <ul>/<ol> for scannable items\n"
             "• Emphasis: <strong> for key info, <em> for nuance\n"
             "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
-            "• Spacing: margins to let content breathe (avoid <br> for layout)\n"
+            "• Spacing: keep clear separation between blocks. Use table margin-bottom, or add one <br> after </table> when there is no bottom margin\n"
             "• No markdown—pure HTML\n\n"
             "Example—a visually rich update with chart:\n"
             "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
@@ -3320,6 +3320,7 @@ def _get_formatting_guidance(
             "    <tr><td style='padding: 8px;'>BTC</td><td style='padding: 8px;'><strong>$67,000</strong></td><td style='padding: 8px; color: green;'>+2.3%</td></tr>\n"
             "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
             "  </table>\n"
+            "  <br>\n"
             "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
             '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
             "Charts: paste path from create_chart result.inline—never construct the path yourself."
