@@ -3305,7 +3305,7 @@ def _get_formatting_guidance(
             "• Lists: <ul>/<ol> for scannable items\n"
             "• Emphasis: <strong> for key info, <em> for nuance\n"
             "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
-            "• Spacing: margins to let content breathe (avoid <br> for layout)\n"
+            "• Spacing: keep clear separation between blocks. Use table margin-bottom, or add one <br/> after </table> when there is no bottom margin\n"
             "• No markdown—pure HTML\n\n"
             "Example—a visually rich update with chart:\n"
             "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
