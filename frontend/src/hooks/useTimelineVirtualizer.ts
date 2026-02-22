@@ -11,22 +11,30 @@ function stableEventKey(event: TimelineEvent): string {
   return event.cursor
 }
 
-// Default size estimates per event kind (px)
+// Default size estimates per event kind (px).
+// Accuracy matters: the closer these are to actual measured heights, the less
+// the viewport jumps when items get measured by ResizeObserver.
 function estimateEventSize(event: TimelineEvent): number {
   switch (event.kind) {
-    case 'message':
-      return 140
+    case 'message': {
+      // chat-bubble: padding 16+16, author row ~28, line-height ~25px/line
+      const body = event.message?.bodyText ?? ''
+      const lineCount = Math.max(1, Math.ceil(body.length / 60))
+      // Short messages (1-2 lines) ~90px, longer messages scale up
+      return 62 + lineCount * 25
+    }
     case 'steps': {
       const entryCount = event.entries?.length ?? 0
       const thinkingCount = event.thinkingEntries?.length ?? 0
-      return 80 + entryCount * 32 + thinkingCount * 40
+      // Collapsed cluster header ~48px + entries ~36px each + thinking ~32px each
+      return 48 + entryCount * 36 + thinkingCount * 32
     }
     case 'thinking':
-      return 60
+      return 48
     case 'kanban':
       return 200
     default:
-      return 100
+      return 80
   }
 }
 
@@ -39,7 +47,7 @@ type UseTimelineVirtualizerOptions = {
 export function useTimelineVirtualizer({
   events,
   scrollContainerRef,
-  overscan = 5,
+  overscan = 10,
 }: UseTimelineVirtualizerOptions) {
   const estimateSize = useCallback(
     (index: number) => estimateEventSize(events[index]),
