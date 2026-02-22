@@ -526,7 +526,7 @@ export function AgentChatLayout({
     hasMoreNewer: Boolean(hasMoreNewer),
     isWorkingNow,
     onSendMessage,
-    promptCount: 3,
+    promptCount: typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3,
   })
   const hasTimelineEvents = events.length > 0
   const showJumpButton = !initialLoading
