@@ -1143,8 +1143,23 @@ export function AgentChatPage({
 
   const pendingScrollFrameRef = useRef<number | null>(null)
 
+  // Lightweight auto-follow: just set scrollTop, no overflow toggle.
+  // Used by ResizeObserver callbacks to avoid layout thrashing with the virtualizer.
+  const snapToBottom = useCallback(() => {
+    const container = document.getElementById('timeline-shell')
+    if (!container) return
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    // Already at bottom — skip to avoid triggering scroll events
+    if (distanceFromBottom < 2) return
+    lastProgrammaticScrollAtRef.current = Date.now()
+    container.scrollTop = container.scrollHeight
+    isNearBottomRef.current = true
+    setIsNearBottom(true)
+  }, [])
+
+  // Full jump with iOS momentum kill — used for user-initiated actions
+  // (send message, click jump button, composer focus, initial scroll).
   const jumpToBottom = useCallback(() => {
-    // Container scrolling: scroll the timeline-shell, not the window
     const container = document.getElementById('timeline-shell')
     const sentinel = document.getElementById('timeline-bottom-sentinel')
     if (!container) return
@@ -1152,27 +1167,25 @@ export function AgentChatPage({
     // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
     container.style.overflowY = 'hidden'
     if (sentinel) {
-      // scrollIntoView is more reliable across browsers
       sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
     } else {
       container.scrollTop = container.scrollHeight + 10000
     }
-    // Restore on next frame so the container remains scrollable
     requestAnimationFrame(() => { container.style.overflowY = '' })
-    // Immediately mark as at-bottom (IntersectionObserver will confirm, but this avoids race conditions)
     isNearBottomRef.current = true
     setIsNearBottom(true)
   }, [])
 
+  // rAF-coalesced auto-follow (for ResizeObserver / content change paths)
   const scrollToBottom = useCallback(() => {
     if (pendingScrollFrameRef.current !== null) {
       return
     }
     pendingScrollFrameRef.current = requestAnimationFrame(() => {
       pendingScrollFrameRef.current = null
-      jumpToBottom()
+      snapToBottom()
     })
-  }, [jumpToBottom])
+  }, [snapToBottom])
 
   // Keep track of composer height to adjust scroll when it changes
   const prevComposerHeight = useRef<number | null>(null)
@@ -1197,15 +1210,14 @@ export function AgentChatPage({
 
       // If pinned, ensure we stay at the bottom
       if (autoScrollPinnedRef.current && !userTouchActiveRef.current) {
-        jumpToBottom()
+        scrollToBottom()
       }
       syncNearBottomState(container)
-      // IntersectionObserver handles isNearBottom updates automatically
     })
 
     observer.observe(composer)
     return () => observer.disconnect()
-  }, [jumpToBottom, syncNearBottomState])
+  }, [scrollToBottom, syncNearBottomState])
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
@@ -1222,8 +1234,9 @@ export function AgentChatPage({
     const observer = new ResizeObserver(() => {
       // If pinned, ensure we stay at the bottom when content changes
       // Skip while user is actively touching to prevent scroll fighting on mobile
+      // Uses rAF-coalesced scrollToBottom to avoid feedback loop with virtualizer measurements
       if (autoScrollPinnedRef.current && !userTouchActiveRef.current) {
-        jumpToBottom()
+        scrollToBottom()
       }
       syncNearBottomState(timelineNode)
     })
@@ -1233,7 +1246,7 @@ export function AgentChatPage({
       observer.observe(inner)
     }
     return () => observer.disconnect()
-  }, [timelineNode, jumpToBottom, syncNearBottomState])
+  }, [timelineNode, scrollToBottom, syncNearBottomState])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -1275,15 +1288,15 @@ export function AgentChatPage({
       shouldScrollOnNextUpdateRef.current = false
       jumpToBottom()
     } else if (shouldScrollOnNextUpdateRef.current) {
-      // Auto scroll (new content while pinned) — skip while user is touching
+      // Auto scroll (new content while pinned) — use lightweight snap to avoid layout thrashing
       shouldScrollOnNextUpdateRef.current = false
       if (!userTouchActiveRef.current) {
-        jumpToBottom()
+        snapToBottom()
       }
     }
-    // IntersectionObserver handles isNearBottom updates automatically
   }, [
     jumpToBottom,
+    snapToBottom,
     timelineEvents,
     timelineStreaming,
     timelineLoadingOlder,

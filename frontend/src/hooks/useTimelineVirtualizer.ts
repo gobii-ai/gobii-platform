@@ -57,6 +57,7 @@ export function useTimelineVirtualizer({
     estimateSize,
     getItemKey,
     overscan,
+    gap: 12, // matches --timeline-row-gap: 0.75rem
   })
 
   return virtualizer
