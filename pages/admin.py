@@ -48,7 +48,11 @@ class LandingPageAdmin(admin.ModelAdmin):
         # Ensure the site domain is used to create the absolute URL
         absolute_url = f"{protocol}{current_site.domain}{rel}"
 
-        return format_html(f'<a href="{absolute_url}" target="_blank">{absolute_url}</a>')
+        return format_html(
+            '<a href="{}" target="_blank">{}</a>',
+            absolute_url,
+            absolute_url,
+        )
 
 
 @admin.register(MiniModeCampaignPattern)
