@@ -278,7 +278,6 @@ export function AgentChatLayout({
   const [scheduledLimitBusy, setScheduledLimitBusy] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
-  const highPriorityDismissKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
   const contactCapDismissKey = useMemo(() => {
     return agentId ? `agent-chat-contact-cap-dismissed:${agentId}` : null
@@ -421,25 +420,13 @@ export function AgentChatLayout({
   }, [showTaskCreditsWarning, taskCreditsStorageKey])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      highPriorityDismissKeyRef.current = highPriorityDismissKey
-      if (!highPriorityBanner || !highPriorityBannerDismissible) {
-        setHighPriorityDismissed(false)
-      }
-      return
-    }
-    if (!highPriorityBanner || !highPriorityBannerDismissible || !highPriorityDismissKey) {
-      if (highPriorityDismissKeyRef.current) {
-        window.localStorage.removeItem(highPriorityDismissKeyRef.current)
-      }
-      highPriorityDismissKeyRef.current = highPriorityDismissKey
+    if (typeof window === 'undefined' || !highPriorityDismissKey) {
       setHighPriorityDismissed(false)
       return
     }
-    highPriorityDismissKeyRef.current = highPriorityDismissKey
     const stored = window.localStorage.getItem(highPriorityDismissKey)
     setHighPriorityDismissed(stored === 'true')
-  }, [highPriorityBanner, highPriorityBannerDismissible, highPriorityDismissKey])
+  }, [highPriorityDismissKey])
 
   // Track upsell message visibility with sessionStorage deduplication
   useEffect(() => {
