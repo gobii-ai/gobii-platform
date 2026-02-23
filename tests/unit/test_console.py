@@ -1029,6 +1029,224 @@ class ConsoleViewsTest(TestCase):
             source="agent_addons_api",
         )
 
+    @tag("batch_console_agents")
+    def test_agent_addons_api_reports_billing_delinquent_for_past_due_subscription(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        class FakeSubscriptions:
+            def __init__(self, subscriptions):
+                self._subscriptions = subscriptions
+
+            def all(self):
+                return list(self._subscriptions)
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Past Due Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Past Due Agent",
+            charter="Billing warning",
+            browser_use_agent=browser_agent,
+        )
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+
+        customer = SimpleNamespace(
+            subscriptions=FakeSubscriptions([
+                SimpleNamespace(
+                    id="sub_past_due",
+                    status="past_due",
+                    stripe_data={
+                        "status": "past_due",
+                        "current_period_end": 200,
+                        "created": 100,
+                        "latest_invoice": {
+                            "status": "open",
+                            "payment_intent": {"status": "requires_payment_method"},
+                        },
+                    },
+                )
+            ])
+        )
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_active_subscription", return_value=None), \
+             patch("console.agent_addons.get_stripe_customer", return_value=customer), \
+             patch(
+                 "console.agent_addons._build_contact_cap_payload",
+                 return_value=(
+                     {
+                         "limit": 100,
+                         "used": 0,
+                         "remaining": 100,
+                         "active": 0,
+                         "pending": 0,
+                         "unlimited": False,
+                     },
+                     False,
+                 ),
+             ), \
+             patch("console.agent_addons._build_contact_pack_options", return_value=[]), \
+             patch("console.agent_addons._build_task_pack_options", return_value=[]):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        billing = payload.get("status", {}).get("billing", {})
+        self.assertTrue(billing.get("delinquent"))
+        self.assertTrue(billing.get("actionable"))
+        self.assertEqual(billing.get("reason"), "past_due")
+        self.assertEqual(billing.get("subscriptionStatus"), "past_due")
+        self.assertEqual(billing.get("paymentIntentStatus"), "requires_payment_method")
+        self.assertEqual(billing.get("manageBillingUrl"), "/console/billing/")
+
+    @tag("batch_console_agents")
+    def test_agent_addons_api_reports_billing_not_delinquent_for_active_subscription(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        class FakeSubscriptions:
+            def __init__(self, subscriptions):
+                self._subscriptions = subscriptions
+
+            def all(self):
+                return list(self._subscriptions)
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Active Billing Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Active Billing Agent",
+            charter="No billing warning",
+            browser_use_agent=browser_agent,
+        )
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+
+        customer = SimpleNamespace(
+            subscriptions=FakeSubscriptions([
+                SimpleNamespace(
+                    id="sub_active",
+                    status="active",
+                    stripe_data={
+                        "status": "active",
+                        "current_period_end": 200,
+                        "created": 100,
+                        "latest_invoice": {
+                            "status": "paid",
+                            "payment_intent": {"status": "succeeded"},
+                        },
+                    },
+                )
+            ])
+        )
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_active_subscription", return_value=None), \
+             patch("console.agent_addons.get_stripe_customer", return_value=customer), \
+             patch(
+                 "console.agent_addons._build_contact_cap_payload",
+                 return_value=(
+                     {
+                         "limit": 100,
+                         "used": 0,
+                         "remaining": 100,
+                         "active": 0,
+                         "pending": 0,
+                         "unlimited": False,
+                     },
+                     False,
+                 ),
+             ), \
+             patch("console.agent_addons._build_contact_pack_options", return_value=[]), \
+             patch("console.agent_addons._build_task_pack_options", return_value=[]):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        billing = payload.get("status", {}).get("billing", {})
+        self.assertFalse(billing.get("delinquent"))
+        self.assertFalse(billing.get("actionable"))
+        self.assertIsNone(billing.get("reason"))
+
+    @tag("batch_console_agents")
+    def test_agent_addons_api_reports_billing_delinquent_for_retrying_invoice(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        class FakeSubscriptions:
+            def __init__(self, subscriptions):
+                self._subscriptions = subscriptions
+
+            def all(self):
+                return list(self._subscriptions)
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Retrying Invoice Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Retrying Invoice Agent",
+            charter="Billing retry warning",
+            browser_use_agent=browser_agent,
+        )
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+
+        customer = SimpleNamespace(
+            subscriptions=FakeSubscriptions([
+                SimpleNamespace(
+                    id="sub_retrying_invoice",
+                    status="active",
+                    stripe_data={
+                        "status": "active",
+                        "current_period_end": 200,
+                        "created": 100,
+                        "latest_invoice": {
+                            "status": "open",
+                            "attempt_count": 1,
+                            "next_payment_attempt": 1730000000,
+                        },
+                    },
+                )
+            ])
+        )
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_active_subscription", return_value=None), \
+             patch("console.agent_addons.get_stripe_customer", return_value=customer), \
+             patch(
+                 "console.agent_addons._build_contact_cap_payload",
+                 return_value=(
+                     {
+                         "limit": 100,
+                         "used": 0,
+                         "remaining": 100,
+                         "active": 0,
+                         "pending": 0,
+                         "unlimited": False,
+                     },
+                     False,
+                 ),
+             ), \
+             patch("console.agent_addons._build_contact_pack_options", return_value=[]), \
+             patch("console.agent_addons._build_task_pack_options", return_value=[]):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        billing = payload.get("status", {}).get("billing", {})
+        self.assertTrue(billing.get("delinquent"))
+        self.assertTrue(billing.get("actionable"))
+        self.assertEqual(billing.get("reason"), "invoice_retrying")
+        self.assertEqual(billing.get("subscriptionStatus"), "active")
+        self.assertEqual(billing.get("latestInvoiceStatus"), "open")
+        self.assertIsNone(billing.get("paymentIntentStatus"))
+        self.assertEqual(billing.get("manageBillingUrl"), "/console/billing/")
+
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
     def test_agent_detail_rejects_decimal_soft_target(self, mock_track_event):

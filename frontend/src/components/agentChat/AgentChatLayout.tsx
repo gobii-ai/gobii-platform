@@ -15,6 +15,7 @@ import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
+import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
@@ -99,6 +100,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskCreditsWarningVariant?: 'low' | 'out' | null
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
+  highPriorityBanner?: HighPriorityBannerConfig | null
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -196,6 +198,7 @@ export function AgentChatLayout({
   taskCreditsWarningVariant = null,
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
+  highPriorityBanner = null,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -270,10 +273,12 @@ export function AgentChatLayout({
   const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
+  const [highPriorityDismissed, setHighPriorityDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
   const [scheduledLimitBusy, setScheduledLimitBusy] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
+  const highPriorityDismissKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
   const contactCapDismissKey = useMemo(() => {
     return agentId ? `agent-chat-contact-cap-dismissed:${agentId}` : null
@@ -284,6 +289,14 @@ export function AgentChatLayout({
     }
     return `agent-chat-task-credits-dismissed:${taskCreditsDismissKey}:${taskCreditsWarningVariant}`
   }, [taskCreditsDismissKey, taskCreditsWarningVariant])
+  const highPriorityBannerId = highPriorityBanner?.id ?? null
+  const highPriorityBannerDismissible = Boolean(highPriorityBanner?.dismissible)
+  const highPriorityDismissKey = useMemo(() => {
+    if (!agentId || !highPriorityBannerDismissible || !highPriorityBannerId) {
+      return null
+    }
+    return `agent-chat-high-priority-dismissed:${agentId}:${highPriorityBannerId}`
+  }, [agentId, highPriorityBannerDismissible, highPriorityBannerId])
 
   const handleSidebarToggle = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed)
@@ -406,6 +419,27 @@ export function AgentChatLayout({
     }
     taskCreditsStorageKeyRef.current = taskCreditsStorageKey
   }, [showTaskCreditsWarning, taskCreditsStorageKey])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      highPriorityDismissKeyRef.current = highPriorityDismissKey
+      if (!highPriorityBanner || !highPriorityBannerDismissible) {
+        setHighPriorityDismissed(false)
+      }
+      return
+    }
+    if (!highPriorityBanner || !highPriorityBannerDismissible || !highPriorityDismissKey) {
+      if (highPriorityDismissKeyRef.current) {
+        window.localStorage.removeItem(highPriorityDismissKeyRef.current)
+      }
+      highPriorityDismissKeyRef.current = highPriorityDismissKey
+      setHighPriorityDismissed(false)
+      return
+    }
+    highPriorityDismissKeyRef.current = highPriorityDismissKey
+    const stored = window.localStorage.getItem(highPriorityDismissKey)
+    setHighPriorityDismissed(stored === 'true')
+  }, [highPriorityBanner, highPriorityBannerDismissible, highPriorityDismissKey])
 
   // Track upsell message visibility with sessionStorage deduplication
   useEffect(() => {
@@ -642,6 +676,9 @@ export function AgentChatLayout({
   const scheduledActionBusy = quickIncreaseBusy || scheduledLimitBusy
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
   const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
+  const showHighPriorityBanner = Boolean(
+    highPriorityBanner && (!highPriorityBannerDismissible || !highPriorityDismissed),
+  )
 
   const handleContactCapDismiss = useCallback(() => {
     if (agentId) {
@@ -676,6 +713,14 @@ export function AgentChatLayout({
     window.localStorage.setItem(taskCreditsStorageKey, 'true')
     setTaskCreditsDismissed(true)
   }, [taskCreditsStorageKey, agentId, taskCreditsWarningVariant])
+  const handleHighPriorityDismiss = useCallback(() => {
+    if (!highPriorityBannerDismissible || !highPriorityDismissKey || typeof window === 'undefined') {
+      setHighPriorityDismissed(true)
+      return
+    }
+    window.localStorage.setItem(highPriorityDismissKey, 'true')
+    setHighPriorityDismissed(true)
+  }, [highPriorityBannerDismissible, highPriorityDismissKey])
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
@@ -711,11 +756,23 @@ export function AgentChatLayout({
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
-          onClose={onClose}
-          onShare={onShare}
-          sidebarCollapsed={sidebarCollapsed}
-        />
-      )}
+	          onClose={onClose}
+	          onShare={onShare}
+	          sidebarCollapsed={sidebarCollapsed}
+	        >
+            {showHighPriorityBanner && highPriorityBanner ? (
+              <HighPriorityBanner
+                title={highPriorityBanner.title}
+                message={highPriorityBanner.message}
+                actionLabel={highPriorityBanner.actionLabel}
+                actionHref={highPriorityBanner.actionHref}
+                dismissible={highPriorityBannerDismissible}
+                tone={highPriorityBanner.tone}
+                onDismiss={highPriorityBannerDismissible ? handleHighPriorityDismiss : undefined}
+              />
+            ) : null}
+          </AgentChatBanner>
+	      )}
       <AgentChatSettingsPanel
         open={settingsOpen}
         onClose={handleSettingsClose}

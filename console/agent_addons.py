@@ -14,6 +14,7 @@ from util.subscription_helper import (
     _ensure_stripe_ready,
     get_active_subscription,
     get_organization_plan,
+    get_stripe_customer,
     get_user_max_contacts_per_agent,
     get_user_plan,
 )
@@ -23,9 +24,140 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     stripe = None  # type: ignore
 
+try:
+    from djstripe.models import Invoice
+except Exception:  # pragma: no cover - optional dependency
+    Invoice = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 MAX_ADDON_PACK_QUANTITY = 999
+DELINQUENT_SUBSCRIPTION_STATUSES = {"past_due", "unpaid", "incomplete"}
+ACTION_REQUIRED_INTENT_STATUSES = {"requires_action", "requires_payment_method"}
+
+
+def _coerce_status(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized or None
+
+
+def _safe_int(value: object) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _get_subscription_data(subscription) -> Mapping[str, object]:
+    payload = getattr(subscription, "stripe_data", None)
+    if isinstance(payload, Mapping):
+        return payload
+    return {}
+
+
+def _resolve_latest_invoice_payload(subscription) -> Mapping[str, object]:
+    subscription_data = _get_subscription_data(subscription)
+    latest_invoice = subscription_data.get("latest_invoice")
+    if isinstance(latest_invoice, Mapping):
+        return latest_invoice
+    if isinstance(latest_invoice, str) and Invoice is not None:
+        invoice = Invoice.objects.filter(id=latest_invoice).first()
+        invoice_payload = getattr(invoice, "stripe_data", None) if invoice is not None else None
+        if isinstance(invoice_payload, Mapping):
+            return invoice_payload
+    return {}
+
+
+def _is_invoice_retrying(latest_invoice_payload: Mapping[str, object], latest_invoice_status: str | None) -> bool:
+    if latest_invoice_status != "open":
+        return False
+    if _safe_int(latest_invoice_payload.get("attempt_count")) < 1:
+        return False
+    return latest_invoice_payload.get("next_payment_attempt") is not None
+
+
+def _resolve_candidate_subscription(owner, owner_type: str, customer_subscriptions: list):
+    if owner_type == "organization":
+        billing = getattr(owner, "billing", None)
+        subscription_id = getattr(billing, "stripe_subscription_id", None) if billing is not None else None
+        if isinstance(subscription_id, str) and subscription_id:
+            for subscription in customer_subscriptions:
+                if str(getattr(subscription, "id", "")) == subscription_id:
+                    return subscription
+    return customer_subscriptions[0] if customer_subscriptions else None
+
+
+def _build_billing_status_payload(owner, owner_type: str, *, can_manage_billing: bool, manage_billing_url: str | None) -> dict:
+    status_payload = {
+        "delinquent": False,
+        "actionable": False,
+        "reason": None,
+        "subscriptionStatus": None,
+        "latestInvoiceStatus": None,
+        "paymentIntentStatus": None,
+        "manageBillingUrl": manage_billing_url if can_manage_billing else None,
+    }
+    if not stripe_status().enabled:
+        return status_payload
+
+    customer = get_stripe_customer(owner)
+    if customer is None:
+        return status_payload
+
+    try:
+        subscriptions = list(customer.subscriptions.all())
+    except (AttributeError, TypeError):
+        logger.exception("Failed to inspect customer subscriptions for billing status owner=%s", getattr(owner, "id", None))
+        return status_payload
+    if not subscriptions:
+        return status_payload
+
+    subscriptions.sort(
+        key=lambda subscription: (
+            _safe_int(_get_subscription_data(subscription).get("current_period_end")),
+            _safe_int(_get_subscription_data(subscription).get("created")),
+        ),
+        reverse=True,
+    )
+    candidate_subscription = _resolve_candidate_subscription(owner, owner_type, subscriptions)
+    if candidate_subscription is None:
+        return status_payload
+
+    subscription_data = _get_subscription_data(candidate_subscription)
+    subscription_status = _coerce_status(subscription_data.get("status")) or _coerce_status(
+        getattr(candidate_subscription, "status", None)
+    )
+    latest_invoice_payload = _resolve_latest_invoice_payload(candidate_subscription)
+    latest_invoice_status = _coerce_status(latest_invoice_payload.get("status"))
+    payment_intent_payload = latest_invoice_payload.get("payment_intent")
+    payment_intent_status = _coerce_status(
+        payment_intent_payload.get("status") if isinstance(payment_intent_payload, Mapping) else None
+    )
+
+    if subscription_status in DELINQUENT_SUBSCRIPTION_STATUSES:
+        reason = subscription_status
+    elif payment_intent_status in ACTION_REQUIRED_INTENT_STATUSES:
+        reason = payment_intent_status
+    elif _is_invoice_retrying(latest_invoice_payload, latest_invoice_status):
+        reason = "invoice_retrying"
+    else:
+        reason = None
+
+    if reason is None:
+        return status_payload
+
+    actionable = bool(can_manage_billing and manage_billing_url)
+    return {
+        "delinquent": True,
+        "actionable": actionable,
+        "reason": reason,
+        "subscriptionStatus": subscription_status,
+        "latestInvoiceStatus": latest_invoice_status,
+        "paymentIntentStatus": payment_intent_status,
+        "manageBillingUrl": manage_billing_url if actionable else None,
+    }
 
 
 def _build_contact_cap_payload(agent) -> tuple[dict, bool]:
@@ -295,6 +427,13 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
         except NoReverseMatch:
             manage_billing_url = None
 
+    billing_status_payload = _build_billing_status_payload(
+        owner,
+        owner_type,
+        can_manage_billing=can_manage_billing,
+        manage_billing_url=manage_billing_url,
+    )
+
     contact_cap_payload, contact_cap_reached = _build_contact_cap_payload(agent)
     contact_pack_options = (
         _build_contact_pack_options(owner, owner_type, plan_payload.get("id") if plan_payload else None)
@@ -317,6 +456,7 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
             "contactCap": {
                 "limitReached": contact_cap_reached,
             },
+            "billing": billing_status_payload,
         },
         "contactPacks": {
             "options": contact_pack_options,
