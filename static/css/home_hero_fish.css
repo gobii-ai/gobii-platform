@@ -67,6 +67,13 @@
   animation: gobii-eye-glow-soft 3s ease-in-out infinite;
 }
 
+.gobii-hero-fish svg #left-eye path,
+.gobii-hero-fish svg #right-eye path {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: gobii-eye-blink-soft 9.6s ease-in-out infinite;
+}
+
 @keyframes gobii-hero-swim-soft {
   0%, 100% {
     transform: translate3d(0, 0, 0) rotate(0deg);
@@ -113,6 +120,12 @@
   50% { opacity: 0.95; }
 }
 
+@keyframes gobii-eye-blink-soft {
+  0%, 86%, 100% { transform: scaleY(1); }
+  88% { transform: scaleY(0.14); }
+  90% { transform: scaleY(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .gobii-hero-fish-cursor {
     transition: none;
@@ -126,7 +139,9 @@
   .gobii-hero-fish svg #bottom-left-fin,
   .gobii-hero-fish svg #bottom-right-fin,
   .gobii-hero-fish svg #left-eye,
-  .gobii-hero-fish svg #right-eye {
+  .gobii-hero-fish svg #right-eye,
+  .gobii-hero-fish svg #left-eye path,
+  .gobii-hero-fish svg #right-eye path {
     animation: none !important;
   }
 }
