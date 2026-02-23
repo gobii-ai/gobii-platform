@@ -29,6 +29,7 @@ import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
 import { appendReturnTo } from '../util/returnTo'
+import { normalizeHexColor } from '../util/color'
 
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
@@ -84,6 +85,61 @@ function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot |
     }
   }
   return null
+}
+
+function adjustHexColor(hexColor: string, ratio: number): string {
+  const normalized = normalizeHexColor(hexColor)
+  const parse = (sliceStart: number) => parseInt(normalized.slice(sliceStart, sliceStart + 2), 16)
+  const clamp = (value: number) => Math.max(0, Math.min(255, Math.round(value)))
+  const r = parse(1)
+  const g = parse(3)
+  const b = parse(5)
+  if (ratio >= 0) {
+    return `#${clamp(r + (255 - r) * ratio).toString(16).padStart(2, '0')}${clamp(g + (255 - g) * ratio).toString(16).padStart(2, '0')}${clamp(b + (255 - b) * ratio).toString(16).padStart(2, '0')}`.toUpperCase()
+  }
+  const factor = 1 - Math.abs(ratio)
+  return `#${clamp(r * factor).toString(16).padStart(2, '0')}${clamp(g * factor).toString(16).padStart(2, '0')}${clamp(b * factor).toString(16).padStart(2, '0')}`.toUpperCase()
+}
+
+function buildFishSvgFaviconDataUrl(sourceSvg: string, colorHex: string): string {
+  const accent = normalizeHexColor(colorHex)
+  const light = adjustHexColor(accent, 0.1)
+  const dark = adjustHexColor(accent, -0.25)
+  const visor = adjustHexColor(accent, -0.55)
+
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(sourceSvg, 'image/svg+xml')
+  const svg = doc.querySelector('svg')
+  if (!svg) {
+    throw new Error('Invalid Gobii fish SVG favicon source')
+  }
+
+  // Tint the existing fish anatomy while preserving eye highlights and overall shape.
+  const setFill = (id: string, fill: string) => {
+    const node = svg.querySelector(`#${id}`) as SVGElement | null
+    if (node) {
+      node.setAttribute('fill', fill)
+    }
+  }
+
+  setFill('body', light)
+  setFill('top-fin', light)
+  setFill('tail-fin', light)
+  setFill('bottom-right-fin', light)
+  setFill('bottom-left-fin', dark)
+  setFill('eye-rectangle', visor)
+
+  svg.setAttribute('width', '64')
+  svg.setAttribute('height', '64')
+
+  const serialized = new XMLSerializer().serializeToString(svg)
+  return `data:image/svg+xml,${encodeURIComponent(serialized)}`
+}
+
+function buildFallbackFaviconDataUrl(colorHex: string): string {
+  const accent = normalizeHexColor(colorHex)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${accent}"/></svg>`
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 
 function compareRosterNames(left: string, right: string): number {
@@ -456,6 +512,10 @@ export function AgentChatPage({
   persistContextSession = true,
   onContextSwitch,
 }: AgentChatPageProps) {
+  const initialThemeColorRef = useRef<string | null>(null)
+  const fishFaviconSvgRef = useRef<string | null>(null)
+  const fishFaviconSvgPromiseRef = useRef<Promise<string> | null>(null)
+
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const routeAgentId = typeof agentId === 'string' ? agentId : null
   const queryClient = useQueryClient()
@@ -1402,6 +1462,109 @@ export function AgentChatPage({
         : (resolvedAgentName || 'Agent')
     document.title = `${name} · Gobii`
   }, [isNewAgent, isSelectionView, resolvedAgentName])
+
+  // Keep favicon synced to the active agent's color in live chat contexts.
+  useEffect(() => {
+    const head = document.head
+    if (!head) {
+      return
+    }
+
+    if (isSelectionView || !activeAgentId) {
+      head.querySelector('link[data-agent-favicon="true"]')?.remove()
+      head.querySelector('link[data-agent-favicon-shortcut="true"]')?.remove()
+      const themeColorMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
+      if (themeColorMeta && initialThemeColorRef.current !== null) {
+        themeColorMeta.content = initialThemeColorRef.current
+      }
+      return
+    }
+
+    const colorHex = normalizeHexColor(resolvedAgentColorHex)
+    let cancelled = false
+
+    const resolveFishSvg = async (): Promise<string> => {
+      if (fishFaviconSvgRef.current) {
+        return fishFaviconSvgRef.current
+      }
+      if (!fishFaviconSvgPromiseRef.current) {
+        fishFaviconSvgPromiseRef.current = fetch('/static/images/gobii-fish.svg', { credentials: 'same-origin' })
+          .then(async (response) => {
+            if (!response.ok) {
+              throw new Error(`Failed to load Gobii fish SVG favicon source (${response.status})`)
+            }
+            return response.text()
+          })
+          .then((svgText) => {
+            fishFaviconSvgRef.current = svgText
+            return svgText
+          })
+      }
+      return fishFaviconSvgPromiseRef.current
+    }
+
+    const applyFaviconHref = (href: string) => {
+      if (cancelled) {
+        return
+      }
+
+      let icon = head.querySelector('link[data-agent-favicon="true"]') as HTMLLinkElement | null
+      if (!icon) {
+        icon = document.createElement('link')
+        icon.setAttribute('data-agent-favicon', 'true')
+        icon.rel = 'icon'
+        icon.type = 'image/svg+xml'
+        head.appendChild(icon)
+      }
+      icon.href = href
+
+      let shortcut = head.querySelector('link[data-agent-favicon-shortcut="true"]') as HTMLLinkElement | null
+      if (!shortcut) {
+        shortcut = document.createElement('link')
+        shortcut.setAttribute('data-agent-favicon-shortcut', 'true')
+        shortcut.rel = 'shortcut icon'
+        shortcut.type = 'image/svg+xml'
+        head.appendChild(shortcut)
+      }
+      shortcut.href = href
+    }
+
+    void resolveFishSvg()
+      .then((svgText) => buildFishSvgFaviconDataUrl(svgText, colorHex))
+      .then((faviconHref) => {
+        applyFaviconHref(faviconHref)
+      })
+      .catch(() => {
+        applyFaviconHref(buildFallbackFaviconDataUrl(colorHex))
+      })
+
+    const themeColorMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
+    if (themeColorMeta && initialThemeColorRef.current === null) {
+      initialThemeColorRef.current = themeColorMeta.content
+    }
+    if (themeColorMeta) {
+      themeColorMeta.content = colorHex
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [activeAgentId, isSelectionView, resolvedAgentColorHex])
+
+  useEffect(() => {
+    return () => {
+      const head = document.head
+      if (!head) {
+        return
+      }
+      head.querySelector('link[data-agent-favicon="true"]')?.remove()
+      head.querySelector('link[data-agent-favicon-shortcut="true"]')?.remove()
+
+      const themeColorMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
+      if (themeColorMeta && initialThemeColorRef.current !== null) {
+        themeColorMeta.content = initialThemeColorRef.current
+      }
+    }
+  }, [])
 
   const rosterErrorMessage = rosterQuery.isError
     ? rosterQuery.error instanceof Error

@@ -568,7 +568,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                 unlimited_limit_url = append_context_query(unlimited_limit_url, agent.organization_id)
 
         try:
-            logo_url = _build_site_url(static("images/noBgBlue.png"))
+            logo_url = _build_site_url(static("images/gobii_fish_with_text_purple.png"))
         except (Site.DoesNotExist, MultipleObjectsReturned, DatabaseError, ValueError) as exc:
             logging.warning("Failed to build logo URL for daily credit email: %s", exc)
             logo_url = ""

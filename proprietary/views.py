@@ -505,7 +505,8 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
         )
 
         canonical_url = self.request.build_absolute_uri(self.request.path)
-        default_image_url = self.request.build_absolute_uri(static("images/noBgBlue.png"))
+        brand_logo_url = self.request.build_absolute_uri(static("images/gobii_fish.png"))
+        default_image_url = self.request.build_absolute_uri(static("images/gobii_fish_social_1280x640.png"))
 
         blog_posts_schema = []
         for post in posts[:10]:
@@ -532,7 +533,7 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
                 "name": "Gobii",
                 "logo": {
                     "@type": "ImageObject",
-                    "url": default_image_url,
+                    "url": brand_logo_url,
                 },
             },
             "blogPost": blog_posts_schema,
@@ -562,7 +563,8 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
 
         context = super().get_context_data(**kwargs)
         canonical_url = self.request.build_absolute_uri(self.request.path)
-        default_image_url = self.request.build_absolute_uri(static("images/noBgBlue.png"))
+        brand_logo_url = self.request.build_absolute_uri(static("images/gobii_fish.png"))
+        default_image_url = self.request.build_absolute_uri(static("images/gobii_fish_social_1280x640.png"))
 
         image_path = post["meta"].get("image")
         if image_path:
@@ -604,7 +606,7 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
                 "name": "Gobii",
                 "logo": {
                     "@type": "ImageObject",
-                    "url": default_image_url,
+                    "url": brand_logo_url,
                 },
             },
             "mainEntityOfPage": {
