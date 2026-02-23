@@ -128,7 +128,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .gobii-hero-fish-cursor {
-    transition: none;
+    transition: none !important;
     transform: none !important;
   }
 
@@ -143,5 +143,6 @@
   .gobii-hero-fish svg #left-eye path,
   .gobii-hero-fish svg #right-eye path {
     animation: none !important;
+    transition: none !important;
   }
 }
