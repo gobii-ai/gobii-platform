@@ -4,6 +4,7 @@
 {% block title %}Gobii | Your AI Team, Always On — Virtual Coworkers That Automate Web Work 24/7{% endblock %}
 {% block head_extras %}
   {{ block.super }}
+  <link rel="stylesheet" href="{% static 'css/home_hero_fish.css' %}">
   <meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">
   {% if immersive_app_assets %}
     {% for href in immersive_app_assets.styles %}

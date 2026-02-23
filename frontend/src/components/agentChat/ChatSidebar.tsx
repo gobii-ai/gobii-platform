@@ -219,7 +219,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         <div className="chat-sidebar-header" data-collapsed={collapsed ? 'true' : 'false'}>
           {!collapsed ? (
             <a href="/" className="chat-sidebar-logo-link">
-              <img src="/static/images/noBgWhite.png" alt="Gobii" className="chat-sidebar-logo" />
+              <img src="/static/images/gobii_fish.png" alt="Gobii Fish" className="chat-sidebar-logo" />
             </a>
           ) : null}
           <div className="chat-sidebar-header-actions">

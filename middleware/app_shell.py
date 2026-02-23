@@ -167,7 +167,7 @@ def _build_shell_html() -> str:
     signup_tracking = _format_signup_tracking_snippet()
     analytics_js = static("js/gobii_analytics.js")
     signup_tracking_js = static("js/signup_tracking.js")
-    icon_url = static("images/noBgBlue.png")
+    icon_url = static("images/gobii_fish.png")
     fonts_css = static("css/custom_fonts.css")
     pygments_css = static("css/pygments.css")
     globals_css = static("css/globals.css")
