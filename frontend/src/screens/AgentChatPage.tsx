@@ -1145,13 +1145,15 @@ export function AgentChatPage({
 
   // Lightweight auto-follow: just set scrollTop, no overflow toggle.
   // Used by ResizeObserver callbacks to avoid layout thrashing with the virtualizer.
+  // Does NOT update lastProgrammaticScrollAtRef — that guard is for user-initiated
+  // programmatic scrolls (jump-to-latest, send). Auto-follow must not block detection
+  // of user scroll-up gestures (especially momentum scrolling after touch end on mobile).
   const snapToBottom = useCallback(() => {
     const container = document.getElementById('timeline-shell')
     if (!container) return
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     // Already at bottom — skip to avoid triggering scroll events
     if (distanceFromBottom < 2) return
-    lastProgrammaticScrollAtRef.current = Date.now()
     container.scrollTop = container.scrollHeight
     isNearBottomRef.current = true
     setIsNearBottom(true)
