@@ -565,6 +565,99 @@
 
   <script>
     document.addEventListener('DOMContentLoaded', function () {
+      const fish = document.querySelector('[data-gobii-fish-cursor]');
+      if (!fish) return;
+
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return;
+      }
+
+      if (window.matchMedia('(pointer: coarse)').matches) {
+        return;
+      }
+
+      const MAX_X = 11;
+      const MAX_Y = 8;
+      const MAX_ROT = 3.2;
+      const MAX_EYE_X = 6.2;
+      const MAX_EYE_Y = 3.6;
+      const SMOOTHING = 0.14;
+
+      let targetX = 0;
+      let targetY = 0;
+      let targetRot = 0;
+      let targetEyeX = 0;
+      let targetEyeY = 0;
+      let currentX = 0;
+      let currentY = 0;
+      let currentRot = 0;
+      let currentEyeX = 0;
+      let currentEyeY = 0;
+      let rafId = null;
+
+      const applyTransform = () => {
+        currentX += (targetX - currentX) * SMOOTHING;
+        currentY += (targetY - currentY) * SMOOTHING;
+        currentRot += (targetRot - currentRot) * SMOOTHING;
+        currentEyeX += (targetEyeX - currentEyeX) * SMOOTHING;
+        currentEyeY += (targetEyeY - currentEyeY) * SMOOTHING;
+
+        fish.style.setProperty('--fish-cursor-x', `${currentX.toFixed(2)}px`);
+        fish.style.setProperty('--fish-cursor-y', `${currentY.toFixed(2)}px`);
+        fish.style.setProperty('--fish-cursor-rot', `${currentRot.toFixed(2)}deg`);
+        fish.style.setProperty('--fish-eye-x', `${currentEyeX.toFixed(2)}px`);
+        fish.style.setProperty('--fish-eye-y', `${currentEyeY.toFixed(2)}px`);
+
+        const stillMoving =
+          Math.abs(targetX - currentX) > 0.02 ||
+          Math.abs(targetY - currentY) > 0.02 ||
+          Math.abs(targetRot - currentRot) > 0.02 ||
+          Math.abs(targetEyeX - currentEyeX) > 0.02 ||
+          Math.abs(targetEyeY - currentEyeY) > 0.02;
+
+        if (stillMoving) {
+          rafId = window.requestAnimationFrame(applyTransform);
+        } else {
+          rafId = null;
+        }
+      };
+
+      const scheduleFrame = () => {
+        if (rafId !== null) return;
+        rafId = window.requestAnimationFrame(applyTransform);
+      };
+
+      const handleMove = (event) => {
+        const nx = (event.clientX / window.innerWidth) * 2 - 1;
+        const ny = (event.clientY / window.innerHeight) * 2 - 1;
+        const nMag = Math.hypot(nx, ny);
+        const nScale = nMag > 1 ? 1 / nMag : 1;
+
+        targetX = nx * MAX_X;
+        targetY = ny * MAX_Y;
+        targetRot = nx * MAX_ROT;
+        targetEyeX = nx * nScale * MAX_EYE_X;
+        targetEyeY = ny * nScale * MAX_EYE_Y;
+        scheduleFrame();
+      };
+
+      const reset = () => {
+        targetX = 0;
+        targetY = 0;
+        targetRot = 0;
+        targetEyeX = 0;
+        targetEyeY = 0;
+        scheduleFrame();
+      };
+
+      window.addEventListener('mousemove', handleMove, { passive: true });
+      document.addEventListener('mouseleave', reset);
+      window.addEventListener('blur', reset);
+    });
+  </script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
       const textarea = document.getElementById('id_charter');
       const ghostWrapper = document.getElementById('charter-ghost');
       const ghostText = document.getElementById('charter-ghost-text');
