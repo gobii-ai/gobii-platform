@@ -1,4 +1,4 @@
-import { Building2, CreditCard, RotateCcw, ShieldAlert } from 'lucide-react'
+import { Building2, CreditCard, ExternalLink, RotateCcw, ShieldAlert } from 'lucide-react'
 
 import type { BillingInitialData } from './types'
 import { formatCents, normalizeCurrency, planMonthlyPriceCents } from './utils'
@@ -9,6 +9,7 @@ type BillingHeaderProps = {
   onChangePlan?: () => void
   onCancel?: () => void
   onResume?: () => void
+  onManageInStripe?: () => void
   seatTarget?: number
   saving?: boolean
   onAdjustSeat?: (delta: number) => void
@@ -20,6 +21,7 @@ export function BillingHeader({
   onChangePlan,
   onCancel,
   onResume,
+  onManageInStripe,
   seatTarget,
   saving = false,
   onAdjustSeat,
@@ -111,6 +113,17 @@ export function BillingHeader({
                 Cancel
               </button>
             ) : null}
+
+          {initialData.endpoints.stripePortalUrl && onManageInStripe ? (
+            <button
+              type="button"
+              onClick={onManageInStripe}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Manage in Stripe
+            </button>
+          ) : null}
 
           {initialData.contextType === 'personal'
             && initialData.paidSubscriber

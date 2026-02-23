@@ -51,6 +51,7 @@ export type BillingEndpoints = {
   updateUrl: string
   cancelSubscriptionUrl?: string
   resumeSubscriptionUrl?: string
+  stripePortalUrl?: string
 }
 
 export type BillingTrial = {
