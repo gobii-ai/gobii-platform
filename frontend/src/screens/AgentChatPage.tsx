@@ -20,7 +20,8 @@ import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnab
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
-import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey } from '../hooks/useAgentTimeline'
+import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse } from '../hooks/useAgentTimeline'
+import { refreshTimelineLatestInCache } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
@@ -2068,7 +2069,7 @@ export function AgentChatPage({
     const handleTimeout = () => {
       finalizeStreaming()
       if (timelineStreaming.reasoning && !timelineStreaming.content && activeAgentId) {
-        void queryClient.invalidateQueries({ queryKey: timelineQueryKey(activeAgentId) })
+        void refreshTimelineLatestInCache(queryClient, activeAgentId)
       }
     }
     if (timeoutMs === 0) {

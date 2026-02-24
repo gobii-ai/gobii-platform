@@ -15,7 +15,12 @@ import { INSIGHT_TIMING } from '../types/insight'
 import { sendAgentMessage, fetchProcessingStatus, fetchAgentInsights } from '../api/agentChat'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
 import { mergeTimelineEvents, normalizeTimelineEvent } from './agentChatTimeline'
-import { injectRealtimeEventIntoCache, flushPendingEventsToCache, updateOptimisticEventInCache } from '../hooks/useTimelineCacheInjector'
+import {
+  injectRealtimeEventIntoCache,
+  flushPendingEventsToCache,
+  updateOptimisticEventInCache,
+  refreshTimelineLatestInCache,
+} from '../hooks/useTimelineCacheInjector'
 import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 
 // Module-level queryClient reference, set once from AgentChatPage
@@ -622,7 +627,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     if (shouldInvalidateQuery && queryClientRef) {
       const agentId = get().agentId
       if (agentId) {
-        void queryClientRef.invalidateQueries({ queryKey: timelineQueryKey(agentId) })
+        void refreshTimelineLatestInCache(queryClientRef, agentId)
       }
     }
   },

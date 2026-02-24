@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { scheduleLoginRedirect } from '../api/http'
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { useAgentChatStore } from '../stores/agentChatStore'
-import { timelineQueryKey } from './useAgentTimeline'
+import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 
@@ -241,7 +241,7 @@ export function useAgentChatSocket(
       return
     }
     lastSyncAtRef.current = now
-    void queryClient.invalidateQueries({ queryKey: timelineQueryKey(agentIdRef.current) })
+    void refreshTimelineLatestInCache(queryClient, agentIdRef.current)
     void refreshProcessingRef.current()
   }, [queryClient])
 

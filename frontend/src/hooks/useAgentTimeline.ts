@@ -4,7 +4,7 @@ import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
 import type { TimelineEvent } from '../types/agentChat'
 import { mergeTimelineEvents, prepareTimelineEvents } from '../stores/agentChatTimeline'
 
-const TIMELINE_PAGE_SIZE = 100
+export const TIMELINE_PAGE_SIZE = 100
 
 export type TimelinePage = {
   events: TimelineEvent[]
@@ -15,7 +15,7 @@ export type TimelinePage = {
   raw: TimelineResponse
 }
 
-function responseToPage(response: TimelineResponse): TimelinePage {
+export function timelineResponseToPage(response: TimelineResponse): TimelinePage {
   const events = prepareTimelineEvents(response.events)
   return {
     events,
@@ -45,17 +45,17 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
 
       if (direction === 'initial') {
         const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE })
-        return responseToPage(response)
+        return timelineResponseToPage(response)
       }
 
       if (direction === 'older' && 'cursor' in pageParam!) {
         const response = await fetchAgentTimeline(agentId, { direction: 'older', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE })
-        return responseToPage(response)
+        return timelineResponseToPage(response)
       }
 
       if (direction === 'newer' && 'cursor' in pageParam!) {
         const response = await fetchAgentTimeline(agentId, { direction: 'newer', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE })
-        return responseToPage(response)
+        return timelineResponseToPage(response)
       }
 
       throw new Error(`Invalid page param direction: ${direction}`)
