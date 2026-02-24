@@ -925,6 +925,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertIsNone(grant_kwargs["credit_override"])
         self.assertTrue(grant_kwargs["invoice_id"].startswith("trial:sub_123"))
         self.assertEqual(grant_kwargs["expiration_date"], end_dt + relativedelta(months=1))
+        self.assertTrue(grant_kwargs["free_trial_start"])
 
         self.mock_capi.assert_called_once()
         capi_kwargs = self.mock_capi.call_args.kwargs
@@ -989,6 +990,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(grant_kwargs["credit_override"], Decimal(200))
         self.assertEqual(grant_kwargs["invoice_id"], "in_paid")
         self.assertEqual(grant_kwargs["expiration_date"], period_end)
+        self.assertFalse(grant_kwargs["free_trial_start"])
 
     @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):
