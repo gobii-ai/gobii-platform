@@ -143,7 +143,7 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
     deleted_names: list[str] = []
     errors: list[str] = []
 
-    current_rows, read_errors = _read_sqlite_skills()
+    current_rows, read_errors, invalid_skill_ids, invalid_skill_names = _read_sqlite_skills()
     if read_errors:
         errors.extend(read_errors)
 
@@ -157,7 +157,14 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
         )
 
     current_names = {row.name for row in current_rows}
-    deleted_names = sorted(name for name in baseline.names if name not in current_names)
+    protected_names = set(invalid_skill_names)
+    for skill_id in invalid_skill_ids:
+        baseline_row = baseline.by_id.get(skill_id)
+        if baseline_row:
+            protected_names.add(baseline_row.name)
+    deleted_names = sorted(
+        name for name in baseline.names if name not in current_names and name not in protected_names
+    )
 
     candidates_by_name: dict[str, _SQLiteSkillRow] = {}
     for row in current_rows:
@@ -166,8 +173,6 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
             continue
         candidates_by_name[row.name] = row
 
-    from .tool_manager import get_available_tool_ids
-
     with transaction.atomic():
         if deleted_names:
             PersistentAgentSkill.objects.filter(
@@ -175,7 +180,11 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
                 name__in=deleted_names,
             ).delete()
 
-        valid_tool_ids = get_available_tool_ids(agent)
+        valid_tool_ids: set[str] = set()
+        if candidates_by_name:
+            from .tool_manager import get_available_tool_ids
+
+            valid_tool_ids = get_available_tool_ids(agent)
 
         for name, row in candidates_by_name.items():
             unknown = [tool_id for tool_id in row.tools if tool_id not in valid_tool_ids]
@@ -272,14 +281,16 @@ def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
     return "\n\n".join(sections)
 
 
-def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str]]:
+def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str], set[str], set[str]]:
     db_path = get_sqlite_db_path()
     if not db_path:
-        return None, ["SQLite DB path unavailable; cannot read skills table."]
+        return None, ["SQLite DB path unavailable; cannot read skills table."], set(), set()
 
     conn = None
     errors: list[str] = []
     rows: list[_SQLiteSkillRow] = []
+    invalid_skill_ids: set[str] = set()
+    invalid_skill_names: set[str] = set()
 
     try:
         conn = open_guarded_sqlite_connection(db_path)
@@ -303,9 +314,12 @@ def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str]]:
                 continue
             if not name:
                 errors.append(f"Skill row {skill_id} ignored: name is required.")
+                invalid_skill_ids.add(skill_id)
                 continue
             if tools_error:
                 errors.append(f"Skill '{name}' ignored: {tools_error}")
+                invalid_skill_ids.add(skill_id)
+                invalid_skill_names.add(name)
                 continue
 
             rows.append(
@@ -317,11 +331,11 @@ def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str]]:
                     instructions=instructions,
                 )
             )
-        return rows, errors
+        return rows, errors, invalid_skill_ids, invalid_skill_names
     except sqlite3.Error:
         logger.exception("Failed to read skills from SQLite.")
         errors.append("Failed to read skills table from SQLite.")
-        return None, errors
+        return None, errors, invalid_skill_ids, invalid_skill_names
     finally:
         if conn is not None:
             try:

@@ -186,6 +186,65 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertEqual(result.deleted_names, ["ops-report"])
         self.assertFalse(PersistentAgentSkill.objects.filter(agent=self.agent, name="ops-report").exists())
 
+    @patch("api.agent.tools.tool_manager.get_available_tool_ids")
+    def test_invalid_skill_row_does_not_delete_existing_versions(self, mock_available_tools):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="ops-report",
+            description="Ops report generation",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Generate report.",
+        )
+
+        baseline = seed_sqlite_skills(self.agent)
+        self.assertIsNotNone(baseline)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                UPDATE "__agent_skills"
+                SET tools = ?
+                WHERE name = ?;
+                """,
+                ('{"invalid": true}', "ops-report"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = apply_sqlite_skill_updates(self.agent, baseline)
+
+        self.assertTrue(result.errors)
+        self.assertIn("tools must be a JSON array", result.errors[0])
+        self.assertEqual(result.deleted_names, [])
+        self.assertFalse(result.changed)
+        self.assertTrue(PersistentAgentSkill.objects.filter(agent=self.agent, name="ops-report").exists())
+        mock_available_tools.assert_not_called()
+
+    @patch("api.agent.tools.tool_manager.get_available_tool_ids")
+    def test_noop_skill_sync_skips_tool_discovery(self, mock_available_tools):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="daily-brief",
+            description="Daily digest workflow",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Collect updates and summarize.",
+        )
+
+        baseline = seed_sqlite_skills(self.agent)
+        self.assertIsNotNone(baseline)
+
+        result = apply_sqlite_skill_updates(self.agent, baseline)
+
+        self.assertFalse(result.errors)
+        self.assertFalse(result.changed)
+        self.assertEqual(result.deleted_names, [])
+        self.assertEqual(result.created_versions, [])
+        mock_available_tools.assert_not_called()
+
     def test_prompt_block_uses_top_three_latest_skills(self):
         now = timezone.now()
         for idx in range(4):
