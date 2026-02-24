@@ -1620,8 +1620,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
         context['personal_addons_disabled'] = not paid_subscriber
-        personal_can_open_stripe = paid_subscriber
-        context['personal_can_open_stripe'] = personal_can_open_stripe
+        context['personal_can_open_stripe'] = paid_subscriber
 
         dedicated_plan = subscription_plan
         dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
@@ -1700,7 +1699,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 "updateUrl": reverse("console_billing_update"),
                 "cancelSubscriptionUrl": reverse("cancel_subscription"),
                 "resumeSubscriptionUrl": reverse("resume_subscription"),
-                "stripePortalUrl": reverse("billing_portal") if personal_can_open_stripe else None,
+                "stripePortalUrl": reverse("billing_portal") if paid_subscriber else None,
             },
         }
         context["billing_props"] = billing_props

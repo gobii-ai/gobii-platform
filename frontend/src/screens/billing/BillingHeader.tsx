@@ -9,7 +9,7 @@ type BillingHeaderProps = {
   onChangePlan?: () => void
   onCancel?: () => void
   onResume?: () => void
-  onManageInStripe?: () => void
+  onManageInStripe: () => void
   seatTarget?: number
   saving?: boolean
   onAdjustSeat?: (delta: number) => void
@@ -114,7 +114,7 @@ export function BillingHeader({
               </button>
             ) : null}
 
-          {initialData.endpoints.stripePortalUrl && onManageInStripe ? (
+          {initialData.endpoints.stripePortalUrl ? (
             <button
               type="button"
               onClick={onManageInStripe}

@@ -343,7 +343,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
             && initialData.endpoints.resumeSubscriptionUrl
             ? resumeAction.openDialog
             : undefined}
-          onManageInStripe={initialData.endpoints.stripePortalUrl ? handleManageInStripe : undefined}
+          onManageInStripe={handleManageInStripe}
           seatTarget={initialData.contextType === 'organization' ? (draft.seatTarget ?? initialData.seats.purchased) : undefined}
           saving={saving}
           onAdjustSeat={initialData.contextType === 'organization' ? handleSeatAdjust : undefined}
