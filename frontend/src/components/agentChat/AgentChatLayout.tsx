@@ -1,12 +1,12 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
-import { motion } from 'framer-motion'
+import type { Virtualizer } from '@tanstack/react-virtual'
 import '../../styles/agentChatLegacy.css'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
-import { TimelineEventList } from './TimelineEventList'
+import { TimelineVirtualItem } from './TimelineVirtualItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
@@ -100,6 +100,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskCreditsWarningVariant?: 'low' | 'out' | null
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
+  virtualizer?: Virtualizer<HTMLElement, Element> | null
   highPriorityBanner?: HighPriorityBannerConfig | null
   onLoadOlder?: () => void
   onLoadNewer?: () => void
@@ -198,8 +199,8 @@ export function AgentChatLayout({
   taskCreditsWarningVariant = null,
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
+  virtualizer = null,
   highPriorityBanner = null,
-  hasMoreOlder,
   hasMoreNewer,
   processingActive,
   processingStartedAt,
@@ -207,8 +208,6 @@ export function AgentChatLayout({
   processingWebTasks = [],
   nextScheduledAt = null,
   streaming,
-  onLoadOlder,
-  onLoadNewer,
   onJumpToLatest,
   onClose,
   onShare,
@@ -527,18 +526,15 @@ export function AgentChatLayout({
     hasMoreNewer: Boolean(hasMoreNewer),
     isWorkingNow,
     onSendMessage,
-    promptCount: 3,
+    promptCount: typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3,
   })
   const hasTimelineEvents = events.length > 0
-  const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
   const showJumpButton = !initialLoading
     && hasTimelineEvents
     && (
       hasMoreNewer
       || (!autoScrollPinned && (hasUnseenActivity || !isNearBottom))
     )
-  // "Load newer" only shows when jump button is hidden — jump-to-latest handles the hasMoreNewer case
-  const showLoadNewerButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || loadingNewer) && !showJumpButton
 
   const showBanner = Boolean(agentName)
   const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
@@ -797,45 +793,67 @@ export function AgentChatLayout({
           id="agent-workspace-root"
           style={composerPalette.cssVars}
         >
-          {/* Scrollable timeline container — layoutScroll tells framer-motion
-              to account for scroll offset so layout animations inside don't
-              re-trigger when the user scrolls. */}
-          <motion.div ref={timelineRef} id="timeline-shell" layoutScroll data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          {/* Scrollable timeline container */}
+          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
               <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
-                <div
-                  id="timeline-load-older"
-                  className="timeline-load-control"
-                  data-side="older"
-                  data-state={loadingOlder ? 'loading' : hasMoreOlder ? 'has-more' : 'exhausted'}
-                  hidden={!showLoadOlderButton}
-                >
-                  <button
-                    type="button"
-                    className="timeline-load-button"
-                    hidden={!showLoadOlderButton}
-                    onClick={onLoadOlder}
-                    disabled={loadingOlder}
-                  >
-                    <span className="timeline-load-indicator" data-loading={loadingOlder ? 'true' : 'false'} aria-hidden="true" />
-                    <span className="timeline-load-label">{loadingOlder ? 'Loading…' : 'Load older'}</span>
-                  </button>
-                </div>
+                {loadingOlder ? (
+                  <div className="timeline-load-control" data-side="older" data-state="loading">
+                    <div className="timeline-load-button" role="status">
+                      <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
+                      <span className="timeline-load-label">Loading…</span>
+                    </div>
+                  </div>
+                ) : null}
 
-                <div id="timeline-event-list" className="flex flex-col">
-                  <TimelineEventList
-                    agentFirstName={agentFirstName}
-                    events={events}
-                    agentColorHex={agentColorHex || undefined}
-                    agentAvatarUrl={agentAvatarUrl}
-                    viewerUserId={viewerUserId ?? null}
-                    viewerEmail={viewerEmail ?? null}
-                    initialLoading={initialLoading}
-                    suppressedThinkingCursor={suppressedThinkingCursor}
-                  />
-                </div>
+                {initialLoading ? (
+                  <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
+                    <div className="flex flex-col items-center gap-3 text-center">
+                      <Loader2 size={28} className="animate-spin text-blue-600" aria-hidden="true" />
+                      <div>
+                        <p className="text-sm font-semibold text-slate-700">Loading conversation…</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : virtualizer ? (
+                  <div
+                    id="timeline-event-list"
+                    style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}
+                  >
+                    {virtualizer.getVirtualItems().map((virtualItem) => {
+                      const event = events[virtualItem.index]
+                      if (!event) return null
+                      const isLatestEvent = virtualItem.index === events.length - 1
+                      return (
+                        <div
+                          key={virtualItem.key}
+                          data-index={virtualItem.index}
+                          ref={virtualizer.measureElement}
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            width: '100%',
+                            transform: `translateY(${virtualItem.start}px)`,
+                          }}
+                        >
+                          <TimelineVirtualItem
+                            event={event}
+                            isLatestEvent={isLatestEvent}
+                            agentFirstName={agentFirstName}
+                            agentColorHex={agentColorHex || undefined}
+                            agentAvatarUrl={agentAvatarUrl}
+                            viewerUserId={viewerUserId ?? null}
+                            viewerEmail={viewerEmail ?? null}
+                            suppressedThinkingCursor={suppressedThinkingCursor}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : null}
                 {showScheduledResumeEvent ? (
                   <ScheduledResumeCard
                     nextScheduledAt={nextScheduledAt}
@@ -907,28 +925,18 @@ export function AgentChatLayout({
                   <div id="timeline-bottom-sentinel" className="timeline-bottom-sentinel" aria-hidden="true" />
                 ) : null}
 
-                <div
-                  id="timeline-load-newer"
-                  className="timeline-load-control"
-                  data-side="newer"
-                  data-state={loadingNewer ? 'loading' : hasMoreNewer ? 'has-more' : 'exhausted'}
-                  hidden={!showLoadNewerButton}
-                >
-                  <button
-                    type="button"
-                    className="timeline-load-button"
-                    hidden={!showLoadNewerButton}
-                    onClick={onLoadNewer}
-                    disabled={loadingNewer}
-                  >
-                    <span className="timeline-load-indicator" data-loading={loadingNewer ? 'true' : 'false'} aria-hidden="true" />
-                    <span className="timeline-load-label">{loadingNewer ? 'Loading…' : 'Load newer'}</span>
-                  </button>
-                </div>
+                {loadingNewer ? (
+                  <div className="timeline-load-control" data-side="newer" data-state="loading">
+                    <div className="timeline-load-button" role="status">
+                      <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
+                      <span className="timeline-load-label">Loading…</span>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             </div>
 
-          </motion.div>
+          </div>
 
           {/* Jump button outside scroll container so position:fixed works on iOS Safari */}
           <button

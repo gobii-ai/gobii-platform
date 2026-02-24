@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 
 import { scheduleLoginRedirect } from '../api/http'
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { useAgentChatStore } from '../stores/agentChatStore'
+import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 
@@ -68,11 +70,11 @@ export function useAgentChatSocket(
     onAgentProfileEvent?: (payload: Record<string, unknown>) => void
   } = {},
 ): AgentChatSocketSnapshot {
+  const queryClient = useQueryClient()
   const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
   const updateAgentIdentityRef = useRef(useAgentChatStore.getState().updateAgentIdentity)
   const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
-  const refreshLatestRef = useRef(useAgentChatStore.getState().refreshLatest)
   const refreshProcessingRef = useRef(useAgentChatStore.getState().refreshProcessing)
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
   const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
@@ -83,7 +85,6 @@ export function useAgentChatSocket(
       updateProcessingRef.current = state.updateProcessing
       updateAgentIdentityRef.current = state.updateAgentIdentity
       receiveStreamRef.current = state.receiveStreamEvent
-      refreshLatestRef.current = state.refreshLatest
       refreshProcessingRef.current = state.refreshProcessing
     }),
   [])
@@ -240,9 +241,9 @@ export function useAgentChatSocket(
       return
     }
     lastSyncAtRef.current = now
-    void refreshLatestRef.current()
+    void refreshTimelineLatestInCache(queryClient, agentIdRef.current)
     void refreshProcessingRef.current()
-  }, [])
+  }, [queryClient])
 
   const updateSubscription = useCallback((nextAgentId: string | null) => {
     const socket = socketRef.current

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import type {
   AgentMessage,
@@ -11,12 +12,23 @@ import type {
 } from '../types/agentChat'
 import type { InsightEvent } from '../types/insight'
 import { INSIGHT_TIMING } from '../types/insight'
-import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus, fetchAgentInsights } from '../api/agentChat'
+import { sendAgentMessage, fetchProcessingStatus, fetchAgentInsights } from '../api/agentChat'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
-import { mergeTimelineEvents, normalizeTimelineEvent, prepareTimelineEvents } from './agentChatTimeline'
+import { mergeTimelineEvents, normalizeTimelineEvent } from './agentChatTimeline'
+import {
+  injectRealtimeEventIntoCache,
+  flushPendingEventsToCache,
+  updateOptimisticEventInCache,
+  refreshTimelineLatestInCache,
+} from '../hooks/useTimelineCacheInjector'
+import { timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 
-const TIMELINE_WINDOW_SIZE = 100
-let refreshLatestInFlight = false
+// Module-level queryClient reference, set once from AgentChatPage
+let queryClientRef: QueryClient | null = null
+
+export function setTimelineQueryClient(client: QueryClient) {
+  queryClientRef = client
+}
 
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
 
@@ -73,19 +85,6 @@ function resolveNextScheduledAt(snapshot: ProcessingSnapshot, fallback: string |
   return fallback
 }
 
-function findLatestThinkingEvent(events: TimelineEvent[]): ThinkingEvent | null {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    const event = events[i]
-    if (event.kind === 'thinking') {
-      return event
-    }
-    if (event.kind === 'steps' && event.thinkingEntries?.length) {
-      return event.thinkingEntries[event.thinkingEntries.length - 1]
-    }
-  }
-  return null
-}
-
 function buildTimelineThinkingStream(event: ThinkingEvent): StreamState {
   return {
     streamId: `timeline:${event.cursor}`,
@@ -97,17 +96,7 @@ function buildTimelineThinkingStream(event: ThinkingEvent): StreamState {
   }
 }
 
-function isThinkingOnlyEvent(event: TimelineEvent): boolean {
-  if (event.kind === 'thinking') {
-    return true
-  }
-  if (event.kind !== 'steps') {
-    return false
-  }
-  const hasTools = event.entries.length > 0 || Boolean(event.kanbanEntries?.length)
-  const hasThinking = Boolean(event.thinkingEntries?.length)
-  return hasThinking && !hasTools
-}
+
 
 const OPTIMISTIC_MATCH_WINDOW_MS = 120_000
 
@@ -160,21 +149,6 @@ function removeOptimisticMatch(events: TimelineEvent[], signature: MessageSignat
   return { events, removed: false }
 }
 
-function removeOptimisticMatches(events: TimelineEvent[], incoming: TimelineEvent[]): TimelineEvent[] {
-  let nextEvents = events
-  for (const event of incoming) {
-    if (event.kind !== 'message' || event.message.isOutbound || event.message.status === 'sending') {
-      continue
-    }
-    const signature = buildMessageSignature(event.message)
-    const updated = removeOptimisticMatch(nextEvents, signature)
-    if (updated.removed) {
-      nextEvents = updated.events
-    }
-  }
-  return nextEvents
-}
-
 function updateOptimisticStatus(
   events: TimelineEvent[],
   clientId: string,
@@ -201,15 +175,6 @@ function updateOptimisticStatus(
     },
   }
   return { events: next, updated: true }
-}
-
-function hasAgentResponse(events: TimelineEvent[]): boolean {
-  return events.some((event) => {
-    if (event.kind === 'thinking') {
-      return true
-    }
-    return event.kind === 'message' && Boolean(event.message.isOutbound)
-  })
 }
 
 function buildOptimisticMessageEvent(body: string, attachments: File[]): { event: TimelineEvent; clientId: string } {
@@ -249,48 +214,44 @@ function buildOptimisticMessageEvent(body: string, attachments: File[]): { event
   }
 }
 
-// Cached state for preserving agent data when switching between agents
-type CachedAgentState = {
-  events: TimelineEvent[]
-  oldestCursor: string | null
-  newestCursor: string | null
-  hasMoreOlder: boolean
-  hasMoreNewer: boolean
-  processingActive: boolean
-  processingStartedAt: number | null
-  awaitingResponse: boolean
-  processingWebTasks: ProcessingWebTask[]
-  nextScheduledAt: string | null
-  agentColorHex: string | null
-  agentName: string | null
-  agentAvatarUrl: string | null
-  streaming: StreamState | null
-  streamingThinkingCollapsed: boolean
+/**
+ * Remove optimistic matches from the react-query cache.
+ * Called when a real event arrives that matches a pending optimistic event.
+ */
+function removeOptimisticMatchFromCache(agentId: string, signature: MessageSignature) {
+  if (!queryClientRef) {
+    return
+  }
+  const key = timelineQueryKey(agentId)
+  queryClientRef.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+    if (!old?.pages?.length) {
+      return old
+    }
+    let changed = false
+    const pages = old.pages.map((page) => {
+      const result = removeOptimisticMatch(page.events, signature)
+      if (result.removed) {
+        changed = true
+        return { ...page, events: result.events }
+      }
+      return page
+    })
+    return changed ? { ...old, pages } : old
+  })
 }
 
 export type AgentChatState = {
   agentId: string | null
-  events: TimelineEvent[]
-  agentStateCache: Record<string, CachedAgentState>
   streaming: StreamState | null
   streamingLastUpdatedAt: number | null
   streamingClearOnDone: boolean
   streamingThinkingCollapsed: boolean
-  oldestCursor: string | null
-  newestCursor: string | null
-  hasMoreOlder: boolean
-  hasMoreNewer: boolean
   hasUnseenActivity: boolean
   processingActive: boolean
   processingStartedAt: number | null
   awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
   nextScheduledAt: string | null
-  loading: boolean
-  loadingOlder: boolean
-  loadingNewer: boolean
-  refreshingLatest: boolean
-  error: string | null
   autoScrollPinned: boolean
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
@@ -305,19 +266,15 @@ export type AgentChatState = {
   insightProcessingStartedAt: number | null
   dismissedInsightIds: Set<string>
   insightsPaused: boolean
-  initialize: (
-    agentId: string,
+  setAgentId: (
+    agentId: string | null,
     options?: {
       agentColorHex?: string | null
       agentName?: string | null
       agentAvatarUrl?: string | null
     },
-  ) => Promise<void>
+  ) => void
   refreshProcessing: () => Promise<void>
-  refreshLatest: () => Promise<void>
-  loadOlder: () => Promise<void>
-  loadNewer: () => Promise<void>
-  jumpToLatest: () => Promise<void>
   sendMessage: (body: string, attachments?: File[]) => Promise<void>
   receiveRealtimeEvent: (event: TimelineEvent) => void
   receiveStreamEvent: (payload: StreamEventPayload) => void
@@ -344,27 +301,16 @@ export type AgentChatState = {
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentId: null,
-  events: [],
-  agentStateCache: {},
   streaming: null,
   streamingLastUpdatedAt: null,
   streamingClearOnDone: false,
   streamingThinkingCollapsed: false,
-  oldestCursor: null,
-  newestCursor: null,
-  hasMoreOlder: false,
-  hasMoreNewer: false,
   hasUnseenActivity: false,
   processingActive: false,
   processingStartedAt: null,
   awaitingResponse: false,
   processingWebTasks: [],
   nextScheduledAt: null,
-  loading: false,
-  loadingOlder: false,
-  loadingNewer: false,
-  refreshingLatest: false,
-  error: null,
   autoScrollPinned: true,
   autoScrollPinSuppressedUntil: null,
   pendingEvents: [],
@@ -380,55 +326,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   dismissedInsightIds: new Set(),
   insightsPaused: false,
 
-  async initialize(agentId, options) {
+  setAgentId(agentId, options) {
     const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
     const providedName = options?.agentName ?? null
     const providedAvatarUrl = options?.agentAvatarUrl ?? null
     const reuseExisting = get().agentId === agentId
-    const fallbackColor = reuseExisting ? get().agentColorHex : DEFAULT_CHAT_COLOR_HEX
-    const fallbackName = reuseExisting ? get().agentName : null
-    const fallbackAvatarUrl = reuseExisting ? get().agentAvatarUrl : null
-
-    // Cache current agent's state before switching (if we have a different agent)
-    const currentState = get()
-    let nextCache = currentState.agentStateCache
-    const currentAgentIdForCache = currentState.agentId
-    const shouldCache =
-      currentAgentIdForCache &&
-      currentAgentIdForCache !== agentId &&
-      (
-        currentState.events.length > 0 ||
-        currentState.processingActive ||
-        currentState.awaitingResponse ||
-        currentState.processingStartedAt !== null ||
-        currentState.processingWebTasks.length > 0 ||
-        currentState.streaming !== null
-      )
-    if (shouldCache && currentAgentIdForCache) {
-      nextCache = {
-        ...currentState.agentStateCache,
-        [currentAgentIdForCache]: {
-          events: currentState.events,
-          oldestCursor: currentState.oldestCursor,
-          newestCursor: currentState.newestCursor,
-          hasMoreOlder: currentState.hasMoreOlder,
-          hasMoreNewer: currentState.hasMoreNewer,
-          processingActive: currentState.processingActive,
-          processingStartedAt: currentState.processingStartedAt,
-          awaitingResponse: currentState.awaitingResponse,
-          processingWebTasks: currentState.processingWebTasks,
-          nextScheduledAt: currentState.nextScheduledAt,
-          agentColorHex: currentState.agentColorHex,
-          agentName: currentState.agentName,
-          agentAvatarUrl: currentState.agentAvatarUrl,
-          streaming: currentState.streaming,
-          streamingThinkingCollapsed: currentState.streamingThinkingCollapsed,
-        },
-      }
-    }
-
-    // Check if we have cached state for the new agent
-    const cachedState = nextCache[agentId]
 
     // Clear insight rotation timer when switching to a different agent
     if (!reuseExisting) {
@@ -438,38 +340,29 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       }
     }
 
+    const fallbackColor = reuseExisting ? get().agentColorHex : DEFAULT_CHAT_COLOR_HEX
+    const fallbackName = reuseExisting ? get().agentName : null
+    const fallbackAvatarUrl = reuseExisting ? get().agentAvatarUrl : null
+
     set({
-      loading: true,
       agentId,
-      // Use cached state if available, otherwise clear
-      events: cachedState?.events ?? [],
-      oldestCursor: cachedState?.oldestCursor ?? null,
-      newestCursor: cachedState?.newestCursor ?? null,
-      hasMoreOlder: cachedState?.hasMoreOlder ?? false,
-      hasMoreNewer: cachedState?.hasMoreNewer ?? false,
       hasUnseenActivity: false,
-      processingActive: cachedState?.processingActive ?? false,
-      processingStartedAt: cachedState?.processingStartedAt ?? null,
-      awaitingResponse: cachedState?.awaitingResponse ?? false,
-      processingWebTasks: cachedState?.processingWebTasks ?? [],
-      nextScheduledAt: cachedState?.nextScheduledAt ?? null,
-      loadingOlder: false,
-      loadingNewer: false,
-      refreshingLatest: false,
+      processingActive: reuseExisting ? get().processingActive : false,
+      processingStartedAt: reuseExisting ? get().processingStartedAt : null,
+      awaitingResponse: reuseExisting ? get().awaitingResponse : false,
+      processingWebTasks: reuseExisting ? get().processingWebTasks : [],
+      nextScheduledAt: reuseExisting ? get().nextScheduledAt : null,
       pendingEvents: [],
-      error: null,
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
-      streaming: cachedState?.streaming ?? null,
-      streamingLastUpdatedAt: null,
-      streamingClearOnDone: false,
-      streamingThinkingCollapsed: cachedState?.streamingThinkingCollapsed ?? false,
-      agentColorHex: providedColor ?? cachedState?.agentColorHex ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
-      agentName: providedName ?? cachedState?.agentName ?? fallbackName ?? null,
-      agentAvatarUrl: providedAvatarUrl ?? cachedState?.agentAvatarUrl ?? fallbackAvatarUrl ?? null,
-      agentStateCache: nextCache,
-      // Reset insight state only when switching to a different agent to avoid stale data
-      // (don't reset on same-agent metadata updates like name/color changes)
+      streaming: reuseExisting ? get().streaming : null,
+      streamingLastUpdatedAt: reuseExisting ? get().streamingLastUpdatedAt : null,
+      streamingClearOnDone: reuseExisting ? get().streamingClearOnDone : false,
+      streamingThinkingCollapsed: reuseExisting ? get().streamingThinkingCollapsed : false,
+      agentColorHex: providedColor ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
+      agentName: providedName ?? fallbackName ?? null,
+      agentAvatarUrl: providedAvatarUrl ?? fallbackAvatarUrl ?? null,
+      // Reset insight state only when switching to a different agent
       ...(reuseExisting ? {} : {
         insights: [],
         currentInsightIndex: 0,
@@ -480,86 +373,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         insightsPaused: false,
       }),
     })
-
-    const currentAgentId = agentId
-    try {
-      const snapshot = await fetchAgentTimeline(agentId, {
-        direction: 'initial',
-        limit: TIMELINE_WINDOW_SIZE,
-      })
-      if (get().agentId !== currentAgentId) {
-        return
-      }
-      const events = prepareTimelineEvents(snapshot.events)
-      const oldestCursor = events.length ? events[0].cursor : null
-      const newestCursor = events.length ? events[events.length - 1].cursor : null
-      const processingSnapshot = normalizeProcessingUpdate(
-        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
-      )
-      const agentColorHex = snapshot.agent_color_hex
-        ? normalizeHexColor(snapshot.agent_color_hex)
-        : providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX
-      const agentName = snapshot.agent_name ?? providedName ?? get().agentName ?? null
-      const agentAvatarUrl = snapshot.agent_avatar_url ?? providedAvatarUrl ?? get().agentAvatarUrl ?? null
-
-      // Preserve awaitingResponse on agent switch unless we can confirm activity resumed.
-      const cachedAwaiting = cachedState?.awaitingResponse ?? false
-      let awaitingResponse = cachedAwaiting
-      if (processingSnapshot.active) {
-        awaitingResponse = false
-      } else if (cachedAwaiting && cachedState?.events?.length) {
-        const cachedCursors = new Set(cachedState.events.map((event) => event.cursor))
-        const hasNewAgentResponse = events.some((event) => (
-          !cachedCursors.has(event.cursor) &&
-          (event.kind === 'thinking' || (event.kind === 'message' && event.message.isOutbound))
-        ))
-        if (hasNewAgentResponse) {
-          awaitingResponse = false
-        }
-      }
-
-      // Determine processingStartedAt for this final state update.
-      // We must explicitly handle this to avoid race conditions with WebSocket updates.
-      const currentProcessingStartedAt = get().processingStartedAt
-      const cachedProcessingStartedAt = cachedState?.processingStartedAt ?? null
-      let finalProcessingStartedAt: number | null = null
-      if (processingSnapshot.active || awaitingResponse) {
-        // Processing is active or we're awaiting a response - ensure we have a timestamp.
-        // Prefer current state (may have been set by sendMessage or updateProcessing),
-        // fall back to cached state, then to a new timestamp as last resort.
-        finalProcessingStartedAt = currentProcessingStartedAt ?? cachedProcessingStartedAt ?? Date.now()
-      }
-      // If neither processing nor awaiting, finalProcessingStartedAt stays null (progress bar hidden)
-
-      set({
-        events,
-        oldestCursor,
-        newestCursor,
-        hasMoreOlder: snapshot.has_more_older,
-        hasMoreNewer: snapshot.has_more_newer,
-        processingActive: processingSnapshot.active,
-        processingStartedAt: finalProcessingStartedAt,
-        processingWebTasks: processingSnapshot.webTasks,
-        nextScheduledAt: resolveNextScheduledAt(processingSnapshot, cachedState?.nextScheduledAt ?? null),
-        loading: false,
-        autoScrollPinned: true,
-        autoScrollPinSuppressedUntil: null,
-        pendingEvents: [],
-        agentColorHex,
-        agentName,
-        agentAvatarUrl,
-        awaitingResponse,
-      })
-    } catch (error) {
-      if (get().agentId !== currentAgentId) {
-        return
-      }
-      console.error('Failed to initialize agent chat:', error)
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to load timeline',
-      })
-    }
   },
 
   async refreshProcessing() {
@@ -569,13 +382,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const { processing_active, processing_snapshot } = await fetchProcessingStatus(agentId)
       const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
       set((state) => {
-        // Handle processingStartedAt consistently with updateProcessing
         let processingStartedAt = state.processingStartedAt
         if (snapshot.active && !state.processingActive) {
-          // Processing just started - preserve existing timestamp or create new one
           processingStartedAt = state.processingStartedAt ?? Date.now()
         } else if (!snapshot.active && !state.awaitingResponse) {
-          // Processing ended and not awaiting - clear timestamp
           processingStartedAt = null
         }
         return {
@@ -587,259 +397,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         }
       })
     } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to refresh processing status',
-      })
-    }
-  },
-
-  async refreshLatest() {
-    const state = get()
-    if (!state.agentId || refreshLatestInFlight || state.loading || !state.newestCursor) {
-      return
-    }
-    refreshLatestInFlight = true
-    set({ refreshingLatest: true })
-    try {
-      const snapshot = await fetchAgentTimeline(state.agentId, {
-        direction: 'newer',
-        cursor: state.newestCursor ?? undefined,
-        limit: TIMELINE_WINDOW_SIZE,
-      })
-      const incoming = prepareTimelineEvents(snapshot.events)
-      const latestThinking = findLatestThinkingEvent(incoming)
-      const hasAgentActivity = hasAgentResponse(incoming)
-      const processingSnapshot = normalizeProcessingUpdate(
-        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
-      )
-      const shouldClearAwaiting = hasAgentActivity || processingSnapshot.active
-      set((current) => {
-        const agentColorHex = snapshot.agent_color_hex
-          ? normalizeHexColor(snapshot.agent_color_hex)
-          : current.agentColorHex
-        let nextStreaming = current.streaming
-        let nextStreamingClearOnDone = current.streamingClearOnDone
-
-        if (latestThinking && nextStreaming?.source === 'stream' && !nextStreaming.cursor) {
-          nextStreaming = { ...nextStreaming, cursor: latestThinking.cursor }
-        }
-
-        const hasNonThinkingIncoming = incoming.some((event) => !isThinkingOnlyEvent(event))
-        if (nextStreaming?.source === 'timeline' && hasNonThinkingIncoming) {
-          nextStreaming = null
-          nextStreamingClearOnDone = false
-        }
-        const baseEvents = removeOptimisticMatches(current.events, incoming)
-        const basePendingEvents = removeOptimisticMatches(current.pendingEvents, incoming)
-
-        // Handle processingStartedAt consistently
-        const nextAwaitingResponse = shouldClearAwaiting ? false : current.awaitingResponse
-        let processingStartedAt = current.processingStartedAt
-        if (processingSnapshot.active && !current.processingActive) {
-          processingStartedAt = current.processingStartedAt ?? Date.now()
-        } else if (!processingSnapshot.active && !nextAwaitingResponse) {
-          processingStartedAt = null
-        }
-
-        if (!current.autoScrollPinned) {
-          const pendingEvents = mergeTimelineEvents(basePendingEvents, incoming)
-          return {
-            events: baseEvents,
-            processingActive: processingSnapshot.active,
-            processingStartedAt,
-            processingWebTasks: processingSnapshot.webTasks,
-            nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
-            pendingEvents,
-            hasUnseenActivity: incoming.length ? true : current.hasUnseenActivity,
-            streaming: nextStreaming,
-            streamingClearOnDone: nextStreamingClearOnDone,
-            awaitingResponse: nextAwaitingResponse,
-            refreshingLatest: false,
-            agentColorHex,
-          }
-        }
-        const merged = mergeTimelineEvents(baseEvents, incoming)
-        const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
-        const events = merged.slice(windowStart)
-        const oldestCursor = events.length ? events[0].cursor : current.oldestCursor
-        const newestCursor = events.length ? events[events.length - 1].cursor : current.newestCursor
-        const trimmedOlder = merged.length > events.length
-        // "newer" responses report has_more_older relative to their own window;
-        // only surface older availability if we already had it or we trimmed.
-        const hasMoreOlder = trimmedOlder || current.hasMoreOlder
-        return {
-          events,
-          oldestCursor,
-          newestCursor,
-          hasMoreOlder,
-          hasMoreNewer: snapshot.has_more_newer,
-          processingActive: processingSnapshot.active,
-          processingStartedAt,
-          processingWebTasks: processingSnapshot.webTasks,
-          nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
-          pendingEvents: [],
-          streaming: nextStreaming,
-          streamingClearOnDone: nextStreamingClearOnDone,
-          awaitingResponse: nextAwaitingResponse,
-          refreshingLatest: false,
-          agentColorHex,
-        }
-      })
-    } catch (error) {
-      set({
-        refreshingLatest: false,
-        error: error instanceof Error ? error.message : 'Failed to refresh timeline',
-      })
-    } finally {
-      refreshLatestInFlight = false
-    }
-  },
-
-  async loadOlder() {
-    const state = get()
-    if (!state.agentId || state.loadingOlder || !state.hasMoreOlder) {
-      return
-    }
-    set({ loadingOlder: true })
-    try {
-      const snapshot = await fetchAgentTimeline(state.agentId, {
-        direction: 'older',
-        cursor: state.oldestCursor ?? undefined,
-        limit: TIMELINE_WINDOW_SIZE,
-      })
-      const incoming = prepareTimelineEvents(snapshot.events)
-      const merged = mergeTimelineEvents(state.events, incoming)
-      const windowSize = Math.min(TIMELINE_WINDOW_SIZE, merged.length)
-      const events = merged.slice(0, windowSize)
-      const oldestCursor = events.length ? events[0].cursor : null
-      const newestCursor = events.length ? events[events.length - 1].cursor : null
-      const trimmedNewer = merged.length > events.length
-      // "older" responses report has_more_newer relative to their own window;
-      // keep existing state unless we trimmed newer items.
-      const hasMoreNewer = trimmedNewer || state.hasMoreNewer
-      set((current) => ({
-        events,
-        oldestCursor,
-        newestCursor,
-        hasMoreOlder: snapshot.has_more_older,
-        hasMoreNewer,
-        loadingOlder: false,
-        agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
-      }))
-    } catch (error) {
-      set({
-        loadingOlder: false,
-        error: error instanceof Error ? error.message : 'Failed to load older history',
-      })
-    }
-  },
-
-  async loadNewer() {
-    const state = get()
-    if (!state.agentId || state.loadingNewer || !state.hasMoreNewer) {
-      return
-    }
-    set({ loadingNewer: true })
-    try {
-      const snapshot = await fetchAgentTimeline(state.agentId, {
-        direction: 'newer',
-        cursor: state.newestCursor ?? undefined,
-        limit: TIMELINE_WINDOW_SIZE,
-      })
-      const incoming = prepareTimelineEvents(snapshot.events)
-      const baseEvents = removeOptimisticMatches(state.events, incoming)
-      const merged = mergeTimelineEvents(baseEvents, incoming)
-      const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
-      const events = merged.slice(windowStart)
-      const oldestCursor = events.length ? events[0].cursor : null
-      const newestCursor = events.length ? events[events.length - 1].cursor : null
-      const trimmedOlder = merged.length > events.length
-      // "newer" responses report has_more_older relative to their own window;
-      // only surface older availability if we already had it or we trimmed.
-      const hasMoreOlder = trimmedOlder || state.hasMoreOlder
-      const processingSnapshot = normalizeProcessingUpdate(
-        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
-      )
-      const hasAgentActivity = hasAgentResponse(incoming)
-      const shouldClearAwaiting = hasAgentActivity || processingSnapshot.active
-      set((current) => {
-        // Handle processingStartedAt consistently
-        const nextAwaitingResponse = shouldClearAwaiting ? false : current.awaitingResponse
-        let processingStartedAt = current.processingStartedAt
-        if (processingSnapshot.active && !current.processingActive) {
-          processingStartedAt = current.processingStartedAt ?? Date.now()
-        } else if (!processingSnapshot.active && !nextAwaitingResponse) {
-          processingStartedAt = null
-        }
-        return {
-          events,
-          oldestCursor,
-          newestCursor,
-          hasMoreOlder,
-          hasMoreNewer: snapshot.has_more_newer,
-          processingActive: processingSnapshot.active,
-          processingStartedAt,
-          processingWebTasks: processingSnapshot.webTasks,
-          nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
-          loadingNewer: false,
-          agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
-          awaitingResponse: nextAwaitingResponse,
-        }
-      })
-    } catch (error) {
-      set({
-        loadingNewer: false,
-        error: error instanceof Error ? error.message : 'Failed to load newer events',
-      })
-    }
-  },
-
-  async jumpToLatest() {
-    const state = get()
-    if (!state.agentId) {
-      return
-    }
-    set({ loading: true })
-    try {
-      const snapshot = await fetchAgentTimeline(state.agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
-      const events = prepareTimelineEvents(snapshot.events)
-      const oldestCursor = events.length ? events[0].cursor : null
-      const newestCursor = events.length ? events[events.length - 1].cursor : null
-      const processingSnapshot = normalizeProcessingUpdate(
-        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
-      )
-      set((current) => {
-        // Handle processingStartedAt consistently
-        // When jumping to latest, we reset awaitingResponse to false
-        let processingStartedAt = current.processingStartedAt
-        if (processingSnapshot.active && !current.processingActive) {
-          processingStartedAt = current.processingStartedAt ?? Date.now()
-        } else if (!processingSnapshot.active) {
-          // Not awaiting (always false here), so clear timestamp
-          processingStartedAt = null
-        }
-        return {
-          events,
-          oldestCursor,
-          newestCursor,
-          hasMoreOlder: snapshot.has_more_older,
-          hasMoreNewer: snapshot.has_more_newer,
-          processingActive: processingSnapshot.active,
-          processingStartedAt,
-          processingWebTasks: processingSnapshot.webTasks,
-          nextScheduledAt: resolveNextScheduledAt(processingSnapshot, current.nextScheduledAt),
-          hasUnseenActivity: false,
-          loading: false,
-          pendingEvents: [],
-          agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
-          awaitingResponse: false,
-        }
-      })
-    } catch (error) {
-      set({
-        loading: false,
-        error: error instanceof Error ? error.message : 'Failed to jump to latest',
-      })
+      console.error('Failed to refresh processing status:', error)
     }
   },
 
@@ -852,23 +410,26 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     if (!trimmed && attachments.length === 0) {
       return
     }
+    const agentId = state.agentId
     const { event: optimisticEvent, clientId } = buildOptimisticMessageEvent(trimmed, attachments)
     set({ awaitingResponse: true, processingStartedAt: Date.now() })
+    // Inject optimistic event into react-query cache
     get().receiveRealtimeEvent(optimisticEvent)
     try {
-      const event = await sendAgentMessage(state.agentId, trimmed, attachments)
+      const event = await sendAgentMessage(agentId, trimmed, attachments)
       get().receiveRealtimeEvent(event)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send message'
+      // Update optimistic event status in cache
+      if (queryClientRef) {
+        updateOptimisticEventInCache(queryClientRef, agentId, clientId, 'failed', message)
+      }
       set((current) => {
-        const updatedEvents = updateOptimisticStatus(current.events, clientId, 'failed', message)
         const updatedPending = updateOptimisticStatus(current.pendingEvents, clientId, 'failed', message)
         return {
-          events: updatedEvents.events,
           pendingEvents: updatedPending.events,
           awaitingResponse: false,
           processingStartedAt: null,
-          error: message,
         }
       })
       throw error
@@ -877,16 +438,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   receiveRealtimeEvent(event) {
     const normalized = normalizeTimelineEvent(event)
+    const agentId = get().agentId
+
     set((state) => {
-      let events = state.events
       let pendingEvents = state.pendingEvents
       let awaitingResponse = state.awaitingResponse
 
+      // Remove optimistic matches from both cache and pending events
       if (normalized.kind === 'message' && !normalized.message.isOutbound && normalized.message.status !== 'sending') {
         const signature = buildMessageSignature(normalized.message)
-        const updatedEvents = removeOptimisticMatch(events, signature)
-        if (updatedEvents.removed) {
-          events = updatedEvents.events
+        if (agentId) {
+          removeOptimisticMatchFromCache(agentId, signature)
         }
         const updatedPending = removeOptimisticMatch(pendingEvents, signature)
         if (updatedPending.removed) {
@@ -924,15 +486,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         awaitingResponse = false
       }
 
-      // Reset progress bar when new activity arrives live (indicates new work cycle)
-      // This only affects live events, not cached state when switching agents
       const shouldResetProgress = normalized.kind === 'steps' || normalized.kind === 'thinking' || isOutboundMessage
       const nextProcessingStartedAt = shouldResetProgress ? Date.now() : state.processingStartedAt
 
       if (!state.autoScrollPinned) {
         const mergedPending = mergeTimelineEvents(pendingEvents, [normalized])
         return {
-          events,
           pendingEvents: mergedPending,
           hasUnseenActivity: true,
           streaming: nextStreaming,
@@ -943,13 +502,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         }
       }
 
-      const merged = mergeTimelineEvents(events, [normalized])
-      const newestCursor = merged.length ? merged[merged.length - 1].cursor : null
-      const oldestCursor = merged.length ? merged[0].cursor : null
+      // When pinned, inject into react-query cache
+      if (queryClientRef && agentId) {
+        injectRealtimeEventIntoCache(queryClientRef, agentId, normalized)
+      }
+
       return {
-        events: merged,
-        newestCursor,
-        oldestCursor,
         pendingEvents: [],
         streaming: nextStreaming,
         streamingClearOnDone: nextStreamingClearOnDone,
@@ -968,7 +526,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const isDone = payload.status === 'done'
     const isDelta = payload.status === 'delta'
     const now = Date.now()
-    let shouldRefreshLatest = false
+    let shouldInvalidateQuery = false
 
     set((state) => {
       const existingStream = state.streaming
@@ -980,15 +538,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       } else {
         base = existingStream
       }
-      // Keep awaitingResponse until a processing/timeline update explicitly clears it.
-      // This prevents a loading-indicator gap between stream completion and follow-up tool events.
-      // Also mark fresh streams as awaiting so non-sendMessage stream flows stay consistent.
       const awaitingResponse = state.awaitingResponse || isNewStream
 
       const reasoningDelta = payload.reasoning_delta ?? ''
       const contentDelta = payload.content_delta ?? ''
 
-      // Reset progress when new stream starts OR when reasoning first appears (thinking begins)
       const hadNoReasoning = !base.reasoning?.trim()
       const hasNewReasoning = Boolean(reasoningDelta)
       const isThinkingStart = hadNoReasoning && hasNewReasoning
@@ -1032,7 +586,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
             processingStartedAt,
           }
         }
-        shouldRefreshLatest = true
+        shouldInvalidateQuery = true
         return {
           streaming: next,
           hasUnseenActivity,
@@ -1048,7 +602,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         return {
           streaming: next,
           hasUnseenActivity,
-          // Start expanded so user can see thinking, auto-collapses when done
           streamingThinkingCollapsed: false,
           streamingClearOnDone: false,
           streamingLastUpdatedAt: now,
@@ -1071,8 +624,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       }
     })
 
-    if (shouldRefreshLatest) {
-      void get().refreshLatest()
+    if (shouldInvalidateQuery && queryClientRef) {
+      const agentId = get().agentId
+      if (agentId) {
+        void refreshTimelineLatestInCache(queryClientRef, agentId)
+      }
     }
   },
 
@@ -1095,13 +651,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   updateProcessing(snapshotInput) {
     const snapshot = normalizeProcessingUpdate(snapshotInput)
     set((state) => {
-      // Track when processing started (for progress bar)
       let processingStartedAt = state.processingStartedAt
       if (snapshot.active && !state.processingActive) {
-        // Processing just started; preserve the original start time if we're already awaiting a response.
         processingStartedAt = state.processingStartedAt ?? Date.now()
       } else if (!snapshot.active) {
-        // Processing ended; keep the timer if we're still awaiting a response.
         processingStartedAt = state.awaitingResponse ? state.processingStartedAt : null
       }
       return {
@@ -1130,38 +683,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         return state
       }
 
-      let nextCache = state.agentStateCache
-      const cachedState = state.agentStateCache[targetAgentId]
-      if (cachedState) {
-        nextCache = {
-          ...state.agentStateCache,
-          [targetAgentId]: {
-            ...cachedState,
-            ...(hasName ? { agentName: update.agentName ?? null } : {}),
-            ...(hasColor
-              ? { agentColorHex: update.agentColorHex ? normalizeHexColor(update.agentColorHex) : null }
-              : {}),
-            ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
-          },
-        }
-      }
-
       const isCurrentAgent = state.agentId === targetAgentId
-      if (!isCurrentAgent && nextCache === state.agentStateCache) {
+      if (!isCurrentAgent) {
         return state
       }
 
       return {
-        ...(nextCache !== state.agentStateCache ? { agentStateCache: nextCache } : {}),
-        ...(isCurrentAgent
-          ? {
-            ...(hasName ? { agentName: update.agentName ?? null } : {}),
-            ...(hasColor
-              ? { agentColorHex: update.agentColorHex ? normalizeHexColor(update.agentColorHex) : null }
-              : {}),
-            ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
-          }
+        ...(hasName ? { agentName: update.agentName ?? null } : {}),
+        ...(hasColor
+          ? { agentColorHex: update.agentColorHex ? normalizeHexColor(update.agentColorHex) : null }
           : {}),
+        ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
       }
     })
   },
@@ -1169,15 +701,13 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   setAutoScrollPinned(pinned) {
     set((state) => {
       if (pinned && state.pendingEvents.length) {
-        const merged = mergeTimelineEvents(state.events, state.pendingEvents)
-        const newestCursor = merged.length ? merged[merged.length - 1].cursor : state.newestCursor
-        const oldestCursor = merged.length ? merged[0].cursor : state.oldestCursor
+        // Flush pending events into react-query cache
+        if (queryClientRef && state.agentId) {
+          flushPendingEventsToCache(queryClientRef, state.agentId, state.pendingEvents)
+        }
         return {
           autoScrollPinned: true,
           hasUnseenActivity: false,
-          events: merged,
-          newestCursor,
-          oldestCursor,
           pendingEvents: [],
           autoScrollPinSuppressedUntil: null,
         }
@@ -1210,7 +740,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const agentId = get().agentId
     if (!agentId) return
 
-    // Check if insights are still fresh (fetched within 5 minutes)
     const now = Date.now()
     const fetchedAt = get().insightsFetchedAt
     if (fetchedAt && now - fetchedAt < 5 * 60 * 1000) {
@@ -1231,26 +760,20 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   startInsightRotation() {
     const state = get()
-    // Clear any existing timer
     if (state.insightRotationTimer) {
       clearTimeout(state.insightRotationTimer)
     }
 
-    // Start each processing cycle unpaused so the tab progress indicator
-    // and rotation always resume after any prior manual pause.
     set({
       insightProcessingStartedAt: Date.now(),
       insightsPaused: false,
     })
 
-    // Fetch insights if not already fetched or stale
     void get().fetchInsights()
 
-    // Start rotation timer
     const rotate = () => {
       const current = get()
 
-      // Don't rotate if paused
       if (current.insightsPaused) {
         return
       }
@@ -1260,21 +783,18 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       )
 
       if (availableInsights.length <= 1) {
-        return // No rotation needed
+        return
       }
 
-      // Move to next insight
       const nextIndex = (current.currentInsightIndex + 1) % availableInsights.length
       set({ currentInsightIndex: nextIndex })
 
-      // Schedule next rotation if still processing and not paused
       if ((current.processingActive || current.awaitingResponse) && !current.insightsPaused) {
         const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
         set({ insightRotationTimer: timer })
       }
     }
 
-    // Start first rotation after initial delay.
     const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
     set({ insightRotationTimer: timer })
   },
@@ -1284,8 +804,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     if (timer) {
       clearTimeout(timer)
     }
-    // Pause is temporary UI state; clear it when work stops so the next cycle
-    // doesn't inherit a stale paused state.
     set({ insightRotationTimer: null, insightsPaused: false })
   },
 
@@ -1294,7 +812,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const newDismissed = new Set(state.dismissedInsightIds)
       newDismissed.add(insightId)
 
-      // If we dismissed the current insight, move to next
       const availableInsights = state.insights.filter(
         (insight) => !newDismissed.has(insight.insightId)
       )
@@ -1314,13 +831,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   getCurrentInsight() {
     const state = get()
 
-    // Don't show insights if processing hasn't been active long enough
     const processingStartedAt = state.insightProcessingStartedAt
     if (processingStartedAt && Date.now() - processingStartedAt < INSIGHT_TIMING.showAfterMs) {
       return null
     }
 
-    // Filter out dismissed insights
     const availableInsights = state.insights.filter(
       (insight) => !state.dismissedInsightIds.has(insight.insightId)
     )
@@ -1336,17 +851,14 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   setInsightsPaused(paused) {
     const state = get()
 
-    // Clear existing timer when pausing
     if (paused && state.insightRotationTimer) {
       clearTimeout(state.insightRotationTimer)
       set({ insightsPaused: true, insightRotationTimer: null })
       return
     }
 
-    // Resume rotation when unpausing
     if (!paused) {
       set({ insightsPaused: false })
-      // Restart rotation if still processing
       if (state.processingActive || state.awaitingResponse) {
         get().startInsightRotation()
       }
@@ -1360,7 +872,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     )
     if (availableInsights.length === 0) return
 
-    // Clamp index to valid range
     const validIndex = Math.max(0, Math.min(index, availableInsights.length - 1))
     set({ currentInsightIndex: validIndex })
   },
