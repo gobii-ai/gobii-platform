@@ -174,6 +174,23 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     setPlanConfirmOpen(true)
   }, [closeUpgradeModal, upgradeModalSource])
 
+  const handleFreeUpgradeClick = useCallback(() => {
+    track(AnalyticsEvent.CTA_FREE_UPGRADE_PLAN, {
+      source: 'billing',
+    })
+    window.location.assign('/pricing/')
+  }, [])
+
+  const showPlanAction = !isOrg && isProprietaryMode && initialData.contextType === 'personal'
+  const handlePlanActionClick = useCallback(() => {
+    if (!showPlanAction) return
+    if (initialData.paidSubscriber) {
+      openUpgradeModal('unknown')
+      return
+    }
+    handleFreeUpgradeClick()
+  }, [showPlanAction, initialData.paidSubscriber, openUpgradeModal, handleFreeUpgradeClick])
+
   const handleManageInStripe = useCallback(() => {
     const stripePortalUrl = initialData.endpoints.stripePortalUrl
     if (!stripePortalUrl || typeof document === 'undefined') {
@@ -334,7 +351,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       <main className="app-main">
         <BillingHeader
           initialData={initialData}
-          onChangePlan={!isOrg && isProprietaryMode ? () => openUpgradeModal('unknown') : undefined}
+          onChangePlan={showPlanAction ? handlePlanActionClick : undefined}
           onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? openCancelDialog : undefined}
           onResume={!isOrg
             && initialData.contextType === 'personal'
@@ -554,7 +571,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           setPlanConfirmBusy(true)
           setPlanConfirmError(null)
           try {
-            const result = await jsonRequest<{ ok: boolean; stripeActionUrl?: string }>(
+            const result = await jsonRequest<{ ok: boolean; redirectUrl?: string; stripeActionUrl?: string }>(
               initialData.endpoints.updateUrl,
               {
                 method: 'POST',
@@ -562,6 +579,10 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
                 json: { ownerType: 'user', planTarget: planConfirmTarget },
               },
             )
+            if (result?.redirectUrl) {
+              window.location.assign(result.redirectUrl)
+              return
+            }
             if (result?.stripeActionUrl) {
               window.location.assign(result.stripeActionUrl)
               return

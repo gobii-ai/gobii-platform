@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any, Mapping
+from urllib.parse import urlencode
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import transaction
@@ -731,13 +732,16 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                 create_if_missing=False,
             )
             if action == "absent" or not updated:
-                logger.warning(
-                    "Plan change requested but no active subscription found for user %s (target=%s, action=%s)",
+                checkout_name = "proprietary:startup_checkout" if plan_target == "startup" else "proprietary:scale_checkout"
+                checkout_redirect = f"{reverse(checkout_name)}?{urlencode({'return_to': reverse('billing')})}"
+                logger.info(
+                    "Plan change requested without active subscription for user %s (target=%s, action=%s); redirecting to checkout",
                     getattr(owner_obj, "id", None),
                     plan_target,
                     action,
                 )
-                raise BillingUpdateError("no_active_subscription", status=400, detail=SUPPORT_DETAIL)
+                response_dict["redirectUrl"] = checkout_redirect
+                return
 
             updated_id = updated.get("id") if isinstance(updated, Mapping) else None
             if not updated_id:

@@ -65,6 +65,8 @@ export const AnalyticsEvent = {
   UPGRADE_PLAN_SELECTED: 'Upgrade Plan Selected',
   /** User was redirected to checkout for an upgrade */
   UPGRADE_CHECKOUT_REDIRECTED: 'Upgrade Checkout Redirected',
+  /** Free user clicked upgrade CTA from billing page */
+  CTA_FREE_UPGRADE_PLAN: 'CTA - Free - Upgrade Plan',
 
   // ============================================
   // Intelligence Gate Events
