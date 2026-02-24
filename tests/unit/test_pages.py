@@ -38,6 +38,20 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @tag("batch_pages")
+    def test_home_page_shows_fish_in_community_mode(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-gobii-fish-cursor')
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_home_page_shows_fish_in_proprietary_mode(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-gobii-fish-cursor')
+
     @tag("batch_pages")
     def test_home_page_has_meta_description(self):
         response = self.client.get("/")

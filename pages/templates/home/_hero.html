@@ -1,12 +1,21 @@
-<div class="text-center mb-8">
-  <h1 class="text-3xl sm:text-3xl lg:text-4xl font-medium text-gray-900 leading-tight max-w-3xl mx-auto">
-    {% if landing_hero_text %}
-      <span class="font-medium">{{ landing_hero_text|safe }}</span>
-    {% else %}
-      <span class="font-medium">Community Edition</span>
-    {% endif %}
-  </h1>
-  <p class="mt-4 text-sm sm:text-base text-gray-500 max-w-3xl mx-auto leading-relaxed">
-    Open-source build of Gobii for self-hosting.
-  </p>
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 md:gap-6 mb-8 lg:max-w-3xl mx-auto">
+  <div class="text-center md:text-left">
+    <h1 class="text-3xl sm:text-3xl lg:text-4xl font-medium text-gray-900 leading-tight max-w-3xl mx-auto md:mx-0">
+      {% if landing_hero_text %}
+        <span class="font-medium">{{ landing_hero_text|safe }}</span>
+      {% else %}
+        <span class="font-medium">Community Edition</span>
+      {% endif %}
+    </h1>
+    <p class="mt-4 text-sm sm:text-base text-gray-500 max-w-3xl mx-auto md:mx-0 leading-relaxed">
+      Open-source build of Gobii for self-hosting.
+    </p>
+  </div>
+  <div class="flex justify-center md:block flex-shrink-0 order-first md:order-last">
+    <div class="gobii-hero-fish-cursor" data-gobii-fish-cursor>
+      <div class="gobii-hero-fish" role="img" aria-label="Gobii AI mascot, an animated fish, swimming on the homepage">
+        {% include "home/_gobii_fish.svg" %}
+      </div>
+    </div>
+  </div>
 </div>
