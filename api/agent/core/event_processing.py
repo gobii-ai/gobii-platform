@@ -3343,6 +3343,15 @@ def _run_agent_loop(
                         )
                 return True, bool(skill_apply.changed)
 
+            def _apply_runtime_updates() -> bool:
+                config_errors = _apply_agent_config_updates()
+                kanban_errors, _ = _apply_kanban_updates()
+                skill_errors, skills_changed = _apply_skill_updates()
+                if skills_changed:
+                    nonlocal tools
+                    tools = get_agent_tools(agent)
+                return config_errors or kanban_errors or skill_errors
+
             msg_content = _extract_message_content(msg)
             raw_message_text = (msg_content or "").strip()
             message_text, has_canonical_continuation = _strip_canonical_continuation_phrase(
@@ -3427,12 +3436,7 @@ def _run_agent_loop(
             _persist_reasoning_step(reasoning_source)
 
             if not tool_calls:
-                config_errors = _apply_agent_config_updates()
-                kanban_errors, _ = _apply_kanban_updates()
-                skill_errors, skills_changed = _apply_skill_updates()
-                if skills_changed:
-                    tools = get_agent_tools(agent)
-                if config_errors or kanban_errors or skill_errors:
+                if _apply_runtime_updates():
                     reasoning_only_streak = 0
                     continue
                 if not message_text and not thinking_content:
@@ -3928,12 +3932,7 @@ def _run_agent_loop(
                     if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
                         executed_non_message_action = True
 
-            config_had_errors = _apply_agent_config_updates()
-            kanban_had_errors, _ = _apply_kanban_updates()
-            skill_had_errors, skills_changed = _apply_skill_updates()
-            if skills_changed:
-                tools = get_agent_tools(agent)
-            if config_had_errors or kanban_had_errors or skill_had_errors:
+            if _apply_runtime_updates():
                 followup_required = True
 
             if executed_non_message_action:
