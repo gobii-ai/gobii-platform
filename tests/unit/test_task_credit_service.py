@@ -86,6 +86,51 @@ class TaskCreditServiceGrantSubscriptionCreditsTests(TestCase):
         args, kwargs = TaskCredit.objects.create.call_args
         self.assertEqual(kwargs["expiration_date"], sub.current_period_end)
         self.assertEqual(kwargs["credits"], plan["monthly_task_credits"])
+        self.assertFalse(kwargs["free_trial_start"])
+
+    @patch("tasks.services.timezone")
+    @patch("tasks.services.apps.get_model")
+    @patch("tasks.services.get_active_subscription")
+    @patch("tasks.services.get_user_plan")
+    def test_grant_subscription_credits_updates_existing_invoice_to_trial_start(
+        self,
+        mock_plan,
+        mock_subscription,
+        mock_get_model,
+        mock_timezone,
+    ):
+        user = User.objects.create(username="user4b")
+        TaskCredit = MagicMock()
+        mock_get_model.return_value = TaskCredit
+
+        existing_credit = MagicMock()
+        existing_credit.plan = PlanNames.STARTUP
+        existing_credit.credits = 5
+        existing_credit.expiration_date = datetime(2024, 1, 31)
+        existing_credit.free_trial_start = False
+        TaskCredit.objects.filter.return_value.first.return_value = existing_credit
+
+        plan = {"id": PlanNames.STARTUP, "monthly_task_credits": 5}
+        mock_plan.return_value = plan
+
+        sub = MagicMock()
+        sub.current_period_end = datetime(2024, 1, 31)
+        mock_subscription.return_value = sub
+
+        mock_timezone.now.return_value = datetime(2024, 1, 1)
+
+        granted = TaskCreditService.grant_subscription_credits(
+            user,
+            plan=plan,
+            invoice_id="inv-trial",
+            free_trial_start=True,
+        )
+
+        self.assertEqual(granted, 5)
+        self.assertTrue(existing_credit.free_trial_start)
+        existing_credit.save.assert_called_once()
+        save_kwargs = existing_credit.save.call_args.kwargs
+        self.assertIn("free_trial_start", save_kwargs["update_fields"])
 
 
 @tag("batch_task_credits")

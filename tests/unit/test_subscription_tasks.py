@@ -76,6 +76,7 @@ class GrantMonthlyFreeCreditsTaskTests(TestCase):
         self.assertEqual(call_kwargs["grant_date"], expected_grant)
         self.assertEqual(call_kwargs["expiration_date"], expected_expiration)
         self.assertEqual(call_kwargs["plan"]["id"], PlanNamesChoices.FREE)
+        self.assertFalse(call_kwargs.get("free_trial_start", False))
 
     def test_fallback_ignores_compensation_grants(self):
         with timezone.override("UTC"):
@@ -174,3 +175,4 @@ class GrantMonthlyFreeCreditsTaskTests(TestCase):
         self.assertEqual(call_kwargs["grant_date"], expected_grant)
         self.assertEqual(call_kwargs["expiration_date"], expected_expiration)
         self.assertEqual(call_kwargs["plan"]["id"], PlanNamesChoices.FREE)
+        self.assertFalse(call_kwargs.get("free_trial_start", False))
