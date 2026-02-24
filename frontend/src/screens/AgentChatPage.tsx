@@ -33,7 +33,6 @@ import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
 import { appendReturnTo } from '../util/returnTo'
-import { normalizeHexColor } from '../util/color'
 
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
