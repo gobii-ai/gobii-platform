@@ -1528,6 +1528,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                         "trialEndsAtIso": None,
                     },
                     "extraTasks": extra_tasks_settings,
+                    "paidSubscriber": overview.get("seats", {}).get("purchased", 0) > 0,
                     "seats": {
                         "purchased": overview.get("seats", {}).get("purchased", 0),
                         "reserved": overview.get("seats", {}).get("reserved", 0),

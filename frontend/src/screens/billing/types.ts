@@ -95,6 +95,7 @@ export type BillingOrgData = {
   plan: BillingPlan
   trial: BillingTrial
   extraTasks: BillingExtraTasksSettings
+  paidSubscriber: boolean
   seats: {
     purchased: number
     reserved: number
