@@ -209,6 +209,18 @@ def _can_manage_contact_packs(request: HttpRequest, agent: PersistentAgent, plan
     return True
 
 
+def _can_open_agent_billing(request: HttpRequest, agent: PersistentAgent) -> bool:
+    if not agent.organization_id:
+        return True
+
+    membership = OrganizationMembership.objects.filter(
+        user=request.user,
+        org=agent.organization,
+        status=OrganizationMembership.OrgStatus.ACTIVE,
+    ).first()
+    return bool(membership and membership.role in BILLING_MANAGE_ROLES)
+
+
 def _can_user_resolve_spawn_requests(user, agent: PersistentAgent) -> bool:
     if user.is_staff:
         return True
@@ -4948,15 +4960,24 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
         owner = agent.organization or agent.user
         plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
         can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
-        return agent, owner, plan_payload, can_manage_billing
+        can_open_billing = _can_open_agent_billing(request, agent)
+        return agent, owner, plan_payload, can_manage_billing, can_open_billing
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent, owner, _, can_manage_billing = self._resolve_agent_addons_context(request, agent_id)
-        payload = build_agent_addons_payload(agent, owner, can_manage_billing=can_manage_billing)
+        agent, owner, _, can_manage_billing, can_open_billing = self._resolve_agent_addons_context(request, agent_id)
+        payload = build_agent_addons_payload(
+            agent,
+            owner,
+            can_manage_billing=can_manage_billing,
+            can_open_billing=can_open_billing,
+        )
         return JsonResponse(payload)
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent, owner, plan_payload, can_manage_billing = self._resolve_agent_addons_context(request, agent_id)
+        agent, owner, plan_payload, can_manage_billing, can_open_billing = self._resolve_agent_addons_context(
+            request,
+            agent_id,
+        )
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -5015,7 +5036,12 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
                     source="agent_addons_api",
                 )
 
-        payload = build_agent_addons_payload(agent, owner, can_manage_billing=can_manage_billing)
+        payload = build_agent_addons_payload(
+            agent,
+            owner,
+            can_manage_billing=can_manage_billing,
+            can_open_billing=can_open_billing,
+        )
         return JsonResponse(payload)
 
 

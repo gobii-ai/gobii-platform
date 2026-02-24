@@ -108,6 +108,136 @@
   pointer-events: auto;
 }
 
+.banner-secondary {
+  display: flex;
+  flex-direction: column;
+  pointer-events: auto;
+}
+
+.high-priority-banner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  width: 100%;
+  padding: 0.62rem 1.25rem;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.35);
+  background: linear-gradient(90deg, rgba(254, 243, 199, 0.97) 0%, rgba(255, 237, 213, 0.97) 100%);
+  color: #7c2d12;
+}
+
+.high-priority-banner--critical {
+  border-bottom-color: rgba(225, 29, 72, 0.35);
+  background: linear-gradient(90deg, rgba(254, 226, 226, 0.98) 0%, rgba(254, 202, 202, 0.98) 100%);
+  color: #7f1d1d;
+}
+
+.high-priority-banner-main {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.high-priority-banner-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.2);
+  color: #b45309;
+  flex-shrink: 0;
+}
+
+.high-priority-banner--critical .high-priority-banner-icon {
+  background: rgba(244, 63, 94, 0.18);
+  color: #be123c;
+}
+
+.high-priority-banner-copy {
+  min-width: 0;
+}
+
+.high-priority-banner-title {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.high-priority-banner-message {
+  margin: 0.1rem 0 0;
+  font-size: 0.77rem;
+  line-height: 1.35;
+}
+
+.high-priority-banner-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.high-priority-banner-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid rgba(185, 28, 28, 0.2);
+  border-radius: 999px;
+  padding: 0.27rem 0.72rem;
+  text-decoration: none;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.high-priority-banner-link:hover {
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.high-priority-banner-link:focus-visible {
+  outline: 2px solid rgba(225, 29, 72, 0.4);
+  outline-offset: 2px;
+}
+
+.high-priority-banner-dismiss {
+  border: none;
+  background: transparent;
+  color: inherit;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.high-priority-banner-dismiss:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.high-priority-banner-dismiss:focus-visible {
+  outline: 2px solid rgba(225, 29, 72, 0.4);
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  .high-priority-banner {
+    flex-wrap: wrap;
+    padding: 0.62rem 0.8rem;
+  }
+
+  .high-priority-banner-actions {
+    margin-left: 2.35rem;
+  }
+}
+
 /* Subtle glass edge highlight along the top */
 .banner::before {
   content: '';

@@ -35,10 +35,21 @@ export type TrialInfo = {
   trialEndsAtIso: string | null
 }
 
+export type BillingStatusInfo = {
+  delinquent: boolean
+  actionable: boolean
+  reason?: string | null
+  subscriptionStatus?: string | null
+  latestInvoiceStatus?: string | null
+  paymentIntentStatus?: string | null
+  manageBillingUrl?: string | null
+}
+
 export type AgentAddonsResponse = {
   contactCap?: ContactCapInfo | null
   status?: {
     contactCap?: ContactCapStatus | null
+    billing?: BillingStatusInfo | null
   }
   contactPacks?: ContactPackSettings | null
   taskPacks?: TaskPackSettings | null

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useReducer, useState } from 'react'
 import { CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
 
-import { jsonRequest } from '../../api/http'
+import { getCsrfToken, jsonRequest } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { SubscriptionUpgradeModal } from '../../components/common/SubscriptionUpgradeModal'
 import { type PlanTier, useSubscriptionStore } from '../../stores/subscriptionStore'
@@ -174,6 +174,31 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     setPlanConfirmOpen(true)
   }, [closeUpgradeModal, upgradeModalSource])
 
+  const handleManageInStripe = useCallback(() => {
+    const stripePortalUrl = initialData.endpoints.stripePortalUrl
+    if (!stripePortalUrl || typeof document === 'undefined') {
+      return
+    }
+
+    const form = document.createElement('form')
+    form.method = 'POST'
+    form.action = stripePortalUrl
+    form.target = '_top'
+
+    const csrfToken = getCsrfToken()
+    if (csrfToken) {
+      const csrfInput = document.createElement('input')
+      csrfInput.type = 'hidden'
+      csrfInput.name = 'csrfmiddlewaretoken'
+      csrfInput.value = csrfToken
+      form.appendChild(csrfInput)
+    }
+
+    document.body.appendChild(form)
+    form.submit()
+    form.remove()
+  }, [initialData.endpoints.stripePortalUrl])
+
   const submitSave = useCallback(async (payload: Record<string, unknown>) => {
     if (saving) return
     setSaving(true)
@@ -318,6 +343,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
             && initialData.endpoints.resumeSubscriptionUrl
             ? resumeAction.openDialog
             : undefined}
+          onManageInStripe={handleManageInStripe}
           seatTarget={initialData.contextType === 'organization' ? (draft.seatTarget ?? initialData.seats.purchased) : undefined}
           saving={saving}
           onAdjustSeat={initialData.contextType === 'organization' ? handleSeatAdjust : undefined}

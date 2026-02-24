@@ -1516,6 +1516,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 seat_currency = (org_plan_cfg.get("currency") or (overview.get("plan") or {}).get("currency") or "USD").upper()
                 pending_seats = overview.get("pending_seats") or {}
                 pending_effective_at = pending_seats.get("effective_at")
+                org_can_open_stripe = can_manage_billing and bool(overview['billing_record']['stripe_customer_id'])
 
                 billing_props = {
                     "contextType": "organization",
@@ -1548,6 +1549,11 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     },
                     "endpoints": {
                         "updateUrl": reverse("console_billing_update"),
+                        "stripePortalUrl": (
+                            reverse("organization_seat_portal", kwargs={"org_id": organization.id})
+                            if org_can_open_stripe
+                            else None
+                        ),
                     },
                 }
 
@@ -1557,7 +1563,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     'org_can_manage_billing': can_manage_billing,
                     'org_auto_purchase_state': auto_purchase_state,
                     'org_credit_usage_pct': usage_pct,
-                    'org_can_open_stripe': can_manage_billing and bool(overview['billing_record']['stripe_customer_id']),
+                    'org_can_open_stripe': org_can_open_stripe,
                     'seat_purchase_form': seat_purchase_form,
                     'seat_reduction_form': seat_reduction_form,
                     'seat_purchase_required': seat_purchase_required,
@@ -1614,7 +1620,6 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
         context['personal_addons_disabled'] = not paid_subscriber
-        context['personal_can_open_stripe'] = paid_subscriber
 
         dedicated_plan = subscription_plan
         dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
@@ -1656,6 +1661,8 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             user=request.user,
             defaults={"max_extra_tasks": 0},
         )
+        personal_can_open_stripe = bool(get_stripe_customer(request.user))
+        context['personal_can_open_stripe'] = personal_can_open_stripe
         personal_extra_limit = int(getattr(user_billing, "max_extra_tasks", 0) or 0)
         personal_extra_settings = derive_extra_tasks_settings(
             personal_extra_limit,
@@ -1693,6 +1700,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 "updateUrl": reverse("console_billing_update"),
                 "cancelSubscriptionUrl": reverse("cancel_subscription"),
                 "resumeSubscriptionUrl": reverse("resume_subscription"),
+                "stripePortalUrl": reverse("billing_portal") if personal_can_open_stripe else None,
             },
         }
         context["billing_props"] = billing_props

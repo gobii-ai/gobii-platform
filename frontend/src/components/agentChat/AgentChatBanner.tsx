@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, Mail, MessageSquare, Settings, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -31,6 +31,7 @@ type AgentChatBannerProps = {
   onClose?: () => void
   onShare?: () => void
   sidebarCollapsed?: boolean
+  children?: ReactNode
 }
 
 function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; label: string }) {
@@ -65,6 +66,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   onClose,
   onShare,
   sidebarCollapsed = true,
+  children,
 }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
   const accentColor = normalizeHexColor(agentColorHex) || '#6366f1'
@@ -310,7 +312,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
         {/* Celebration shimmer */}
         {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
 
-    </div>
+      </div>
+      {children ? <div className="banner-secondary">{children}</div> : null}
     </div>
   )
 })

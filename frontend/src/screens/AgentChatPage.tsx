@@ -146,6 +146,23 @@ function compareRosterNames(left: string, right: string): number {
   return left.localeCompare(right, undefined, { sensitivity: 'base' })
 }
 
+function resolveBillingAlertMessage(reason?: string | null): string {
+  switch ((reason || '').toLowerCase()) {
+    case 'requires_action':
+      return 'Your bank requires additional verification before we can process payment.'
+    case 'requires_payment_method':
+      return 'Your default payment method needs to be updated before we can process billing.'
+    case 'past_due':
+    case 'unpaid':
+    case 'incomplete':
+      return 'We were unable to collect your subscription payment.'
+    case 'invoice_retrying':
+      return 'Your latest invoice payment failed and Stripe is retrying automatically.'
+    default:
+      return 'We are unable to process billing for your subscription right now.'
+  }
+}
+
 const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persistent agents available/i
 
 type CreateAgentErrorState = {
@@ -2087,6 +2104,22 @@ export function AgentChatPage({
     }
     return '/console/billing/'
   }, [effectiveContext])
+  const billingStatus = addonsPayload?.status?.billing ?? null
+  const billingManageUrl = billingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
+  const highPriorityBanner = useMemo(() => {
+    if (!billingStatus?.delinquent || !billingStatus?.actionable || !billingManageUrl) {
+      return null
+    }
+    return {
+      id: 'billing-delinquent',
+      title: 'Billing issue needs attention',
+      message: `${resolveBillingAlertMessage(billingStatus.reason)} Visit billing to fix this and avoid disruption.`,
+      actionLabel: 'Open billing',
+      actionHref: billingManageUrl,
+      dismissible: false,
+      tone: 'critical' as const,
+    }
+  }, [billingManageUrl, billingStatus?.actionable, billingStatus?.delinquent, billingStatus?.reason])
 
   const closeGate = useCallback(() => {
     pendingCreateRef.current = null
@@ -2437,6 +2470,7 @@ export function AgentChatPage({
         taskCreditsWarningVariant={taskCreditsWarningVariant}
         showTaskCreditsUpgrade={taskPackShowUpgrade}
         taskCreditsDismissKey={taskCreditsDismissKey}
+        highPriorityBanner={highPriorityBanner}
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
