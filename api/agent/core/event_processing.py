@@ -112,7 +112,7 @@ from ..tools.sqlite_agent_config import (
 from ..tools.sqlite_kanban import apply_sqlite_kanban_updates, seed_sqlite_kanban
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, seed_sqlite_skills
 from console.agent_chat.signals import broadcast_kanban_changes
-from ..tools.sqlite_state import agent_sqlite_db
+from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.spawn_agent import execute_spawn_agent
@@ -3344,6 +3344,14 @@ def _run_agent_loop(
                 return True, bool(skill_apply.changed)
 
             def _apply_runtime_updates() -> bool:
+                # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
+                # In that mode, reconciliation has no SQLite state to diff against.
+                if not get_sqlite_db_path():
+                    logger.debug(
+                        "Agent %s: skipping runtime SQLite reconciliation (no db path).",
+                        agent.id,
+                    )
+                    return False
                 config_errors = _apply_agent_config_updates()
                 kanban_errors, _ = _apply_kanban_updates()
                 skill_errors, skills_changed = _apply_skill_updates()
