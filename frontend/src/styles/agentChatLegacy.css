@@ -1553,6 +1553,12 @@
   border-radius: 9999px;
 }
 
+@media (max-width: 767px) {
+  .composer-working-tasks-badge {
+    display: none;
+  }
+}
+
 .composer-working-toggle {
   display: flex;
   align-items: center;
