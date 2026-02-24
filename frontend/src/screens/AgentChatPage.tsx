@@ -920,9 +920,14 @@ export function AgentChatPage({
     if (distanceFromBottom > BOTTOM_REPIN_THRESHOLD_PX) {
       return
     }
+    // If unseen events are waiting in pending cache, force a post-flush jump so
+    // we don't strand the viewport just above newly injected latest content.
+    if (timelineHasUnseenActivity) {
+      forceScrollOnNextUpdateRef.current = true
+    }
     autoScrollPinnedRef.current = true
     setAutoScrollPinned(true)
-  }, [setAutoScrollPinned])
+  }, [setAutoScrollPinned, timelineHasUnseenActivity])
 
   const unpinAutoScrollFromUserGesture = useCallback(() => {
     if (!autoScrollPinnedRef.current) {
@@ -1852,14 +1857,11 @@ export function AgentChatPage({
     window.location.assign('/console/agents/create/quick/')
   }, [onCreateAgent])
 
-  const handleJumpToLatest = useCallback(async () => {
+  const handleJumpToLatest = useCallback(() => {
     forceScrollOnNextUpdateRef.current = true
-    if (activeAgentId) {
-      await queryClient.resetQueries({ queryKey: timelineQueryKey(activeAgentId) })
-    }
     setAutoScrollPinned(true)
     scrollToBottom()
-  }, [activeAgentId, queryClient, scrollToBottom, setAutoScrollPinned])
+  }, [scrollToBottom, setAutoScrollPinned])
 
   const handleComposerFocus = useCallback(() => {
     if (typeof window === 'undefined') return
