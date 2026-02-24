@@ -82,32 +82,24 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
-from ..tools.email_sender import get_send_email_tool
-from ..tools.peer_dm import get_send_agent_message_tool
-from ..tools.request_contact_permission import get_request_contact_permission_tool
-from ..tools.search_tools import get_search_tools_tool
-from ..tools.secure_credentials_request import get_secure_credentials_request_tool
-from ..tools.sms_sender import get_send_sms_tool
-from ..tools.spawn_web_task import (
-    get_browser_daily_task_limit,
-    get_spawn_web_task_tool,
-)
-from ..tools.spawn_agent import get_spawn_agent_tool
+from ..tools.spawn_web_task import get_browser_daily_task_limit
+from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_kanban import format_kanban_friendly_id
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
+    AGENT_SKILLS_TABLE,
     FILES_TABLE,
     KANBAN_CARDS_TABLE,
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
 )
+from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import (
     CREATE_IMAGE_TOOL_NAME,
     ensure_default_tools_enabled,
+    ensure_skill_tools_enabled,
     get_enabled_tool_definitions,
 )
-from ..tools.web_chat_sender import get_send_chat_tool
-from ..tools.webhook_sender import get_send_webhook_tool
 from .tool_results import (
     PREVIEW_TIER_COUNT,
     ToolCallResultRecord,
@@ -2071,6 +2063,15 @@ def build_prompt_context(
             non_shrinkable=True
         )
 
+    recent_skills_block = format_recent_skills_for_prompt(agent, limit=3)
+    if recent_skills_block:
+        important_group.section_text(
+            "agent_skills",
+            recent_skills_block,
+            weight=4,
+            non_shrinkable=True,
+        )
+
     files_snapshot = _build_sqlite_files_snapshot(agent)
     store_files_for_prompt(files_snapshot.records)
 
@@ -2159,6 +2160,24 @@ def build_prompt_context(
         "agent_config_note",
         agent_config_note,
         weight=2,
+        non_shrinkable=True,
+    )
+    skills_note = (
+        f"Agent skills table ({AGENT_SKILLS_TABLE}) stores recurring workflows with version history. "
+        "Whenever a workflow repeats, create/update a skill so future runs can execute it consistently. "
+        "Schema: name, description, version, tools, instructions. "
+        "Version is auto-incremented per (name) and treated as read-only mirror metadata; do not set it manually. "
+        "Updating or inserting changed content creates a new version. "
+        "Delete by name to hard-delete all versions of that skill. "
+        "Use canonical tool IDs in tools as a JSON array, for example: "
+        f"INSERT INTO {AGENT_SKILLS_TABLE} (name, description, tools, instructions) "
+        "VALUES ('weekly-brief', 'Build weekly ops summary', '[\"sqlite_batch\",\"read_file\"]', '...'); "
+        "or UPDATE an existing row's instructions/tools to publish a new version."
+    )
+    variable_group.section_text(
+        "agent_skills_note",
+        skills_note,
+        weight=3,
         non_shrinkable=True,
     )
     kanban_note = (
@@ -5121,50 +5140,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
     """Get all available tools for an agent, including dynamically enabled MCP tools."""
-    spawn_capacity = 0
-    can_spawn_agent = False
-    if agent:
-        owner = agent.organization if agent.organization_id else agent.user
-        spawn_capacity = max(int(AgentService.get_agents_available(owner)), 0)
-        can_spawn_agent = spawn_capacity > 0
-
-    # Static tools always available
-    static_tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "sleep_until_next_trigger",
-                "description": "Pause the agent until the next external trigger (no further action this cycle).",
-                "parameters": {"type": "object", "properties": {}},
-            },
-        },
-        get_send_email_tool(),
-        get_send_sms_tool(),
-        get_send_chat_tool(),
-        get_spawn_web_task_tool(agent),
-        # MCP management tools
-        get_search_tools_tool(),
-        get_request_contact_permission_tool(),
-        get_secure_credentials_request_tool(),
-    ]
-
-    if can_spawn_agent:
-        static_tools.append(get_spawn_agent_tool(agent, available_capacity=spawn_capacity))
-
-    if agent and agent.webhooks.exists():
-        static_tools.append(get_send_webhook_tool())
-
-    # Add peer DM tool only when agent has at least one enabled peer link
-    if agent and AgentPeerLink.objects.filter(
-        is_enabled=True,
-    ).filter(
-        Q(agent_a=agent) | Q(agent_b=agent)
-    ).exists():
-        static_tools.append(get_send_agent_message_tool())
+    static_tools = get_static_tool_definitions(agent)
 
     # Add dynamically enabled MCP tools if agent is provided
     if agent:
         ensure_default_tools_enabled(agent)
+        ensure_skill_tools_enabled(agent)
         dynamic_tools = get_enabled_tool_definitions(agent)
         static_tools.extend(dynamic_tools)
 

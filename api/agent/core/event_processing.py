@@ -110,8 +110,9 @@ from ..tools.sqlite_agent_config import (
     seed_sqlite_agent_config,
 )
 from ..tools.sqlite_kanban import apply_sqlite_kanban_updates, seed_sqlite_kanban
+from ..tools.sqlite_skills import apply_sqlite_skill_updates, seed_sqlite_skills
 from console.agent_chat.signals import broadcast_kanban_changes
-from ..tools.sqlite_state import agent_sqlite_db
+from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.spawn_agent import execute_spawn_agent
@@ -3106,6 +3107,7 @@ def _run_agent_loop(
 
             config_snapshot = seed_sqlite_agent_config(agent)
             kanban_snapshot = seed_sqlite_kanban(agent)
+            skills_snapshot = seed_sqlite_skills(agent)
             current_notice = continuation_notice
             continuation_notice = None
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
@@ -3317,6 +3319,47 @@ def _run_agent_loop(
                         )
                 return True, kanban_apply.snapshot
 
+            def _apply_skill_updates() -> tuple[bool, bool]:
+                """Apply skill updates and return (had_errors, changed)."""
+                skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
+
+                if not skill_apply.errors:
+                    return False, bool(skill_apply.changed)
+
+                for error in skill_apply.errors:
+                    try:
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": f"Skill update failed: {error}",
+                        }
+                        _attach_completion(step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
+                    except Exception:
+                        logger.debug(
+                            "Failed to persist skill update error step for agent %s",
+                            agent.id,
+                            exc_info=True,
+                        )
+                return True, bool(skill_apply.changed)
+
+            def _apply_runtime_updates() -> bool:
+                # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
+                # In that mode, reconciliation has no SQLite state to diff against.
+                if not get_sqlite_db_path():
+                    logger.debug(
+                        "Agent %s: skipping runtime SQLite reconciliation (no db path).",
+                        agent.id,
+                    )
+                    return False
+                config_errors = _apply_agent_config_updates()
+                kanban_errors, _ = _apply_kanban_updates()
+                skill_errors, skills_changed = _apply_skill_updates()
+                if skills_changed:
+                    nonlocal tools
+                    tools = get_agent_tools(agent)
+                return config_errors or kanban_errors or skill_errors
+
             msg_content = _extract_message_content(msg)
             raw_message_text = (msg_content or "").strip()
             message_text, has_canonical_continuation = _strip_canonical_continuation_phrase(
@@ -3401,9 +3444,7 @@ def _run_agent_loop(
             _persist_reasoning_step(reasoning_source)
 
             if not tool_calls:
-                config_errors = _apply_agent_config_updates()
-                kanban_errors, _ = _apply_kanban_updates()
-                if config_errors or kanban_errors:
+                if _apply_runtime_updates():
                     reasoning_only_streak = 0
                     continue
                 if not message_text and not thinking_content:
@@ -3899,9 +3940,7 @@ def _run_agent_loop(
                     if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
                         executed_non_message_action = True
 
-            config_had_errors = _apply_agent_config_updates()
-            kanban_had_errors, _ = _apply_kanban_updates()
-            if config_had_errors or kanban_had_errors:
+            if _apply_runtime_updates():
                 followup_required = True
 
             if executed_non_message_action:

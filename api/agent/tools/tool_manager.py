@@ -38,6 +38,8 @@ from .create_image import (
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .autotool_heuristics import find_matching_tools
+from .sqlite_skills import get_required_skill_tool_ids
+from .static_tools import get_static_tool_names
 from config.plans import PLAN_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -337,6 +339,11 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
     return catalog
 
 
+def get_available_tool_ids(agent: PersistentAgent) -> Set[str]:
+    """Return canonical tool IDs currently available to the agent."""
+    return set(_build_available_tool_index(agent).keys()) | get_static_tool_names(agent)
+
+
 def _evict_surplus_tools(
     agent: PersistentAgent,
     exclude: Optional[Sequence[str]] = None,
@@ -375,6 +382,105 @@ def _evict_surplus_tools(
         ", ".join(evicted_names),
     )
     return evicted_names
+
+
+def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
+    """Ensure all tools required by latest persisted skills are enabled."""
+    required = sorted(get_required_skill_tool_ids(agent))
+    limit = get_enabled_tool_limit(agent)
+    if not required:
+        return {
+            "status": "success",
+            "enabled": [],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+            "required": [],
+            "limit": limit,
+            "total_enabled": PersistentAgentEnabledTool.objects.filter(agent=agent).count(),
+            "overflow_by": 0,
+            "over_capacity": False,
+        }
+
+    enabled: List[str] = []
+    already_enabled: List[str] = []
+    invalid: List[str] = []
+    dynamic_required: List[str] = []
+    static_tool_names = get_static_tool_names(agent)
+
+    for tool_name in required:
+        # Static tools are surfaced directly by get_agent_tools and do not need
+        # PersistentAgentEnabledTool rows.
+        if tool_name in static_tool_names:
+            already_enabled.append(tool_name)
+            continue
+        dynamic_required.append(tool_name)
+
+    catalog: Dict[str, ToolCatalogEntry] = {}
+    manager: Optional[MCPToolManager] = None
+    if dynamic_required:
+        catalog = _build_available_tool_index(agent)
+        manager = _get_manager()
+    for tool_name in dynamic_required:
+        entry = catalog.get(tool_name)
+        if not entry:
+            invalid.append(tool_name)
+            continue
+
+        if entry.provider == "mcp" and manager and manager.is_tool_blacklisted(tool_name):
+            invalid.append(tool_name)
+            continue
+
+        try:
+            row, created = PersistentAgentEnabledTool.objects.get_or_create(
+                agent=agent,
+                tool_full_name=tool_name,
+            )
+        except Exception:
+            logger.exception("Failed to ensure skill tool '%s' for agent %s", tool_name, agent.id)
+            invalid.append(tool_name)
+            continue
+
+        metadata_updates = _apply_tool_metadata(row, entry)
+        if metadata_updates:
+            row.save(update_fields=metadata_updates)
+
+        if created:
+            enabled.append(tool_name)
+        else:
+            already_enabled.append(tool_name)
+
+    evicted = _evict_surplus_tools(
+        agent,
+        exclude=required,
+        limit=limit,
+    )
+
+    total_enabled = PersistentAgentEnabledTool.objects.filter(agent=agent).count()
+    overflow_by = max(total_enabled - limit, 0)
+    over_capacity = overflow_by > 0
+    if over_capacity:
+        logger.warning(
+            "Agent %s has %d enabled tools after skill enforcement (cap=%d, overflow=%d). "
+            "Required skill tools are preserved.",
+            agent.id,
+            total_enabled,
+            limit,
+            overflow_by,
+        )
+
+    return {
+        "status": "warning" if over_capacity else "success",
+        "enabled": enabled,
+        "already_enabled": already_enabled,
+        "evicted": evicted,
+        "invalid": invalid,
+        "required": required,
+        "limit": limit,
+        "total_enabled": total_enabled,
+        "overflow_by": overflow_by,
+        "over_capacity": over_capacity,
+    }
 
 
 def _apply_tool_metadata(row: PersistentAgentEnabledTool, entry: Optional[ToolCatalogEntry]) -> List[str]:
