@@ -15,6 +15,8 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 from typing import Optional
 
@@ -80,6 +82,7 @@ LONG_TEXT_LENGTH = 120
 JSON_DETECTION_THRESHOLD = 0.6
 JSON_HINT_THRESHOLD = 0.2
 CSV_DETECTION_THRESHOLD = 0.4
+SQLITE_RESTORE_SUBPROCESS_TIMEOUT_SECONDS = 120
 
 _JSON_START_RE = re.compile(r"^\s*[\[{]")
 _CSV_DELIMS = [",", "\t", "|", ";"]
@@ -943,6 +946,80 @@ def sqlite_storage_key(agent_uuid: str) -> str:
     return f"agent_state/{clean_uuid[:2]}/{clean_uuid[2:4]}/{agent_uuid}.db.zst"
 
 
+def _decompress_sqlite_archive_in_subprocess(archive_path: str, db_path: str) -> None:
+    """Decompress an archive in a child process to isolate native crashes.
+
+    If zstandard/native code crashes (e.g., SIGSEGV), only the child dies and
+    the parent worker can safely fall back to a fresh SQLite DB.
+    """
+    child_code = (
+        "import shutil\n"
+        "import sys\n"
+        "import zstandard as zstd\n"
+        "src = sys.argv[1]\n"
+        "dst = sys.argv[2]\n"
+        "with open(src, 'rb') as fsrc:\n"
+        "    dctx = zstd.ZstdDecompressor()\n"
+        "    with dctx.stream_reader(fsrc) as reader, open(dst, 'wb') as fdst:\n"
+        "        shutil.copyfileobj(reader, fdst)\n"
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", child_code, archive_path, db_path],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=SQLITE_RESTORE_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"SQLite restore subprocess timed out after {SQLITE_RESTORE_SUBPROCESS_TIMEOUT_SECONDS}s"
+        ) from exc
+
+    if proc.returncode == 0:
+        return
+
+    stderr = (proc.stderr or "").strip()
+    stdout = (proc.stdout or "").strip()
+    if proc.returncode < 0:
+        signal_no = -proc.returncode
+        raise RuntimeError(
+            f"SQLite restore subprocess exited via signal {signal_no}. stderr={stderr or '<none>'}"
+        )
+    raise RuntimeError(
+        f"SQLite restore subprocess failed with exit code {proc.returncode}. "
+        f"stderr={stderr or '<none>'} stdout={stdout or '<none>'}"
+    )
+
+
+def _restore_sqlite_db_from_storage(storage_key: str, db_path: str, agent_uuid: str) -> bool:
+    """Restore persisted SQLite DB, returning True when restore succeeds."""
+    archive_path = db_path + ".restore.zst"
+    try:
+        with default_storage.open(storage_key, "rb") as src, open(archive_path, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+        _decompress_sqlite_archive_in_subprocess(archive_path, db_path)
+        return True
+    except Exception:
+        logger.warning(
+            "Failed to restore SQLite DB for agent %s – starting fresh.",
+            agent_uuid,
+            exc_info=True,
+        )
+        try:
+            if os.path.exists(db_path):
+                os.remove(db_path)
+        except Exception:
+            logger.debug("Failed to delete partially restored SQLite DB for agent %s", agent_uuid, exc_info=True)
+        return False
+    finally:
+        try:
+            if os.path.exists(archive_path):
+                os.remove(archive_path)
+        except Exception:
+            logger.debug("Failed to clean up restore archive for agent %s", agent_uuid, exc_info=True)
+
+
 @contextlib.contextmanager
 def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context mgr
     """Context manager that restores/persists the per-agent SQLite DB.
@@ -960,17 +1037,7 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
 
         # ---------------- Restore phase ---------------- #
         if default_storage.exists(storage_key):
-            try:
-                with default_storage.open(storage_key, "rb") as src:
-                    dctx = zstd.ZstdDecompressor()
-                    with dctx.stream_reader(src) as reader, open(db_path, "wb") as dst:
-                        shutil.copyfileobj(reader, dst)
-            except Exception:
-                logger.warning(
-                    "Failed to restore SQLite DB for agent %s – starting fresh.",
-                    agent_uuid,
-                    exc_info=True,
-                )
+            _restore_sqlite_db_from_storage(storage_key, db_path, agent_uuid)
 
         token = set_sqlite_db_path(db_path)
 
