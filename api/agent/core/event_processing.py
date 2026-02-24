@@ -110,6 +110,7 @@ from ..tools.sqlite_agent_config import (
     seed_sqlite_agent_config,
 )
 from ..tools.sqlite_kanban import apply_sqlite_kanban_updates, seed_sqlite_kanban
+from ..tools.sqlite_skills import apply_sqlite_skill_updates, seed_sqlite_skills
 from console.agent_chat.signals import broadcast_kanban_changes
 from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
@@ -3106,6 +3107,7 @@ def _run_agent_loop(
 
             config_snapshot = seed_sqlite_agent_config(agent)
             kanban_snapshot = seed_sqlite_kanban(agent)
+            skills_snapshot = seed_sqlite_skills(agent)
             current_notice = continuation_notice
             continuation_notice = None
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
@@ -3317,6 +3319,30 @@ def _run_agent_loop(
                         )
                 return True, kanban_apply.snapshot
 
+            def _apply_skill_updates() -> tuple[bool, bool]:
+                """Apply skill updates and return (had_errors, changed)."""
+                skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
+
+                if not skill_apply.errors:
+                    return False, bool(skill_apply.changed)
+
+                for error in skill_apply.errors:
+                    try:
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": f"Skill update failed: {error}",
+                        }
+                        _attach_completion(step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
+                    except Exception:
+                        logger.debug(
+                            "Failed to persist skill update error step for agent %s",
+                            agent.id,
+                            exc_info=True,
+                        )
+                return True, bool(skill_apply.changed)
+
             msg_content = _extract_message_content(msg)
             raw_message_text = (msg_content or "").strip()
             message_text, has_canonical_continuation = _strip_canonical_continuation_phrase(
@@ -3403,7 +3429,10 @@ def _run_agent_loop(
             if not tool_calls:
                 config_errors = _apply_agent_config_updates()
                 kanban_errors, _ = _apply_kanban_updates()
-                if config_errors or kanban_errors:
+                skill_errors, skills_changed = _apply_skill_updates()
+                if skills_changed:
+                    tools = get_agent_tools(agent)
+                if config_errors or kanban_errors or skill_errors:
                     reasoning_only_streak = 0
                     continue
                 if not message_text and not thinking_content:
@@ -3901,7 +3930,10 @@ def _run_agent_loop(
 
             config_had_errors = _apply_agent_config_updates()
             kanban_had_errors, _ = _apply_kanban_updates()
-            if config_had_errors or kanban_had_errors:
+            skill_had_errors, skills_changed = _apply_skill_updates()
+            if skills_changed:
+                tools = get_agent_tools(agent)
+            if config_had_errors or kanban_had_errors or skill_had_errors:
                 followup_required = True
 
             if executed_non_message_action:

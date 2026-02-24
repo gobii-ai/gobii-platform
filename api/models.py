@@ -6685,6 +6685,40 @@ class PersistentAgentEnabledTool(models.Model):
         return f"EnabledTool<{self.tool_full_name}> for {getattr(self.agent, 'name', 'agent')}"
 
 
+class PersistentAgentSkill(models.Model):
+    """Versioned workflow skill authored by a persistent agent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="skills",
+    )
+    name = models.CharField(max_length=128)
+    description = models.TextField(blank=True)
+    version = models.PositiveIntegerField()
+    tools = models.JSONField(default=list, blank=True)
+    instructions = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "name", "version"],
+                name="unique_agent_skill_name_version",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "name", "-version"], name="pa_skill_agent_name_ver_idx"),
+            models.Index(fields=["agent", "-updated_at"], name="pa_skill_agent_updated_idx"),
+        ]
+        ordering = ["name", "-version", "-updated_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"Skill<{self.name}@v{self.version}> for {getattr(self.agent, 'name', 'agent')}"
+
+
 class PersistentAgentSecret(models.Model):
     """
     A secret (encrypted key-value pair) for a persistent agent, scoped to a domain pattern.
