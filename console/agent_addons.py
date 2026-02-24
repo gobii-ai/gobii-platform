@@ -89,7 +89,7 @@ def _resolve_candidate_subscription(owner, owner_type: str, customer_subscriptio
     return customer_subscriptions[0] if customer_subscriptions else None
 
 
-def _build_billing_status_payload(owner, owner_type: str, *, can_manage_billing: bool, manage_billing_url: str | None) -> dict:
+def _build_billing_status_payload(owner, owner_type: str, *, can_open_billing: bool, manage_billing_url: str | None) -> dict:
     status_payload = {
         "delinquent": False,
         "actionable": False,
@@ -97,7 +97,7 @@ def _build_billing_status_payload(owner, owner_type: str, *, can_manage_billing:
         "subscriptionStatus": None,
         "latestInvoiceStatus": None,
         "paymentIntentStatus": None,
-        "manageBillingUrl": manage_billing_url if can_manage_billing else None,
+        "manageBillingUrl": manage_billing_url if can_open_billing else None,
     }
     if not stripe_status().enabled:
         return status_payload
@@ -148,7 +148,7 @@ def _build_billing_status_payload(owner, owner_type: str, *, can_manage_billing:
     if reason is None:
         return status_payload
 
-    actionable = bool(can_manage_billing and manage_billing_url)
+    actionable = bool(can_open_billing and manage_billing_url)
     return {
         "delinquent": True,
         "actionable": actionable,
@@ -391,7 +391,13 @@ def update_task_pack_quantities(
     )
 
 
-def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = False) -> dict:
+def build_agent_addons_payload(
+    agent,
+    owner=None,
+    *,
+    can_manage_billing: bool = False,
+    can_open_billing: bool = False,
+) -> dict:
     plan_payload = None
     upgrade_url = None
     manage_billing_url = None
@@ -419,7 +425,7 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
         except NoReverseMatch:
             upgrade_url = None
 
-    if can_manage_billing:
+    if can_open_billing:
         try:
             manage_billing_url = reverse("billing")
             if agent.organization_id:
@@ -430,7 +436,7 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
     billing_status_payload = _build_billing_status_payload(
         owner,
         owner_type,
-        can_manage_billing=can_manage_billing,
+        can_open_billing=can_open_billing,
         manage_billing_url=manage_billing_url,
     )
 

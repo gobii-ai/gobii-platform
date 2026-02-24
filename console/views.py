@@ -1620,7 +1620,6 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
         context['personal_addons_disabled'] = not paid_subscriber
-        context['personal_can_open_stripe'] = paid_subscriber
 
         dedicated_plan = subscription_plan
         dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
@@ -1662,6 +1661,8 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             user=request.user,
             defaults={"max_extra_tasks": 0},
         )
+        personal_can_open_stripe = bool(get_stripe_customer(request.user))
+        context['personal_can_open_stripe'] = personal_can_open_stripe
         personal_extra_limit = int(getattr(user_billing, "max_extra_tasks", 0) or 0)
         personal_extra_settings = derive_extra_tasks_settings(
             personal_extra_limit,
@@ -1699,7 +1700,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 "updateUrl": reverse("console_billing_update"),
                 "cancelSubscriptionUrl": reverse("cancel_subscription"),
                 "resumeSubscriptionUrl": reverse("resume_subscription"),
-                "stripePortalUrl": reverse("billing_portal") if paid_subscriber else None,
+                "stripePortalUrl": reverse("billing_portal") if personal_can_open_stripe else None,
             },
         }
         context["billing_props"] = billing_props

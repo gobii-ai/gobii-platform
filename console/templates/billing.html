@@ -70,7 +70,7 @@
           <form method="post" action="{% url 'organization_seat_portal' organization.id %}">
             {% csrf_token %}
             <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 border border-blue-100 rounded-md hover:bg-blue-50">
-              Manage in Stripe
+              Change Payment Method
             </button>
           </form>
           {% endif %}
@@ -336,7 +336,7 @@
           <form method="post" action="{% url 'billing_portal' %}">
             {% csrf_token %}
             <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-blue-600 border border-blue-100 rounded-md hover:bg-blue-50">
-              Manage in Stripe
+              Change Payment Method
             </button>
           </form>
           {% endif %}
