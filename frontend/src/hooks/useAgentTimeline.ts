@@ -76,7 +76,6 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
     enabled: Boolean(agentId) && (options?.enabled !== false),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
-    refetchOnMount: false,
   })
 }
 

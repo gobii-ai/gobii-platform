@@ -685,12 +685,25 @@ export function AgentChatPage({
   })
 
   // Auto-trigger older loading when scrolled near top
-  const firstVisibleIndex = virtualizer.getVirtualItems()[0]?.index ?? 0
+  const virtualItems = virtualizer.getVirtualItems()
+  const firstVisibleIndex = virtualItems.length > 0 ? virtualItems[0].index : null
   useEffect(() => {
-    if (firstVisibleIndex <= 2 && timelineQuery.hasPreviousPage && !timelineQuery.isFetchingPreviousPage) {
+    if (
+      firstVisibleIndex !== null
+      && firstVisibleIndex <= 2
+      && timelineQuery.hasPreviousPage
+      && !timelineQuery.isFetchingPreviousPage
+      && !timelineQuery.isFetchPreviousPageError
+    ) {
       void timelineQuery.fetchPreviousPage()
     }
-  }, [firstVisibleIndex, timelineQuery.hasPreviousPage, timelineQuery.isFetchingPreviousPage, timelineQuery.fetchPreviousPage])
+  }, [
+    firstVisibleIndex,
+    timelineQuery.hasPreviousPage,
+    timelineQuery.isFetchingPreviousPage,
+    timelineQuery.isFetchPreviousPageError,
+    timelineQuery.fetchPreviousPage,
+  ])
 
   // Scroll position preservation when loading older pages
   const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
