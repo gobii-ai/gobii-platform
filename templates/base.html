@@ -505,7 +505,7 @@
 
   {% htmx_script %}
 </head>
-<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-analytics-cta-event="{{ analytics.events.CTA_CLICKED }}">
+<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-analytics-cta-event="{{ analytics.events.CTA_CLICKED }}" data-analytics-cta-tracking-enabled="{% if request.path == '/' or request.path|slice:':11' == '/solutions/' %}true{% else %}false{% endif %}">
   {% if llm_bootstrap_required %}
     <div class="bg-amber-100 text-amber-900 border-b border-amber-300">
       <div class="max-w-7xl mx-auto px-4 py-3 text-sm">

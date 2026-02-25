@@ -17,8 +17,12 @@
       return '';
     }
 
+    if (rawDestination.charAt(0) === '#') {
+      return (window.location.pathname || '/') + rawDestination;
+    }
+
     try {
-      var parsed = new URL(rawDestination, window.location.origin);
+      var parsed = new URL(rawDestination, window.location.href);
       return parsed.pathname + parsed.search + parsed.hash;
     } catch (error) {
       return rawDestination;
@@ -128,6 +132,14 @@
   }
 
   function isTrackedPage() {
+    var enabled = document.body ? document.body.dataset.analyticsCtaTrackingEnabled : '';
+    if (enabled === 'true') {
+      return true;
+    }
+    if (enabled === 'false') {
+      return false;
+    }
+
     var path = window.location.pathname || '/';
     return path === '/' || path.indexOf('/solutions/') === 0;
   }
