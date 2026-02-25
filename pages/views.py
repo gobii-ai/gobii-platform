@@ -184,6 +184,36 @@ def _login_url_with_utms(request) -> str:
     return base_url
 
 
+def _track_web_event_for_request(
+    request,
+    *,
+    event: AnalyticsEvent,
+    properties: dict | None = None,
+    source: AnalyticsSource = AnalyticsSource.WEB,
+) -> None:
+    """Track a web analytics event for auth users or anonymous sessions."""
+    payload = properties or {}
+    if request.user.is_authenticated:
+        Analytics.track_event(
+            user_id=request.user.id,
+            event=event,
+            source=source,
+            properties=payload,
+        )
+        return
+
+    session_key = request.session.session_key
+    if not session_key:
+        request.session.save()
+        session_key = request.session.session_key
+    Analytics.track_event_anonymous(
+        anonymous_id=str(session_key),
+        event=event,
+        source=source,
+        properties=payload,
+    )
+
+
 def _build_oauth_charter_cookie_payload(
     request,
     *,
@@ -625,6 +655,13 @@ class HomeAgentSpawnView(TemplateView):
             if request.user.is_authenticated:
                 # User is already logged in, go directly to agent creation
                 return redirect(next_url)
+            _track_web_event_for_request(
+                request,
+                event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+                properties={
+                    "source_page": "home",
+                },
+            )
             if trial_onboarding_requested:
                 set_trial_onboarding_intent(
                     request,
@@ -958,6 +995,21 @@ class EngineeringProSignupView(View):
         return self._handle(request)
 
     def _handle(self, request):
+        if request.method == "POST":
+            source_page = (
+                request.POST.get("source_page")
+                or request.GET.get("source_page")
+                or "engineering_solution"
+            )
+            _track_web_event_for_request(
+                request,
+                event=AnalyticsEvent.PLAN_INTEREST,
+                properties={
+                    "source_page": source_page,
+                    "target": "api_keys",
+                },
+            )
+
         trial_onboarding_requested = is_truthy_flag(
             request.POST.get("trial_onboarding") or request.GET.get("trial_onboarding")
         )
@@ -1715,6 +1767,16 @@ class MarketingContactRequestView(View):
                 "</div>",
                 status=500,
             )
+
+        analytics_properties = {
+            "source_page": source,
+            "inquiry_type": inquiry_value or "",
+        }
+        _track_web_event_for_request(
+            request,
+            event=AnalyticsEvent.MARKETING_CONTACT_REQUEST_SUBMITTED,
+            properties=analytics_properties,
+        )
 
         return HttpResponse(
             '<div class="rounded-xl border border-emerald-200 bg-white/90 px-4 py-3 text-sm text-emerald-700" role="status">'
