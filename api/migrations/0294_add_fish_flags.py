@@ -2,7 +2,7 @@ from django.db import migrations
 
 
 FLAGS = (
-    ("fish_upper_left", False),
+    ("fish_upper_left", True),
     ("fish_homepage", True),
 )
 

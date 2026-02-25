@@ -12,7 +12,7 @@ def add_switch(apps, schema_editor):
         return
     Switch.objects.update_or_create(
         name=SWITCH_NAME,
-        defaults={"active": False},
+        defaults={"active": True},
     )
 
 
