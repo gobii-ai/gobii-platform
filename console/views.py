@@ -474,6 +474,11 @@ logger = logging.getLogger(__name__)
 
 tracer = trace.get_tracer("gobii.utils")
 
+BILLING_UPDATE_SUPPORT_DETAIL = (
+    "An error occurred while updating billing. "
+    "Please contact support@gobii.ai for help."
+)
+
 
 def _assign_stripe_api_key() -> str:
     """Ensure Stripe secret key is configured before making API calls."""
@@ -491,6 +496,47 @@ def _normalize_non_negative_int(value: int | str | None) -> int:
         return max(int(value), 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _additional_tasks_metered_price_id_for_owner(owner, owner_type: str) -> str:
+    """Return the metered overage price for the owner's current plan."""
+    stripe_settings = get_stripe_settings()
+
+    if owner_type == "organization":
+        return getattr(stripe_settings, "org_team_additional_task_price_id", "") or ""
+
+    plan_id = str((get_user_plan(owner) or {}).get("id") or "").strip().lower()
+    if plan_id in {PlanNames.STARTUP, "startup"}:
+        return getattr(stripe_settings, "startup_additional_task_price_id", "") or ""
+    if plan_id in {PlanNames.SCALE, "scale"}:
+        return getattr(stripe_settings, "scale_additional_task_price_id", "") or ""
+    return ""
+
+
+def _sync_additional_tasks_metered_subscription_item(owner, owner_type: str, enabled: bool) -> None:
+    """Attach/detach the Stripe metered overage item to match auto-purchase state."""
+    subscription = get_active_subscription(owner)
+    if subscription is None:
+        # No active subscription yet (or free plan); there is nothing to sync.
+        return
+
+    price_id = _additional_tasks_metered_price_id_for_owner(owner, owner_type)
+    if not price_id:
+        if enabled:
+            raise ValidationError("Additional task billing is not configured for the current plan.")
+        return
+
+    _assign_stripe_api_key()
+    subscription_data = stripe.Subscription.retrieve(subscription.id, expand=["items.data.price"])
+    existing_item = _get_subscription_item_for_price(subscription_data, price_id)
+
+    if enabled:
+        if existing_item is None:
+            stripe.SubscriptionItem.create(subscription=subscription.id, price=price_id)
+        return
+
+    if existing_item is not None:
+        stripe.SubscriptionItem.delete(existing_item.get("id"))
 
 
 def _get_checkout_trial_days() -> tuple[int, int]:
@@ -1842,6 +1888,31 @@ def update_billing_settings(request):
             defaults=defaults,
         )
 
+        try:
+            _sync_additional_tasks_metered_subscription_item(
+                membership.org,
+                "organization",
+                auto_purchase,
+            )
+        except ValidationError as exc:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "invalid_overage_configuration",
+                    "detail": _format_validation_error(exc),
+                },
+                status=400,
+            )
+        except (stripe.error.StripeError, ImproperlyConfigured):
+            logger.exception(
+                "Failed to sync additional-task metered item for organization %s",
+                membership.org.id,
+            )
+            return JsonResponse(
+                {"success": False, "error": "stripe_error", "detail": BILLING_UPDATE_SUPPORT_DETAIL},
+                status=400,
+            )
+
         if not auto_purchase:
             org_billing.max_extra_tasks = 0
         elif infinite:
@@ -1886,6 +1957,27 @@ def update_billing_settings(request):
         user=request.user,
         defaults={"max_extra_tasks": 0},
     )
+
+    try:
+        _sync_additional_tasks_metered_subscription_item(request.user, "user", auto_purchase)
+    except ValidationError as exc:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "invalid_overage_configuration",
+                "detail": _format_validation_error(exc),
+            },
+            status=400,
+        )
+    except (stripe.error.StripeError, ImproperlyConfigured):
+        logger.exception(
+            "Failed to sync additional-task metered item for user %s",
+            request.user.id,
+        )
+        return JsonResponse(
+            {"success": False, "error": "stripe_error", "detail": BILLING_UPDATE_SUPPORT_DETAIL},
+            status=400,
+        )
 
     if not auto_purchase:
         user_billing.max_extra_tasks = 0

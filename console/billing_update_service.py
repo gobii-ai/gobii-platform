@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any, Mapping
 from urllib.parse import urlencode
 
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import transaction
 from django.http import HttpRequest
 from django.urls import reverse
@@ -442,7 +442,12 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
         desired_owner_type = (payload_dict.get("ownerType") or "").strip().lower()
         desired_org_id = (payload_dict.get("organizationId") or "").strip()
 
-        resolved_context = build_console_context(request)
+        try:
+            resolved_context = build_console_context(request)
+        except PermissionDenied as exc:
+            # Surface context override issues as handled 4xx errors instead of
+            # bubbling as unhandled exceptions.
+            raise BillingUpdateError(str(exc), status=403) from exc
         if resolved_context.current_context.type == "organization":
             membership = resolved_context.current_membership
             if membership is None:
