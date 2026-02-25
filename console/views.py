@@ -539,6 +539,36 @@ def _sync_additional_tasks_metered_subscription_item(owner, owner_type: str, ena
         stripe.SubscriptionItem.delete(existing_item.get("id"))
 
 
+def _sync_additional_tasks_metered_or_error(
+    owner,
+    owner_type: str,
+    enabled: bool,
+    *,
+    log_owner_label: str,
+) -> JsonResponse | None:
+    try:
+        _sync_additional_tasks_metered_subscription_item(owner, owner_type, enabled)
+    except ValidationError as exc:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "invalid_overage_configuration",
+                "detail": _format_validation_error(exc),
+            },
+            status=400,
+        )
+    except (stripe.error.StripeError, ImproperlyConfigured):
+        logger.exception(
+            "Failed to sync additional-task metered item for %s",
+            log_owner_label,
+        )
+        return JsonResponse(
+            {"success": False, "error": "stripe_error", "detail": BILLING_UPDATE_SUPPORT_DETAIL},
+            status=400,
+        )
+    return None
+
+
 def _get_checkout_trial_days() -> tuple[int, int]:
     try:
         stripe_settings = get_stripe_settings()
@@ -1888,30 +1918,14 @@ def update_billing_settings(request):
             defaults=defaults,
         )
 
-        try:
-            _sync_additional_tasks_metered_subscription_item(
-                membership.org,
-                "organization",
-                auto_purchase,
-            )
-        except ValidationError as exc:
-            return JsonResponse(
-                {
-                    "success": False,
-                    "error": "invalid_overage_configuration",
-                    "detail": _format_validation_error(exc),
-                },
-                status=400,
-            )
-        except (stripe.error.StripeError, ImproperlyConfigured):
-            logger.exception(
-                "Failed to sync additional-task metered item for organization %s",
-                membership.org.id,
-            )
-            return JsonResponse(
-                {"success": False, "error": "stripe_error", "detail": BILLING_UPDATE_SUPPORT_DETAIL},
-                status=400,
-            )
+        sync_error_response = _sync_additional_tasks_metered_or_error(
+            membership.org,
+            "organization",
+            auto_purchase,
+            log_owner_label=f"organization {membership.org.id}",
+        )
+        if sync_error_response is not None:
+            return sync_error_response
 
         if not auto_purchase:
             org_billing.max_extra_tasks = 0
@@ -1958,26 +1972,14 @@ def update_billing_settings(request):
         defaults={"max_extra_tasks": 0},
     )
 
-    try:
-        _sync_additional_tasks_metered_subscription_item(request.user, "user", auto_purchase)
-    except ValidationError as exc:
-        return JsonResponse(
-            {
-                "success": False,
-                "error": "invalid_overage_configuration",
-                "detail": _format_validation_error(exc),
-            },
-            status=400,
-        )
-    except (stripe.error.StripeError, ImproperlyConfigured):
-        logger.exception(
-            "Failed to sync additional-task metered item for user %s",
-            request.user.id,
-        )
-        return JsonResponse(
-            {"success": False, "error": "stripe_error", "detail": BILLING_UPDATE_SUPPORT_DETAIL},
-            status=400,
-        )
+    sync_error_response = _sync_additional_tasks_metered_or_error(
+        request.user,
+        "user",
+        auto_purchase,
+        log_owner_label=f"user {request.user.id}",
+    )
+    if sync_error_response is not None:
+        return sync_error_response
 
     if not auto_purchase:
         user_billing.max_extra_tasks = 0

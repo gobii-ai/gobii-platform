@@ -27,7 +27,7 @@ from util.subscription_helper import (
     sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
 )
 
-from api.models import BrowserUseAgent
+from api.models import BrowserUseAgent, UserBilling
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
@@ -86,6 +86,16 @@ def _get_owner_plan_id(owner, owner_type: str) -> str | None:
     else:
         plan = get_user_plan(owner)
     return (plan or {}).get("id")
+
+
+def _user_auto_purchase_enabled(user) -> bool:
+    """Return whether the user has additional-task auto-purchase enabled."""
+    max_extra_tasks = (
+        UserBilling.objects.filter(user=user)
+        .values_list("max_extra_tasks", flat=True)
+        .first()
+    )
+    return bool(max_extra_tasks and int(max_extra_tasks) != 0)
 
 
 def _stripe_action_url_from_latest_invoice(subscription_data: Mapping[str, Any] | None) -> str | None:
@@ -711,8 +721,10 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
         stripe_settings = get_stripe_settings()
         if plan_target == "startup":
             licensed_price_id = getattr(stripe_settings, "startup_price_id", "") or ""
+            metered_price_id = getattr(stripe_settings, "startup_additional_task_price_id", "") or ""
         else:
             licensed_price_id = getattr(stripe_settings, "scale_price_id", "") or ""
+            metered_price_id = getattr(stripe_settings, "scale_additional_task_price_id", "") or ""
 
         if not licensed_price_id:
             raise BillingUpdateError("plan_not_configured", status=400)
@@ -722,16 +734,25 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
             if not customer or not getattr(customer, "id", None):
                 raise BillingUpdateError("stripe_customer_missing", status=400)
 
-            updated, action = ensure_single_individual_subscription(
-                str(customer.id),
-                licensed_price_id=licensed_price_id,
-                metadata={
+            ensure_kwargs: dict[str, object] = {
+                "licensed_price_id": licensed_price_id,
+                "metadata": {
                     "plan_target": plan_target,
                     "plan_requestor_id": str(request.user.id),
                     "source": "console_react_billing_update",
                 },
-                idempotency_key=f"console-plan-{customer.id}-{plan_target}-{request.user.id}",
-                create_if_missing=False,
+                "idempotency_key": f"console-plan-{customer.id}-{plan_target}-{request.user.id}",
+                "create_if_missing": False,
+            }
+
+            if _user_auto_purchase_enabled(owner_obj):
+                if not metered_price_id:
+                    raise BillingUpdateError("additional_task_price_not_configured", status=400)
+                ensure_kwargs["metered_price_id"] = metered_price_id
+
+            updated, action = ensure_single_individual_subscription(
+                str(customer.id),
+                **ensure_kwargs,
             )
             if action == "absent" or not updated:
                 checkout_name = "proprietary:startup_checkout" if plan_target == "startup" else "proprietary:scale_checkout"
