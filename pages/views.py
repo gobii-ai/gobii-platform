@@ -17,7 +17,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
-from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate
+from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
@@ -171,6 +171,24 @@ def _collect_dedicated_ip_line_items(existing_subs: list[dict], stripe_settings)
                     collected[price_id] = collected.get(price_id, 0) + qty
 
     return [{"price": pid, "quantity": qty} for pid, qty in collected.items()]
+
+
+def _is_additional_tasks_auto_purchase_enabled(user) -> bool:
+    """Return whether the user has additional-task auto-purchase enabled."""
+    max_extra_tasks = (
+        UserBilling.objects.filter(user=user)
+        .values_list("max_extra_tasks", flat=True)
+        .first()
+    )
+    return bool(max_extra_tasks and int(max_extra_tasks) != 0)
+
+
+def _additional_tasks_price_id_for_plan(stripe_settings, plan_target: str) -> str:
+    if plan_target == "startup":
+        return getattr(stripe_settings, "startup_additional_task_price_id", "") or ""
+    if plan_target == "scale":
+        return getattr(stripe_settings, "scale_additional_task_price_id", "") or ""
+    return ""
 
 
 
@@ -1292,7 +1310,12 @@ class StartupCheckoutView(LoginRequiredMixin, View):
                 "quantity": 1,
             }
         ]
-        additional_price_id = stripe_settings.startup_additional_task_price_id
+        auto_purchase_enabled = _is_additional_tasks_auto_purchase_enabled(user)
+        additional_price_id = (
+            _additional_tasks_price_id_for_plan(stripe_settings, "startup")
+            if auto_purchase_enabled
+            else ""
+        )
         if additional_price_id:
             line_items.append({"price": additional_price_id})
 
@@ -1315,14 +1338,16 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
         try:
             # Reuse/modify existing subscription when present; keep checkout for first purchase.
-            subscription, action = ensure_single_individual_subscription(
-                customer_id=customer.id,
-                licensed_price_id=price_id,
-                metered_price_id=additional_price_id,
-                metadata=metadata,
-                idempotency_key=f"startup-individual-{customer.id}-{event_id}",
-                create_if_missing=False,
-            )
+            ensure_kwargs: dict[str, object] = {
+                "customer_id": customer.id,
+                "licensed_price_id": price_id,
+                "metadata": metadata,
+                "idempotency_key": f"startup-individual-{customer.id}-{event_id}",
+                "create_if_missing": False,
+            }
+            if additional_price_id:
+                ensure_kwargs["metered_price_id"] = additional_price_id
+            subscription, action = ensure_single_individual_subscription(**ensure_kwargs)
 
             if action != "absent" and subscription is not None:
                 try:
@@ -1439,7 +1464,12 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                 "quantity": 1,
             }
         ]
-        additional_price_id = stripe_settings.scale_additional_task_price_id
+        auto_purchase_enabled = _is_additional_tasks_auto_purchase_enabled(user)
+        additional_price_id = (
+            _additional_tasks_price_id_for_plan(stripe_settings, "scale")
+            if auto_purchase_enabled
+            else ""
+        )
         if additional_price_id:
             line_items.append({"price": additional_price_id})
 
@@ -1464,14 +1494,16 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
 
         if existing_subs:
             try:
-                subscription, action = ensure_single_individual_subscription(
-                    customer_id=customer.id,
-                    licensed_price_id=price_id,
-                    metered_price_id=additional_price_id,
-                    metadata=metadata,
-                    idempotency_key=f"scale-individual-upgrade-{customer.id}-{event_id}",
-                    create_if_missing=False,
-                )
+                ensure_kwargs: dict[str, object] = {
+                    "customer_id": customer.id,
+                    "licensed_price_id": price_id,
+                    "metadata": metadata,
+                    "idempotency_key": f"scale-individual-upgrade-{customer.id}-{event_id}",
+                    "create_if_missing": False,
+                }
+                if additional_price_id:
+                    ensure_kwargs["metered_price_id"] = additional_price_id
+                subscription, action = ensure_single_individual_subscription(**ensure_kwargs)
 
                 if action != "absent" and subscription is not None:
                     try:

@@ -14,6 +14,7 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     ProxyServer,
+    UserBilling,
 )
 
 
@@ -191,6 +192,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
     @patch("console.billing_update_service.stripe.Subscription.retrieve")
     @patch("console.billing_update_service._sync_subscription_after_direct_update")
+    @patch("console.billing_update_service.get_stripe_settings")
     @patch(
         "console.billing_update_service.ensure_single_individual_subscription",
         return_value=({"id": "sub_plan_change"}, "updated"),
@@ -204,16 +206,27 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self,
         mock_stripe_status,
         _mock_get_customer,
-        _mock_ensure_single_subscription,
+        mock_ensure_single_subscription,
+        mock_get_stripe_settings,
         mock_sync_subscription,
         mock_retrieve_subscription,
         _mock_assign_key,
     ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            scale_price_id="price_scale",
+            startup_additional_task_price_id="price_startup_meter",
+            scale_additional_task_price_id="price_scale_meter",
+        )
         mock_retrieve_subscription.return_value = {
             "id": "sub_plan_change",
             "latest_invoice": None,
         }
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={"max_extra_tasks": 10},
+        )
 
         session = self.client.session
         session["context_type"] = "personal"
@@ -235,6 +248,8 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload.get("ok"))
+        ensure_kwargs = mock_ensure_single_subscription.call_args.kwargs
+        self.assertEqual(ensure_kwargs.get("metered_price_id"), "price_startup_meter")
         mock_retrieve_subscription.assert_called_once()
         mock_sync_subscription.assert_called_once_with(mock_retrieve_subscription.return_value)
 
@@ -251,7 +266,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self,
         mock_stripe_status,
         _mock_get_customer,
-        _mock_ensure_single_subscription,
+        mock_ensure_single_subscription,
     ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
 
@@ -277,6 +292,8 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertIn("/subscribe/scale/", payload.get("redirectUrl", ""))
         self.assertIn("return_to=%2Fconsole%2Fbilling%2F", payload.get("redirectUrl", ""))
+        ensure_kwargs = mock_ensure_single_subscription.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
 
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
     @patch("console.billing_update_service.stripe.Subscription.retrieve")

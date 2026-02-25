@@ -12,7 +12,7 @@ from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings, tag
 from django.urls import reverse
 from waffle.testutils import override_flag
-from api.models import BrowserUseAgent, PersistentAgent, UserFlags
+from api.models import BrowserUseAgent, PersistentAgent, UserBilling, UserFlags
 from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_CHARTER_COOKIE
 from pages import views as page_views
 from pages.models import LandingPage
@@ -1054,6 +1054,8 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         parsed = urlparse(resp["Location"])
         self.assertEqual(parsed.path, reverse("agent_quick_spawn"))
+        ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
 
         session = self.client.session
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
@@ -1101,6 +1103,67 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+        self.assertEqual(
+            kwargs["line_items"],
+            [{"price": "price_startup", "quantity": 1}],
+        )
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.customer_has_any_individual_subscription")
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_startup_checkout_includes_metered_line_item_when_auto_purchase_enabled(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_ensure,
+        mock_has_history,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="trial_metered@test.com",
+            password="pw",
+            username="trial_metered_user",
+        )
+        UserBilling.objects.update_or_create(
+            user=user,
+            defaults={"max_extra_tasks": 25},
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            startup_additional_task_price_id="price_startup_meter",
+            startup_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_trial")
+        mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
+        mock_ensure.return_value = (None, "absent")
+        mock_has_history.return_value = False
+
+        resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
+
+        ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertEqual(ensure_kwargs.get("metered_price_id"), "price_startup_meter")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(
+            kwargs["line_items"],
+            [
+                {"price": "price_startup", "quantity": 1},
+                {"price": "price_startup_meter"},
+            ],
+        )
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
@@ -1148,6 +1211,10 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
+        self.assertEqual(
+            kwargs["line_items"],
+            [{"price": "price_scale", "quantity": 1}],
+        )
 
 
 @tag("batch_pages")
@@ -1349,6 +1416,8 @@ class MarketingMetaTests(TestCase):
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
+        ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()
 
 
@@ -1439,4 +1508,6 @@ class SubscriptionPriceParsingTests(TestCase):
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
+        ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()
