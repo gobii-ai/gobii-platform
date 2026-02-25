@@ -30,6 +30,7 @@ from .views import (
     SolutionView,
     MarketingContactRequestView,
     SolutionsSitemap,
+    WebManifestView,
 )
 
 from djstripe import views as djstripe_views
@@ -67,6 +68,7 @@ sitemaps['solutions'] = SolutionsSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),
+    path("manifest.json", WebManifestView.as_view(), name="web_manifest"),
     path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=True)),
     path("library/", LibraryView.as_view(), name="library"),
     path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),

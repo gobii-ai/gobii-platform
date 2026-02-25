@@ -18,6 +18,7 @@ from pages.account_info_cache import (
 from pages.mini_mode import is_mini_mode_enabled
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
+from util.fish_collateral import is_fish_collateral_enabled
 from util.subscription_helper import (
     get_user_plan,
     get_user_api_rate_limit,
@@ -195,6 +196,12 @@ def mini_mode(request):
     return {
         "mini_mode_enabled": mini_mode_enabled,
         "mini_mode_solutions_header": mini_mode_enabled and request.path.startswith("/solutions/"),
+    }
+
+
+def fish_collateral(request):
+    return {
+        "fish_collateral_enabled": is_fish_collateral_enabled(),
     }
 
 

@@ -3,6 +3,7 @@ import hashlib
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
+from waffle.testutils import override_switch
 
 
 User = get_user_model()
@@ -88,3 +89,71 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertIn("window.GobiiSignupTracking.fetchAndFire", content)
         self.assertIn("source: 'app_shell'", content)
         self.assertIn("send_page_view: false", content)
+
+    @tag("batch_pages")
+    def test_base_template_uses_legacy_collateral_when_switch_is_off(self):
+        with override_switch("fish_collateral", active=False):
+            response = self.client.get(reverse("pages:home"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn('/static/images/favicon.ico?v=4', content)
+        self.assertIn('/static/images/favicon-16x16.png?v=4', content)
+        self.assertIn('/static/images/favicon-32x32.png?v=4', content)
+        self.assertIn('/static/images/apple-touch-icon.png?v=4', content)
+        self.assertIn('rel="manifest" href="/manifest.json"', content)
+
+    @tag("batch_pages")
+    def test_base_template_uses_fish_collateral_when_switch_is_on(self):
+        with override_switch("fish_collateral", active=True):
+            response = self.client.get(reverse("pages:home"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn('/static/images/gobii_fish_favicon.ico?v=5', content)
+        self.assertIn('/static/images/gobii_fish_favicon_16.png?v=5', content)
+        self.assertIn('/static/images/gobii_fish_favicon_32.png?v=5', content)
+        self.assertIn('/static/images/gobii_fish_apple_touch_180.png?v=5', content)
+
+    @tag("batch_pages")
+    @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123", GOBII_PROPRIETARY_MODE=True)
+    def test_app_shell_uses_legacy_icon_when_switch_is_off(self):
+        with override_switch("fish_collateral", active=False):
+            response = self.client.get("/app")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn('href="/static/images/noBgBlue.png"', content)
+        self.assertIn('data-fish-collateral-enabled="false"', content)
+
+    @tag("batch_pages")
+    @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123", GOBII_PROPRIETARY_MODE=True)
+    def test_app_shell_uses_fish_icon_when_switch_is_on(self):
+        with override_switch("fish_collateral", active=True):
+            response = self.client.get("/app")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn('href="/static/images/gobii_fish.png"', content)
+        self.assertIn('data-fish-collateral-enabled="true"', content)
+
+
+@tag("batch_pages")
+class WebManifestRenderingTests(TestCase):
+    def test_manifest_uses_legacy_icons_when_switch_is_off(self):
+        with override_switch("fish_collateral", active=False):
+            response = self.client.get(reverse("pages:web_manifest"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/manifest+json")
+        payload = response.json()
+        self.assertEqual(payload["icons"][0]["src"], "/static/images/favicon-16x16.png")
+        self.assertEqual(payload["icons"][1]["src"], "/static/images/favicon-32x32.png")
+        self.assertEqual(payload["icons"][2]["src"], "/static/images/favicon-192x192.png")
+        self.assertEqual(payload["icons"][3]["src"], "/static/images/gobii_swoosh_white_on_blue_512.png")
+
+    def test_manifest_uses_fish_icons_when_switch_is_on(self):
+        with override_switch("fish_collateral", active=True):
+            response = self.client.get(reverse("pages:web_manifest"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/manifest+json")
+        payload = response.json()
+        self.assertEqual(payload["icons"][0]["src"], "/static/images/gobii_fish_favicon_16.png")
+        self.assertEqual(payload["icons"][1]["src"], "/static/images/gobii_fish_favicon_32.png")
+        self.assertEqual(payload["icons"][2]["src"], "/static/images/gobii_fish_icon_192.png")
+        self.assertEqual(payload["icons"][3]["src"], "/static/images/gobii_fish_icon_512.png")

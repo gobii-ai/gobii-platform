@@ -103,6 +103,16 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const hasAgents = agents.length > 0
 
+  const fishCollateralEnabled = useMemo(() => {
+    if (typeof document === 'undefined') {
+      return true
+    }
+    const mountNode = document.getElementById('gobii-frontend-root')
+    return mountNode?.dataset.fishCollateralEnabled !== 'false'
+  }, [])
+  const sidebarLogoSrc = fishCollateralEnabled ? '/static/images/gobii_fish.png' : '/static/images/noBgWhite.png'
+  const sidebarLogoAlt = fishCollateralEnabled ? 'Gobii Fish' : 'Gobii'
+
   const activeAgent = useMemo(
     () => agents.find((a) => a.id === activeAgentId) ?? null,
     [agents, activeAgentId],
@@ -219,7 +229,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         <div className="chat-sidebar-header" data-collapsed={collapsed ? 'true' : 'false'}>
           {!collapsed ? (
             <a href="/" className="chat-sidebar-logo-link">
-              <img src="/static/images/gobii_fish.png" alt="Gobii Fish" className="chat-sidebar-logo" />
+              <img src={sidebarLogoSrc} alt={sidebarLogoAlt} className="chat-sidebar-logo" />
             </a>
           ) : null}
           <div className="chat-sidebar-header-actions">
