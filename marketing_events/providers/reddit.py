@@ -94,15 +94,20 @@ class RedditCAPI:
 
         # Clean properties into metadata
         props = (evt.get("properties") or {}).copy()
+        transaction_value = props.pop("transaction_value", None)
         props.pop("test_mode", False)  # This property is not used in the Reddit payload
         props.pop("event_time", None)
         props.pop("event_id", None)
 
-        metadata = self._clean_metadata({
+        metadata_payload = {
             **props,
             "conversion_id": evt.get("event_id"),  # keep for dedupe
             # add value/currency/item_count/products if you have them
-        })
+        }
+        # Keep Reddit purchase values tied to the charged amount when available.
+        if evt.get("event_name") == "Subscribe" and transaction_value not in (None, "", []):
+            metadata_payload["value"] = transaction_value
+        metadata = self._clean_metadata(metadata_payload)
 
         # Event timestamp
         event_at_ms = self._to_millis(evt.get("event_time"))

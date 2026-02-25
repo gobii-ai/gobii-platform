@@ -108,3 +108,31 @@ class RedditPayloadTests(SimpleTestCase):
         _, kwargs = mock_post.call_args
         event = kwargs["json"]["data"]["events"][0]
         self.assertEqual(event["type"], {"tracking_type": "LEAD"})
+
+    def test_subscribe_prefers_transaction_value_for_purchase_value(self):
+        provider = RedditCAPI(pixel_id="acct123", token="token456")
+        evt = {
+            "event_name": "Subscribe",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-sub-1",
+            "properties": {
+                "value": 150.0,
+                "transaction_value": 30.0,
+                "currency": "USD",
+            },
+            "ids": {},
+            "network": {},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.reddit.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        event = kwargs["json"]["data"]["events"][0]
+        self.assertEqual(event["type"], {"tracking_type": "PURCHASE"})
+        self.assertEqual(event["metadata"]["value"], 30.0)
+        self.assertEqual(event["metadata"]["currency"], "USD")

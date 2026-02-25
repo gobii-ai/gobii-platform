@@ -1876,6 +1876,62 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
         self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
 
+    def test_invoice_payment_succeeded_emits_subscribe_for_trial_conversion_without_line_period(self):
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        payload = _build_invoice_payload(
+            customer_id="cus_user_succeeded",
+            subscription_id="sub_user_succeeded",
+            amount_paid=3000,
+            status="paid",
+            billing_reason="subscription_cycle",
+            product_id="prod_plan",
+        )
+        payload["lines"]["data"][0]["amount"] = 3000
+        payload["lines"]["data"][0]["price"]["unit_amount"] = 3000
+        payload["lines"]["data"][0]["price"]["currency"] = "usd"
+        payload["lines"]["data"][0].pop("period", None)
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
+            subscription=SimpleNamespace(
+                id="sub_user_succeeded",
+                stripe_data={
+                    "trial_end": str(trial_end),
+                    "current_period_start": str(trial_end),
+                },
+            ),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_invoice_payment_succeeded(event)
+
+        self.assertEqual(mock_capi.call_count, 2)
+
+        first_call = mock_capi.call_args_list[0].kwargs
+        self.assertEqual(first_call["event_name"], "Subscribe")
+        self.assertEqual(first_call["provider_targets"], ["google_analytics"])
+        first_props = first_call["properties"]
+        self.assertEqual(first_props["transaction_value"], 30.0)
+        self.assertEqual(first_props["currency"], "USD")
+        self.assertEqual(first_props["event_id"], payload["id"])
+
+        second_call = mock_capi.call_args_list[1].kwargs
+        self.assertEqual(second_call["event_name"], "Subscribe")
+        self.assertEqual(second_call["provider_targets"], ["reddit"])
+        second_props = second_call["properties"]
+        self.assertEqual(second_props["transaction_value"], 30.0)
+        self.assertEqual(second_props["currency"], "USD")
+        self.assertEqual(second_props["event_id"], payload["id"])
+
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")
         org = Organization.objects.create(name="Success Org", slug="success-org", created_by=owner)

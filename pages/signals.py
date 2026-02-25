@@ -1471,12 +1471,32 @@ def handle_invoice_payment_succeeded(event, **kwargs):
         subscription_obj = getattr(invoice, "subscription", None) if invoice else None
         subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
         trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
+        if trial_end_dt is None:
+            trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_obj, "trial_end"))
         line_start_dt = _line_period_start(lines)
+        subscription_current_period_start_dt = _coerce_datetime(
+            _get_stripe_data_value(subscription_data, "current_period_start")
+        )
+        if subscription_current_period_start_dt is None:
+            subscription_current_period_start_dt = _coerce_datetime(
+                _get_stripe_data_value(subscription_obj, "current_period_start")
+            )
+        trial_conversion_line_match = bool(
+            trial_end_dt and line_start_dt and trial_end_dt.date() == line_start_dt.date()
+        )
+        trial_conversion_subscription_match = bool(
+            trial_end_dt
+            and subscription_current_period_start_dt
+            and trial_end_dt.date() == subscription_current_period_start_dt.date()
+        )
         trial_conversion = bool(
             billing_reason == "subscription_cycle"
-            and trial_end_dt
-            and line_start_dt
-            and trial_end_dt.date() == line_start_dt.date()
+            and trial_conversion_line_match
+        )
+        reddit_trial_conversion_fallback = bool(
+            billing_reason == "subscription_cycle"
+            and (not trial_conversion_line_match)
+            and trial_conversion_subscription_match
         )
 
         try:
@@ -1566,6 +1586,15 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     context=subscribe_context,
                     provider_targets=["google_analytics"] if should_send_ga_renewal else None,
                 )
+                if reddit_trial_conversion_fallback:
+                    capi(
+                        user=owner,
+                        event_name="Subscribe",
+                        properties=marketing_properties,
+                        request=None,
+                        context=subscribe_context,
+                        provider_targets=["reddit"],
+                    )
         except Exception:
             logger.exception(
                 "Failed to enqueue marketing Subscribe event for invoice %s",
