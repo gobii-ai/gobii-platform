@@ -59,6 +59,29 @@ class HomePageTests(TestCase):
             '<meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
         )
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_home_page_uses_legacy_hero_illustration_when_fish_homepage_is_off(self):
+        with override_flag("fish_homepage", active=False):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        legacy_hero_image = soup.find("img", {"src": "/static/images/undraw/texting.svg"})
+        self.assertIsNotNone(legacy_hero_image)
+        self.assertIsNone(soup.select_one("[data-gobii-fish-cursor]"))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_home_page_uses_fish_hero_animation_when_fish_homepage_is_on(self):
+        with override_flag("fish_homepage", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        self.assertIsNotNone(soup.select_one("[data-gobii-fish-cursor]"))
+        self.assertIsNone(soup.find("img", {"src": "/static/images/undraw/texting.svg"}))
+
     @tag("batch_pages")
     def test_home_page_excludes_eval_agents(self):
         User = get_user_model()
