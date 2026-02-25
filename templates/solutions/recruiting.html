@@ -147,7 +147,7 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto">
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="recruiting_hero" />
             <input type="hidden" name="trial_onboarding" value="1" />
@@ -246,7 +246,7 @@
                   Scheduled runs
                 </li>
               </ul>
-              <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="inline-flex">
+              <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="inline-flex" data-analytics-cta-id="recruiting_talent_scout" data-analytics-placement="featured_agent" data-analytics-intent="spawn_agent">
                 {% csrf_token %}
                 <input type="hidden" name="source_page" value="recruiting_talent_scout" />
                 <input type="hidden" name="trial_onboarding" value="1" />
@@ -326,7 +326,7 @@
           </li>
         </ul>
         <div class="pl-[4.75rem]">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'candidate-researcher' %}" class="inline-flex">
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'candidate-researcher' %}" class="inline-flex" data-analytics-cta-id="recruiting_candidate_researcher" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="recruiting_candidate_researcher" />
             <input type="hidden" name="trial_onboarding" value="1" />
@@ -375,7 +375,7 @@
           </li>
         </ul>
         <div class="pl-[4.75rem]">
-          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'outreach-agent' %}" class="inline-flex">
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'outreach-agent' %}" class="inline-flex" data-analytics-cta-id="recruiting_outreach_agent" data-analytics-placement="supporting_agent" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="recruiting_outreach_agent" />
             <input type="hidden" name="trial_onboarding" value="1" />
@@ -645,7 +645,7 @@
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto">
+      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="w-full sm:w-auto" data-analytics-cta-id="recruiting_final_cta" data-analytics-placement="final_cta" data-analytics-intent="spawn_agent">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="recruiting_final_cta" />
         <input type="hidden" name="trial_onboarding" value="1" />

@@ -1,4 +1,5 @@
 import hashlib
+import json
 
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified
@@ -38,28 +39,25 @@ def _format_vite_tags() -> str:
 
 def _format_segment_snippet() -> str:
     """Generate Segment analytics snippet if configured."""
-    write_key = getattr(settings, "SEGMENT_WEB_WRITE_KEY", None)
-    if settings.DEBUG or not write_key:
-        # Provide a no-op stub in debug mode or when not configured
-        return """<script>
-    window.analytics = window.analytics || {
-      page: function() {},
-      track: function() {},
-      identify: function() {},
-      ready: function(cb) { if (typeof cb === 'function') cb(); },
-    };
-  </script>"""
-
+    write_key = settings.SEGMENT_WEB_WRITE_KEY
+    segment_enabled = bool(write_key and (not settings.DEBUG or settings.SEGMENT_WEB_ENABLE_IN_DEBUG))
+    enabled_js = "true" if segment_enabled else "false"
+    write_key_json = json.dumps(write_key)
     return f"""<script>
-    !function(){{var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){{return function(){{if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){{var c=document.querySelector("link[rel='canonical']");n.push({{__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer}})}}n.unshift(e);analytics.push(n);return analytics}}}};for(var n=0;n<analytics.methods.length;n++){{var key=analytics.methods[n];analytics[key]=analytics.factory(key)}}analytics.load=function(key,n){{var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n}};analytics.SNIPPET_VERSION="5.2.0";}}}}();
-    analytics.load("{write_key}");
-    analytics.addSourceMiddleware(({{ payload, next }}) => {{
-      if (!payload.obj.properties) payload.obj.properties = {{}};
-      payload.obj.properties.medium = 'Web';
-      payload.obj.properties.frontend = true;
-      next(payload);
-    }});
-    analytics.page('App', 'Immersive App');
+    (function() {{
+      var segmentEnabled = window.GobiiSegmentBootstrap && window.GobiiSegmentBootstrap.init({{
+        enabled: {enabled_js},
+        writeKey: {write_key_json},
+        defaultProperties: {{
+          medium: 'Web',
+          frontend: true
+        }}
+      }});
+      if (!segmentEnabled) {{
+        return;
+      }}
+      analytics.page('App', 'Immersive App');
+    }})();
   </script>"""
 
 
@@ -166,6 +164,7 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
     segment_snippet = _format_segment_snippet()
     pixel_loaders = _format_pixel_loaders()
     signup_tracking = _format_signup_tracking_snippet()
+    segment_bootstrap_js = static("js/segment_bootstrap.js")
     analytics_js = static("js/gobii_analytics.js")
     signup_tracking_js = static("js/signup_tracking.js")
     icon_url = static("images/gobii_fish.png") if fish_collateral_enabled else static("images/noBgBlue.png")
@@ -188,6 +187,7 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
   <link rel="stylesheet" href="{pygments_css}">
   <link rel="stylesheet" href="{globals_css}">
   {pixel_loaders}
+  <script src="{segment_bootstrap_js}"></script>
   {segment_snippet}
   <script src="{analytics_js}"></script>
   <script src="{signup_tracking_js}"></script>

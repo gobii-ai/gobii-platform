@@ -96,6 +96,8 @@ class AnalyticsEvent(StrEnum):
     WEB_TASK_RESULT_VIEWED = 'Task Result Viewed'
     WEB_TASK_RESULT_DOWNLOADED = 'Task Result Downloaded'
     WEB_TASK_CANCELLED = 'Task Cancelled'
+    MARKETING_CONTACT_REQUEST_SUBMITTED = 'Marketing Contact Request Submitted'
+    CTA_CLICKED = 'CTA Clicked'
 
     # Web Chat Events
     WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'
@@ -698,6 +700,12 @@ PAGE_META = {
     "/accounts/login/":                 ("Auth",       "Login"),
     "/accounts/logout/":                ("Auth",       "Logout"),
     "/accounts/signup/":                ("Auth",       "Sign Up"),
+    "/solutions/recruiting/":           ("Marketing",  "Solutions Recruiting"),
+    "/solutions/sales/":                ("Marketing",  "Solutions Sales"),
+    "/solutions/health-care/":          ("Marketing",  "Solutions Health Care"),
+    "/solutions/defense/":              ("Marketing",  "Solutions Defense"),
+    "/solutions/engineering/":          ("Marketing",  "Solutions Engineering"),
+    r"^/solutions/.*/$":                ("Marketing",  "Solutions"),
     r"^/console/tasks/.*/$":            ("App",        "Task Details"),
     r"^/console/agents/.*/$":           ("App",        "Agent Details"),
     "/console/agents/":                 ("App",        "Agents"),

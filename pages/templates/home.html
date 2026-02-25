@@ -211,10 +211,11 @@
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
       <div class="max-w-4xl mx-auto relative z-20">
-          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-requires-trial="{{ home_spawn_requires_trial|yesno:'true,false' }}" data-immersive-form>
+          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-requires-trial="{{ home_spawn_requires_trial|yesno:'true,false' }}" data-immersive-form data-analytics-cta-id="home_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
             {% csrf_token %}
             <input type="hidden" name="return_to" id="agent-return-to" value="">
             <input type="hidden" name="embed" id="agent-embed" value="{% if user.is_authenticated %}1{% else %}0{% endif %}">
+            <input type="hidden" name="source_page" value="home_hero">
             <input type="hidden" name="trial_onboarding" value="1">
             <input type="hidden" name="trial_onboarding_target" value="agent_ui">
             

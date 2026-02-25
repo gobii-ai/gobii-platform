@@ -146,7 +146,13 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <a href="#for-agencies" class="w-full sm:w-auto group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
+          <a
+            href="#for-agencies"
+            class="w-full sm:w-auto group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200"
+            data-analytics-cta-id="solutions_defense_hero_for_agencies"
+            data-analytics-placement="hero"
+            data-analytics-intent="learn_more"
+          >
             For defense agencies
             <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -569,12 +575,16 @@
         action="{% url 'pages:marketing_contact_request' %}"
         method="post"
         class="space-y-4"
+        data-analytics-cta-id="defense_contact_form"
+        data-analytics-placement="final_cta"
+        data-analytics-intent="contact_sales"
         hx-post="{% url 'pages:marketing_contact_request' %}"
         hx-target="#defense-contact-response"
         hx-swap="innerHTML"
       >
         {% csrf_token %}
         <input type="hidden" name="source" value="defense_landing_page">
+        <input type="hidden" name="source_page" value="defense_contact_form">
         <div>
           <input
             type="email"

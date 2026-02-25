@@ -144,102 +144,90 @@
   {% endif %}
 
 
-{% if not debug and settings.SEGMENT_WEB_WRITE_KEY %}
-  <!-- Segment -->
+  <script src="{% static 'js/segment_bootstrap.js' %}"></script>
   <script>
-    !function(){var i="analytics",analytics=window[i]=window[i]||[];if(!analytics.initialize)if(analytics.invoked)window.console&&console.error&&console.error("Segment snippet included twice.");else{analytics.invoked=!0;analytics.methods=["trackSubmit","trackClick","trackLink","trackForm","pageview","identify","reset","group","track","ready","alias","debug","page","screen","once","off","on","addSourceMiddleware","addIntegrationMiddleware","setAnonymousId","addDestinationMiddleware","register"];analytics.factory=function(e){return function(){if(window[i].initialized)return window[i][e].apply(window[i],arguments);var n=Array.prototype.slice.call(arguments);if(["track","screen","alias","group","page","identify"].indexOf(e)>-1){var c=document.querySelector("link[rel='canonical']");n.push({__t:"bpc",c:c&&c.getAttribute("href")||void 0,p:location.pathname,u:location.href,s:location.search,t:document.title,r:document.referrer})}n.unshift(e);analytics.push(n);return analytics}};for(var n=0;n<analytics.methods.length;n++){var key=analytics.methods[n];analytics[key]=analytics.factory(key)}analytics.load=function(key,n){var t=document.createElement("script");t.type="text/javascript";t.async=!0;t.setAttribute("data-global-segment-analytics-key",i);t.src="https://cdn.segment.com/analytics.js/v1/" + key + "/analytics.min.js";var r=document.getElementsByTagName("script")[0];r.parentNode.insertBefore(t,r);analytics._loadOptions=n};analytics.SNIPPET_VERSION="5.2.0";} }();
-    analytics.load("{{ settings.SEGMENT_WEB_WRITE_KEY }}");
-
-    // Add a source middleware to set the medium for web events
-    analytics.addSourceMiddleware(({ payload, next }) => {
-      const { properties } = payload.obj;
-
-      if (!properties) {
-        payload.obj.properties = {};
-      }
-
-      properties.medium = 'Web';
-      properties.frontend = true;
-
-      next(payload)
-    });
-
     (function () {
-      if (!{{ user.is_authenticated|yesno:"true,false" }}) return;
-      if (typeof window.analytics === 'undefined') return; //Snippet blocked
-      // Check if user method exists before calling it (may not be loaded on localhost)
-      if (typeof analytics.user === 'function') {
-        if (analytics.user()?.id() === "{{ user.id }}") return;
+      const segmentEnabled = window.GobiiSegmentBootstrap && window.GobiiSegmentBootstrap.init({
+        enabled: {% if settings.SEGMENT_WEB_WRITE_KEY %}{% if not settings.DEBUG or settings.SEGMENT_WEB_ENABLE_IN_DEBUG %}true{% else %}false{% endif %}{% else %}false{% endif %},
+        writeKey: "{{ settings.SEGMENT_WEB_WRITE_KEY|escapejs }}",
+        defaultProperties: {
+          medium: 'Web',
+          frontend: true
+        }
+      });
+
+      if (!segmentEnabled) {
+        return;
       }
 
-      analytics.identify("{{ user.id }}", {
-        email : "{{ user.email }}",
-      });
+      if ({{ user.is_authenticated|yesno:"true,false" }}) {
+        let shouldIdentify = true;
+        // Check if user method exists before calling it.
+        if (typeof analytics.user === 'function') {
+          const segmentUser = analytics.user();
+          if (segmentUser && typeof segmentUser.id === 'function' && segmentUser.id() === "{{ user.id }}") {
+            shouldIdentify = false;
+          }
+        }
+
+        if (shouldIdentify) {
+          analytics.identify("{{ user.id }}", {
+            email : "{{ user.email }}",
+          });
+        }
+      }
+
+      {% if landing_code %}
+        analytics.page('Landing Page', {
+          landing_code: '{{ landing_code|escapejs }}',
+          landing_hero_text: '{{ landing_hero_text|escapejs|default:"" }}',
+          landing_preview_image: '{{ landing_preview_image|escapejs|default:"" }}',
+          landing_title: '{{ landing_title|escapejs|default:"" }}',
+          default_charter: '{{ default_charter|escapejs|default:"" }}',
+        });
+      {% else %}
+        {% get_page_meta request.path as page_meta %}   {# ← call the tag, store result #}
+        (function() {
+          const isOrganizationContext = {% if current_context and current_context.type == 'organization' %}true{% else %}false{% endif %};
+          const organizationId = {% if current_context and current_context.type == 'organization' %}"{{ current_context.id|escapejs }}"{% else %}null{% endif %};
+          const organizationName = {% if current_context and current_context.type == 'organization' %}"{{ current_context.name|escapejs }}"{% else %}null{% endif %};
+          const isConsolePath = window.location.pathname.startsWith('/console');
+          const pageProps = {};
+
+          if (isOrganizationContext && isConsolePath) {
+            pageProps.organization = true;
+            if (organizationId) {
+              pageProps.organization_id = organizationId;
+            }
+            if (organizationName) {
+              pageProps.organization_name = organizationName;
+            }
+          }
+
+          {% if page_meta %}
+          let pageCategory = "{{ page_meta.0|escapejs }}";
+          let pageName = "{{ page_meta.1|escapejs }}";
+
+          if (isOrganizationContext && isConsolePath && pageName) {
+            pageName = `Organization ${pageName}`;
+          }
+
+          if (Object.keys(pageProps).length > 0) {
+            analytics.page(pageCategory, pageName, pageProps);
+          } else {
+            analytics.page(pageCategory, pageName);
+          }
+          {% else %}
+          if (Object.keys(pageProps).length > 0) {
+            analytics.page(pageProps);
+          } else {
+            analytics.page();
+          }
+          {% endif %}
+        })();
+      {% endif %}
     })();
-
-    {% if landing_code %}
-      analytics.page('Landing Page', {
-        landing_code: '{{ landing_code|escapejs }}',
-        landing_hero_text: '{{ landing_hero_text|escapejs|default:"" }}',
-        landing_preview_image: '{{ landing_preview_image|escapejs|default:"" }}',
-        landing_title: '{{ landing_title|escapejs|default:"" }}',
-        default_charter: '{{ default_charter|escapejs|default:"" }}',
-      });
-    {% else %}
-      {% get_page_meta request.path as page_meta %}   {# ← call the tag, store result #}
-      (function() {
-        const isOrganizationContext = {% if current_context and current_context.type == 'organization' %}true{% else %}false{% endif %};
-        const organizationId = {% if current_context and current_context.type == 'organization' %}"{{ current_context.id|escapejs }}"{% else %}null{% endif %};
-        const organizationName = {% if current_context and current_context.type == 'organization' %}"{{ current_context.name|escapejs }}"{% else %}null{% endif %};
-        const isConsolePath = window.location.pathname.startsWith('/console');
-        const pageProps = {};
-
-        if (isOrganizationContext && isConsolePath) {
-          pageProps.organization = true;
-          if (organizationId) {
-            pageProps.organization_id = organizationId;
-          }
-          if (organizationName) {
-            pageProps.organization_name = organizationName;
-          }
-        }
-
-        {% if page_meta %}
-        let pageCategory = "{{ page_meta.0|escapejs }}";
-        let pageName = "{{ page_meta.1|escapejs }}";
-
-        if (isOrganizationContext && isConsolePath && pageName) {
-          pageName = `Organization ${pageName}`;
-        }
-
-        if (Object.keys(pageProps).length > 0) {
-          analytics.page(pageCategory, pageName, pageProps);
-        } else {
-          analytics.page(pageCategory, pageName);
-        }
-        {% else %}
-        if (Object.keys(pageProps).length > 0) {
-          analytics.page(pageProps);
-        } else {
-          analytics.page();
-        }
-        {% endif %}
-      })();
-    {% endif %}
   </script>
-  <!-- End Segment -->
-{% endif %}
-
-{% if debug or not settings.SEGMENT_WEB_WRITE_KEY %}
-  <script>
-    window.analytics = window.analytics || {
-      page: () => {},
-      track: () => {},
-      identify: () => {},
-      ready: (cb) => (typeof cb === 'function' ? cb() : undefined),
-    };
-  </script>
-{% endif %}
 
 {% if not debug and settings.MIXPANEL_PROJECT_TOKEN %}
   <!-- Mixpanel Replay -->
@@ -261,7 +249,14 @@
        {% else %}
           try {
             const authCheck = setInterval(() => {
-                const segment_user_id = analytics?.user()?.id();
+                const segmentUser =
+                  window.analytics && typeof window.analytics.user === 'function'
+                    ? window.analytics.user()
+                    : null;
+                const segment_user_id =
+                  segmentUser && typeof segmentUser.id === 'function'
+                    ? segmentUser.id()
+                    : null;
 
                 if (segment_user_id) {
                     mixpanel.identify(segment_user_id); //use segment's user id
@@ -283,7 +278,14 @@
         // Checking for segment device_id
        try {
          const anonymousCheck = setInterval(() => {
-           const segment_device_id = analytics?.user()?.anonymousId();
+           const segmentUser =
+             window.analytics && typeof window.analytics.user === 'function'
+               ? window.analytics.user()
+               : null;
+           const segment_device_id =
+             segmentUser && typeof segmentUser.anonymousId === 'function'
+               ? segmentUser.anonymousId()
+               : null;
 
            if (segment_device_id) {
              mixpanel.register({$device_id: segment_device_id}); //use segment's device_id
@@ -447,6 +449,7 @@
   </script>
 
   <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  <script src="{% static 'js/cta_tracking.js' %}"></script>
   <script src="{% static 'js/signup_tracking.js' %}"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js"></script>
   <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
@@ -502,7 +505,7 @@
 
   {% htmx_script %}
 </head>
-<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
+<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-analytics-cta-event="{{ analytics.events.CTA_CLICKED }}" data-analytics-cta-tracking-enabled="{% if request.path == '/' or request.path|slice:':11' == '/solutions/' %}true{% else %}false{% endif %}">
   {% if llm_bootstrap_required %}
     <div class="bg-amber-100 text-amber-900 border-b border-amber-300">
       <div class="max-w-7xl mx-auto px-4 py-3 text-sm">

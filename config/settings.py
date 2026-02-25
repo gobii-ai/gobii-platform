@@ -1008,6 +1008,7 @@ SEGMENT_WEB_WRITE_KEY = env(
         fallback=SEGMENT_WRITE_KEY,
     ),
 )
+SEGMENT_WEB_ENABLE_IN_DEBUG = env.bool("SEGMENT_WEB_ENABLE_IN_DEBUG", default=False)
 GA_MEASUREMENT_API_SECRET = env(
     "GA_MEASUREMENT_API_SECRET",
     default=_proprietary_default("analytics", "GA_MEASUREMENT_API_SECRET"),
