@@ -10,6 +10,10 @@ AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 AGENT_CRON_THROTTLE = "agent_cron_throttle"
 
 
+# Controls favicon/logo collateral assets across templates and app shell
+FISH_COLLATERAL = "fish_collateral"
+
+
 
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a

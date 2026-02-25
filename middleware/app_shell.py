@@ -5,6 +5,7 @@ from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseNotMod
 from django.templatetags.static import static
 
 from config.vite import ViteManifestError, get_vite_asset
+from util.fish_collateral import is_fish_collateral_enabled
 
 APP_PATH_PREFIX = "/app"
 APP_SHELL_CACHE_CONTROL = (
@@ -160,14 +161,15 @@ def _format_pixel_loaders() -> str:
     return "\n  ".join(snippets) if snippets else ""
 
 
-def _build_shell_html() -> str:
+def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
     vite_tags = _format_vite_tags()
     segment_snippet = _format_segment_snippet()
     pixel_loaders = _format_pixel_loaders()
     signup_tracking = _format_signup_tracking_snippet()
     analytics_js = static("js/gobii_analytics.js")
     signup_tracking_js = static("js/signup_tracking.js")
-    icon_url = static("images/gobii_fish.png")
+    icon_url = static("images/gobii_fish.png") if fish_collateral_enabled else static("images/noBgBlue.png")
+    fish_collateral_data_attr = "true" if fish_collateral_enabled else "false"
     fonts_css = static("css/custom_fonts.css")
     pygments_css = static("css/pygments.css")
     globals_css = static("css/globals.css")
@@ -193,7 +195,7 @@ def _build_shell_html() -> str:
   {vite_tags}
 </head>
 <body class="min-h-screen bg-white">
-  <div id="gobii-frontend-root" data-app="immersive-app"></div>
+  <div id="gobii-frontend-root" data-app="immersive-app" data-fish-collateral-enabled="{fish_collateral_data_attr}"></div>
 </body>
 </html>"""
 
@@ -205,6 +207,7 @@ class AppShellMiddleware:
         self.get_response = get_response
         self._cached_shell = None
         self._cached_etag = None
+        self._cached_fish_collateral_enabled = None
 
     def __call__(self, request):
         if not self._should_handle(request.path):
@@ -213,10 +216,16 @@ class AppShellMiddleware:
         if request.method not in {"GET", "HEAD"}:
             return HttpResponseNotAllowed(["GET", "HEAD"])
 
-        if self._cached_shell is None or settings.DEBUG:
-            self._cached_shell = _build_shell_html()
+        fish_collateral_enabled = is_fish_collateral_enabled()
+        if (
+            self._cached_shell is None
+            or settings.DEBUG
+            or self._cached_fish_collateral_enabled != fish_collateral_enabled
+        ):
+            self._cached_shell = _build_shell_html(fish_collateral_enabled=fish_collateral_enabled)
             digest = hashlib.sha256(self._cached_shell.encode("utf-8")).hexdigest()
             self._cached_etag = f"\"{digest}\""
+            self._cached_fish_collateral_enabled = fish_collateral_enabled
 
         request_etag = request.headers.get("If-None-Match")
         if self._etag_matches(request_etag):

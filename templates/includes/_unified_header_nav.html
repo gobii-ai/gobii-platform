@@ -1,5 +1,6 @@
 {% load static %}
 {% load i18n %}
+{% load waffle_tags %}
 {% url 'account_login' as account_login_url %}
 
 <!-- Unified Header -->
@@ -20,13 +21,23 @@
     <div class="flex items-center justify-between h-16 !border-none">
       <!-- Brand -->
       <a href="{% url 'pages:home' %}" class="text-lg font-bold text-slate-900 flex items-center h-10">
-        <img src="{% static 'images/gobii_fish_with_text_purple_nav.png' %}"
-             alt="Gobii Fish Wordmark"
-             class="h-10 w-auto"
-             width="120"
-             height="40"
-             loading="eager"
-             decoding="async">
+        {% flag "fish_upper_left" %}
+          <img src="{% static 'images/gobii_fish_with_text_purple_nav.png' %}"
+               alt="Gobii Fish Wordmark"
+               class="h-10 w-auto"
+               width="120"
+               height="40"
+               loading="eager"
+               decoding="async">
+        {% else %}
+          <img src="{% static 'images/noBgIndigo600.png' %}"
+               alt="Gobii Wordmark"
+               class="h-10 w-auto"
+               width="120"
+               height="40"
+               loading="eager"
+               decoding="async">
+        {% endflag %}
       </a>
 
       <!-- Desktop Nav - Floating pill style -->

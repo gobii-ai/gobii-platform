@@ -57,6 +57,7 @@ from util.urls import (
     build_immersive_chat_url,
     normalize_return_to,
 )
+from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -1012,6 +1013,16 @@ def health_check(request):
         return HttpResponse("Shutting down", status=503)
 
     return HttpResponse("OK")
+
+
+class WebManifestView(View):
+    def get(self, request, *args, **kwargs):
+        payload = build_web_manifest_payload(
+            fish_collateral_enabled=is_fish_collateral_enabled(),
+        )
+        response = JsonResponse(payload, content_type="application/manifest+json")
+        response["Cache-Control"] = "no-store, max-age=0"
+        return response
 
 
 class LandingRedirectView(View):

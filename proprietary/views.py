@@ -19,6 +19,7 @@ from util.subscription_helper import (
     get_stripe_customer,
     get_user_plan,
 )
+from util.fish_collateral import is_fish_collateral_enabled
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings
@@ -505,8 +506,14 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
         )
 
         canonical_url = self.request.build_absolute_uri(self.request.path)
-        brand_logo_url = self.request.build_absolute_uri(static("images/gobii_fish.png"))
-        default_image_url = self.request.build_absolute_uri(static("images/gobii_fish_social_1280x640.png"))
+        if is_fish_collateral_enabled():
+            brand_logo_path = "images/gobii_fish.png"
+            default_image_path = "images/gobii_fish_social_1280x640.png"
+        else:
+            brand_logo_path = "images/noBgBlue.png"
+            default_image_path = "images/noBgBlue.png"
+        brand_logo_url = self.request.build_absolute_uri(static(brand_logo_path))
+        default_image_url = self.request.build_absolute_uri(static(default_image_path))
 
         blog_posts_schema = []
         for post in posts[:10]:
@@ -563,8 +570,14 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
 
         context = super().get_context_data(**kwargs)
         canonical_url = self.request.build_absolute_uri(self.request.path)
-        brand_logo_url = self.request.build_absolute_uri(static("images/gobii_fish.png"))
-        default_image_url = self.request.build_absolute_uri(static("images/gobii_fish_social_1280x640.png"))
+        if is_fish_collateral_enabled():
+            brand_logo_path = "images/gobii_fish.png"
+            default_image_path = "images/gobii_fish_social_1280x640.png"
+        else:
+            brand_logo_path = "images/noBgBlue.png"
+            default_image_path = "images/noBgBlue.png"
+        brand_logo_url = self.request.build_absolute_uri(static(brand_logo_path))
+        default_image_url = self.request.build_absolute_uri(static(default_image_path))
 
         image_path = post["meta"].get("image")
         if image_path:

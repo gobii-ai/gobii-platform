@@ -15,6 +15,7 @@
        data-agent-avatar-url="{{ agent.get_avatar_url|default_if_none:'' }}"
        data-agent-email="{{ agent_email }}"
        data-agent-sms="{{ agent_sms }}"
+       data-fish-collateral-enabled="{% if fish_collateral_enabled %}true{% else %}false{% endif %}"
        data-user-plan="{{ user_plan|default:'' }}"
        data-startup-trial-days="{{ startup_trial_days|default:0 }}"
        data-scale-trial-days="{{ scale_trial_days|default:0 }}"

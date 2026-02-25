@@ -8,11 +8,21 @@
   <meta name="csrf-cookie-name" content="{{ settings.CSRF_COOKIE_NAME|default:'csrftoken' }}">
   {% include "partials/_csrf_helpers.html" %}
   <title>{% block page_title %}Gobii Console{% endblock %}</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/gobii_fish_favicon_32.png' %}" />
-  <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/gobii_fish_favicon_16.png' %}" />
-  <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/gobii_fish_apple_touch_180.png' %}" />
+  {% if fish_collateral_enabled %}
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/gobii_fish_favicon_32.png' %}" />
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/gobii_fish_favicon_16.png' %}" />
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/gobii_fish_apple_touch_180.png' %}" />
+  {% else %}
+    <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/favicon-32x32.png' %}" />
+    <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/favicon-16x16.png' %}" />
+    <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/apple-touch-icon.png' %}" />
+  {% endif %}
   <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
-  <link rel="preload" as="image" href="{% static 'images/gobii_fish.png' %}" />
+  {% if fish_collateral_enabled %}
+    <link rel="preload" as="image" href="{% static 'images/gobii_fish.png' %}" />
+  {% else %}
+    <link rel="preload" as="image" href="{% static 'images/noBgBlue.png' %}" />
+  {% endif %}
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
   <link rel="stylesheet" href="{% static 'css/pygments.css' %}">
   <link rel="stylesheet" href="{% static 'css/globals.css' %}">
