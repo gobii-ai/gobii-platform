@@ -5829,21 +5829,20 @@ class AgentEmailOAuthCallbackView(LoginRequiredMixin, View):
         credential.save()
 
         account_update_fields: list[str] = []
-        if account.connection_mode != AgentEmailAccount.ConnectionMode.OAUTH2:
-            account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
-            account_update_fields.append("connection_mode")
-        if account.smtp_auth != AgentEmailAccount.AuthMode.OAUTH2:
-            account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
-            account_update_fields.append("smtp_auth")
-        if account.imap_auth != AgentEmailAccount.ImapAuthMode.OAUTH2:
-            account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
-            account_update_fields.append("imap_auth")
-        if not account.smtp_username:
-            account.smtp_username = account.endpoint.address
-            account_update_fields.append("smtp_username")
-        if not account.imap_username:
-            account.imap_username = account.endpoint.address
-            account_update_fields.append("imap_username")
+        oauth_mode_fields = (
+            ("connection_mode", AgentEmailAccount.ConnectionMode.OAUTH2),
+            ("smtp_auth", AgentEmailAccount.AuthMode.OAUTH2),
+            ("imap_auth", AgentEmailAccount.ImapAuthMode.OAUTH2),
+        )
+        for field, value in oauth_mode_fields:
+            if getattr(account, field) != value:
+                setattr(account, field, value)
+                account_update_fields.append(field)
+
+        for field in ("smtp_username", "imap_username"):
+            if not getattr(account, field):
+                setattr(account, field, account.endpoint.address)
+                account_update_fields.append(field)
         if account_update_fields:
             account.save(update_fields=[*account_update_fields, "updated_at"])
 
