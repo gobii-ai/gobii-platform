@@ -30,6 +30,7 @@ class RedditCAPI:
         # Map your internal names to Reddit tracking types
         mapping = {
             "CompleteRegistration": "SIGN_UP",
+            "StartTrial": "LEAD",
             "Subscribe": "PURCHASE",
             # add more as needed:
             # "AddToCart": "ADD_TO_CART",

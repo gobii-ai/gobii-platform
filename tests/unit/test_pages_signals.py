@@ -61,6 +61,7 @@ class UserSignedUpSignalTests(TestCase):
             "wbraid": "first-wbraid",
             "msclkid": "first-msclkid",
             "ttclid": "first-ttclid",
+            "rdt_cid": "first-rdt-cid",
         }
         now = timezone.now()
         later = now + timedelta(minutes=5)
@@ -78,6 +79,7 @@ class UserSignedUpSignalTests(TestCase):
             "wbraid": "last-wbraid",
             "msclkid": "last-msclkid",
             "ttclid": "last-ttclid",
+            "rdt_cid": "last-rdt-cid",
             "first_referrer": "https://first.example/",
             "last_referrer": "https://last.example/",
             "first_path": "/landing/first/",
@@ -107,12 +109,18 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(traits["gclid_last"], "last-gclid")
         self.assertEqual(traits["msclkid_first"], "first-msclkid")
         self.assertEqual(traits["msclkid_last"], "last-msclkid")
+        self.assertEqual(traits["rdt_cid_first"], "first-rdt-cid")
+        self.assertEqual(traits["rdt_cid_last"], "last-rdt-cid")
         self.assertEqual(traits["first_referrer"], "https://first.example/")
         self.assertEqual(traits["last_referrer"], "https://last.example/")
         self.assertEqual(traits["first_landing_path"], "/landing/first/")
         self.assertEqual(traits["last_landing_path"], "/pricing/")
         self.assertEqual(traits["segment_anonymous_id"], "anon-123")
         self.assertEqual(traits["ga_client_id"], "GA1.2.111.222")
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.rdt_cid_first, "first-rdt-cid")
+        self.assertEqual(attribution.rdt_cid_last, "last-rdt-cid")
 
         track_call = mock_track.call_args.kwargs
         properties = track_call["properties"]
@@ -348,6 +356,20 @@ class BuildMarketingContextFromUserTests(TestCase):
         context = _build_marketing_context_from_user(self.user)
 
         self.assertEqual(context.get("ga_client_id"), "GA1.2.111.222")
+
+    def test_includes_reddit_click_id_in_context(self):
+        """Reddit click id should be included for downstream CAPI events."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            rdt_cid_last="reddit-last-click",
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+        click_ids = context.get("click_ids", {})
+
+        self.assertEqual(click_ids.get("rdt_cid"), "reddit-last-click")
 
     def test_returns_minimal_context_when_no_attribution(self):
         """When user has no attribution, return minimal context with consent."""

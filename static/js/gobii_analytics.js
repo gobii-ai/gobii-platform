@@ -54,7 +54,7 @@ if (typeof window !== 'undefined') {
 }
 
 const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
-const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'fbclid'];
+const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid', 'fbclid'];
 
 const LANDING_PARAM = 'g';
 
@@ -76,7 +76,10 @@ const LANDING_PARAM = 'g';
   const found = {};
 
   CLICK_ID_PARAMS.forEach((param) => {
-    const value = params.get(param);
+    let value = params.get(param);
+    if (!value && param === 'rdt_cid') {
+      value = params.get('rdt_click_id');
+    }
     if (!value) return;
 
     const expiry = new Date();

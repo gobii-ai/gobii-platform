@@ -21,7 +21,7 @@ class UTMTrackingMiddleware:
         "utm_content",
         "utm_term",
     )
-    CLICK_ID_PARAMS: Tuple[str, ...] = ("gclid", "gbraid", "wbraid", "msclkid", "ttclid")
+    CLICK_ID_PARAMS: Tuple[str, ...] = ("gclid", "gbraid", "wbraid", "msclkid", "ttclid", "rdt_cid")
     EXTRA_PARAMS: Tuple[str, ...] = ("fbclid",)
 
     SESSION_UTM_FIRST = "utm_first_touch"
@@ -77,6 +77,10 @@ class UTMTrackingMiddleware:
                 should_set_mini_mode_cookie = True
 
         click_values = self._clean_params(params, self.CLICK_ID_PARAMS)
+        if not click_values.get("rdt_cid"):
+            rdt_click_id = (params.get("rdt_click_id") or "").strip()
+            if rdt_click_id:
+                click_values["rdt_cid"] = rdt_click_id
         if click_values:
             session_modified |= self._persist_first_last(
                 session,

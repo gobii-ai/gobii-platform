@@ -107,3 +107,16 @@ class UTMCaptureMiniModeTests(TestCase):
         params = parse_qs(querystring)
         self.assertEqual(params.get("gclid"), ["last-gclid"])
         self.assertEqual(params.get("msclkid"), ["last-msclkid"])
+
+    def test_reddit_click_id_alias_is_normalized(self):
+        request = self._build_request("/?rdt_click_id=reddit-click-1")
+        self.middleware(request)
+
+        self.assertEqual(
+            request.session.get("click_ids_first"),
+            {"rdt_cid": "reddit-click-1"},
+        )
+        self.assertEqual(
+            request.session.get("click_ids_last"),
+            {"rdt_cid": "reddit-click-1"},
+        )

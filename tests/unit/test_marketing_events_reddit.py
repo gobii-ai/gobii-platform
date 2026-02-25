@@ -86,3 +86,25 @@ class RedditPayloadTests(SimpleTestCase):
                 "value": 99.99,
             },
         )
+
+    def test_start_trial_maps_to_lead(self):
+        provider = RedditCAPI(pixel_id="acct123", token="token456")
+        evt = {
+            "event_name": "StartTrial",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-trial-1",
+            "properties": {},
+            "ids": {},
+            "network": {},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.reddit.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        event = kwargs["json"]["data"]["events"][0]
+        self.assertEqual(event["type"], {"tracking_type": "LEAD"})

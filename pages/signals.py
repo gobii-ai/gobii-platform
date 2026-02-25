@@ -74,7 +74,7 @@ UTM_MAPPING = {
     'term': 'utm_term'
 }
 
-CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid')
+CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid')
 
 
 def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
@@ -575,6 +575,7 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     fbc = getattr(attribution, "fbc", "")
     fbclid = getattr(attribution, "fbclid", "")
     fbp = getattr(attribution, "fbp", "")
+    rdt_cid = getattr(attribution, "rdt_cid_last", "") or getattr(attribution, "rdt_cid_first", "")
 
     if fbc:
         click_ids["fbc"] = fbc
@@ -588,6 +589,8 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
         click_ids["fbclid"] = fbclid
     if fbp:
         click_ids["fbp"] = fbp
+    if rdt_cid:
+        click_ids["rdt_cid"] = rdt_cid
     if click_ids:
         context["click_ids"] = click_ids
 
@@ -1003,6 +1006,8 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     'msclkid_last': last_click.get('msclkid', ''),
                     'ttclid_first': first_click.get('ttclid', ''),
                     'ttclid_last': last_click.get('ttclid', ''),
+                    'rdt_cid_first': first_click.get('rdt_cid', ''),
+                    'rdt_cid_last': last_click.get('rdt_cid', ''),
                     'first_referrer': first_referrer,
                     'last_referrer': last_referrer,
                     'first_landing_path': first_path,
