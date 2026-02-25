@@ -89,24 +89,26 @@ function toPortValue(value: string): number | null {
 function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
   const gmailDefaults = settings.providerDefaults.gmail
   const hasMailDirectionSelected = settings.account.isInboundEnabled || settings.account.isOutboundEnabled
+  const hasOAuthConfigured =
+    settings.oauth.connected
+    || settings.account.smtpAuth === 'oauth2'
+    || settings.account.imapAuth === 'oauth2'
   const inferredProvider: ProviderKey =
-    settings.account.connectionMode === 'oauth2'
+    hasOAuthConfigured
     || settings.oauth.provider.toLowerCase() === 'gmail'
     || settings.account.smtpHost === (gmailDefaults?.smtp_host ?? '')
       ? 'gmail'
       : 'custom'
-  const hasConfiguredConnection = hasMailDirectionSelected && Boolean(
+  const hasConfiguredConnection = hasOAuthConfigured || (hasMailDirectionSelected && Boolean(
     settings.account.exists
-    || settings.account.connectionMode === 'oauth2'
-    || settings.oauth.connected
     || settings.account.smtpHost
     || settings.account.imapHost,
-  )
+  ))
   const provider: ProviderKey | '' = hasConfiguredConnection ? inferredProvider : ''
   const connectionType: ConnectionType | '' =
     !hasConfiguredConnection
       ? ''
-      : settings.account.connectionMode === 'oauth2'
+      : hasOAuthConfigured || settings.account.connectionMode === 'oauth2'
         ? 'oauth'
         : 'manual'
 
@@ -657,14 +659,6 @@ export function AgentEmailSettingsScreen({
                     {oauthConnected ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Mail className="h-4 w-4 text-blue-700" />}
                     <span>{oauthConnected ? 'Gmail OAuth connected' : 'OAuth connection required before saving'}</span>
                   </div>
-                  <a
-                    href="https://myaccount.google.com/apppasswords"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-block text-sm font-semibold text-blue-700 underline"
-                  >
-                    Open Gmail App Passwords
-                  </a>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
