@@ -6,9 +6,12 @@ from unittest.mock import patch, MagicMock
 
 from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import AnonymousUser
 from django.core import signing
-from django.test import TestCase, override_settings, tag
+from django.template.loader import render_to_string
+from django.test import RequestFactory, TestCase, override_settings, tag
 from django.urls import reverse
+from waffle.testutils import override_flag
 from api.models import BrowserUseAgent, PersistentAgent, UserFlags
 from config.socialaccount_adapter import OAUTH_ATTRIBUTION_COOKIE, OAUTH_CHARTER_COOKIE
 from pages import views as page_views
@@ -625,11 +628,32 @@ class PretrainedWorkerHireRedirectTests(TestCase):
 
 @tag("batch_pages")
 class SolutionCtaCopyTests(TestCase):
+    def setUp(self):
+        self.request_factory = RequestFactory()
+
     @staticmethod
     def _normalized_button_text(button) -> str:
         return " ".join(
             segment for segment in button.stripped_strings if segment and segment != "→"
         ).strip()
+
+    def _mini_header_logo_src(self) -> str | None:
+        request = self.request_factory.get("/solutions/recruiting/")
+        request.user = AnonymousUser()
+        rendered = render_to_string("includes/_unified_header_nav_mini.html", {"request": request})
+        soup = BeautifulSoup(rendered, "html.parser")
+        logo = soup.select_one('header.hs-header a[href="/"] img')
+        return logo.get("src") if logo else None
+
+    @tag("batch_pages")
+    def test_solution_header_uses_standard_logo_when_fish_upper_left_is_off(self):
+        with override_flag("fish_upper_left", active=False):
+            self.assertEqual(self._mini_header_logo_src(), "/static/images/noBgIndigo600.png")
+
+    @tag("batch_pages")
+    def test_solution_header_uses_fish_logo_when_fish_upper_left_is_on(self):
+        with override_flag("fish_upper_left", active=True):
+            self.assertEqual(self._mini_header_logo_src(), "/static/images/gobii_fish_with_text_purple_nav.png")
 
     @tag("batch_pages")
     def test_solution_cta_text_changes_for_authenticated_users(self):
