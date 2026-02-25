@@ -97,6 +97,7 @@ class AnalyticsEvent(StrEnum):
     WEB_TASK_RESULT_DOWNLOADED = 'Task Result Downloaded'
     WEB_TASK_CANCELLED = 'Task Cancelled'
     MARKETING_CONTACT_REQUEST_SUBMITTED = 'Marketing Contact Request Submitted'
+    CTA_CLICKED = 'CTA Clicked'
 
     # Web Chat Events
     WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'

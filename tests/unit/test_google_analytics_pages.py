@@ -78,17 +78,74 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertContains(response, 'let gaPageTitle = "Marketing - Home";')
         self.assertContains(response, "gtag('config', 'G-TEST123', gtagConfig);")
 
+    @override_settings(
+        DEBUG=True,
+        SEGMENT_WEB_WRITE_KEY="segment-web-test",
+        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
+    )
+    def test_base_template_loads_segment_when_debug_override_enabled(self):
+        response = self.client.get(reverse("pages:home"))
+        self.assertEqual(response.status_code, 200)
+
+        content = response.content.decode("utf-8")
+        self.assertIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertIn('writeKey: "segment\\u002Dweb\\u002Dtest"', content)
+        self.assertIn("enabled: true,", content)
+        self.assertNotIn('analytics.load("segment-web-test");', content)
+
+    @override_settings(
+        DEBUG=True,
+        SEGMENT_WEB_WRITE_KEY="segment-web-test",
+        SEGMENT_WEB_ENABLE_IN_DEBUG=False,
+    )
+    def test_base_template_uses_stub_when_debug_override_disabled(self):
+        response = self.client.get(reverse("pages:home"))
+        self.assertEqual(response.status_code, 200)
+
+        content = response.content.decode("utf-8")
+        self.assertIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertIn('writeKey: "segment\\u002Dweb\\u002Dtest"', content)
+        self.assertIn("enabled: false,", content)
+        self.assertNotIn('analytics.load("segment-web-test");', content)
+
     @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123", GOBII_PROPRIETARY_MODE=True)
     def test_app_shell_includes_shared_tracking_helpers(self):
         response = self.client.get("/app")
         self.assertEqual(response.status_code, 200)
 
         content = response.content.decode("utf-8")
+        self.assertIn('src="/static/js/segment_bootstrap.js"', content)
         self.assertIn('src="/static/js/gobii_analytics.js"', content)
         self.assertIn('src="/static/js/signup_tracking.js"', content)
         self.assertIn("window.GobiiSignupTracking.fetchAndFire", content)
         self.assertIn("source: 'app_shell'", content)
         self.assertIn("send_page_view: false", content)
+
+    @override_settings(
+        DEBUG=True,
+        SEGMENT_WEB_WRITE_KEY="segment-web-test",
+        SEGMENT_WEB_ENABLE_IN_DEBUG=True,
+    )
+    def test_app_shell_enables_segment_when_debug_override_enabled(self):
+        response = self.client.get("/app")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertIn('writeKey: "segment-web-test"', content)
+        self.assertIn("enabled: true,", content)
+
+    @override_settings(
+        DEBUG=True,
+        SEGMENT_WEB_WRITE_KEY="segment-web-test",
+        SEGMENT_WEB_ENABLE_IN_DEBUG=False,
+    )
+    def test_app_shell_disables_segment_when_debug_override_disabled(self):
+        response = self.client.get("/app")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn('src="/static/js/segment_bootstrap.js"', content)
+        self.assertIn('writeKey: "segment-web-test"', content)
+        self.assertIn("enabled: false,", content)
 
     @tag("batch_pages")
     def test_base_template_uses_legacy_collateral_when_switch_is_off(self):

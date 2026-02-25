@@ -172,7 +172,7 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
+          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto" data-analytics-cta-id="engineering_hero" data-analytics-placement="hero" data-analytics-intent="get_api_keys">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="engineering_hero" />
             <input type="hidden" name="trial_onboarding" value="1" />
@@ -525,7 +525,7 @@ agent = response.<span class="function">json</span>()
 
     <div class="grid md:grid-cols-3 gap-8">
       <!-- Console / Get Started - Primary -->
-      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50" data-analytics-cta-id="engineering_resources_api_key" data-analytics-placement="resources" data-analytics-intent="get_api_keys">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="engineering_resources_api_key" />
         <input type="hidden" name="trial_onboarding" value="1" />
@@ -687,7 +687,7 @@ agent = response.<span class="function">json</span>()
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto" data-analytics-cta-id="engineering_final_cta" data-analytics-placement="final_cta" data-analytics-intent="get_api_keys">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="engineering_final_cta" />
         <input type="hidden" name="trial_onboarding" value="1" />
