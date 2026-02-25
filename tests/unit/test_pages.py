@@ -1054,6 +1054,8 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         parsed = urlparse(resp["Location"])
         self.assertEqual(parsed.path, reverse("agent_quick_spawn"))
+        ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
 
         session = self.client.session
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
@@ -1101,6 +1103,10 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+        self.assertEqual(
+            kwargs["line_items"],
+            [{"price": "price_startup", "quantity": 1}],
+        )
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
@@ -1148,6 +1154,10 @@ class CheckoutRedirectTests(TestCase):
 
         kwargs = mock_session_create.call_args.kwargs
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
+        self.assertEqual(
+            kwargs["line_items"],
+            [{"price": "price_scale", "quantity": 1}],
+        )
 
 
 @tag("batch_pages")
@@ -1349,6 +1359,8 @@ class MarketingMetaTests(TestCase):
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
+        ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()
 
 
@@ -1439,4 +1451,6 @@ class SubscriptionPriceParsingTests(TestCase):
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
+        ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()

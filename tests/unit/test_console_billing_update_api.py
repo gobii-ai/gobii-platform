@@ -204,7 +204,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self,
         mock_stripe_status,
         _mock_get_customer,
-        _mock_ensure_single_subscription,
+        mock_ensure_single_subscription,
         mock_sync_subscription,
         mock_retrieve_subscription,
         _mock_assign_key,
@@ -235,6 +235,8 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
         self.assertTrue(payload.get("ok"))
+        ensure_kwargs = mock_ensure_single_subscription.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_retrieve_subscription.assert_called_once()
         mock_sync_subscription.assert_called_once_with(mock_retrieve_subscription.return_value)
 
@@ -251,7 +253,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self,
         mock_stripe_status,
         _mock_get_customer,
-        _mock_ensure_single_subscription,
+        mock_ensure_single_subscription,
     ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
 
@@ -277,6 +279,8 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertIn("/subscribe/scale/", payload.get("redirectUrl", ""))
         self.assertIn("return_to=%2Fconsole%2Fbilling%2F", payload.get("redirectUrl", ""))
+        ensure_kwargs = mock_ensure_single_subscription.call_args.kwargs
+        self.assertNotIn("metered_price_id", ensure_kwargs)
 
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
     @patch("console.billing_update_service.stripe.Subscription.retrieve")

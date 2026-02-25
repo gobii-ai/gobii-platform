@@ -706,10 +706,8 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
         stripe_settings = get_stripe_settings()
         if plan_target == "startup":
             licensed_price_id = getattr(stripe_settings, "startup_price_id", "") or ""
-            metered_price_id = getattr(stripe_settings, "startup_additional_task_price_id", "") or ""
         else:
             licensed_price_id = getattr(stripe_settings, "scale_price_id", "") or ""
-            metered_price_id = getattr(stripe_settings, "scale_additional_task_price_id", "") or ""
 
         if not licensed_price_id:
             raise BillingUpdateError("plan_not_configured", status=400)
@@ -722,7 +720,6 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
             updated, action = ensure_single_individual_subscription(
                 str(customer.id),
                 licensed_price_id=licensed_price_id,
-                metered_price_id=metered_price_id or None,
                 metadata={
                     "plan_target": plan_target,
                     "plan_requestor_id": str(request.user.id),

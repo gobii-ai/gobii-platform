@@ -1292,9 +1292,6 @@ class StartupCheckoutView(LoginRequiredMixin, View):
                 "quantity": 1,
             }
         ]
-        additional_price_id = stripe_settings.startup_additional_task_price_id
-        if additional_price_id:
-            line_items.append({"price": additional_price_id})
 
         metadata = {
             "gobii_event_id": event_id,
@@ -1318,7 +1315,6 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             subscription, action = ensure_single_individual_subscription(
                 customer_id=customer.id,
                 licensed_price_id=price_id,
-                metered_price_id=additional_price_id,
                 metadata=metadata,
                 idempotency_key=f"startup-individual-{customer.id}-{event_id}",
                 create_if_missing=False,
@@ -1439,9 +1435,6 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                 "quantity": 1,
             }
         ]
-        additional_price_id = stripe_settings.scale_additional_task_price_id
-        if additional_price_id:
-            line_items.append({"price": additional_price_id})
 
         metadata = {
             "gobii_event_id": event_id,
@@ -1467,7 +1460,6 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                 subscription, action = ensure_single_individual_subscription(
                     customer_id=customer.id,
                     licensed_price_id=price_id,
-                    metered_price_id=additional_price_id,
                     metadata=metadata,
                     idempotency_key=f"scale-individual-upgrade-{customer.id}-{event_id}",
                     create_if_missing=False,
