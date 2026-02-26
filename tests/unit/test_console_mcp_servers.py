@@ -54,6 +54,7 @@ class MCPServerListAPITests(TestCase):
         self.assertEqual(record["scope"], MCPServerConfig.Scope.USER)
         self.assertEqual(record["scope_label"], "User")
         self.assertEqual(record["url"], "https://api.example.com/mcp")
+        self.assertFalse(record["is_remote_mcp_remote"])
         self.assertIn("oauth_status_url", record)
         self.assertFalse(record["oauth_pending"])
         self.assertFalse(record["oauth_connected"])
@@ -94,6 +95,7 @@ class MCPServerListAPITests(TestCase):
         self.assertEqual(record["id"], str(server.id))
         self.assertEqual(record["scope"], MCPServerConfig.Scope.ORGANIZATION)
         self.assertEqual(record["url"], "https://org.example.com/mcp")
+        self.assertFalse(record["is_remote_mcp_remote"])
         self.assertFalse(record["oauth_pending"])
 
     def test_viewer_role_blocked_from_org_scope(self):
@@ -144,6 +146,24 @@ class MCPServerListAPITests(TestCase):
         record = response.json()["servers"][0]
         self.assertTrue(record["oauth_pending"])
         self.assertFalse(record["oauth_connected"])
+
+    def test_marks_remote_mcp_remote_server(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="remote-stdio",
+            display_name="Remote STDIO",
+            command="npx",
+            command_args=["mcp-remote", "https://remote.example.com/sse"],
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-mcp-server-list"))
+
+        self.assertEqual(response.status_code, 200)
+        record = response.json()["servers"][0]
+        self.assertEqual(record["id"], str(server.id))
+        self.assertTrue(record["is_remote_mcp_remote"])
 
 
 @tag("batch_console_mcp_servers")

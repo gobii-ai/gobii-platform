@@ -13,6 +13,8 @@ import requests
 from django.conf import settings
 from django.utils.dateparse import parse_datetime
 from django.db import DatabaseError
+from django.contrib.sites.models import Site
+from django.urls import reverse
 from django.utils import timezone
 
 from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig
@@ -251,6 +253,15 @@ class SandboxComputeBackend:
     ) -> Dict[str, Any]:
         raise NotImplementedError
 
+    def mcp_remote_auth_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def mcp_remote_auth_status(self, session_id: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def mcp_remote_auth_authorize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        raise NotImplementedError
+
 
 class LocalSandboxBackend(SandboxComputeBackend):
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
@@ -383,6 +394,15 @@ class LocalSandboxBackend(SandboxComputeBackend):
         manager = get_mcp_manager()
         ok = manager.discover_tools_for_server(server_config_id)
         return {"status": "ok" if ok else "error", "reason": reason}
+
+    def mcp_remote_auth_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "Remote MCP auth bridge requires the HTTP sandbox backend."}
+
+    def mcp_remote_auth_status(self, session_id: str) -> Dict[str, Any]:
+        return {"status": "error", "message": "Remote MCP auth bridge requires the HTTP sandbox backend."}
+
+    def mcp_remote_auth_authorize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "Remote MCP auth bridge requires the HTTP sandbox backend."}
 
 
 class HttpSandboxBackend(SandboxComputeBackend):
@@ -540,6 +560,15 @@ class HttpSandboxBackend(SandboxComputeBackend):
         if server_payload:
             payload["server"] = server_payload
         return self._post("sandbox/compute/discover_mcp_tools", payload)
+
+    def mcp_remote_auth_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._post("sandbox/compute/mcp_remote_auth/start", payload)
+
+    def mcp_remote_auth_status(self, session_id: str) -> Dict[str, Any]:
+        return self._post("sandbox/compute/mcp_remote_auth/status", {"session_id": session_id})
+
+    def mcp_remote_auth_authorize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._post("sandbox/compute/mcp_remote_auth/authorize", payload)
 
     def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
         return {"status": "skipped", "message": "Workspace snapshots are not available via HTTP backend."}
@@ -722,6 +751,24 @@ def _proxy_env_for_session(session: AgentComputeSession) -> Optional[Dict[str, s
     return env
 
 
+def _console_mcp_oauth_callback_base_url() -> str:
+    try:
+        domain = Site.objects.get_current().domain
+    except (Site.DoesNotExist, DatabaseError):
+        return ""
+
+    if not isinstance(domain, str):
+        return ""
+    normalized = domain.strip()
+    if not normalized:
+        return ""
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        base_url = normalized.rstrip("/")
+    else:
+        base_url = f"https://{normalized.rstrip('/')}"
+    return f"{base_url}{reverse('console-mcp-oauth-callback-view')}"
+
+
 def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]], Optional[Any]]:
     if not config_id:
         return None, None
@@ -758,7 +805,11 @@ def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]],
         "headers": headers,
         "auth_method": runtime.auth_method,
         "scope": runtime.scope,
+        "is_remote_mcp_remote": bool(runtime.is_remote_mcp_remote),
     }
+    callback_base_url = _console_mcp_oauth_callback_base_url()
+    if callback_base_url:
+        payload["remote_auth_callback_base_url"] = callback_base_url
     return payload, runtime
 
 
@@ -1097,6 +1148,49 @@ class SandboxComputeService:
                 fingerprint = manager._build_tool_cache_fingerprint(runtime)
                 set_cached_mcp_tool_definitions(server_config_id, fingerprint, tools)
         return result
+
+    def mcp_remote_auth_start(
+        self,
+        server_config_id: str,
+        *,
+        session_id: str,
+        redirect_url: str,
+        source: str = "setup",
+    ) -> Dict[str, Any]:
+        server_payload, runtime = _build_mcp_server_payload(server_config_id)
+        if not server_payload or runtime is None:
+            return {"status": "error", "message": "MCP server config not available."}
+        payload = {
+            "server_id": server_config_id,
+            "session_id": session_id,
+            "redirect_url": redirect_url,
+            "source": source,
+            "server": server_payload,
+        }
+        return self._backend.mcp_remote_auth_start(payload)
+
+    def mcp_remote_auth_status(self, session_id: str) -> Dict[str, Any]:
+        if not session_id:
+            return {"status": "error", "message": "Missing session_id."}
+        return self._backend.mcp_remote_auth_status(session_id)
+
+    def mcp_remote_auth_authorize(
+        self,
+        *,
+        session_id: str,
+        authorization_code: str,
+        state: str = "",
+        error: str = "",
+    ) -> Dict[str, Any]:
+        if not session_id:
+            return {"status": "error", "message": "Missing session_id."}
+        payload = {
+            "session_id": session_id,
+            "authorization_code": authorization_code,
+            "state": state,
+            "error": error,
+        }
+        return self._backend.mcp_remote_auth_authorize(payload)
 
 
 def _log_tool_call(event: str, tool_name: str, params: Dict[str, Any], *, agent_id: str) -> None:

@@ -38,6 +38,62 @@ async function completeOAuth() {
   const error = params.get("error");
   const code = params.get("code");
   const state = params.get("state");
+  const remoteAuth = params.get("remote_auth");
+  const remoteAuthSessionId = params.get("remote_auth_session_id");
+  const pendingSession = state ? getPendingSession(state) : null;
+  const explicitRemoteAuth = remoteAuth === "1" || Boolean(remoteAuthSessionId);
+  const inferredRemoteAuth = Boolean(state) && !pendingSession;
+  const isRemoteAuth = explicitRemoteAuth || inferredRemoteAuth;
+  const resolvedRemoteAuthSessionId = remoteAuthSessionId || state || "";
+
+  if (isRemoteAuth) {
+    if (!resolvedRemoteAuthSessionId) {
+      showError("Missing remote auth session identifier.");
+      return;
+    }
+    setStatus("Completing remote authorization...");
+    try {
+      const response = await fetch("/console/api/mcp/remote-auth/authorize/", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": getCsrfToken(),
+        },
+        body: JSON.stringify({
+          session_id: resolvedRemoteAuthSessionId,
+          authorization_code: code || "",
+          state: state || "",
+          error: error || "",
+        }),
+      });
+
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || "Remote callback failed");
+      }
+
+      localStorage.setItem(
+        `gobii:mcp_remote_auth_complete:${resolvedRemoteAuthSessionId}`,
+        JSON.stringify({
+          sessionId: resolvedRemoteAuthSessionId,
+          completedAt: new Date().toISOString(),
+        }),
+      );
+      setStatus("Remote authorization complete.");
+      setTimeout(() => {
+        if (window.opener && !window.opener.closed) {
+          window.close();
+          return;
+        }
+        window.location.href = "/console/advanced/mcp-servers/?remote_auth=success";
+      }, 500);
+    } catch (err) {
+      console.error("Remote OAuth callback failed", err);
+      showError(err.message || "Failed to complete remote authorization.");
+    }
+    return;
+  }
 
   if (error) {
     showError(`Provider returned an error: ${error}`);
@@ -49,8 +105,7 @@ async function completeOAuth() {
     return;
   }
 
-  const sessionData = getPendingSession(state);
-  if (!sessionData) {
+  if (!pendingSession) {
     showError("OAuth session expired. Please start the flow again.");
     return;
   }
@@ -65,7 +120,7 @@ async function completeOAuth() {
         "X-CSRFToken": getCsrfToken(),
       },
       body: JSON.stringify({
-        session_id: sessionData.sessionId,
+        session_id: pendingSession.sessionId,
         authorization_code: code,
         state,
       }),
@@ -76,9 +131,9 @@ async function completeOAuth() {
       throw new Error(detail || "Callback failed");
     }
 
-    clearPendingKeys(sessionData.serverId, state);
+    clearPendingKeys(pendingSession.serverId, state);
     setStatus("Connection complete! Redirecting…");
-    const payload = sessionData.returnUrl || "/console/advanced/mcp-servers/?oauth=success";
+    const payload = pendingSession.returnUrl || "/console/advanced/mcp-servers/?oauth=success";
     setTimeout(() => {
       window.location.href = payload;
     }, 1200);

@@ -22,6 +22,8 @@ type McpServersScreenProps = {
   oauthStartUrl: string
   oauthMetadataUrl: string
   oauthCallbackPath: string
+  remoteAuthStartUrl: string
+  remoteAuthStatusUrlTemplate: string
 }
 
 const PLACEHOLDER_TOKEN = '00000000-0000-0000-0000-000000000000'
@@ -36,6 +38,8 @@ export function McpServersScreen({
   oauthStartUrl,
   oauthMetadataUrl,
   oauthCallbackPath,
+  remoteAuthStartUrl,
+  remoteAuthStatusUrlTemplate,
 }: McpServersScreenProps) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['mcp-servers', listUrl] as const, [listUrl])
@@ -91,6 +95,10 @@ export function McpServersScreen({
           metadataUrl: oauthMetadataUrl,
           callbackPath: oauthCallbackPath,
         }}
+        remoteAuth={{
+          startUrl: remoteAuthStartUrl,
+          statusUrlTemplate: remoteAuthStatusUrlTemplate,
+        }}
       />
     ))
   }, [
@@ -103,6 +111,8 @@ export function McpServersScreen({
     oauthStartUrl,
     oauthMetadataUrl,
     oauthCallbackPath,
+    remoteAuthStartUrl,
+    remoteAuthStatusUrlTemplate,
   ])
 
   const openEditModal = useCallback(
@@ -123,6 +133,10 @@ export function McpServersScreen({
             metadataUrl: oauthMetadataUrl,
             callbackPath: oauthCallbackPath,
           }}
+          remoteAuth={{
+            startUrl: remoteAuthStartUrl,
+            statusUrlTemplate: remoteAuthStatusUrlTemplate,
+          }}
         />
       ))
     },
@@ -137,6 +151,8 @@ export function McpServersScreen({
       oauthStartUrl,
       oauthMetadataUrl,
       oauthCallbackPath,
+      remoteAuthStartUrl,
+      remoteAuthStatusUrlTemplate,
     ],
   )
 

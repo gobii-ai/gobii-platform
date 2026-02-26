@@ -36,6 +36,14 @@ class MCPOAuthApiTests(TestCase):
             url="https://oauth.example.com",
             auth_method=MCPServerConfig.AuthMethod.OAUTH2,
         )
+        self.remote_server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="remote-server",
+            display_name="Remote Server",
+            command="npx",
+            command_args=["mcp-remote", "https://remote.example.com/sse"],
+        )
         self.client.force_login(self.user)
 
     def test_start_creates_session(self):
@@ -249,3 +257,116 @@ class MCPOAuthApiTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         session.refresh_from_db()
         self.assertEqual(session.code_verifier, "updated-verifier")
+
+    def test_remote_auth_start_rejects_non_remote_server(self):
+        response = self.client.post(
+            reverse("console-mcp-remote-auth-start"),
+            data=json.dumps({"server_config_id": str(self.server.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("not configured with mcp-remote", response.content.decode())
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_remote_auth_start_calls_sandbox_backend(self, mock_service_cls):
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_remote_auth_start.return_value = {
+            "status": "pending_auth",
+            "session_id": "session-123",
+            "authorization_url": "https://idp.example.com/auth",
+            "config_id": str(self.remote_server.id),
+        }
+
+        response = self.client.post(
+            reverse("console-mcp-remote-auth-start"),
+            data=json.dumps({"server_config_id": str(self.remote_server.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertEqual(payload["status"], "pending_auth")
+        self.assertTrue(payload["session_id"])
+        self.assertEqual(payload["server_config_id"], str(self.remote_server.id))
+        mock_service.mcp_remote_auth_start.assert_called_once()
+        _call_args, call_kwargs = mock_service.mcp_remote_auth_start.call_args
+        self.assertIn("/console/mcp/oauth/callback/", call_kwargs["redirect_url"])
+        self.assertNotIn("remote_auth=", call_kwargs["redirect_url"])
+        self.assertNotIn("remote_auth_session_id=", call_kwargs["redirect_url"])
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_remote_auth_start_preserves_loopback_host(self, mock_service_cls):
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_remote_auth_start.return_value = {
+            "status": "pending_auth",
+            "session_id": "session-123",
+            "authorization_url": "https://idp.example.com/auth",
+            "config_id": str(self.remote_server.id),
+        }
+
+        response = self.client.post(
+            reverse("console-mcp-remote-auth-start"),
+            data=json.dumps({"server_config_id": str(self.remote_server.id)}),
+            content_type="application/json",
+            HTTP_HOST="127.0.0.1:8000",
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        _call_args, call_kwargs = mock_service.mcp_remote_auth_start.call_args
+        self.assertTrue(call_kwargs["redirect_url"].startswith("http://127.0.0.1:8000/console/mcp/oauth/callback/"))
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_remote_auth_status_checks_server_permissions(self, mock_service_cls):
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_remote_auth_status.return_value = {
+            "status": "pending_auth",
+            "session_id": "session-xyz",
+            "config_id": str(self.remote_server.id),
+        }
+
+        response = self.client.get(
+            reverse("console-mcp-remote-auth-status", args=["session-xyz"]),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["session_id"], "session-xyz")
+        self.assertEqual(payload["server_config_id"], str(self.remote_server.id))
+        mock_service.mcp_remote_auth_status.assert_called_once_with("session-xyz")
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_remote_auth_authorize_submits_code(self, mock_service_cls):
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_remote_auth_status.return_value = {
+            "status": "pending_auth",
+            "session_id": "session-abc",
+            "config_id": str(self.remote_server.id),
+        }
+        mock_service.mcp_remote_auth_authorize.return_value = {
+            "status": "code_submitted",
+            "session_id": "session-abc",
+        }
+
+        response = self.client.post(
+            reverse("console-mcp-remote-auth-authorize"),
+            data=json.dumps(
+                {
+                    "session_id": "session-abc",
+                    "authorization_code": "code-123",
+                    "state": "state-123",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["status"], "code_submitted")
+        mock_service.mcp_remote_auth_status.assert_called_once_with("session-abc")
+        mock_service.mcp_remote_auth_authorize.assert_called_once_with(
+            session_id="session-abc",
+            authorization_code="code-123",
+            state="state-123",
+            error="",
+        )

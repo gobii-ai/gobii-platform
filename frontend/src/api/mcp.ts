@@ -18,6 +18,7 @@ type McpServerDTO = {
   oauth_revoke_url?: string
   oauth_pending?: boolean
   oauth_connected?: boolean
+  is_remote_mcp_remote?: boolean
 }
 
 type McpServerDetailDTO = McpServerDTO & {
@@ -82,6 +83,7 @@ export type McpServer = {
   oauthRevokeUrl?: string
   oauthPending: boolean
   oauthConnected: boolean
+  isRemoteMcpRemote: boolean
 }
 
 export type McpServerListResponse = {
@@ -156,6 +158,7 @@ const mapServer = (server: McpServerDTO): McpServer => ({
   oauthRevokeUrl: server.oauth_revoke_url,
   oauthPending: Boolean(server.oauth_pending),
   oauthConnected: Boolean(server.oauth_connected),
+  isRemoteMcpRemote: Boolean(server.is_remote_mcp_remote),
 })
 
 const mapServerDetail = (server: McpServerDetailDTO): McpServerDetail => ({

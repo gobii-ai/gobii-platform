@@ -12,6 +12,7 @@ import {
 } from '../../api/mcp'
 import { HttpError } from '../../api/http'
 import { useMcpOAuth } from '../../hooks/useMcpOAuth'
+import { useMcpRemoteAuth } from '../../hooks/useMcpRemoteAuth'
 import { Modal } from '../common/Modal'
 
 type HeaderEntry = { key: string; value: string }
@@ -32,6 +33,10 @@ type McpServerFormModalProps = {
     startUrl: string
     metadataUrl: string
     callbackPath: string
+  }
+  remoteAuth: {
+    startUrl: string
+    statusUrlTemplate: string
   }
 }
 
@@ -64,6 +69,7 @@ export function McpServerFormModal({
   onSuccess,
   onError,
   oauth,
+  remoteAuth,
 }: McpServerFormModalProps) {
   const [state, setState] = useState<FormState>(() => getInitialState(undefined, allowCommands))
   const [formErrors, setFormErrors] = useState<FormErrors | null>(null)
@@ -101,6 +107,14 @@ export function McpServerFormModal({
     statusUrl: server?.oauthStatusUrl,
     revokeUrl: server?.oauthRevokeUrl,
     getServerUrl: () => state.url,
+  })
+
+  const remoteAuthEnabled = mode === 'edit' && state.connectionType === 'stdio' && Boolean(server?.isRemoteMcpRemote)
+  const remoteAuthStore = useMcpRemoteAuth({
+    serverId: mode === 'edit' ? server?.id : undefined,
+    enabled: remoteAuthEnabled,
+    startUrl: remoteAuth.startUrl,
+    statusUrlTemplate: remoteAuth.statusUrlTemplate,
   })
 
   useEffect(() => {
@@ -192,6 +206,24 @@ export function McpServerFormModal({
     }
 
     onClose()
+  }
+
+  const handleStartRemoteAuth = async () => {
+    const popup = window.open('', '_blank')
+    const result = await remoteAuthStore.start({ source: 'setup' })
+    const authorizationUrl = result.authorizationUrl || ''
+    if (authorizationUrl) {
+      if (popup && !popup.closed) {
+        popup.location.href = authorizationUrl
+        popup.focus()
+      } else {
+        window.open(authorizationUrl, '_blank', 'noopener')
+      }
+      return
+    }
+    if (popup && !popup.closed) {
+      popup.close()
+    }
   }
 
   const formTitle =
@@ -431,6 +463,48 @@ export function McpServerFormModal({
                     {error}
                   </p>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {remoteAuthEnabled && (
+            <div className="space-y-3">
+              <label className="block text-sm font-semibold text-slate-700">Remote Authorization</label>
+              <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 space-y-2">
+                <p>
+                  Status:{' '}
+                  <span className="font-semibold">
+                    {remoteAuthStore.status === 'authorized'
+                      ? 'Authorized'
+                      : remoteAuthStore.status === 'failed'
+                        ? 'Failed'
+                        : remoteAuthStore.status === 'starting'
+                          ? 'Starting…'
+                          : remoteAuthStore.status === 'pending'
+                            ? 'Pending authorization'
+                            : 'Not started'}
+                  </span>
+                </p>
+                {remoteAuthStore.error && <p className="text-xs text-amber-700">{remoteAuthStore.error}</p>}
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  className="inline-flex items-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+                  disabled={remoteAuthStore.status === 'starting'}
+                  onClick={handleStartRemoteAuth}
+                >
+                  {remoteAuthStore.status === 'starting' ? 'Starting…' : 'Authorize mcp-remote'}
+                </button>
+                {remoteAuthStore.authorizationUrl && (
+                  <button
+                    type="button"
+                    className="inline-flex items-center rounded-lg border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
+                    onClick={() => window.open(remoteAuthStore.authorizationUrl!, '_blank', 'noopener')}
+                  >
+                    Open Authorization Link
+                  </button>
+                )}
               </div>
             </div>
           )}

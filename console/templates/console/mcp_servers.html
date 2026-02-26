@@ -4,7 +4,7 @@
 
 {% block console_content %}
 <div class="space-y-4">
-  {% with placeholder_id='00000000-0000-0000-0000-000000000000' %}
+{% with placeholder_id='00000000-0000-0000-0000-000000000000' remote_session_id='remote-session-id' %}
   <div id="gobii-frontend-root"
        class="min-h-[50vh]"
        data-app="mcp-servers"
@@ -16,6 +16,8 @@
        data-allow-commands="{{ allow_mcp_commands|yesno:'true,false' }}"
        data-oauth-start-url="{% url 'console-mcp-oauth-start' %}"
        data-oauth-metadata-url="{% url 'console-mcp-oauth-metadata' %}"
+       data-remote-auth-start-url="{% url 'console-mcp-remote-auth-start' %}"
+       data-remote-auth-status-url-template="{% url 'console-mcp-remote-auth-status' remote_session_id %}"
        data-oauth-callback-path="{% url 'console-mcp-oauth-callback-view' %}">
   </div>
   {% endwith %}

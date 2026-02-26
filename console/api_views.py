@@ -139,7 +139,12 @@ from console.daily_credit import (
 from console.agent_creation import enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
-from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
+from api.services.mcp_remote_runtime import is_mcp_remote_invocation
+from api.services.sandbox_compute import (
+    SANDBOX_COMPUTE_WAFFLE_FLAG,
+    SandboxComputeService,
+    SandboxComputeUnavailable,
+)
 from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
 import litellm
@@ -797,6 +802,10 @@ def _serialize_mcp_server(
     request: HttpRequest | None = None,
     pending_servers: set[str] | None = None,
 ) -> dict[str, object]:
+    is_remote_mcp_remote = is_mcp_remote_invocation(
+        server.command or "",
+        list(server.command_args or []),
+    )
     data: dict[str, object] = {
         "id": str(server.id),
         "name": server.name,
@@ -807,6 +816,7 @@ def _serialize_mcp_server(
         "url": server.url,
         "auth_method": server.auth_method,
         "is_active": server.is_active,
+        "is_remote_mcp_remote": is_remote_mcp_remote,
         "scope": server.scope,
         "scope_label": server.get_scope_display(),
         "updated_at": server.updated_at.isoformat(),
@@ -879,6 +889,11 @@ def _parse_json_body(request: HttpRequest) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("JSON object expected")
     return payload
+
+
+def _build_remote_mcp_callback_url(request: HttpRequest) -> str:
+    base = request.build_absolute_uri(reverse("console-mcp-oauth-callback-view"))
+    return base
 
 
 def _json_ok(**extra):
@@ -5535,6 +5550,124 @@ class MCPOAuthRevokeView(LoginRequiredMixin, View):
         except Exception:
             logger.exception("Failed to refresh MCP manager after OAuth revoke for %s", config.id)
         return JsonResponse({"revoked": True})
+
+
+class MCPRemoteAuthStartView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        config_id = body.get("server_config_id")
+        if not config_id:
+            return HttpResponseBadRequest("server_config_id is required")
+
+        config = _resolve_mcp_server_config(request, str(config_id))
+        if not is_mcp_remote_invocation(config.command or "", list(config.command_args or [])):
+            return HttpResponseBadRequest("This server is not configured with mcp-remote.")
+
+        source = str(body.get("source") or "setup").strip() or "setup"
+        session_id = str(uuid.uuid4())
+        redirect_url = _build_remote_mcp_callback_url(request)
+
+        try:
+            service = SandboxComputeService()
+        except SandboxComputeUnavailable as exc:
+            return JsonResponse({"status": "error", "message": str(exc)}, status=502)
+
+        result = service.mcp_remote_auth_start(
+            str(config.id),
+            session_id=session_id,
+            redirect_url=redirect_url,
+            source=source,
+        )
+        if result.get("status") == "error":
+            message = str(result.get("message") or "Failed to start remote auth session.")
+            status_code = 400 if "requires the HTTP sandbox backend" in message.lower() else 502
+            return JsonResponse(result, status=status_code)
+
+        response = dict(result)
+        response.setdefault("session_id", session_id)
+        response["server_config_id"] = str(config.id)
+        return JsonResponse(response, status=201)
+
+
+class MCPRemoteAuthStatusView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, session_id: str, *args: Any, **kwargs: Any):
+        if not session_id:
+            return HttpResponseBadRequest("session_id is required")
+
+        try:
+            service = SandboxComputeService()
+        except SandboxComputeUnavailable as exc:
+            return JsonResponse({"status": "error", "message": str(exc)}, status=502)
+
+        result = service.mcp_remote_auth_status(session_id)
+        if result.get("status") == "error":
+            message = str(result.get("message") or "Failed to load remote auth session.")
+            status_code = 404 if "not found" in message.lower() else 400
+            return JsonResponse(result, status=status_code)
+
+        config_id = result.get("config_id") or result.get("server_id") or result.get("server_config_id")
+        if config_id:
+            _resolve_mcp_server_config(request, str(config_id))
+            result["server_config_id"] = str(config_id)
+        return JsonResponse(result)
+
+
+class MCPRemoteAuthAuthorizeView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        session_id = str(body.get("session_id") or "").strip()
+        authorization_code = str(body.get("authorization_code") or "").strip()
+        state = str(body.get("state") or "").strip()
+        error = str(body.get("error") or "").strip()
+        if not session_id:
+            return HttpResponseBadRequest("session_id is required")
+        if not authorization_code and not error:
+            return HttpResponseBadRequest("authorization_code is required")
+
+        try:
+            service = SandboxComputeService()
+        except SandboxComputeUnavailable as exc:
+            return JsonResponse({"status": "error", "message": str(exc)}, status=502)
+
+        status_payload = service.mcp_remote_auth_status(session_id)
+        if status_payload.get("status") == "error":
+            message = str(status_payload.get("message") or "Failed to load remote auth session.")
+            status_code = 404 if "not found" in message.lower() else 400
+            return JsonResponse(status_payload, status=status_code)
+
+        config_id = (
+            status_payload.get("config_id")
+            or status_payload.get("server_id")
+            or status_payload.get("server_config_id")
+        )
+        if config_id:
+            _resolve_mcp_server_config(request, str(config_id))
+
+        result = service.mcp_remote_auth_authorize(
+            session_id=session_id,
+            authorization_code=authorization_code,
+            state=state,
+            error=error,
+        )
+        if result.get("status") == "error":
+            message = str(result.get("message") or "Failed to submit authorization code.")
+            status_code = 404 if "not found" in message.lower() else 400
+            return JsonResponse(result, status=status_code)
+        return JsonResponse(result)
 
 
 class AgentEmailOAuthStartView(LoginRequiredMixin, View):

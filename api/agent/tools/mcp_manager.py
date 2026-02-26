@@ -68,6 +68,10 @@ from ...services.mcp_tool_cache import (
     invalidate_mcp_tool_cache,
     set_cached_mcp_tool_definitions,
 )
+from ...services.mcp_remote_runtime import (
+    ensure_remote_mcp_env,
+    rewrite_mcp_remote_invocation,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -161,6 +165,7 @@ class MCPServerRuntime:
     oauth_token_type: Optional[str] = None
     oauth_expires_at: Optional[datetime] = None
     oauth_updated_at: Optional[datetime] = None
+    is_remote_mcp_remote: bool = False
 
 
 @dataclass 
@@ -601,13 +606,19 @@ class MCPToolManager:
             if fallback_value:
                 env[key] = fallback_value
 
+        command_value = cfg.command or ""
+        command_args = list(cfg.command_args or [])
+        rewritten = rewrite_mcp_remote_invocation(command_value, command_args)
+        command_runtime = rewritten.command if command_value else None
+        env = ensure_remote_mcp_env(env, is_remote_mcp_remote=rewritten.is_remote_mcp_remote)
+
         return MCPServerRuntime(
             config_id=str(cfg.id),
             name=cfg.name,
             display_name=cfg.display_name,
             description=cfg.description,
-            command=cfg.command or None,
-            args=list(cfg.command_args or []),
+            command=command_runtime,
+            args=list(rewritten.args if command_value else command_args),
             url=cfg.url or None,
             auth_method=cfg.auth_method,
             env=env,
@@ -621,6 +632,7 @@ class MCPToolManager:
             organization_id=str(cfg.organization_id) if cfg.organization_id else None,
             user_id=str(cfg.user_id) if cfg.user_id else None,
             updated_at=cfg.updated_at,
+            is_remote_mcp_remote=rewritten.is_remote_mcp_remote,
         )
 
     def _maybe_refresh_oauth_credential(
@@ -874,6 +886,7 @@ class MCPToolManager:
             "url": server.url or "",
             "command": server.command or "",
             "args": [str(arg) for arg in (server.args or [])],
+            "is_remote_mcp_remote": bool(server.is_remote_mcp_remote),
             "auth_method": server.auth_method,
             "updated_at": updated_at,
             "oauth_updated_at": oauth_updated_at,

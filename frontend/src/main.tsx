@@ -194,8 +194,10 @@ switch (appName) {
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
+    const remoteAuthStartUrl = mountNode.dataset.remoteAuthStartUrl
+    const remoteAuthStatusUrlTemplate = mountNode.dataset.remoteAuthStatusUrlTemplate
     const allowCommands = mountNode.dataset.allowCommands === 'true'
-    if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath) {
+    if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath || !remoteAuthStartUrl || !remoteAuthStatusUrlTemplate) {
       throw new Error('MCP OAuth endpoints are required')
     }
 
@@ -210,6 +212,8 @@ switch (appName) {
         oauthStartUrl={oauthStartUrl}
         oauthMetadataUrl={oauthMetadataUrl}
         oauthCallbackPath={oauthCallbackPath}
+        remoteAuthStartUrl={remoteAuthStartUrl}
+        remoteAuthStatusUrlTemplate={remoteAuthStatusUrlTemplate}
       />
     )
     break

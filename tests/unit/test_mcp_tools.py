@@ -275,6 +275,68 @@ class MCPToolManagerTests(TestCase):
 
         return agent
 
+    def _setup_user_scoped_tool(self) -> tuple[PersistentAgent, MCPServerRuntime, MCPToolInfo]:
+        """Register a user-scoped MCP tool so execution routes through sandbox compute."""
+        User = get_user_model()
+        user = User.objects.create_user(username=f"user-{uuid.uuid4().hex[:8]}@example.com")
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name=f"user-agent-{uuid.uuid4().hex[:6]}",
+            charter="User tool",
+            browser_use_agent=browser_agent,
+        )
+
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"user-server-{uuid.uuid4().hex[:8]}",
+            display_name="User Server",
+            description="",
+            command="npx",
+            command_args=["demo-mcp-server"],
+        )
+        runtime = MCPServerRuntime(
+            config_id=str(config.id),
+            name=config.name,
+            display_name=config.display_name,
+            description=config.description,
+            command=config.command or None,
+            args=list(config.command_args or []),
+            url=config.url or None,
+            auth_method=config.auth_method,
+            env=config.environment or {},
+            headers=config.headers or {},
+            prefetch_apps=list(config.prefetch_apps or []),
+            scope=config.scope,
+            organization_id=None,
+            user_id=str(user.id),
+            updated_at=config.updated_at,
+        )
+        tool = MCPToolInfo(
+            runtime.config_id,
+            "mcp_user_demo_tool",
+            runtime.name,
+            "demo_tool",
+            "Demo user-scoped tool",
+            {},
+        )
+
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._clients = {runtime.config_id: MagicMock()}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name=tool.full_name,
+            tool_server=runtime.name,
+            tool_name=tool.tool_name,
+            server_config=config,
+        )
+
+        return agent, runtime, tool
+
     def test_select_agent_proxy_url_uses_browser_preference(self):
         """Agents with dedicated IPs should expose them to the MCP proxy selector."""
         User = get_user_model()
@@ -445,6 +507,29 @@ class MCPToolManagerTests(TestCase):
         mock_post.assert_not_called()
         self.assertEqual(runtime.oauth_access_token, "valid-token")
         self.assertEqual(runtime.oauth_token_type, "Bearer")
+
+    def test_build_runtime_rewrites_mcp_remote_command(self):
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=get_user_model().objects.create_user(
+                username="remote-rewrite-user",
+                email="remote-rewrite@example.com",
+            ),
+            name=f"remote-rewrite-{uuid.uuid4().hex[:8]}",
+            display_name="Remote Rewrite",
+            command="npx",
+            command_args=["mcp-remote", "https://remote.example.com/sse", "--transport", "http-first"],
+        )
+
+        manager = MCPToolManager()
+        runtime = manager._build_runtime_from_config(config)
+
+        self.assertTrue(runtime.is_remote_mcp_remote)
+        self.assertEqual(runtime.command, "npx")
+        self.assertEqual(runtime.args[0], "-y")
+        self.assertEqual(runtime.args[1], "@mattgreathouse/remote-mcp-remote")
+        self.assertIn("https://remote.example.com/sse", runtime.args)
+        self.assertEqual(runtime.env.get("MCP_REMOTE_CONFIG_DIR"), "/workspace/.mcp-auth")
         
     def test_default_enabled_tools_defined(self):
         """Test that default enabled tools list is defined."""
@@ -729,6 +814,52 @@ class MCPToolManagerTests(TestCase):
             any("requires a proxy" in message or "Proxy selection failed" in message for message in log_capture.output),
             f"Expected error log about proxy requirement, got: {log_capture.output}",
         )
+
+    @patch("api.agent.tools.mcp_manager.SandboxComputeService")
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_execute_tool_passes_through_action_required_connect_url(
+        self,
+        _mock_sandbox_enabled,
+        mock_service_cls,
+    ):
+        agent, runtime, tool = self._setup_user_scoped_tool()
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_request.return_value = {
+            "status": "action_required",
+            "message": "Authorization required before this tool can run.",
+            "result": "Authorization required before this tool can run.",
+            "connect_url": "https://connect.example.com/start",
+            "remote_auth_session_id": "session-abc",
+            "config_id": runtime.config_id,
+        }
+
+        result = self.manager.execute_mcp_tool(agent, tool.full_name, {"foo": "bar"})
+
+        self.assertEqual(result["status"], "action_required")
+        self.assertEqual(result["connect_url"], "https://connect.example.com/start")
+        self.assertEqual(result["remote_auth_session_id"], "session-abc")
+        self.assertEqual(result["result"], "Authorization required before this tool can run.")
+        mock_service.mcp_request.assert_called_once()
+
+    @patch("api.agent.tools.mcp_manager.SandboxComputeService")
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_execute_tool_returns_sandbox_success_after_authorization(
+        self,
+        _mock_sandbox_enabled,
+        mock_service_cls,
+    ):
+        agent, _runtime, tool = self._setup_user_scoped_tool()
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_request.return_value = {
+            "status": "ok",
+            "result": {"items": [{"id": "one"}]},
+        }
+
+        result = self.manager.execute_mcp_tool(agent, tool.full_name, {"foo": "bar"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"], {"items": [{"id": "one"}]})
+        mock_service.mcp_request.assert_called_once()
 
     def test_execute_mcp_tool_not_enabled(self):
         """Test executing a tool that's not enabled."""

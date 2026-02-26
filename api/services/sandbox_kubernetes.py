@@ -326,6 +326,15 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         finally:
             self._delete_pod(pod_name)
 
+    def mcp_remote_auth_start(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "Remote MCP auth bridge is not yet supported for kubernetes backend."}
+
+    def mcp_remote_auth_status(self, session_id: str) -> Dict[str, Any]:
+        return {"status": "error", "message": "Remote MCP auth bridge is not yet supported for kubernetes backend."}
+
+    def mcp_remote_auth_authorize(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "error", "message": "Remote MCP auth bridge is not yet supported for kubernetes backend."}
+
     def _proxy_post(
         self,
         pod_name: str,
