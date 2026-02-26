@@ -58,6 +58,19 @@ def _acct_config_sig(acct: AgentEmailAccount) -> str:
         return ""
 
 
+def _eligible_idle_accounts_queryset():
+    """Return inbound-enabled IDLE accounts for the current release environment only."""
+    return (
+        AgentEmailAccount.objects.select_related("endpoint")
+        .filter(
+            is_inbound_enabled=True,
+            imap_idle_enabled=True,
+            endpoint__owner_agent__execution_environment=settings.GOBII_RELEASE_ENV,
+        )
+        .order_by("-updated_at")
+    )
+
+
 class Command(BaseCommand):
     help = "Run IMAP IDLE watchers that trigger per-account poll tasks."
 
@@ -162,11 +175,7 @@ class Command(BaseCommand):
                         watchers.pop(acct_id, None)
 
                 # 2) Query eligible accounts
-                eligible = (
-                    AgentEmailAccount.objects.select_related("endpoint")
-                    .filter(is_inbound_enabled=True, imap_idle_enabled=True)
-                    .order_by("-updated_at")
-                )
+                eligible = _eligible_idle_accounts_queryset()
 
                 # 3) Stop watchers whose account is no longer eligible
                 eligible_ids = {str(a.pk) for a in eligible}
