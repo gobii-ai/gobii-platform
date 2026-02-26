@@ -42,6 +42,9 @@ from api.models import (
     BrowserLLMTier,
     BrowserModelEndpoint,
     BrowserTierEndpoint,
+    DatabaseLLMTier,
+    DatabaseModelEndpoint,
+    DatabaseTierEndpoint,
     CommsChannel,
     EmbeddingsLLMTier,
     EmbeddingsModelEndpoint,
@@ -967,6 +970,11 @@ def _next_file_handler_order() -> int:
 
 def _next_image_generation_order() -> int:
     last = ImageGenerationLLMTier.objects.order_by("-order").first()
+    return (last.order if last else 0) + 1
+
+
+def _next_database_order() -> int:
+    last = DatabaseLLMTier.objects.order_by("-order").first()
     return (last.order if last else 0) + 1
 
 
@@ -3039,6 +3047,7 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
             provider.persistent_endpoints.exists()
             or provider.browser_endpoints.exists()
             or provider.embedding_endpoints.exists()
+            or provider.database_endpoints.exists()
             or provider.file_handler_endpoints.exists()
             or provider.image_generation_endpoints.exists()
         )
@@ -3084,6 +3093,15 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
             elif kind == "embedding":
                 endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
                 result = _run_embedding_test(endpoint)
+            elif kind == "database":
+                endpoint = get_object_or_404(DatabaseModelEndpoint, pk=endpoint_id)
+                result = _run_completion_test(
+                    endpoint,
+                    endpoint.provider,
+                    model_attr="litellm_model",
+                    base_attr="api_base",
+                    default_max_tokens=128,
+                )
             elif kind == "file_handler":
                 endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
                 result = _run_completion_test(
@@ -3778,6 +3796,125 @@ class EmbeddingTierEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
         tier_endpoint = get_object_or_404(EmbeddingsTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        return _json_ok()
+
+
+class DatabaseEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
+            payload,
+            endpoint_model=DatabaseModelEndpoint,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class DatabaseEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(DatabaseModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_aux_llm_endpoint_from_payload(endpoint, payload)
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(DatabaseModelEndpoint, pk=endpoint_id)
+        error_response = _delete_endpoint_with_tier_guard(endpoint)
+        if error_response:
+            return error_response
+        return _json_ok()
+
+
+class DatabaseTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        tier = _create_aux_tier_from_payload(
+            payload,
+            tier_model=DatabaseLLMTier,
+            next_order_fn=_next_database_order,
+        )
+        return _json_ok(tier_id=str(tier.id))
+
+
+class DatabaseTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(DatabaseLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_aux_tier_from_payload(
+            tier,
+            payload,
+            queryset=DatabaseLLMTier.objects.all(),
+        )
+        if error_response:
+            return error_response
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(DatabaseLLMTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class DatabaseTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(DatabaseLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        te, error_response = _create_aux_tier_endpoint_from_payload(
+            payload,
+            tier=tier,
+            endpoint_model=DatabaseModelEndpoint,
+            tier_endpoint_model=DatabaseTierEndpoint,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class DatabaseTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(DatabaseTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
+        if error_response:
+            return error_response
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(DatabaseTierEndpoint, pk=tier_endpoint_id)
         tier_endpoint.delete()
         return _json_ok()
 

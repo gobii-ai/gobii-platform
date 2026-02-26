@@ -27,6 +27,7 @@ import {
   Sparkles,
   Crown,
   Star,
+  Database,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -64,6 +65,7 @@ const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: st
   { id: 'persistent', label: 'Persistent' },
   { id: 'browser', label: 'Browser' },
   { id: 'embedding', label: 'Embedding' },
+  { id: 'database', label: 'Database' },
   { id: 'file_handler', label: 'File handler' },
   { id: 'image_generation', label: 'Image generation' },
 ]
@@ -203,8 +205,8 @@ type ProviderCardData = {
   endpoints: ProviderEndpointCard[]
 }
 
-type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation'
-type ProfileTierScope = Exclude<TierScope, 'file_handler' | 'image_generation'>
+type TierScope = 'persistent' | 'browser' | 'embedding' | 'database' | 'file_handler' | 'image_generation'
+type ProfileTierScope = Exclude<TierScope, 'database' | 'file_handler' | 'image_generation'>
 type EndpointKind = Extract<llmApi.ProviderEndpoint['type'], TierScope>
 type TierEndpointWeightPayload = { weight: number }
 type TierEndpointCreatePayload = { endpoint_id: string; weight: number }
@@ -213,6 +215,7 @@ const ENDPOINT_KIND_MAP: Record<llmApi.ProviderEndpoint['type'], EndpointKind> =
   persistent: 'persistent',
   browser: 'browser',
   embedding: 'embedding',
+  database: 'database',
   file_handler: 'file_handler',
   image_generation: 'image_generation',
 }
@@ -223,6 +226,7 @@ const updateTierEndpointByScope: Record<TierScope, (tierEndpointId: string, payl
   persistent: (tierEndpointId, payload) => llmApi.updatePersistentTierEndpoint(tierEndpointId, payload),
   browser: (tierEndpointId, payload) => llmApi.updateBrowserTierEndpoint(tierEndpointId, payload),
   embedding: (tierEndpointId, payload) => llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload),
+  database: (tierEndpointId, payload) => llmApi.updateDatabaseTierEndpoint(tierEndpointId, payload),
   file_handler: (tierEndpointId, payload) => llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload),
   image_generation: (tierEndpointId, payload) => llmApi.updateImageGenerationTierEndpoint(tierEndpointId, payload),
 }
@@ -231,6 +235,7 @@ const deleteTierEndpointByScope: Record<TierScope, (tierEndpointId: string) => P
   persistent: (tierEndpointId) => llmApi.deletePersistentTierEndpoint(tierEndpointId),
   browser: (tierEndpointId) => llmApi.deleteBrowserTierEndpoint(tierEndpointId),
   embedding: (tierEndpointId) => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId),
+  database: (tierEndpointId) => llmApi.deleteDatabaseTierEndpoint(tierEndpointId),
   file_handler: (tierEndpointId) => llmApi.deleteFileHandlerTierEndpoint(tierEndpointId),
   image_generation: (tierEndpointId) => llmApi.deleteImageGenerationTierEndpoint(tierEndpointId),
 }
@@ -251,6 +256,7 @@ const addTierEndpointByScope: Record<TierScope, (
     return llmApi.addBrowserTierEndpoint(tierId, browserPayload) as { tier_endpoint_id?: string }
   },
   embedding: async (tierId, payload) => llmApi.addEmbeddingTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+  database: async (tierId, payload) => llmApi.addDatabaseTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
   file_handler: async (tierId, payload) => llmApi.addFileHandlerTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
   image_generation: async (tierId, payload) => llmApi.addImageGenerationTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
 }
@@ -792,6 +798,27 @@ function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
   return mapped
 }
 
+function mapDatabaseTiers(tiers: llmApi.DatabaseTier[] = []): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'database',
+      intelligenceTier: null,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, () => 'database')
+  return mapped
+}
+
 function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
   const mapped = tiers.map((tier) => {
     const normalized = normalizeTierEndpointWeights(tier.endpoints)
@@ -899,6 +926,8 @@ function AddEndpointModal({
     ? choices.browser_endpoints
     : scope === 'embedding'
       ? choices.embedding_endpoints
+      : scope === 'database'
+        ? choices.database_endpoints
       : scope === 'file_handler'
         ? choices.file_handler_endpoints
         : scope === 'image_generation'
@@ -1320,6 +1349,8 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
                     ? 'Edit browser endpoint'
                     : endpoint.type === 'file_handler'
                       ? 'Edit file handler endpoint'
+                      : endpoint.type === 'database'
+                        ? 'Edit database endpoint'
                       : endpoint.type === 'image_generation'
                         ? 'Edit image generation endpoint'
                         : 'Edit embedding endpoint'}
@@ -1576,10 +1607,11 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
 
   const isBrowser = endpoint.type === 'browser'
   const isEmbedding = endpoint.type === 'embedding'
+  const isDatabase = endpoint.type === 'database'
   const isFileHandler = endpoint.type === 'file_handler'
   const isImageGeneration = endpoint.type === 'image_generation'
   const isPersistent = endpoint.type === 'persistent'
-  const isToolingEndpoint = !isEmbedding && !isFileHandler && !isImageGeneration
+  const isToolingEndpoint = !isEmbedding && !isDatabase && !isFileHandler && !isImageGeneration
 
   return (
     <div className="space-y-3">
@@ -1588,7 +1620,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <label className="text-xs text-slate-500">Model identifier</label>
           <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
-        {!isBrowser && !isImageGeneration && (
+        {!isBrowser && !isImageGeneration && !isDatabase && (
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>
             <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
@@ -1623,13 +1655,13 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         )}
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
-        {!isImageGeneration && (
+        {!isImageGeneration && !isDatabase && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Supports temperature
           </label>
         )}
-        {!isImageGeneration && (
+        {!isImageGeneration && !isDatabase && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Vision
@@ -1733,6 +1765,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
     persistent: 'Add persistent endpoint',
     browser: 'Add browser endpoint',
     embedding: 'Add embedding endpoint',
+    database: 'Add database endpoint',
     file_handler: 'Add file handler endpoint',
     image_generation: 'Add image generation endpoint',
   }[type]
@@ -1818,13 +1851,13 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             )}
           </div>
           <div className="flex flex-wrap gap-4 text-sm">
-            {type !== 'image_generation' && (
+            {type !== 'image_generation' && type !== 'database' && (
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
                 Supports temperature
               </label>
             )}
-            {type !== 'image_generation' && (
+            {type !== 'image_generation' && type !== 'database' && (
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
                 Vision
@@ -1855,7 +1888,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 Reasoning
               </label>
             )}
-            {type !== 'embedding' && type !== 'file_handler' && type !== 'image_generation' && (
+            {type !== 'embedding' && type !== 'database' && type !== 'file_handler' && type !== 'image_generation' && (
               <>
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" checked={supportsTools} onChange={(event) => setSupportsTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -2509,6 +2542,11 @@ export function LlmConfigScreen() {
     return mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers)
   }, [selectedProfile, overviewQuery.data?.embeddings.tiers])
 
+  const databaseTiers = useMemo(
+    () => mapDatabaseTiers(overviewQuery.data?.databases?.tiers),
+    [overviewQuery.data?.databases?.tiers],
+  )
+
   const fileHandlerTiers = useMemo(
     () => mapFileHandlerTiers(overviewQuery.data?.file_handlers?.tiers),
     [overviewQuery.data?.file_handlers?.tiers],
@@ -2526,6 +2564,7 @@ export function LlmConfigScreen() {
     persistent_endpoints: [],
     browser_endpoints: [],
     embedding_endpoints: [],
+    database_endpoints: [],
     file_handler_endpoints: [],
     image_generation_endpoints: [],
   }
@@ -2700,6 +2739,11 @@ export function LlmConfigScreen() {
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
       payload.enabled = true
+    } else if (type === 'database') {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
+      payload.enabled = true
     } else if (type === 'file_handler') {
       payload.model = values.model
       payload.litellm_model = values.model
@@ -2762,12 +2806,12 @@ export function LlmConfigScreen() {
       const parsed = parseNumber(values.max_output_tokens)
       payload.max_output_tokens = parsed ?? null
     }
-    if (kind !== 'browser' && kind !== 'image_generation' && values.temperature !== undefined) {
+    if ((kind === 'persistent' || kind === 'embedding') && values.temperature !== undefined) {
       const parsed = parseNumber(values.temperature)
       payload.temperature_override = parsed ?? null
     }
-    if (kind !== 'image_generation' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
-    if (kind !== 'image_generation' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
+    if (kind !== 'image_generation' && kind !== 'database' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
+    if (kind !== 'image_generation' && kind !== 'database' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (kind === 'image_generation' && values.supportsImageToImage !== undefined) {
       payload.supports_image_to_image = values.supportsImageToImage
     }
@@ -3042,6 +3086,32 @@ export function LlmConfigScreen() {
       }),
     })
 
+  const handleDatabaseTierAdd = () => runMutation(() => llmApi.createDatabaseTier({}), {
+    successMessage: 'Database tier added',
+    label: 'Creating database tier…',
+    busyKey: actionKey('database', 'add'),
+    context: 'Database tiers',
+  })
+  const handleDatabaseTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updateDatabaseTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving database tier up…' : 'Moving database tier down…',
+      busyKey: actionKey('database', tierId, 'move', direction),
+      busyKeys: [actionKey('database', tierId, 'move')],
+      context: 'Database tiers',
+    })
+  const handleDatabaseTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete database tier "${tier.name}"?`,
+      message: 'Any weighting rules tied to this tier will be lost.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteDatabaseTier(tier.id), {
+        successMessage: 'Database tier removed',
+        label: 'Removing database tier…',
+        busyKey: actionKey('database', tier.id, 'remove'),
+        context: tier.name,
+      }),
+    })
+
   const handleFileHandlerTierAdd = () => runMutation(() => llmApi.createFileHandlerTier({}), {
     successMessage: 'File handler tier added',
     label: 'Creating file handler tier…',
@@ -3095,7 +3165,7 @@ export function LlmConfigScreen() {
     })
 
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
-    const useProfile = Boolean(selectedProfile && scope !== 'file_handler' && scope !== 'image_generation')
+    const useProfile = Boolean(selectedProfile && scope !== 'database' && scope !== 'file_handler' && scope !== 'image_generation')
     showModal((onClose) => createPortal(
       <AddEndpointModal
         tier={tier}
@@ -3545,7 +3615,7 @@ export function LlmConfigScreen() {
   // Profile-specific tier endpoint handlers
   const commitProfileTierEndpointWeights = (tier: Tier, scope: TierScope) => {
     if (!selectedProfile) return commitTierEndpointWeights(tier, scope)
-    if (scope === 'file_handler' || scope === 'image_generation') return
+    if (scope === 'database' || scope === 'file_handler' || scope === 'image_generation') return
 
     const key = `${scope}:${tier.id}`
     const staged = stagedWeightsRef.current[key]
@@ -3587,7 +3657,7 @@ export function LlmConfigScreen() {
 
   const handleProfileTierEndpointRemove = (tier: Tier, endpoint: TierEndpoint, scope: TierScope) => {
     if (!selectedProfile) return handleTierEndpointRemove(tier, endpoint, scope)
-    if (scope === 'file_handler' || scope === 'image_generation') return
+    if (scope === 'database' || scope === 'file_handler' || scope === 'image_generation') return
 
     return confirmDestructiveAction({
       title: `Remove "${endpoint.label}" from ${tier.name}?`,
@@ -3615,7 +3685,7 @@ export function LlmConfigScreen() {
     selection: { endpointId: string; extractionEndpointId?: string | null },
   ) => {
     if (!selectedProfile) return submitTierEndpoint(tier, scope, selection)
-    if (scope === 'file_handler' || scope === 'image_generation') return
+    if (scope === 'database' || scope === 'file_handler' || scope === 'image_generation') return
     const { endpointId, extractionEndpointId } = selection
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
@@ -3705,7 +3775,7 @@ export function LlmConfigScreen() {
       <div className="space-y-8">
         <div className="gobii-card-base space-y-2 px-6 py-6">
           <h1 className="text-2xl font-semibold text-slate-900/90">LLM configuration</h1>
-          <p className="text-sm text-slate-600">Review providers, endpoints, and token tiers powering orchestrator, browser-use, and embedding flows.</p>
+          <p className="text-sm text-slate-600">Review providers, endpoints, and token tiers powering orchestrator, browser-use, embedding, and database translation flows.</p>
         </div>
         {overviewQuery.isError && (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700 flex items-center gap-2">
@@ -3954,7 +4024,7 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Other model consumers"
-          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, file handling, and image generation.'}
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, database translation, file handling, and image generation.'}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4052,6 +4122,43 @@ export function LlmConfigScreen() {
                 )
               })}
               {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
+            </div>
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start gap-3">
+                  <Database className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">Database tiers</h4>
+                    <p className="text-sm text-slate-600">Fallback order for translating sqlite instructions into executable SQL.</p>
+                  </div>
+                </div>
+                <button type="button" className={button.secondary} onClick={handleDatabaseTierAdd}>
+                  <PlusCircle className="size-4" /> Add tier
+                </button>
+              </div>
+              {databaseTiers.map((tier, index) => {
+                const lastIndex = databaseTiers.length - 1
+                return (
+                  <TierCard
+                    key={tier.id}
+                    tier={tier}
+                    pendingWeights={pendingWeights}
+                    scope="database"
+                    canMoveUp={index > 0}
+                    canMoveDown={index < lastIndex}
+                    isDirty={dirtyTierIds.has(`database:${tier.id}`)}
+                    isSaving={savingTierIds.has(`database:${tier.id}`)}
+                    onMove={(direction) => handleDatabaseTierMove(tier.id, direction)}
+                    onRemove={handleDatabaseTierRemove}
+                    onAddEndpoint={() => handleTierEndpointAdd(tier, 'database')}
+                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'database')}
+                    onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'database')}
+                    onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'database')}
+                    isActionBusy={isBusy}
+                  />
+                )
+              })}
+              {databaseTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No database tiers configured.</p>}
             </div>
             <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
               <div className="flex items-center justify-between">

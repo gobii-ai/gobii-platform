@@ -710,6 +710,56 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertEqual(mock_completion.call_count, 2, "Warning status should force a follow-up iteration.")
 
+    def test_sqlite_tool_calls_are_marked_llm_enforced(self):
+        """sqlite_batch calls from the LLM include enforcement metadata."""
+        enable_tools(self.agent, ["sqlite_batch"])
+
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"instruction": "Return 1 as value", "will_continue_work": false}'
+
+        response_message = MagicMock()
+        response_message.tool_calls = [tool_call]
+        response_message.function_call = None
+        response_message.content = None
+
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=5,
+                completion_tokens=5,
+                total_tokens=10,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+        token_usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "total_tokens": 10,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+             patch("api.agent.core.event_processing.build_prompt_context", return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+             patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})]), \
+             patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)), \
+             patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True}) as mock_execute_tool, \
+             patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None}):
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_execute_tool.call_count, 1)
+        exec_params = mock_execute_tool.call_args[0][2]
+        self.assertTrue(exec_params.get("_llm_enforced"))
+        self.assertIn("instruction", exec_params)
+
 
 @tag("batch_event_processing")
 class AgentRunSequenceHelperTests(TestCase):

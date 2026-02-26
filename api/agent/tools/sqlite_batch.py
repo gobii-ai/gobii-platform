@@ -29,6 +29,7 @@ from sqlparse.sql import Statement
 
 if TYPE_CHECKING:
     from ...models import PersistentAgent
+from ..core.llm_utils import run_completion
 from .sqlite_guardrails import (
     clear_guarded_connection,
     get_blocked_statement_reason,
@@ -38,7 +39,12 @@ from .sqlite_guardrails import (
 )
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
 from .sqlite_helpers import is_write_statement
-from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
+from .sqlite_state import (
+    EPHEMERAL_TABLES,
+    _sqlite_db_path_var,
+    get_sqlite_digest_prompt,
+    get_sqlite_schema_prompt,
+)  # type: ignore
 
 logger = logging.getLogger(__name__)
 PROTECTED_TABLE_NAMES = frozenset(
@@ -63,6 +69,12 @@ class _SqliteBatchLimits:
     cpu_seconds: int
     memory_mb: int
     query_timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class _SqlTranslationOutcome:
+    queries: List[str]
+    metadata: Dict[str, Any]
 
 
 def _get_setting_value(name: str) -> Any:
@@ -1529,6 +1541,258 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
     return queries if queries else None
 
 
+def _coerce_bool_param(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
+def _extract_instruction_param(params: Dict[str, Any]) -> str | None:
+    raw = params.get("instruction")
+    if not isinstance(raw, str):
+        return None
+    instruction = raw.strip()
+    return instruction or None
+
+
+def _extract_completion_text(response: Any) -> str:
+    choices = getattr(response, "choices", None)
+    if choices is None and isinstance(response, dict):
+        choices = response.get("choices")
+    if not choices:
+        return ""
+
+    first_choice = choices[0]
+    message = first_choice.get("message") if isinstance(first_choice, dict) else getattr(first_choice, "message", None)
+    if message is None:
+        return ""
+
+    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
+
+
+def _extract_queries_from_translation_payload(payload: Any) -> List[str] | None:
+    raw_queries: Any = None
+    if isinstance(payload, dict):
+        raw_queries = payload.get("queries")
+        if raw_queries is None:
+            raw_queries = payload.get("sql")
+        if raw_queries is None:
+            raw_queries = payload.get("query")
+    elif isinstance(payload, list):
+        raw_queries = payload
+    elif isinstance(payload, str):
+        raw_queries = payload
+
+    if raw_queries is None:
+        return None
+
+    if isinstance(raw_queries, str):
+        items = [raw_queries]
+    elif isinstance(raw_queries, list):
+        items = raw_queries
+    else:
+        return None
+
+    queries: list[str] = []
+    for item in items:
+        if not isinstance(item, str):
+            return None
+        split_items = _split_sqlite_statements(item)
+        if split_items:
+            queries.extend(split_items)
+    return queries or None
+
+
+def _parse_translated_queries(raw_content: str) -> List[str] | None:
+    content = (raw_content or "").strip()
+    if not content:
+        return None
+
+    content, _ = _strip_markdown_fences(content)
+    content = content.strip()
+
+    candidates: list[Any] = []
+    try:
+        candidates.append(json.loads(content))
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder()
+    for idx, char in enumerate(content):
+        if char not in "{[":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(content[idx:])
+        except json.JSONDecodeError:
+            continue
+        candidates.append(obj)
+
+    for candidate in candidates:
+        queries = _extract_queries_from_translation_payload(candidate)
+        if queries:
+            return queries
+
+    # Best-effort fallback when model returns raw SQL text despite contract.
+    return _extract_queries_from_translation_payload(content)
+
+
+def _build_sql_translation_messages(instruction: str) -> List[Dict[str, str]]:
+    schema_digest = get_sqlite_digest_prompt()
+    schema_summary = get_sqlite_schema_prompt()
+
+    system_prompt = (
+        "You are a SQLite SQL translator.\n"
+        "Convert the provided natural-language instruction into executable SQLite statements.\n"
+        "Strictly output JSON only with this exact shape: {\"queries\":[\"...\"]}.\n"
+        "Rules:\n"
+        "- Use SQLite syntax only.\n"
+        "- Use only schema elements present in the provided schema summary/digest.\n"
+        "- Do not include markdown, comments, or explanation text.\n"
+        "- Never output ATTACH, DETACH, VACUUM, PRAGMA database_list, or extension-loading statements.\n"
+        "- Split multi-step work into multiple statements in the queries array."
+    )
+
+    user_prompt = (
+        "Instruction:\n"
+        f"{instruction}\n\n"
+        "Schema digest:\n"
+        f"{schema_digest}\n\n"
+        "Schema summary:\n"
+        f"{schema_summary}\n"
+    )
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def _get_sql_translation_failover_configs(agent: "PersistentAgent") -> List[Dict[str, Any]]:
+    from ..core.database_config import get_database_translation_configs
+    from ..core.llm_config import get_llm_config_with_failover
+    from api.evals.execution import get_current_eval_routing_profile
+
+    db_configs = get_database_translation_configs()
+    if db_configs:
+        failover: list[dict[str, Any]] = []
+        for cfg in db_configs:
+            params = dict(cfg.params)
+            params.setdefault("temperature", 0)
+            failover.append(
+                {
+                    "source": "database_tier",
+                    "config_key": cfg.endpoint_key,
+                    "endpoint_id": cfg.endpoint_id,
+                    "endpoint_key": cfg.endpoint_key,
+                    "provider_key": cfg.provider_key,
+                    "model": cfg.model,
+                    "params": params,
+                    "tier_order": cfg.tier_order,
+                    "weight": cfg.weight,
+                }
+            )
+        return failover
+
+    primary_configs = get_llm_config_with_failover(
+        agent_id=str(agent.id),
+        token_count=0,
+        agent=agent,
+        routing_profile=get_current_eval_routing_profile(),
+        allow_unconfigured=True,
+    )
+    failover = []
+    for config_key, model, params in primary_configs:
+        model_params = dict(params or {})
+        supports_temperature = bool(model_params.get("supports_temperature", True))
+        if supports_temperature:
+            model_params.setdefault("temperature", 0)
+        else:
+            model_params.pop("temperature", None)
+        failover.append(
+            {
+                "source": "primary_fallback",
+                "config_key": config_key,
+                "endpoint_id": None,
+                "endpoint_key": config_key,
+                "provider_key": None,
+                "model": model,
+                "params": model_params,
+                "tier_order": None,
+                "weight": None,
+            }
+        )
+    return failover
+
+
+def _translate_instruction_to_queries(
+    *,
+    agent: "PersistentAgent",
+    instruction: str,
+) -> _SqlTranslationOutcome | Dict[str, Any]:
+    failover_configs = _get_sql_translation_failover_configs(agent)
+    if not failover_configs:
+        return {
+            "status": "error",
+            "message": "No configured LLM is available to translate sqlite_batch instruction.",
+        }
+
+    messages = _build_sql_translation_messages(instruction)
+    errors: list[str] = []
+    for attempt_idx, cfg in enumerate(failover_configs, start=1):
+        try:
+            response = run_completion(
+                model=cfg["model"],
+                messages=messages,
+                params=dict(cfg["params"]),
+            )
+            content = _extract_completion_text(response)
+            queries = _parse_translated_queries(content)
+            if not queries:
+                errors.append(
+                    f"{cfg['config_key']}: translator returned invalid JSON contract"
+                )
+                continue
+
+            metadata = {
+                "source": cfg["source"],
+                "attempt": attempt_idx,
+                "config_key": cfg["config_key"],
+                "endpoint_id": cfg["endpoint_id"],
+                "endpoint_key": cfg["endpoint_key"],
+                "provider_key": cfg["provider_key"],
+                "model": cfg["model"],
+                "tier_order": cfg["tier_order"],
+                "weight": cfg["weight"],
+                "instruction": instruction,
+                "queries": queries,
+                "generated_statements": queries,
+            }
+            return _SqlTranslationOutcome(queries=queries, metadata=metadata)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{cfg['config_key']}: {type(exc).__name__}: {exc}")
+
+    error_preview = "; ".join(errors[:3]) if errors else "translation failed"
+    return {
+        "status": "error",
+        "message": f"Failed to translate sqlite instruction into SQL. {error_preview}",
+    }
+
+
 def _run_sqlite_batch_in_subprocess(
     *,
     agent_id: str,
@@ -1618,12 +1882,27 @@ def _execute_sqlite_batch_inner(
     query_timeout_seconds: float,
 ) -> Dict[str, Any]:
     """Execute one or more SQL queries against the agent's SQLite DB."""
+    llm_enforced = _coerce_bool_param(params.get("_llm_enforced", False))
+    instruction = _extract_instruction_param(params)
+    if llm_enforced and not instruction:
+        return {
+            "status": "error",
+            "message": "sqlite_batch instruction is required for LLM-enforced calls.",
+        }
+
     queries = _normalize_queries(params)
     if not queries:
         return {
             "status": "error",
-            "message": "Provide `sql` as a SQL string (semicolon-separated for multiple statements).",
+            "message": (
+                "Provide `instruction` for translation, or use legacy `sql`/`query`/`queries` "
+                "for internal callers."
+            ),
         }
+
+    translation_metadata = params.get("_translation_metadata")
+    if not isinstance(translation_metadata, dict):
+        translation_metadata = None
 
     will_continue_work_raw = params.get("will_continue_work", None)
     if will_continue_work_raw is None:
@@ -1744,6 +2023,8 @@ def _execute_sqlite_batch_inner(
             "db_size_mb": round(db_size_mb, 2),
             "message": msg,
         }
+        if translation_metadata:
+            response["translation"] = translation_metadata
 
         if not had_error and not had_warning and will_continue_work is False:
             response["auto_sleep_ok"] = True
@@ -1766,10 +2047,29 @@ def execute_sqlite_batch(agent: "PersistentAgent", params: Dict[str, Any]) -> Di
     if not db_path:
         return {"status": "error", "message": "SQLite DB path unavailable"}
 
+    working_params = dict(params or {})
+    llm_enforced = _coerce_bool_param(working_params.get("_llm_enforced", False))
+    instruction = _extract_instruction_param(working_params)
+    if llm_enforced and not instruction:
+        return {
+            "status": "error",
+            "message": "sqlite_batch instruction is required for LLM-enforced calls.",
+        }
+
+    if instruction:
+        translation_outcome = _translate_instruction_to_queries(
+            agent=agent,
+            instruction=instruction,
+        )
+        if isinstance(translation_outcome, dict):
+            return translation_outcome
+        working_params["queries"] = translation_outcome.queries
+        working_params["_translation_metadata"] = translation_outcome.metadata
+
     limits = _resolve_sqlite_batch_limits()
     return _run_sqlite_batch_in_subprocess(
         agent_id=str(agent.id),
-        params=params,
+        params=working_params,
         db_path=db_path,
         limits=limits,
     )
@@ -1783,23 +2083,23 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "Durable SQLite memory for structured data. "
-                "Provide `sql` as a single SQL string; separate multiple statements with semicolons. "
-                "ESCAPE single quotes by DOUBLING them: 'O''Brien' (NOT backslash). "
-                "grep_context_all/split_sections return STRING arrays: use json_each(...) then ctx.value directly, NOT json_extract. "
+                "Provide a detailed `instruction` describing exactly what to query or update; "
+                "the database translator will generate SQL. "
+                "Include precise tables/fields/filters/ordering and expected output columns in your instruction."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "sql": {
+                    "instruction": {
                         "type": "string",
-                        "description": "SQL to execute as a single string. Use semicolons to separate statements.",
+                        "description": "Detailed natural-language database instruction to translate into SQLite SQL.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
                     },
                 },
-                "required": ["sql", "will_continue_work"],
+                "required": ["instruction", "will_continue_work"],
             },
         },
     }

@@ -2,13 +2,16 @@ import json
 import os
 import sqlite3
 import tempfile
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.agent.tools.sqlite_batch import (
+    _execute_sqlite_batch_inner,
     execute_sqlite_batch,
+    get_sqlite_batch_tool,
     _apply_all_sql_fixes,
     _autocorrect_ambiguous_column,
     _autocorrect_cte_typos,
@@ -184,6 +187,128 @@ class SqliteBatchToolTests(TestCase):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"sql": 123})
             self.assertEqual(out.get("status"), "error")
+
+    @patch("api.agent.tools.sqlite_batch._get_sql_translation_failover_configs")
+    @patch("api.agent.tools.sqlite_batch.run_completion")
+    @patch("api.agent.tools.sqlite_batch._run_sqlite_batch_in_subprocess")
+    def test_instruction_translation_success(
+        self,
+        mock_run_subprocess,
+        mock_run_completion,
+        mock_get_failover,
+    ):
+        mock_get_failover.return_value = [
+            {
+                "source": "database_tier",
+                "config_key": "db-tier-1",
+                "endpoint_id": "ep-1",
+                "endpoint_key": "db-endpoint",
+                "provider_key": "openai",
+                "model": "gpt-4.1-mini",
+                "params": {"temperature": 0},
+                "tier_order": 0,
+                "weight": 1.0,
+            }
+        ]
+        mock_run_completion.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"queries":["SELECT 42 AS answer"]}',
+                    }
+                }
+            ]
+        }
+
+        def _run_sync(*, agent_id, params, db_path, limits):
+            return _execute_sqlite_batch_inner(
+                agent_id=agent_id,
+                params=params,
+                db_path=db_path,
+                query_timeout_seconds=limits.query_timeout_seconds,
+            )
+
+        mock_run_subprocess.side_effect = _run_sync
+
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"instruction": "Return the number 42 as answer.", "will_continue_work": True},
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][0]["result"], [{"answer": 42}])
+        translation = out.get("translation")
+        self.assertIsInstance(translation, dict)
+        self.assertEqual(translation.get("source"), "database_tier")
+        self.assertEqual(translation.get("config_key"), "db-tier-1")
+        self.assertEqual(translation.get("queries"), ["SELECT 42 AS answer"])
+
+    def test_instruction_missing_rejected_for_llm_enforced_calls(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"_llm_enforced": True, "queries": "SELECT 1", "will_continue_work": False},
+            )
+        self.assertEqual(out.get("status"), "error")
+        self.assertIn("instruction is required", out.get("message", "").lower())
+
+    @patch("api.evals.execution.get_current_eval_routing_profile", return_value=None)
+    @patch("api.agent.core.llm_config.get_llm_config_with_failover")
+    @patch("api.agent.core.database_config.get_database_translation_configs", return_value=[])
+    @patch("api.agent.tools.sqlite_batch.run_completion")
+    @patch("api.agent.tools.sqlite_batch._run_sqlite_batch_in_subprocess")
+    def test_instruction_translation_falls_back_to_primary_config_when_no_database_tier(
+        self,
+        mock_run_subprocess,
+        mock_run_completion,
+        _mock_db_configs,
+        mock_primary_failover,
+        _mock_eval_profile,
+    ):
+        mock_primary_failover.return_value = [
+            ("primary-default", "gpt-4o-mini", {"supports_temperature": True})
+        ]
+        mock_run_completion.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"queries":["SELECT 7 AS lucky_number"]}',
+                    }
+                }
+            ]
+        }
+
+        def _run_sync(*, agent_id, params, db_path, limits):
+            return _execute_sqlite_batch_inner(
+                agent_id=agent_id,
+                params=params,
+                db_path=db_path,
+                query_timeout_seconds=limits.query_timeout_seconds,
+            )
+
+        mock_run_subprocess.side_effect = _run_sync
+
+        with self._with_temp_db():
+            out = execute_sqlite_batch(
+                self.agent,
+                {"instruction": "Return 7 as lucky_number.", "will_continue_work": True},
+            )
+
+        self.assertEqual(out.get("status"), "ok", out.get("message"))
+        self.assertEqual(out["results"][0]["result"], [{"lucky_number": 7}])
+        translation = out.get("translation") or {}
+        self.assertEqual(translation.get("source"), "primary_fallback")
+        self.assertEqual(translation.get("config_key"), "primary-default")
+        self.assertEqual(translation.get("queries"), ["SELECT 7 AS lucky_number"])
+        self.assertEqual(mock_primary_failover.call_count, 1)
+
+    def test_sqlite_batch_tool_schema_requires_instruction(self):
+        tool = get_sqlite_batch_tool()
+        params = tool["function"]["parameters"]
+        self.assertEqual(params.get("required"), ["instruction", "will_continue_work"])
+        self.assertIn("instruction", params.get("properties", {}))
+        self.assertNotIn("sql", params.get("properties", {}))
 
     def test_attach_database_is_blocked(self):
         with self._with_temp_db() as (_db_path, _token, tmp):

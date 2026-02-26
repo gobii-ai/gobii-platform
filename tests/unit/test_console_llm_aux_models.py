@@ -5,6 +5,8 @@ from django.test import Client, TestCase, tag
 from django.urls import reverse
 
 from api.models import (
+    DatabaseModelEndpoint,
+    DatabaseTierEndpoint,
     EmbeddingsModelEndpoint,
     EmbeddingsTierEndpoint,
     FileHandlerModelEndpoint,
@@ -226,5 +228,73 @@ class ConsoleLlmAuxModelApiTests(TestCase):
 
         delete_endpoint_resp = self.client.delete(
             reverse("console_llm_image_generation_endpoint_detail", args=[endpoint_id])
+        )
+        self.assertEqual(delete_endpoint_resp.status_code, 200, delete_endpoint_resp.content)
+
+    def test_database_endpoint_and_tier_lifecycle(self):
+        create_resp = self._json_post(
+            "console_llm_database_endpoints",
+            {
+                "provider_id": str(self.provider.id),
+                "key": "db-translator-model",
+                "model": "gpt-4.1-mini",
+                "api_base": "https://example.com/v1",
+            },
+        )
+        self.assertEqual(create_resp.status_code, 200, create_resp.content)
+        endpoint_id = create_resp.json()["endpoint_id"]
+
+        patch_resp = self._json_patch(
+            "console_llm_database_endpoint_detail",
+            {
+                "model": "gpt-4.1",
+                "low_latency": True,
+                "provider_id": None,
+            },
+            endpoint_id,
+        )
+        self.assertEqual(patch_resp.status_code, 200, patch_resp.content)
+        endpoint = DatabaseModelEndpoint.objects.get(id=endpoint_id)
+        self.assertEqual(endpoint.litellm_model, "gpt-4.1")
+        self.assertTrue(endpoint.low_latency)
+        self.assertIsNone(endpoint.provider_id)
+
+        tier_resp = self._json_post("console_llm_database_tiers", {"description": "Tier DB"})
+        self.assertEqual(tier_resp.status_code, 200, tier_resp.content)
+        tier_id = tier_resp.json()["tier_id"]
+
+        attach_resp = self._json_post(
+            "console_llm_database_tier_endpoints",
+            {"endpoint_id": endpoint_id, "weight": 1.75},
+            tier_id,
+        )
+        self.assertEqual(attach_resp.status_code, 200, attach_resp.content)
+        tier_endpoint_id = attach_resp.json()["tier_endpoint_id"]
+        self.assertTrue(DatabaseTierEndpoint.objects.filter(id=tier_endpoint_id).exists())
+
+        update_weight_resp = self._json_patch(
+            "console_llm_database_tier_endpoint_detail",
+            {"weight": 2.5},
+            tier_endpoint_id,
+        )
+        self.assertEqual(update_weight_resp.status_code, 200, update_weight_resp.content)
+        tier_endpoint = DatabaseTierEndpoint.objects.get(id=tier_endpoint_id)
+        self.assertEqual(tier_endpoint.weight, 2.5)
+
+        blocked_delete_resp = self.client.delete(
+            reverse("console_llm_database_endpoint_detail", args=[endpoint_id])
+        )
+        self.assertEqual(blocked_delete_resp.status_code, 400, blocked_delete_resp.content)
+
+        delete_tier_endpoint_resp = self.client.delete(
+            reverse("console_llm_database_tier_endpoint_detail", args=[tier_endpoint_id])
+        )
+        self.assertEqual(delete_tier_endpoint_resp.status_code, 200, delete_tier_endpoint_resp.content)
+
+        delete_tier_resp = self.client.delete(reverse("console_llm_database_tier_detail", args=[tier_id]))
+        self.assertEqual(delete_tier_resp.status_code, 200, delete_tier_resp.content)
+
+        delete_endpoint_resp = self.client.delete(
+            reverse("console_llm_database_endpoint_detail", args=[endpoint_id])
         )
         self.assertEqual(delete_endpoint_resp.status_code, 200, delete_endpoint_resp.content)

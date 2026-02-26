@@ -4194,6 +4194,9 @@ from .models import (
     EmbeddingsModelEndpoint,
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
+    DatabaseModelEndpoint,
+    DatabaseLLMTier,
+    DatabaseTierEndpoint,
     FileHandlerModelEndpoint,
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
@@ -4318,6 +4321,35 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
     search_fields = ("description", "tier_endpoints__endpoint__key")
     ordering = ("order",)
     inlines = [EmbeddingsTierEndpointInline]
+
+
+@admin.register(DatabaseModelEndpoint)
+class DatabaseModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "litellm_model", "api_base", "low_latency", "enabled")
+    list_filter = ("enabled", "low_latency", "provider")
+    search_fields = ("key", "litellm_model", "api_base")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "low_latency",
+        "litellm_model",
+        "api_base",
+    )
+
+
+class DatabaseTierEndpointInline(admin.TabularInline):
+    model = DatabaseTierEndpoint
+    extra = 0
+    autocomplete_fields = ("endpoint",)
+
+
+@admin.register(DatabaseLLMTier)
+class DatabaseLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("order", "description")
+    search_fields = ("description", "tier_endpoints__endpoint__key")
+    ordering = ("order",)
+    inlines = [DatabaseTierEndpointInline]
 
 
 @admin.register(FileHandlerModelEndpoint)

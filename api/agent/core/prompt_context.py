@@ -299,7 +299,7 @@ guess(identifier) → error   # you ARE about to get "no such column"
 # Simple queries win. Fancy queries break.
 # Only use two-step patterns when structure is truly unknown.
 unknown(structure) → step1: inspect → step2: use(inspected)
-sqlite_batch(sql="
+sqlite_batch(instruction="
   SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='{id}';  -- step1: get enough context
   SELECT regexp_extract(result_text, 'pattern1'), ...  -- step2: use paths from step1
   FROM __tool_results WHERE result_id='{id}'")
@@ -371,8 +371,8 @@ filter_groups    → HAVING {condition}
 order            → ORDER BY {verified_column} [ASC|DESC]
 
 # sqlite_batch format (non-negotiable)
-sqlite_batch(sql="...", will_continue_work=true)  # sql must be a single STRING; separate statements with semicolons
-never: sqlite_batch({}) | sqlite_batch(sql=[...]) | sqlite_batch(queries=[...])
+sqlite_batch(instruction="Detailed SQLite instruction with tables/fields/filters/output.", will_continue_work=true)
+never: sqlite_batch({}) | sqlite_batch(instruction=[...]) | sqlite_batch(sql="...") | sqlite_batch(queries=[...])
 
 # SQLite pitfalls
 UNION/UNION ALL → ORDER BY only at the END (or wrap in a subquery)
@@ -478,7 +478,7 @@ do:
   <search_tool>(query="<topic>", will_continue_work=true)
 
   # Create queue from results:
-  sqlite_batch(sql="
+  sqlite_batch(instruction="
     CREATE TABLE queue (url TEXT PRIMARY KEY, title TEXT, done INT DEFAULT 0);
     INSERT INTO queue (url, title)
     SELECT json_extract(r.value,'$.u'), json_extract(r.value,'$.t')
@@ -516,7 +516,7 @@ do:
   mcp_brightdata_scrape_as_markdown(url="<url>", will_continue_work=true)
 
   # Extract patterns with context:
-  sqlite_batch(sql="
+  sqlite_batch(instruction="
     SELECT regexp_extract(ctx.value, '<pattern>') as val,
            ctx.value as context
     FROM __tool_results,
@@ -550,7 +550,7 @@ when:
   - Need to analyze, cross-reference, or persist
 
 do:
-  sqlite_batch(sql="
+  sqlite_batch(instruction="
     CREATE TABLE <name> (
       <key> TEXT PRIMARY KEY,
       <field1> TEXT,
@@ -580,7 +580,7 @@ when:
   - Need to find discrepancies, overlaps, or gaps
 
 do:
-  sqlite_batch(sql="
+  sqlite_batch(instruction="
     SELECT
       COALESCE(a.key, b.key) as key,
       a.value as source_a,
@@ -619,7 +619,7 @@ when:
   - Patterns emerged that weren't planned
 
 do:
-  sqlite_batch(sql="
+  sqlite_batch(instruction="
     ALTER TABLE <table> ADD COLUMN category TEXT;
 
     UPDATE <table> SET category = CASE
@@ -705,7 +705,7 @@ Example wrap-up (model your future state):
 send_chat_message(body="Here's what I found: [full detailed report]",
                   will_continue_work=true)  # After this: still need to mark done → true
 
-sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id='final-task';",
+sqlite_batch(instruction="UPDATE __kanban_cards SET status='done' WHERE friendly_id='final-task';",
              will_continue_work=false)  # After this: 0 cards remain → false
 ```
 
@@ -730,7 +730,7 @@ Only mark a task done after you've verified its completion:
 → Result shows: successfully scraped 15KB of content
 THOUGHT: Scrape succeeded. Now I can mark that card done and process the data.
 
-sqlite_batch(sql="
+sqlite_batch(instruction="
   -- Mark the scraping task done (verified success)
   UPDATE __kanban_cards SET status='done' WHERE friendly_id='scrape-competitor-site';
 
@@ -744,7 +744,7 @@ sqlite_batch(sql="
 send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...",
                   will_continue_work=true)  # true: still need to mark last card done
 
-sqlite_batch(sql="
+sqlite_batch(instruction="
   UPDATE __kanban_cards SET status='done' WHERE friendly_id='analyze-findings';
 ", will_continue_work=false)  # false: report already sent, now done
 ```
@@ -760,7 +760,7 @@ sqlite_batch(sql="
 ```sql
 -- WRONG: Mark done in same turn as the tool call (haven't seen result yet)
 mcp_brightdata_scrape_as_markdown(url="...")
-sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id='scrape-site'")
+sqlite_batch(instruction="UPDATE __kanban_cards SET status='done' WHERE friendly_id='scrape-site'")
 -- ^ Don't know if scrape succeeded!
 
 -- WRONG: Batch-mark all cards done without verifying each task completed
@@ -3532,7 +3532,7 @@ def _get_system_instruction(
             "Tools only — NO TEXT (DEFAULT)\n"
             "  → tools execute silently, no message sent\n"
             "  Use when: working on tasks. No announcements like 'I'll fetch...' or 'Let me...'\n"
-            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
+            "  Example: sqlite_batch(instruction=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
             "Empty response (no text, no tools)\n"
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
@@ -3648,7 +3648,7 @@ def _get_system_instruction(
         "```\n\n"
         "❌ WRONG — Function call syntax in text (completely ignored):\n"
         "```\n"
-        "sqlite_batch(sql=\"SELECT * FROM table\")\n"
+        "sqlite_batch(instruction=\"SELECT * FROM table\")\n"
         "http_request(url=\"https://example.com\")\n"
         "```\n\n"
         "❌ WRONG — Any tool invocation written in your message content\n\n"
@@ -3704,7 +3704,7 @@ def _get_system_instruction(
         "User: 'I want you to monitor competitor pricing for me'\n"
         "Before: 'Awaiting instructions'\n"
         "After:  'Monitor competitor pricing. Track changes daily, alert on significant moves.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Set up price tracking', 'todo');\")\n"
+        "→ sqlite_batch(instruction=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Set up price tracking', 'todo');\")\n"
         "```\n\n"
 
         "**User changes your focus:**\n"
@@ -3712,7 +3712,7 @@ def _get_system_instruction(
         "User: 'Actually, focus just on their enterprise plans, not consumer'\n"
         "Before: 'Monitor competitor pricing. Track changes daily.'\n"
         "After:  'Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.' WHERE id=1;\")\n"
+        "→ sqlite_batch(instruction=\"UPDATE __agent_config SET charter='Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.' WHERE id=1;\")\n"
         "```\n\n"
 
         "**User adds a preference:**\n"
@@ -3720,7 +3720,7 @@ def _get_system_instruction(
         "User: 'Send me updates via Slack, not email'\n"
         "Before: 'Scout AI startups weekly.'\n"
         "After:  'Scout AI startups weekly. User prefers Slack for updates.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Scout AI startups weekly. User prefers Slack for updates.' WHERE id=1;\")\n"
+        "→ sqlite_batch(instruction=\"UPDATE __agent_config SET charter='Scout AI startups weekly. User prefers Slack for updates.' WHERE id=1;\")\n"
         "```\n\n"
 
         "**User gives entirely new instructions:**\n"
@@ -3728,15 +3728,15 @@ def _get_system_instruction(
         "User: 'Forget the startup stuff. I need you to track my portfolio stocks instead.'\n"
         "Before: 'Scout AI startups. Track YC, Product Hunt.'\n"
         "After:  'Track user portfolio stocks. Monitor prices and news.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track user portfolio stocks. Monitor prices and news.' WHERE id=1;\")\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET schedule='...' WHERE id=1;\") if timing changes\n"
+        "→ sqlite_batch(instruction=\"UPDATE __agent_config SET charter='Track user portfolio stocks. Monitor prices and news.' WHERE id=1;\")\n"
+        "→ sqlite_batch(instruction=\"UPDATE __agent_config SET schedule='...' WHERE id=1;\") if timing changes\n"
         "```\n\n"
 
         "### Schedule updates:\n"
         "Update your schedule when timing requirements change:\n"
-        "- User says 'check every hour' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\")`\n"
-        "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
-        "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
+        "- User says 'check every hour' → `sqlite_batch(instruction=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\")`\n"
+        "- User says 'weekly on Fridays' → `sqlite_batch(instruction=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
+        "- User says 'stop the daily checks' → `sqlite_batch(instruction=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
 
         "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
 
@@ -3752,7 +3752,7 @@ def _get_system_instruction(
         "- **For multi-step work: create cards.** Complex tasks need tracking to avoid losing your place.\n"
         "- **Cards must be ultra-specific and self-contained.** Include the high-level goal so context survives long sessions. Pattern: `<action> — <why/goal>`\n"
         "- **Always include a reporting step.** The final card must deliver results to the user (e.g., 'Email findings + top 3 recs to user — completing competitor research').\n"
-        "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
+        "- **First response to multi-step work:** `sqlite_batch(instruction=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
         "- **Cards persist across turns.** Once inserted, cards stay in the table until you UPDATE or DELETE them. Never re-insert cards that already exist.\n"
@@ -4178,7 +4178,7 @@ def _get_system_instruction(
         "User: 'Research Acme Corp'\n"
         "Turn 1: → search_tools('company info')     # NO TEXT\n"
         "Turn 2: → mcp_brightdata_scrape_as_markdown('...')        # NO TEXT\n"
-        "Turn 3: → sqlite_batch('CREATE TABLE...')  # NO TEXT\n"
+        "Turn 3: → sqlite_batch(instruction='Create table + insert rows for analysis')  # NO TEXT\n"
         "Turn 4: '## Acme Corp\\n| Founded |...'    # FINDINGS → speak\n"
         "\n"
         "# Quick lookup\n"

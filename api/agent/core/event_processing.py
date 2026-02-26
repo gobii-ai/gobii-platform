@@ -3753,6 +3753,7 @@ def _run_agent_loop(
                     if tool_name == "sqlite_batch":
                         exec_params = dict(exec_params)  # copy already-substituted params
                         exec_params["_has_user_facing_message"] = has_user_facing_message
+                        exec_params["_llm_enforced"] = True
 
                     # Ensure a fresh DB connection before tool execution and subsequent ORM writes
                     close_old_connections()
