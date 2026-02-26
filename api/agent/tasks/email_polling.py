@@ -397,6 +397,15 @@ def _parse_last_seen(last_seen: Optional[str]) -> Tuple[Optional[str], int]:
         return None, 0
 
 
+def _agent_env_matches(acct: AgentEmailAccount) -> bool:
+    """True when the account's owner agent matches the current release environment."""
+    try:
+        owner_agent = acct.endpoint.owner_agent
+    except Exception:
+        return False
+    return bool(owner_agent and owner_agent.execution_environment == settings.GOBII_RELEASE_ENV)
+
+
 def _poll_account_locked(acct: AgentEmailAccount) -> None:
     now = timezone.now()
     client: imaplib.IMAP4 | None = None
@@ -496,8 +505,8 @@ def poll_imap_inbox(self, account_id: str) -> None:
             return
         acquired = True
         acct = AgentEmailAccount.objects.select_related("endpoint__owner_agent").get(pk=account_id)
-        owner_agent = getattr(getattr(acct, "endpoint", None), "owner_agent", None)
-        if owner_agent is None or owner_agent.execution_environment != settings.GOBII_RELEASE_ENV:
+        owner_agent = acct.endpoint.owner_agent
+        if not _agent_env_matches(acct):
             logger.info(
                 "IMAP poll skipped for account %s due to env mismatch (agent_env=%s, expected=%s)",
                 account_id,
