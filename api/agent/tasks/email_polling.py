@@ -22,6 +22,7 @@ from email.header import decode_header, make_header
 from email.utils import parseaddr
 
 from celery import shared_task
+from django.conf import settings
 from django.utils import timezone
 from opentelemetry import trace
 
@@ -494,8 +495,16 @@ def poll_imap_inbox(self, account_id: str) -> None:
             logger.info("IMAP poll skipped (lock busy) for account %s", account_id)
             return
         acquired = True
-
         acct = AgentEmailAccount.objects.select_related("endpoint__owner_agent").get(pk=account_id)
+        owner_agent = getattr(getattr(acct, "endpoint", None), "owner_agent", None)
+        if owner_agent is None or owner_agent.execution_environment != settings.GOBII_RELEASE_ENV:
+            logger.info(
+                "IMAP poll skipped for account %s due to env mismatch (agent_env=%s, expected=%s)",
+                account_id,
+                getattr(owner_agent, "execution_environment", None),
+                settings.GOBII_RELEASE_ENV,
+            )
+            return
         _poll_account_locked(acct)
     except AgentEmailAccount.DoesNotExist:
         logger.warning("AgentEmailAccount %s does not exist; skipping", account_id)
@@ -515,7 +524,11 @@ def poll_imap_inboxes(self) -> None:
     # Select a pool of candidates; filter minimally in DB, due filtering in Python
     candidates = (
         AgentEmailAccount.objects.select_related("endpoint")
-        .filter(is_inbound_enabled=True)
+        # Only poll accounts whose owner agent matches the current release env.
+        .filter(
+            is_inbound_enabled=True,
+            endpoint__owner_agent__execution_environment=settings.GOBII_RELEASE_ENV,
+        )
         .order_by("-updated_at")
     )
 
