@@ -66,6 +66,7 @@ from ...services.mcp_remote import (
     normalize_mcp_remote_args,
 )
 from ...services.mcp_remote_bridge import (
+    build_mcp_remote_auth_session_id,
     build_mcp_remote_bridge_payload,
 )
 from ...services.mcp_tool_cache import (
@@ -716,7 +717,9 @@ class MCPToolManager:
             _is_remote, args = normalize_mcp_remote_args(
                 command,
                 args,
-                build_mcp_remote_bridge_payload(),
+                build_mcp_remote_bridge_payload(
+                    auth_session_id=build_mcp_remote_auth_session_id(str(cfg.id)),
+                ),
             )
 
         return MCPServerRuntime(

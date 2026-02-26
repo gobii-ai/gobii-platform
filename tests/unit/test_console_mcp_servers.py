@@ -4,7 +4,8 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.core.cache import cache
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
@@ -17,6 +18,10 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentMCPServer,
+)
+from api.services.mcp_remote_bridge import (
+    bridge_session_key,
+    build_mcp_remote_auth_session_id,
 )
 from console.forms import MCPServerConfigForm
 from util.analytics import AnalyticsEvent
@@ -57,6 +62,10 @@ class MCPServerListAPITests(TestCase):
         self.assertIn("oauth_status_url", record)
         self.assertFalse(record["oauth_pending"])
         self.assertFalse(record["oauth_connected"])
+        self.assertFalse(record["mcp_remote_auth_pending"])
+        self.assertIsNone(record["mcp_remote_auth_url"])
+        self.assertIsNone(record["mcp_remote_auth_session_id"])
+        self.assertIsNone(record["mcp_remote_auth_expires_at"])
 
     def test_returns_organization_scope_when_context_selected(self):
         org = Organization.objects.create(
@@ -144,6 +153,104 @@ class MCPServerListAPITests(TestCase):
         record = response.json()["servers"][0]
         self.assertTrue(record["oauth_pending"])
         self.assertFalse(record["oauth_connected"])
+
+    @override_settings(MCP_REMOTE_BRIDGE_ENABLED=True)
+    def test_list_includes_pending_mcp_remote_auth_link(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="remote-server",
+            display_name="Remote Server",
+            command="npx",
+            command_args=["@mattgreathouse/remote-mcp-remote", "https://remote.example.com/mcp"],
+        )
+        session_id = build_mcp_remote_auth_session_id(str(server.id))
+        expires_at = timezone.now() + timedelta(minutes=5)
+        cache.set(
+            bridge_session_key(session_id),
+            {
+                "session_id": session_id,
+                "state": "state-1",
+                "authorization_url": "https://auth.example.com/connect",
+                "expires_at": expires_at.isoformat(),
+            },
+            timeout=120,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-mcp-server-list"))
+
+        self.assertEqual(response.status_code, 200)
+        record = response.json()["servers"][0]
+        self.assertTrue(record["mcp_remote_auth_pending"])
+        self.assertEqual(record["mcp_remote_auth_url"], "https://auth.example.com/connect")
+        self.assertEqual(record["mcp_remote_auth_session_id"], session_id)
+        self.assertEqual(record["mcp_remote_auth_expires_at"], expires_at.isoformat())
+
+    @override_settings(MCP_REMOTE_BRIDGE_ENABLED=True)
+    def test_detail_includes_pending_mcp_remote_auth_link(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="remote-detail-server",
+            display_name="Remote Detail Server",
+            command="npx",
+            command_args=["@mattgreathouse/remote-mcp-remote", "https://remote.example.com/mcp"],
+        )
+        session_id = build_mcp_remote_auth_session_id(str(server.id))
+        expires_at = timezone.now() + timedelta(minutes=5)
+        cache.set(
+            bridge_session_key(session_id),
+            {
+                "session_id": session_id,
+                "state": "state-2",
+                "authorization_url": "https://auth.example.com/detail-connect",
+                "expires_at": expires_at.isoformat(),
+            },
+            timeout=120,
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-mcp-server-detail", args=[server.id]))
+
+        self.assertEqual(response.status_code, 200)
+        record = response.json()["server"]
+        self.assertTrue(record["mcp_remote_auth_pending"])
+        self.assertEqual(record["mcp_remote_auth_url"], "https://auth.example.com/detail-connect")
+        self.assertEqual(record["mcp_remote_auth_session_id"], session_id)
+        self.assertEqual(record["mcp_remote_auth_expires_at"], expires_at.isoformat())
+
+    @override_settings(MCP_REMOTE_BRIDGE_ENABLED=True)
+    @patch("console.api_views.SandboxComputeService")
+    def test_detail_polls_sandbox_for_remote_auth_link_when_cache_empty(self, mock_service_cls):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="remote-sandbox-poll-server",
+            display_name="Remote Sandbox Poll",
+            command="npx",
+            command_args=["@mattgreathouse/remote-mcp-remote", "https://remote.example.com/mcp"],
+        )
+        mock_service = mock_service_cls.return_value
+        mock_service.discover_mcp_tools.return_value = {
+            "status": "action_required",
+            "connect_url": "https://auth.example.com/from-sandbox",
+            "auth_session_id": "sandbox-session-123",
+        }
+        self.client.force_login(self.user)
+
+        response = self.client.get(reverse("console-mcp-server-detail", args=[server.id]))
+
+        self.assertEqual(response.status_code, 200)
+        record = response.json()["server"]
+        self.assertTrue(record["mcp_remote_auth_pending"])
+        self.assertEqual(record["mcp_remote_auth_url"], "https://auth.example.com/from-sandbox")
+        self.assertEqual(record["mcp_remote_auth_session_id"], "sandbox-session-123")
+        mock_service.discover_mcp_tools.assert_called_once_with(
+            str(server.id),
+            reason="console_remote_auth_poll",
+            timeout_seconds=5,
+        )
 
 
 @tag("batch_console_mcp_servers")

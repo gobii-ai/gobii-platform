@@ -81,6 +81,7 @@ export function McpServerFormModal({
     queryFn: () => fetchMcpServerDetail(detailUrl!),
     enabled: shouldFetchDetail,
   })
+  const refetchServerDetail = detailQuery.refetch
 
   const server = detailQuery.data
 
@@ -116,6 +117,24 @@ export function McpServerFormModal({
   }, [formErrors])
 
   const nonFieldErrors = formErrors?.non_field_errors ?? []
+  const isRemoteServer = isMcpRemoteServer(server)
+  const remoteAuthUrl = server?.mcpRemoteAuthUrl ?? null
+  const showRemoteAuthPanel = Boolean(
+    mode === 'edit' && state.connectionType === 'stdio' && isRemoteServer,
+  )
+  const shouldPollRemoteAuth = Boolean(showRemoteAuthPanel && !remoteAuthUrl)
+
+  useEffect(() => {
+    if (!shouldPollRemoteAuth) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      void refetchServerDetail()
+    }, 5000)
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [shouldPollRemoteAuth, refetchServerDetail])
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -374,6 +393,26 @@ export function McpServerFormModal({
 
           {allowCommands && state.connectionType === 'stdio' && (
             <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 space-y-4">
+              {showRemoteAuthPanel && (
+                <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-3">
+                  <p className="text-sm font-semibold text-emerald-900">Connect your account</p>
+                  {remoteAuthUrl ? (
+                    <div className="space-y-2">
+                      <p className="text-xs text-emerald-800">Finish sign-in to complete setup.</p>
+                      <a
+                        href={remoteAuthUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center rounded-md bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700"
+                      >
+                        Continue sign-in
+                      </a>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-emerald-800">Preparing your sign-in link...</p>
+                  )}
+                </div>
+              )}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-slate-600">Environment variables</label>
@@ -902,6 +941,27 @@ function statusLabel(status: OAuthStatus): string {
 }
 
 type OAuthStatus = ReturnType<typeof useMcpOAuth>['status']
+
+function isMcpRemoteServer(server?: McpServerDetail): boolean {
+  if (!server) {
+    return false
+  }
+
+  const tokens = [server.command, ...(server.commandArgs || [])]
+    .map((token) => String(token || '').trim().toLowerCase())
+    .filter(Boolean)
+
+  return tokens.some((token) => {
+    return (
+      token === 'mcp-remote' ||
+      token.startsWith('mcp-remote@') ||
+      token === '@modelcontextprotocol/mcp-remote' ||
+      token.startsWith('@modelcontextprotocol/mcp-remote@') ||
+      token === '@mattgreathouse/remote-mcp-remote' ||
+      token.startsWith('@mattgreathouse/remote-mcp-remote@')
+    )
+  })
+}
 
 function isErrorBody(payload: unknown): payload is { errors?: FormErrors; message?: string } {
   if (!payload || typeof payload !== 'object') {

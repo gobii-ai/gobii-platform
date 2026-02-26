@@ -47,7 +47,12 @@ from .tasks import process_browser_use_task
 from .services.task_webhooks import trigger_task_webhook
 from .services.persistent_agents import maybe_sync_agent_email_display_name
 from .services.agent_settings_resume import queue_settings_change_resume
-from .services.mcp_remote_bridge import validate_mcp_remote_bridge_request
+from .services.mcp_remote_bridge import (
+    bridge_code_key,
+    bridge_session_key,
+    bridge_state_key,
+    validate_mcp_remote_bridge_request,
+)
 from opentelemetry import baggage, context, trace
 from tasks.services import TaskCreditService
 
@@ -75,23 +80,6 @@ from drf_spectacular.utils import extend_schema, extend_schema_view, inline_seri
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
-
-_MCP_BRIDGE_STATE_KEY_PREFIX = "mcp_remote_bridge:state:"
-_MCP_BRIDGE_SESSION_KEY_PREFIX = "mcp_remote_bridge:session:"
-_MCP_BRIDGE_CODE_KEY_PREFIX = "mcp_remote_bridge:code:"
-
-
-def _bridge_state_key(state: str) -> str:
-    return f"{_MCP_BRIDGE_STATE_KEY_PREFIX}{state}"
-
-
-def _bridge_session_key(session_id: str) -> str:
-    return f"{_MCP_BRIDGE_SESSION_KEY_PREFIX}{session_id}"
-
-
-def _bridge_code_key(session_id: str) -> str:
-    return f"{_MCP_BRIDGE_CODE_KEY_PREFIX}{session_id}"
-
 
 def _enforce_personal_api_access_or_raise(user, *, organization=None):
     if organization is not None:
@@ -1075,8 +1063,8 @@ class MCPRemoteBridgeNotifyView(View):
 
         # Keep state/session records beyond the active TTL so poll can emit 410 on expiry.
         record_ttl_seconds = ttl_seconds * 4
-        cache.set(_bridge_state_key(state), session_id, timeout=record_ttl_seconds)
-        cache.set(_bridge_session_key(session_id), session_payload, timeout=record_ttl_seconds)
+        cache.set(bridge_state_key(state), session_id, timeout=record_ttl_seconds)
+        cache.set(bridge_session_key(session_id), session_payload, timeout=record_ttl_seconds)
 
         return JsonResponse({"status": "ok", "session_id": session_id})
 
@@ -1094,12 +1082,12 @@ class MCPRemoteBridgePollView(View):
         if not session_id:
             return HttpResponseBadRequest("session_id is required")
 
-        code = cache.get(_bridge_code_key(session_id))
+        code = cache.get(bridge_code_key(session_id))
         if isinstance(code, str) and code.strip():
-            cache.delete(_bridge_code_key(session_id))
+            cache.delete(bridge_code_key(session_id))
             return JsonResponse({"code": code.strip()}, status=200)
 
-        session_payload = cache.get(_bridge_session_key(session_id))
+        session_payload = cache.get(bridge_session_key(session_id))
         if not isinstance(session_payload, dict):
             return JsonResponse({"status": "pending"}, status=404)
 
@@ -1113,10 +1101,10 @@ class MCPRemoteBridgePollView(View):
 
         if expires_at and timezone.now() >= expires_at:
             state = str(session_payload.get("state") or "").strip()
-            cache.delete(_bridge_session_key(session_id))
-            cache.delete(_bridge_code_key(session_id))
+            cache.delete(bridge_session_key(session_id))
+            cache.delete(bridge_code_key(session_id))
             if state:
-                cache.delete(_bridge_state_key(state))
+                cache.delete(bridge_state_key(state))
             return JsonResponse({"error": "Auth session expired"}, status=410)
 
         return JsonResponse({"status": "pending"}, status=202)
@@ -1142,12 +1130,12 @@ class MCPRemoteBridgeCallbackView(View):
         if not state:
             return HttpResponseBadRequest("state is required")
 
-        session_id = cache.get(_bridge_state_key(state))
+        session_id = cache.get(bridge_state_key(state))
         if not isinstance(session_id, str) or not session_id.strip():
             return HttpResponseBadRequest("Unknown or expired OAuth state")
         session_id = session_id.strip()
 
-        session_payload = cache.get(_bridge_session_key(session_id))
+        session_payload = cache.get(bridge_session_key(session_id))
         if isinstance(session_payload, dict):
             expires_at_raw = str(session_payload.get("expires_at") or "").strip()
             if expires_at_raw:
@@ -1156,15 +1144,15 @@ class MCPRemoteBridgeCallbackView(View):
                 except ValueError:
                     expires_at = None
                 if expires_at is None:
-                    cache.delete(_bridge_session_key(session_id))
-                    cache.delete(_bridge_state_key(state))
+                    cache.delete(bridge_session_key(session_id))
+                    cache.delete(bridge_state_key(state))
                     return HttpResponseBadRequest("OAuth session is invalid. Restart authentication.")
                 if timezone.is_naive(expires_at):
                     expires_at = timezone.make_aware(expires_at, dt_timezone.utc)
                 if timezone.now() >= expires_at:
-                    cache.delete(_bridge_session_key(session_id))
-                    cache.delete(_bridge_state_key(state))
-                    cache.delete(_bridge_code_key(session_id))
+                    cache.delete(bridge_session_key(session_id))
+                    cache.delete(bridge_state_key(state))
+                    cache.delete(bridge_code_key(session_id))
                     return HttpResponse("OAuth session expired. Please retry from Gobii.", status=410)
 
         error = str(request.GET.get("error") or request.POST.get("error") or "").strip()
@@ -1178,7 +1166,7 @@ class MCPRemoteBridgeCallbackView(View):
             return HttpResponseBadRequest("code is required")
 
         ttl_seconds = max(1, int(settings.MCP_REMOTE_BRIDGE_SESSION_TTL_SECONDS))
-        cache.set(_bridge_code_key(session_id), code, timeout=ttl_seconds)
+        cache.set(bridge_code_key(session_id), code, timeout=ttl_seconds)
 
         return HttpResponse(
             (

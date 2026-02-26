@@ -19,7 +19,10 @@ from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MC
 from api.services.mcp_remote import (
     normalize_mcp_remote_args,
 )
-from api.services.mcp_remote_bridge import build_mcp_remote_bridge_payload
+from api.services.mcp_remote_bridge import (
+    build_mcp_remote_auth_session_id,
+    build_mcp_remote_bridge_payload,
+)
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
@@ -252,6 +255,7 @@ class SandboxComputeBackend:
         *,
         reason: str,
         server_payload: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
         raise NotImplementedError
 
@@ -381,6 +385,7 @@ class LocalSandboxBackend(SandboxComputeBackend):
         *,
         reason: str,
         server_payload: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
         from api.agent.tools.mcp_manager import get_mcp_manager
 
@@ -539,11 +544,15 @@ class HttpSandboxBackend(SandboxComputeBackend):
         *,
         reason: str,
         server_payload: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
         payload = {"server_id": server_config_id, "reason": reason}
         if server_payload:
             payload["server"] = server_payload
-        return self._post("sandbox/compute/discover_mcp_tools", payload)
+        request_timeout = timeout_seconds if isinstance(timeout_seconds, int) and timeout_seconds > 0 else None
+        if request_timeout is not None:
+            payload["timeout_seconds"] = request_timeout
+        return self._post("sandbox/compute/discover_mcp_tools", payload, timeout=request_timeout)
 
     def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
         return {"status": "skipped", "message": "Workspace snapshots are not available via HTTP backend."}
@@ -755,7 +764,9 @@ def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]],
     command = runtime.command or ""
     command_args = list(runtime.args or [])
     env_vars = dict(runtime.env or {})
-    bridge_payload = build_mcp_remote_bridge_payload()
+    bridge_payload = build_mcp_remote_bridge_payload(
+        auth_session_id=build_mcp_remote_auth_session_id(str(cfg.id)),
+    )
     is_remote, command_args = normalize_mcp_remote_args(command, command_args, bridge_payload)
 
     payload = {
@@ -1090,7 +1101,13 @@ class SandboxComputeService:
             "stopped": True,
         }
 
-    def discover_mcp_tools(self, server_config_id: str, *, reason: str) -> Dict[str, Any]:
+    def discover_mcp_tools(
+        self,
+        server_config_id: str,
+        *,
+        reason: str,
+        timeout_seconds: Optional[int] = None,
+    ) -> Dict[str, Any]:
         server_payload, runtime = _build_mcp_server_payload(server_config_id)
         if not server_payload or runtime is None:
             return {"status": "error", "message": "MCP server config not available."}
@@ -1099,6 +1116,7 @@ class SandboxComputeService:
             server_config_id,
             reason=reason,
             server_payload=server_payload,
+            timeout_seconds=timeout_seconds,
         )
         if isinstance(result, dict) and result.get("status") == "ok":
             tools = result.get("tools")

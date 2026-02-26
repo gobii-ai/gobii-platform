@@ -187,14 +187,18 @@ class SandboxComputeSyncTests(TestCase):
         self.assertIsInstance(payload, dict)
 
         payload = payload or {}
-        self.assertIn("@gobii-ai/remote-mcp-remote", payload["command_args"])
+        self.assertIn("@mattgreathouse/remote-mcp-remote", payload["command_args"])
         self.assertIn("--auth-mode", payload["command_args"])
         self.assertIn("bridge", payload["command_args"])
         self.assertIn("--redirect-url", payload["command_args"])
         self.assertIn("--auth-bridge-poll-url", payload["command_args"])
         self.assertIn("--auth-bridge-notify-url", payload["command_args"])
+        self.assertIn("--auth-session-id", payload["command_args"])
+        auth_session_index = payload["command_args"].index("--auth-session-id")
+        self.assertEqual(payload["command_args"][auth_session_index + 1], str(server.id))
 
         bridge = payload.get("mcp_remote_bridge") or {}
+        self.assertEqual(bridge.get("auth_session_id"), str(server.id))
         self.assertTrue(
             str(bridge.get("redirect_url", "")).startswith("https://app.example.com/api/mcp/auth/callback/")
         )

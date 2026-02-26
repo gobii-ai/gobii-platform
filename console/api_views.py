@@ -18,6 +18,7 @@ import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core import signing
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
@@ -139,7 +140,11 @@ from console.daily_credit import (
 from console.agent_creation import enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
-from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
+from api.services.sandbox_compute import (
+    SANDBOX_COMPUTE_WAFFLE_FLAG,
+    SandboxComputeService,
+    SandboxComputeUnavailable,
+)
 from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
 import litellm
@@ -155,6 +160,12 @@ from api.evals.realtime import broadcast_run_update, broadcast_suite_update
 from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
+from api.services.mcp_remote import is_mcp_remote_invocation
+from api.services.mcp_remote_bridge import (
+    bridge_session_key,
+    build_mcp_remote_auth_session_id,
+    get_active_mcp_remote_bridge_session,
+)
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from api.services.spawn_requests import SpawnRequestResolutionError, SpawnRequestService
 from api.services.daily_credit_limits import get_agent_credit_multiplier
@@ -792,6 +803,44 @@ def _owner_queryset(owner_scope: str, owner_user, owner_org):
     ).order_by("display_name")
 
 
+def _serialize_mcp_remote_bridge_auth(server: MCPServerConfig) -> dict[str, object]:
+    empty_payload: dict[str, object] = {
+        "mcp_remote_auth_pending": False,
+        "mcp_remote_auth_url": None,
+        "mcp_remote_auth_session_id": None,
+        "mcp_remote_auth_expires_at": None,
+    }
+    if not settings.MCP_REMOTE_BRIDGE_ENABLED:
+        return empty_payload
+
+    command = str(server.command or "").strip()
+    command_args = list(server.command_args or [])
+    if not command or not is_mcp_remote_invocation(command, command_args):
+        return empty_payload
+
+    session_id = build_mcp_remote_auth_session_id(str(server.id))
+    if not session_id:
+        return empty_payload
+
+    session_payload = get_active_mcp_remote_bridge_session(session_id)
+    if not isinstance(session_payload, dict):
+        return {
+            "mcp_remote_auth_pending": False,
+            "mcp_remote_auth_url": None,
+            "mcp_remote_auth_session_id": session_id,
+            "mcp_remote_auth_expires_at": None,
+        }
+
+    authorization_url = str(session_payload.get("authorization_url") or "").strip() or None
+    expires_at = str(session_payload.get("expires_at") or "").strip() or None
+    return {
+        "mcp_remote_auth_pending": authorization_url is not None,
+        "mcp_remote_auth_url": authorization_url,
+        "mcp_remote_auth_session_id": session_id,
+        "mcp_remote_auth_expires_at": expires_at,
+    }
+
+
 def _serialize_mcp_server(
     server: MCPServerConfig,
     request: HttpRequest | None = None,
@@ -839,6 +888,7 @@ def _serialize_mcp_server(
                 "oauth_pending": pending,
             }
         )
+    data.update(_serialize_mcp_remote_bridge_auth(server))
     return data
 
 
@@ -859,6 +909,74 @@ def _serialize_mcp_server_detail(server: MCPServerConfig, request: HttpRequest |
         data["oauth_status_url"] = reverse("console-mcp-oauth-status", args=[server.id])
         data["oauth_revoke_url"] = reverse("console-mcp-oauth-revoke", args=[server.id])
     return data
+
+
+def _fetch_mcp_remote_auth_from_sandbox(server: MCPServerConfig) -> dict[str, object] | None:
+    command = str(server.command or "").strip()
+    command_args = list(server.command_args or [])
+    if not command or not is_mcp_remote_invocation(command, command_args):
+        return None
+
+    try:
+        service = SandboxComputeService()
+    except SandboxComputeUnavailable:
+        return None
+
+    result = service.discover_mcp_tools(
+        str(server.id),
+        reason="console_remote_auth_poll",
+        timeout_seconds=settings.MCP_REMOTE_BRIDGE_DISCOVERY_TIMEOUT_SECONDS,
+    )
+
+    if not isinstance(result, dict):
+        return None
+    if str(result.get("status") or "").strip().lower() != "action_required":
+        return None
+
+    connect_url = str(result.get("connect_url") or "").strip()
+    auth_session_id = str(result.get("auth_session_id") or "").strip()
+    auth_payload = result.get("auth")
+    if isinstance(auth_payload, dict):
+        if not connect_url:
+            connect_url = str(
+                auth_payload.get("authorization_url")
+                or auth_payload.get("auth_url")
+                or auth_payload.get("url")
+                or ""
+            ).strip()
+        if not auth_session_id:
+            auth_session_id = str(auth_payload.get("session_id") or "").strip()
+
+    if not connect_url:
+        return None
+
+    if not auth_session_id:
+        auth_session_id = build_mcp_remote_auth_session_id(str(server.id))
+
+    ttl_seconds = max(1, int(settings.MCP_REMOTE_BRIDGE_SESSION_TTL_SECONDS))
+    expires_at = timezone.now() + timedelta(seconds=ttl_seconds)
+    state = auth_session_id
+    if isinstance(auth_payload, dict):
+        maybe_state = str(auth_payload.get("state") or "").strip()
+        if maybe_state:
+            state = maybe_state
+    cache.set(
+        bridge_session_key(auth_session_id),
+        {
+            "session_id": auth_session_id,
+            "state": state,
+            "authorization_url": connect_url,
+            "expires_at": expires_at.isoformat(),
+        },
+        timeout=ttl_seconds * 4,
+    )
+
+    return {
+        "mcp_remote_auth_pending": True,
+        "mcp_remote_auth_url": connect_url,
+        "mcp_remote_auth_session_id": auth_session_id or None,
+        "mcp_remote_auth_expires_at": None,
+    }
 
 
 def _form_errors(form: MCPServerConfigForm) -> dict[str, list[str]]:
@@ -5112,7 +5230,15 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
         server = _resolve_mcp_server_config(request, server_id)
-        return JsonResponse({"server": _serialize_mcp_server_detail(server, request)})
+        serialized = _serialize_mcp_server_detail(server, request)
+        if (
+            settings.MCP_REMOTE_BRIDGE_ENABLED
+            and not serialized.get("mcp_remote_auth_url")
+        ):
+            sandbox_auth = _fetch_mcp_remote_auth_from_sandbox(server)
+            if sandbox_auth:
+                serialized.update(sandbox_auth)
+        return JsonResponse({"server": serialized})
 
     def patch(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
         server = _resolve_mcp_server_config(request, server_id)

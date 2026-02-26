@@ -129,6 +129,11 @@ MCP_REMOTE_BRIDGE_AUTH_TIMEOUT_SECONDS = env.int(
     "MCP_REMOTE_BRIDGE_AUTH_TIMEOUT_SECONDS",
     default=180,
 )
+# Max time the console MCP detail endpoint waits when polling sandbox for a bridge auth link.
+MCP_REMOTE_BRIDGE_DISCOVERY_TIMEOUT_SECONDS = env.int(
+    "MCP_REMOTE_BRIDGE_DISCOVERY_TIMEOUT_SECONDS",
+    default=5,
+)
 # Optional shared secret used to validate bridge-mode notify/poll/callback requests.
 MCP_REMOTE_BRIDGE_SHARED_SECRET = env(
     "MCP_REMOTE_BRIDGE_SHARED_SECRET",

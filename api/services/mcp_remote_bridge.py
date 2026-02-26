@@ -1,9 +1,17 @@
+from datetime import datetime, timezone as dt_timezone
 from typing import Any, Optional
 from urllib.parse import quote_plus, urlparse
 
 from django.conf import settings
+from django.core.cache import cache
 from django.http import HttpRequest
 from django.urls import reverse
+from django.utils import timezone
+
+
+MCP_REMOTE_BRIDGE_STATE_KEY_PREFIX = "mcp_remote_bridge:state:"
+MCP_REMOTE_BRIDGE_SESSION_KEY_PREFIX = "mcp_remote_bridge:session:"
+MCP_REMOTE_BRIDGE_CODE_KEY_PREFIX = "mcp_remote_bridge:code:"
 
 
 def _public_site_base_url() -> str:
@@ -27,6 +35,54 @@ def _append_query_param(url: str, key: str, value: str) -> str:
     encoded_key = quote_plus(key)
     encoded_value = quote_plus(value)
     return f"{url}{separator}{encoded_key}={encoded_value}"
+
+
+def build_mcp_remote_auth_session_id(config_id: str) -> str:
+    return str(config_id or "").strip()
+
+
+def bridge_state_key(state: str) -> str:
+    return f"{MCP_REMOTE_BRIDGE_STATE_KEY_PREFIX}{state}"
+
+
+def bridge_session_key(session_id: str) -> str:
+    return f"{MCP_REMOTE_BRIDGE_SESSION_KEY_PREFIX}{session_id}"
+
+
+def bridge_code_key(session_id: str) -> str:
+    return f"{MCP_REMOTE_BRIDGE_CODE_KEY_PREFIX}{session_id}"
+
+
+def get_active_mcp_remote_bridge_session(session_id: str) -> dict[str, Any] | None:
+    normalized_session_id = str(session_id or "").strip()
+    if not normalized_session_id:
+        return None
+
+    payload = cache.get(bridge_session_key(normalized_session_id))
+    if not isinstance(payload, dict):
+        return None
+
+    expires_at_raw = str(payload.get("expires_at") or "").strip()
+    expires_at: datetime | None
+    if expires_at_raw:
+        try:
+            expires_at = datetime.fromisoformat(expires_at_raw)
+        except ValueError:
+            expires_at = None
+        if expires_at and timezone.is_naive(expires_at):
+            expires_at = timezone.make_aware(expires_at, dt_timezone.utc)
+    else:
+        expires_at = None
+
+    if expires_at and timezone.now() >= expires_at:
+        state = str(payload.get("state") or "").strip()
+        cache.delete(bridge_session_key(normalized_session_id))
+        cache.delete(bridge_code_key(normalized_session_id))
+        if state:
+            cache.delete(bridge_state_key(state))
+        return None
+
+    return payload
 
 
 def build_mcp_remote_bridge_payload(*, auth_session_id: Optional[str] = None) -> dict[str, Any]:

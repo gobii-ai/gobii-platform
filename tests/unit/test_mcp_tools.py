@@ -469,12 +469,15 @@ class MCPToolManagerTests(TestCase):
 
         runtime = self.manager._build_runtime_from_config(config)
 
-        self.assertIn("@gobii-ai/remote-mcp-remote", runtime.args)
+        self.assertIn("@mattgreathouse/remote-mcp-remote", runtime.args)
         self.assertIn("--auth-mode", runtime.args)
         self.assertIn("bridge", runtime.args)
         self.assertIn("--auth-bridge-notify-url", runtime.args)
         self.assertIn("--auth-bridge-poll-url", runtime.args)
         self.assertIn("--redirect-url", runtime.args)
+        self.assertIn("--auth-session-id", runtime.args)
+        session_arg_index = runtime.args.index("--auth-session-id")
+        self.assertEqual(runtime.args[session_arg_index + 1], str(config.id))
         self.assertTrue(any("bridge_token=bridge-secret" in arg for arg in runtime.args))
 
     def test_execute_mcp_tool_returns_action_required_for_mcp_remote_auth_event(self):
@@ -505,7 +508,7 @@ class MCPToolManagerTests(TestCase):
             display_name=self.server_config.display_name,
             description=self.server_config.description,
             command="npx",
-            args=["@gobii-ai/remote-mcp-remote", "https://remote.example.com/mcp"],
+            args=["@mattgreathouse/remote-mcp-remote", "https://remote.example.com/mcp"],
             url=None,
             auth_method=MCPServerConfig.AuthMethod.NONE,
             env={},

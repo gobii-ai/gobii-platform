@@ -306,6 +306,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         *,
         reason: str,
         server_payload: Optional[Dict[str, Any]] = None,
+        timeout_seconds: Optional[int] = None,
     ) -> Dict[str, Any]:
         if not server_payload:
             return {"status": "error", "message": "Missing MCP server payload for discovery."}
@@ -320,8 +321,15 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             return {"status": "error", "message": "Discovery pod did not become ready in time."}
 
         payload = {"server_id": server_config_id, "reason": reason, "server": server_payload}
+        if isinstance(timeout_seconds, int) and timeout_seconds > 0:
+            payload["timeout_seconds"] = timeout_seconds
         try:
-            response = self._proxy_post(pod_name, "/sandbox/compute/discover_mcp_tools", payload)
+            response = self._proxy_post(
+                pod_name,
+                "/sandbox/compute/discover_mcp_tools",
+                payload,
+                timeout=timeout_seconds,
+            )
             return response
         finally:
             self._delete_pod(pod_name)

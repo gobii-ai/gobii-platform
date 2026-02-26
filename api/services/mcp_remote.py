@@ -1,7 +1,7 @@
 import os
 from typing import Any
 
-MCP_REMOTE_NPM_PACKAGE = "@gobii-ai/remote-mcp-remote"
+MCP_REMOTE_NPM_PACKAGE = "@mattgreathouse/remote-mcp-remote"
 _MCP_REMOTE_DEFAULT_TOKEN = "mcp-remote"
 _MCP_REMOTE_ALT_TOKEN = "@modelcontextprotocol/mcp-remote"
 
