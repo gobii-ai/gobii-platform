@@ -335,6 +335,27 @@ class MCPOAuthApiTests(TestCase):
         self.assertEqual(payload["server_config_id"], str(self.remote_server.id))
         mock_service.mcp_remote_auth_status.assert_called_once_with("session-xyz")
 
+    @patch("console.api_views.store_remote_auth_state")
+    @patch("console.api_views.SandboxComputeService")
+    def test_remote_auth_status_persists_remote_state(self, mock_service_cls, mock_store_state):
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_remote_auth_status.return_value = {
+            "status": "authorized",
+            "session_id": "session-xyz",
+            "config_id": str(self.remote_server.id),
+            "remote_auth_state": {"version": 1, "files": [{"path": "mcp-remote-0.1.40/abc_tokens.json"}]},
+        }
+
+        response = self.client.get(
+            reverse("console-mcp-remote-auth-status", args=["session-xyz"]),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["status"], "authorized")
+        self.assertNotIn("remote_auth_state", payload)
+        mock_store_state.assert_called_once()
+
     @patch("console.api_views.SandboxComputeService")
     def test_remote_auth_authorize_submits_code(self, mock_service_cls):
         mock_service = mock_service_cls.return_value
@@ -370,3 +391,36 @@ class MCPOAuthApiTests(TestCase):
             state="state-123",
             error="",
         )
+
+    @patch("console.api_views.store_remote_auth_state")
+    @patch("console.api_views.SandboxComputeService")
+    def test_remote_auth_authorize_persists_remote_state(self, mock_service_cls, mock_store_state):
+        mock_service = mock_service_cls.return_value
+        mock_service.mcp_remote_auth_status.return_value = {
+            "status": "pending_auth",
+            "session_id": "session-abc",
+            "config_id": str(self.remote_server.id),
+        }
+        mock_service.mcp_remote_auth_authorize.return_value = {
+            "status": "authorized",
+            "session_id": "session-abc",
+            "remote_auth_state": {"version": 1, "files": [{"path": "mcp-remote-0.1.40/abc_tokens.json"}]},
+        }
+
+        response = self.client.post(
+            reverse("console-mcp-remote-auth-authorize"),
+            data=json.dumps(
+                {
+                    "session_id": "session-abc",
+                    "authorization_code": "code-123",
+                    "state": "state-123",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["status"], "authorized")
+        self.assertNotIn("remote_auth_state", payload)
+        mock_store_state.assert_called_once()

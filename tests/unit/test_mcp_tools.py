@@ -51,6 +51,10 @@ from api.agent.tools.search_tools import (
     search_tools,
 )
 from api.services.prompt_settings import invalidate_prompt_settings_cache
+from api.services.mcp_remote_runtime import (
+    DEFAULT_REMOTE_MCP_CONFIG_DIR,
+    SANDBOX_REMOTE_MCP_CONFIG_DIR,
+)
 from tests.utils.llm_seed import seed_persistent_basic
 
 
@@ -529,7 +533,29 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(runtime.args[0], "-y")
         self.assertEqual(runtime.args[1], "@mattgreathouse/remote-mcp-remote")
         self.assertIn("https://remote.example.com/sse", runtime.args)
-        self.assertEqual(runtime.env.get("MCP_REMOTE_CONFIG_DIR"), "/workspace/.mcp-auth")
+        self.assertEqual(runtime.env.get("MCP_REMOTE_CONFIG_DIR"), DEFAULT_REMOTE_MCP_CONFIG_DIR)
+
+    def test_sandbox_payload_uses_sandbox_remote_mcp_config_dir(self):
+        from api.services.sandbox_compute import _build_mcp_server_payload
+
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=get_user_model().objects.create_user(
+                username=f"remote-payload-user-{uuid.uuid4().hex[:8]}",
+                email=f"remote-payload-{uuid.uuid4().hex[:8]}@example.com",
+            ),
+            name=f"remote-payload-{uuid.uuid4().hex[:8]}",
+            display_name="Remote Payload",
+            command="npx",
+            command_args=["mcp-remote", "https://remote.example.com/sse"],
+        )
+
+        payload, runtime = _build_mcp_server_payload(str(config.id))
+
+        self.assertIsNotNone(payload)
+        self.assertIsNotNone(runtime)
+        self.assertEqual(runtime.env.get("MCP_REMOTE_CONFIG_DIR"), DEFAULT_REMOTE_MCP_CONFIG_DIR)
+        self.assertEqual(payload["env"].get("MCP_REMOTE_CONFIG_DIR"), SANDBOX_REMOTE_MCP_CONFIG_DIR)
         
     def test_default_enabled_tools_defined(self):
         """Test that default enabled tools list is defined."""

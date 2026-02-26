@@ -20,6 +20,12 @@ from django.utils import timezone
 from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
+from api.services.mcp_remote_auth_state import (
+    load_remote_auth_state,
+    pop_remote_auth_state,
+    store_remote_auth_state,
+)
+from api.services.mcp_remote_runtime import SANDBOX_REMOTE_MCP_CONFIG_DIR
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
@@ -794,6 +800,9 @@ def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]],
     auth_headers = manager._build_auth_headers(runtime)
     if auth_headers:
         headers.update(auth_headers)
+    env = dict(runtime.env or {})
+    if runtime.is_remote_mcp_remote:
+        env["MCP_REMOTE_CONFIG_DIR"] = SANDBOX_REMOTE_MCP_CONFIG_DIR
 
     payload = {
         "config_id": runtime.config_id,
@@ -801,16 +810,36 @@ def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]],
         "command": runtime.command or "",
         "command_args": list(runtime.args or []),
         "url": runtime.url or "",
-        "env": runtime.env or {},
+        "env": env,
         "headers": headers,
         "auth_method": runtime.auth_method,
         "scope": runtime.scope,
         "is_remote_mcp_remote": bool(runtime.is_remote_mcp_remote),
     }
+    if runtime.is_remote_mcp_remote:
+        remote_auth_state = load_remote_auth_state(cfg)
+        if remote_auth_state:
+            payload["remote_auth_state"] = remote_auth_state
     callback_base_url = _console_mcp_oauth_callback_base_url()
     if callback_base_url:
         payload["remote_auth_callback_base_url"] = callback_base_url
     return payload, runtime
+
+
+def _persist_remote_auth_state(config_id: str, state: Dict[str, Any]) -> None:
+    if not config_id or not isinstance(state, dict) or not state:
+        return
+
+    try:
+        config = MCPServerConfig.objects.select_related("oauth_credential").filter(id=config_id, is_active=True).first()
+    except DatabaseError:
+        logger.exception("Failed to load MCP server config %s for remote auth persistence", config_id)
+        return
+
+    if not config:
+        return
+
+    store_remote_auth_state(config, state)
 
 
 class SandboxComputeService:
@@ -1049,6 +1078,10 @@ class SandboxComputeService:
             full_tool_name=full_tool_name,
             server_payload=server_payload,
         )
+        if isinstance(result, dict):
+            remote_auth_state = pop_remote_auth_state(result)
+            if remote_auth_state:
+                _persist_remote_auth_state(server_config_id, remote_auth_state)
         if isinstance(result, dict) and result.get("status") != "error":
             sync_result = self._maybe_sync_after_mcp(agent, session)
             if sync_result and sync_result.get("status") != "ok":
@@ -1139,6 +1172,10 @@ class SandboxComputeService:
             reason=reason,
             server_payload=server_payload,
         )
+        if isinstance(result, dict):
+            remote_auth_state = pop_remote_auth_state(result)
+            if remote_auth_state:
+                _persist_remote_auth_state(server_config_id, remote_auth_state)
         if isinstance(result, dict) and result.get("status") == "ok":
             tools = result.get("tools")
             if isinstance(tools, list):
@@ -1167,7 +1204,12 @@ class SandboxComputeService:
             "source": source,
             "server": server_payload,
         }
-        return self._backend.mcp_remote_auth_start(payload)
+        result = self._backend.mcp_remote_auth_start(payload)
+        if isinstance(result, dict):
+            remote_auth_state = pop_remote_auth_state(result)
+            if remote_auth_state:
+                _persist_remote_auth_state(server_config_id, remote_auth_state)
+        return result
 
     def mcp_remote_auth_status(self, session_id: str) -> Dict[str, Any]:
         if not session_id:

@@ -4,7 +4,17 @@ from typing import Dict, List, Tuple
 
 
 REMOTE_MCP_REMOTE_PACKAGE = "@mattgreathouse/remote-mcp-remote"
-DEFAULT_REMOTE_MCP_CONFIG_DIR = "/workspace/.mcp-auth"
+SANDBOX_REMOTE_MCP_CONFIG_DIR = "/workspace/.mcp-auth"
+
+
+def _default_local_remote_mcp_config_dir() -> str:
+    home = os.path.expanduser("~")
+    if home and home != "~":
+        return os.path.join(home, ".gobii", "mcp-auth")
+    return os.path.join("/tmp", "gobii", "mcp-auth")
+
+
+DEFAULT_REMOTE_MCP_CONFIG_DIR = _default_local_remote_mcp_config_dir()
 
 _MCP_REMOTE_PACKAGE_TOKENS = {
     "mcp-remote",

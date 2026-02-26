@@ -6473,6 +6473,7 @@ class MCPServerOAuthCredential(models.Model):
     access_token_encrypted = models.BinaryField(null=True, blank=True)
     refresh_token_encrypted = models.BinaryField(null=True, blank=True)
     id_token_encrypted = models.BinaryField(null=True, blank=True)
+    remote_auth_state_encrypted = models.BinaryField(null=True, blank=True)
     token_type = models.CharField(max_length=32, blank=True)
     scope = models.CharField(max_length=512, blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)

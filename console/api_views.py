@@ -140,6 +140,10 @@ from console.agent_creation import enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.services.mcp_remote_runtime import is_mcp_remote_invocation
+from api.services.mcp_remote_auth_state import (
+    pop_remote_auth_state,
+    store_remote_auth_state,
+)
 from api.services.sandbox_compute import (
     SANDBOX_COMPUTE_WAFFLE_FLAG,
     SandboxComputeService,
@@ -5615,8 +5619,13 @@ class MCPRemoteAuthStatusView(LoginRequiredMixin, View):
 
         config_id = result.get("config_id") or result.get("server_id") or result.get("server_config_id")
         if config_id:
-            _resolve_mcp_server_config(request, str(config_id))
+            config = _resolve_mcp_server_config(request, str(config_id))
+            remote_auth_state = pop_remote_auth_state(result)
+            if remote_auth_state:
+                store_remote_auth_state(config, remote_auth_state)
             result["server_config_id"] = str(config_id)
+        else:
+            pop_remote_auth_state(result)
         return JsonResponse(result)
 
 
@@ -5654,8 +5663,14 @@ class MCPRemoteAuthAuthorizeView(LoginRequiredMixin, View):
             or status_payload.get("server_id")
             or status_payload.get("server_config_id")
         )
+        config = None
         if config_id:
-            _resolve_mcp_server_config(request, str(config_id))
+            config = _resolve_mcp_server_config(request, str(config_id))
+            initial_state = pop_remote_auth_state(status_payload)
+            if initial_state:
+                store_remote_auth_state(config, initial_state)
+        else:
+            pop_remote_auth_state(status_payload)
 
         result = service.mcp_remote_auth_authorize(
             session_id=session_id,
@@ -5667,6 +5682,10 @@ class MCPRemoteAuthAuthorizeView(LoginRequiredMixin, View):
             message = str(result.get("message") or "Failed to submit authorization code.")
             status_code = 404 if "not found" in message.lower() else 400
             return JsonResponse(result, status=status_code)
+
+        submitted_state = pop_remote_auth_state(result)
+        if submitted_state and config is not None:
+            store_remote_auth_state(config, submitted_state)
         return JsonResponse(result)
 
 

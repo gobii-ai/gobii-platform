@@ -82,11 +82,14 @@ async function completeOAuth() {
       );
       setStatus("Remote authorization complete.");
       setTimeout(() => {
-        if (window.opener && !window.opener.closed) {
+        try {
           window.close();
-          return;
+        } catch (closeError) {
+          console.warn("Unable to auto-close callback window", closeError);
         }
-        window.location.href = "/console/advanced/mcp-servers/?remote_auth=success";
+        if (!window.closed) {
+          setStatus("Remote authorization complete. You can close this window.");
+        }
       }, 500);
     } catch (err) {
       console.error("Remote OAuth callback failed", err);
