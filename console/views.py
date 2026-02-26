@@ -23,6 +23,7 @@ from django.http import (
     HttpResponseForbidden,
     HttpResponseNotAllowed,
     HttpResponse,
+    HttpResponseRedirect,
     JsonResponse,
     Http404,
     HttpRequest,
@@ -39,6 +40,8 @@ from django.middleware.csrf import get_token
 from datetime import timedelta, datetime, timezone as dt_timezone
 from functools import cached_property, wraps
 import uuid
+
+from django.conf import settings
 
 from agents.services import AgentService, PretrainedWorkerTemplateService
 from config.socialaccount_adapter import (
@@ -7173,7 +7176,7 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                 extra={"agent_id": str(pk), "user_id": self.request.user.id},
             )
             return None, "wrong_account"
-            
+
         return agent, None
 
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get")
@@ -10223,6 +10226,25 @@ def _billing_redirect(owner, owner_type: str) -> str:
     if owner_type == "organization" and owner is not None:
         return f"{url}?org_id={owner.id}"
     return url
+
+
+@login_required
+def google_workspace_connect(request, agent_id):
+    agent = get_object_or_404(PersistentAgent, id=agent_id)
+    if not (request.user.is_superuser or agent.user_id == request.user.id):
+        return HttpResponseForbidden("Not authorized for this agent")
+
+    scope_tier = request.GET.get("scope_tier") or getattr(settings, "GOOGLE_WORKSPACE_DEFAULT_SCOPE_TIER", "minimal")
+    try:
+        start_url = reverse("api:google_workspace_oauth_start", kwargs={"agent_id": agent_id})
+    except NoReverseMatch:
+        start_url = f"/api/v1/google/workspace/oauth/start/{agent_id}/"
+
+    if scope_tier:
+        separator = "&" if "?" in start_url else "?"
+        start_url = f"{start_url}{separator}scope_tier={scope_tier}"
+
+    return HttpResponseRedirect(start_url)
 
 
 @login_required

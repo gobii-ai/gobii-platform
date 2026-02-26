@@ -1303,7 +1303,7 @@ def _default_pipedream_environment() -> str:
 PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_environment())
 
 # Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,google_docs,greenhouse")
-PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,google_docs,greenhouse,trello")
+PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="greenhouse,trello")
 
 # Pipedream Connect GC (batch cleanup)
 PIPEDREAM_GC_ENABLED = env.bool(
@@ -1325,6 +1325,17 @@ if PIPEDREAM_GC_ENABLED:
         "task": "api.tasks.pipedream_connect_gc.gc_orphaned_users",
         "schedule": crontab(hour=4, minute=45),
     }
+
+# ────────── Google Workspace (Docs/Sheets) ──────────
+GOOGLE_WORKSPACE_TOOLS_ENABLED = env.bool("GOOGLE_WORKSPACE_TOOLS_ENABLED", default=False)
+GOOGLE_WORKSPACE_CLIENT_ID = env("GOOGLE_WORKSPACE_CLIENT_ID", default="")
+GOOGLE_WORKSPACE_CLIENT_SECRET = env("GOOGLE_WORKSPACE_CLIENT_SECRET", default="")
+GOOGLE_WORKSPACE_REDIRECT_URI = env("GOOGLE_WORKSPACE_REDIRECT_URI", default="")
+GOOGLE_WORKSPACE_CONNECT_URL = env(
+    "GOOGLE_WORKSPACE_CONNECT_URL",
+    default="",
+)
+GOOGLE_WORKSPACE_DEFAULT_SCOPE_TIER = env("GOOGLE_WORKSPACE_DEFAULT_SCOPE_TIER", default="minimal")
 
 # File Handling
 

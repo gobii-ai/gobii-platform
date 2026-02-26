@@ -4150,7 +4150,7 @@ def _get_system_instruction(
         "result → insight | result → need(more)\n"
         "```\n"
 
-        "For MCP tools (Google Sheets, Slack, etc.), just call the tool. If it needs auth, it'll return a connect link—share that with the user and wait. "
+        "For MCP tools (Slack, etc.), just call the tool. If it needs auth, it'll return a connect link—share that with the user and wait. "
         "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
         "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "

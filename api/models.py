@@ -6640,6 +6640,122 @@ class MCPServerOAuthSession(models.Model):
             raise ValidationError("Only user-scoped MCP servers can be manually assigned to agents")
 
 
+class GoogleWorkspaceCredential(models.Model):
+    """Encrypted OAuth credential for Google Docs/Sheets."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="google_workspace_credentials",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="google_workspace_credentials",
+    )
+    google_account_email = models.EmailField(max_length=255, blank=True)
+    scope_tier = models.CharField(max_length=32, blank=True)
+    scopes = models.TextField(blank=True, help_text="Space-separated scopes granted by the user.")
+    access_token_encrypted = models.BinaryField(null=True, blank=True)
+    refresh_token_encrypted = models.BinaryField(null=True, blank=True)
+    id_token_encrypted = models.BinaryField(null=True, blank=True)
+    token_type = models.CharField(max_length=32, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization"], name="gws_cred_org_idx"),
+            models.Index(fields=["user"], name="gws_cred_user_idx"),
+            models.Index(fields=["google_account_email"], name="gws_cred_email_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        email = self.google_account_email or "unknown"
+        return f"GoogleWorkspaceCredential<{email}>"
+
+    @staticmethod
+    def _encrypt_text(value: str | None) -> bytes | None:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: bytes | None) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to decrypt Google Workspace credential payload")
+            return ""
+
+    @property
+    def access_token(self) -> str:
+        return self._decrypt_text(self.access_token_encrypted)
+
+    @access_token.setter
+    def access_token(self, value: str | None) -> None:
+        self.access_token_encrypted = self._encrypt_text(value)
+
+    @property
+    def refresh_token(self) -> str:
+        return self._decrypt_text(self.refresh_token_encrypted)
+
+    @refresh_token.setter
+    def refresh_token(self, value: str | None) -> None:
+        self.refresh_token_encrypted = self._encrypt_text(value)
+
+    @property
+    def id_token(self) -> str:
+        return self._decrypt_text(self.id_token_encrypted)
+
+    @id_token.setter
+    def id_token(self, value: str | None) -> None:
+        self.id_token_encrypted = self._encrypt_text(value)
+
+    def scopes_list(self) -> list[str]:
+        scopes_text = self.scopes or ""
+        return [s for s in scopes_text.split() if s]
+
+
+class AgentGoogleWorkspaceBinding(models.Model):
+    """Per-agent binding to a Google Workspace credential."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.OneToOneField(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="google_workspace_binding",
+    )
+    credential = models.ForeignKey(
+        GoogleWorkspaceCredential,
+        on_delete=models.CASCADE,
+        related_name="bindings",
+    )
+    scope_tier = models.CharField(max_length=32, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["agent"], name="gws_binding_agent_idx"),
+            models.Index(fields=["credential"], name="gws_binding_credential_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"AgentGoogleWorkspaceBinding<{self.agent_id}>"
+
+
 class PersistentAgentEnabledTool(models.Model):
     """Normalized record of a tool enabled for a persistent agent.
 
