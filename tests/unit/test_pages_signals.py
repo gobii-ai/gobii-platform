@@ -61,6 +61,7 @@ class UserSignedUpSignalTests(TestCase):
             "wbraid": "first-wbraid",
             "msclkid": "first-msclkid",
             "ttclid": "first-ttclid",
+            "rdt_cid": "first-rdt-cid",
         }
         now = timezone.now()
         later = now + timedelta(minutes=5)
@@ -78,6 +79,7 @@ class UserSignedUpSignalTests(TestCase):
             "wbraid": "last-wbraid",
             "msclkid": "last-msclkid",
             "ttclid": "last-ttclid",
+            "rdt_cid": "last-rdt-cid",
             "first_referrer": "https://first.example/",
             "last_referrer": "https://last.example/",
             "first_path": "/landing/first/",
@@ -107,12 +109,18 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(traits["gclid_last"], "last-gclid")
         self.assertEqual(traits["msclkid_first"], "first-msclkid")
         self.assertEqual(traits["msclkid_last"], "last-msclkid")
+        self.assertEqual(traits["rdt_cid_first"], "first-rdt-cid")
+        self.assertEqual(traits["rdt_cid_last"], "last-rdt-cid")
         self.assertEqual(traits["first_referrer"], "https://first.example/")
         self.assertEqual(traits["last_referrer"], "https://last.example/")
         self.assertEqual(traits["first_landing_path"], "/landing/first/")
         self.assertEqual(traits["last_landing_path"], "/pricing/")
         self.assertEqual(traits["segment_anonymous_id"], "anon-123")
         self.assertEqual(traits["ga_client_id"], "GA1.2.111.222")
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.rdt_cid_first, "first-rdt-cid")
+        self.assertEqual(attribution.rdt_cid_last, "last-rdt-cid")
 
         track_call = mock_track.call_args.kwargs
         properties = track_call["properties"]
@@ -348,6 +356,20 @@ class BuildMarketingContextFromUserTests(TestCase):
         context = _build_marketing_context_from_user(self.user)
 
         self.assertEqual(context.get("ga_client_id"), "GA1.2.111.222")
+
+    def test_includes_reddit_click_id_in_context(self):
+        """Reddit click id should be included for downstream CAPI events."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            rdt_cid_last="reddit-last-click",
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+        click_ids = context.get("click_ids", {})
+
+        self.assertEqual(click_ids.get("rdt_cid"), "reddit-last-click")
 
     def test_returns_minimal_context_when_no_attribution(self):
         """When user has no attribution, return minimal context with consent."""
@@ -1853,6 +1875,62 @@ class PaymentSucceededSignalTests(TestCase):
         events = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
         self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
         self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
+
+    def test_invoice_payment_succeeded_emits_subscribe_for_trial_conversion_without_line_period(self):
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        payload = _build_invoice_payload(
+            customer_id="cus_user_succeeded",
+            subscription_id="sub_user_succeeded",
+            amount_paid=3000,
+            status="paid",
+            billing_reason="subscription_cycle",
+            product_id="prod_plan",
+        )
+        payload["lines"]["data"][0]["amount"] = 3000
+        payload["lines"]["data"][0]["price"]["unit_amount"] = 3000
+        payload["lines"]["data"][0]["price"]["currency"] = "usd"
+        payload["lines"]["data"][0].pop("period", None)
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
+            subscription=SimpleNamespace(
+                id="sub_user_succeeded",
+                stripe_data={
+                    "trial_end": str(trial_end),
+                    "current_period_start": str(trial_end),
+                },
+            ),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_invoice_payment_succeeded(event)
+
+        self.assertEqual(mock_capi.call_count, 2)
+
+        first_call = mock_capi.call_args_list[0].kwargs
+        self.assertEqual(first_call["event_name"], "Subscribe")
+        self.assertEqual(first_call["provider_targets"], ["google_analytics"])
+        first_props = first_call["properties"]
+        self.assertEqual(first_props["transaction_value"], 30.0)
+        self.assertEqual(first_props["currency"], "USD")
+        self.assertEqual(first_props["event_id"], payload["id"])
+
+        second_call = mock_capi.call_args_list[1].kwargs
+        self.assertEqual(second_call["event_name"], "Subscribe")
+        self.assertEqual(second_call["provider_targets"], ["reddit"])
+        second_props = second_call["properties"]
+        self.assertEqual(second_props["transaction_value"], 30.0)
+        self.assertEqual(second_props["currency"], "USD")
+        self.assertEqual(second_props["event_id"], payload["id"])
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")

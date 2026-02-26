@@ -39,7 +39,7 @@ def extract_click_context(request):
         fbc = f"fb.1.{int(time.time() * 1000)}.{fbclid}"
         record_fbc_synthesized(source="marketing_events.context.extract_click_context")
 
-    rdt_cid = q.get("rdt_cid") or q.get("rdt_click_id")
+    rdt_cid = q.get("rdt_cid") or q.get("rdt_click_id") or c.get("rdt_cid") or c.get("rdt_click_id")
     ttclid = q.get("ttclid") or q.get("tt_click_id")
 
     utm = {k: v for k, v in q.items() if k.startswith("utm_")}

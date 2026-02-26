@@ -74,7 +74,7 @@ UTM_MAPPING = {
     'term': 'utm_term'
 }
 
-CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid')
+CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid')
 
 
 def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
@@ -575,6 +575,7 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     fbc = getattr(attribution, "fbc", "")
     fbclid = getattr(attribution, "fbclid", "")
     fbp = getattr(attribution, "fbp", "")
+    rdt_cid = getattr(attribution, "rdt_cid_last", "") or getattr(attribution, "rdt_cid_first", "")
 
     if fbc:
         click_ids["fbc"] = fbc
@@ -588,6 +589,8 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
         click_ids["fbclid"] = fbclid
     if fbp:
         click_ids["fbp"] = fbp
+    if rdt_cid:
+        click_ids["rdt_cid"] = rdt_cid
     if click_ids:
         context["click_ids"] = click_ids
 
@@ -1003,6 +1006,8 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     'msclkid_last': last_click.get('msclkid', ''),
                     'ttclid_first': first_click.get('ttclid', ''),
                     'ttclid_last': last_click.get('ttclid', ''),
+                    'rdt_cid_first': first_click.get('rdt_cid', ''),
+                    'rdt_cid_last': last_click.get('rdt_cid', ''),
                     'first_referrer': first_referrer,
                     'last_referrer': last_referrer,
                     'first_landing_path': first_path,
@@ -1466,12 +1471,32 @@ def handle_invoice_payment_succeeded(event, **kwargs):
         subscription_obj = getattr(invoice, "subscription", None) if invoice else None
         subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
         trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
+        if trial_end_dt is None:
+            trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_obj, "trial_end"))
         line_start_dt = _line_period_start(lines)
+        subscription_current_period_start_dt = _coerce_datetime(
+            _get_stripe_data_value(subscription_data, "current_period_start")
+        )
+        if subscription_current_period_start_dt is None:
+            subscription_current_period_start_dt = _coerce_datetime(
+                _get_stripe_data_value(subscription_obj, "current_period_start")
+            )
+        trial_conversion_line_match = bool(
+            trial_end_dt and line_start_dt and trial_end_dt.date() == line_start_dt.date()
+        )
+        trial_conversion_subscription_match = bool(
+            trial_end_dt
+            and subscription_current_period_start_dt
+            and trial_end_dt.date() == subscription_current_period_start_dt.date()
+        )
         trial_conversion = bool(
             billing_reason == "subscription_cycle"
-            and trial_end_dt
-            and line_start_dt
-            and trial_end_dt.date() == line_start_dt.date()
+            and trial_conversion_line_match
+        )
+        reddit_trial_conversion_fallback = bool(
+            billing_reason == "subscription_cycle"
+            and (not trial_conversion_line_match)
+            and trial_conversion_subscription_match
         )
 
         try:
@@ -1561,6 +1586,15 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     context=subscribe_context,
                     provider_targets=["google_analytics"] if should_send_ga_renewal else None,
                 )
+                if reddit_trial_conversion_fallback:
+                    capi(
+                        user=owner,
+                        event_name="Subscribe",
+                        properties=marketing_properties,
+                        request=None,
+                        context=subscribe_context,
+                        provider_targets=["reddit"],
+                    )
         except Exception:
             logger.exception(
                 "Failed to enqueue marketing Subscribe event for invoice %s",
