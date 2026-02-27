@@ -22,7 +22,7 @@ export function SubscriptionUpgradeModal({
   dismissible = true,
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
-  const { trialDaysByPlan, trialEligible } = useSubscriptionStore()
+  const { trialDaysByPlan, trialEligible, pricingModalAlmostFullScreen } = useSubscriptionStore()
   const handleClose = useCallback(() => {
     if (dismissible) {
       onClose()
@@ -62,6 +62,14 @@ export function SubscriptionUpgradeModal({
     return null
   }
 
+  const modalContainerClass = pricingModalAlmostFullScreen
+    ? 'flex min-h-full items-center justify-center p-2 sm:p-4'
+    : 'flex min-h-full items-start justify-center p-4 pb-20 sm:items-center sm:p-6'
+
+  const modalClass = pricingModalAlmostFullScreen
+    ? 'relative z-50 w-full max-w-[96vw] max-h-[94vh] transform overflow-y-auto rounded-2xl bg-white shadow-2xl transition-all'
+    : 'relative z-50 w-full max-w-4xl transform overflow-hidden rounded-2xl bg-white shadow-2xl transition-all'
+
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
       {/* Backdrop */}
@@ -73,12 +81,12 @@ export function SubscriptionUpgradeModal({
       />
 
       {/* Modal */}
-      <div className="flex min-h-full items-start justify-center p-4 pb-20 sm:items-center sm:p-6">
+      <div className={modalContainerClass}>
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="upgrade-modal-title"
-          className="relative z-50 w-full max-w-4xl transform overflow-hidden rounded-2xl bg-white shadow-2xl transition-all"
+          className={modalClass}
         >
           {/* Header */}
           <div className="border-b border-slate-100 px-6 py-5 sm:px-8">
