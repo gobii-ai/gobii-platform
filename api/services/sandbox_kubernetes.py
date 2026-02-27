@@ -817,7 +817,8 @@ def _build_pod_manifest(
     proxy_url: Optional[str],
     no_proxy: Optional[str],
 ) -> Dict[str, Any]:
-    env = _build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy)
+    env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
+    env.extend(_build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy))
 
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
@@ -837,6 +838,7 @@ def _build_pod_manifest(
         },
         "volumeMounts": [
             {"name": "workspace", "mountPath": "/workspace"},
+            {"name": "runtime-cache", "mountPath": "/runtime-cache"},
         ],
         "readinessProbe": {
             "httpGet": {"path": "/healthz", "port": 8080},
@@ -845,8 +847,7 @@ def _build_pod_manifest(
             "failureThreshold": 3,
         },
     }
-    if env:
-        container["env"] = env
+    container["env"] = env
 
     return {
         "apiVersion": "v1",
@@ -874,7 +875,8 @@ def _build_pod_manifest(
                 {
                     "name": "workspace",
                     "persistentVolumeClaim": {"claimName": pvc_name},
-                }
+                },
+                {"name": "runtime-cache", "emptyDir": {}},
             ],
         },
     }
@@ -892,7 +894,8 @@ def _build_discovery_pod_manifest(
     proxy_url: Optional[str],
     no_proxy: Optional[str],
 ) -> Dict[str, Any]:
-    env = _build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy)
+    env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
+    env.extend(_build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy))
 
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
@@ -912,6 +915,7 @@ def _build_discovery_pod_manifest(
         },
         "volumeMounts": [
             {"name": "workspace", "mountPath": "/workspace"},
+            {"name": "runtime-cache", "mountPath": "/runtime-cache"},
         ],
         "readinessProbe": {
             "httpGet": {"path": "/healthz", "port": 8080},
@@ -920,8 +924,7 @@ def _build_discovery_pod_manifest(
             "failureThreshold": 3,
         },
     }
-    if env:
-        container["env"] = env
+    container["env"] = env
 
     return {
         "apiVersion": "v1",
@@ -946,6 +949,7 @@ def _build_discovery_pod_manifest(
             "containers": [container],
             "volumes": [
                 {"name": "workspace", "emptyDir": {}},
+                {"name": "runtime-cache", "emptyDir": {}},
             ],
         },
     }
