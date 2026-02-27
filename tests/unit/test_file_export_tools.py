@@ -15,6 +15,7 @@ from api.models import (
     AgentFsNode,
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentCompletion,
     LLMProvider,
     ImageGenerationModelEndpoint,
     ImageGenerationLLMTier,
@@ -233,6 +234,11 @@ class FileExportToolTests(TestCase):
         self.assertEqual(node.mime_type, "image/png")
         with node.content.open("rb") as handle:
             self.assertEqual(handle.read(), png_bytes)
+        completion = PersistentAgentCompletion.objects.get(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+        )
+        self.assertTrue((completion.llm_model or "").endswith("gemini-2.5-flash-image"))
 
     @patch("api.agent.tools.create_image.run_completion")
     def test_create_image_with_source_images_requires_supported_endpoint(self, mock_run_completion):

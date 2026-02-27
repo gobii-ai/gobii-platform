@@ -8880,6 +8880,7 @@ class PersistentAgentCompletion(models.Model):
         SHORT_DESCRIPTION = ("short_description", "Short Description")
         MINI_DESCRIPTION = ("mini_description", "Mini Description")
         AVATAR_VISUAL_DESCRIPTION = ("avatar_visual_description", "Avatar Visual Description")
+        IMAGE_GENERATION = ("image_generation", "Image Generation")
         TOOL_SEARCH = ("tool_search", "Tool Search")
         TEMPLATE_CLONE = ("template_clone", "Template Clone")
         OTHER = ("other", "Other")

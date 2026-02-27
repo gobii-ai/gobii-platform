@@ -154,12 +154,14 @@ def _generate_avatar_image(prompt: str) -> AvatarGenerationResult:
     errors: list[str] = []
     for config in configs:
         try:
-            image_bytes, mime_type = _generate_image_bytes(
+            generated = _generate_image_bytes(
                 config,
                 prompt=prompt,
                 aspect_ratio=AVATAR_ASPECT_RATIO,
                 source_image_data_uris=None,
             )
+            image_bytes = generated.image_bytes
+            mime_type = generated.mime_type
             return AvatarGenerationResult(
                 image_bytes=image_bytes,
                 mime_type=mime_type,

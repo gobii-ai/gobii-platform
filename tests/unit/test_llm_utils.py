@@ -112,6 +112,55 @@ class RunCompletionReasoningTests(TestCase):
         self.assertEqual(mock_completion.call_count, 2)
 
     @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_image_response_with_message_images_is_not_empty(self, mock_completion):
+        image_response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "images": [{"image_url": {"url": "data:image/png;base64,Zm9v"}}],
+                    }
+                }
+            ]
+        }
+        mock_completion.return_value = image_response
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+        )
+
+        self.assertIs(result, image_response)
+        self.assertEqual(mock_completion.call_count, 1)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_image_response_with_output_image_content_is_not_empty(self, mock_completion):
+        image_response = {
+            "choices": [
+                {
+                    "message": {
+                        "content": [
+                            {"type": "output_image", "image_url": {"url": "https://example.com/generated.png"}}
+                        ]
+                    }
+                }
+            ]
+        }
+        mock_completion.return_value = image_response
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+        )
+
+        self.assertIs(result, image_response)
+        self.assertEqual(mock_completion.call_count, 1)
+
+    @tag("batch_event_llm")
     @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_retries_on_forbidden_marker_response(self, mock_completion):

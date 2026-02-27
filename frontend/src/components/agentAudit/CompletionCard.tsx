@@ -63,6 +63,8 @@ export function CompletionCard({
         return 'Short Description Generation'
       case 'mini_description':
         return 'Mini Description Generation'
+      case 'image_generation':
+        return 'Image Generation'
       case 'tool_search':
         return 'Tool Search'
       default:
