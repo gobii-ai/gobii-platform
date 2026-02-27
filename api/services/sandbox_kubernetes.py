@@ -9,9 +9,14 @@ import requests
 from django.conf import settings
 
 from api.models import AgentComputeSession
+from api.proxy_selection import select_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate
-from api.services.system_settings import get_sandbox_compute_pod_image, get_sandbox_egress_proxy_pod_image
+from api.services.system_settings import (
+    get_sandbox_compute_pod_image,
+    get_sandbox_compute_require_proxy,
+    get_sandbox_egress_proxy_pod_image,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +101,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
         self._snapshot_class = getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_CLASS", "")
         self._proxy_timeout = int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))
+        self._mcp_timeout = int(getattr(settings, "SANDBOX_COMPUTE_MCP_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
+        self._tool_timeout = int(getattr(settings, "SANDBOX_COMPUTE_TOOL_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
+        self._discovery_timeout = int(
+            getattr(settings, "SANDBOX_COMPUTE_DISCOVERY_TIMEOUT_SECONDS", self._proxy_timeout)
+        )
 
         if not self._pod_image:
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_POD_IMAGE is required for kubernetes backend.")
@@ -205,7 +215,17 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         }
         if server_payload:
             payload["server"] = server_payload
-        return self._proxy_post(session.pod_name, "/sandbox/compute/mcp_request", payload)
+        timeout_value = getattr(
+            self,
+            "_mcp_timeout",
+            getattr(self, "_proxy_timeout", int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))),
+        )
+        return self._proxy_post(
+            session.pod_name,
+            "/sandbox/compute/mcp_request",
+            payload,
+            timeout=timeout_value,
+        )
 
     def tool_request(
         self,
@@ -217,7 +237,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         if not session.pod_name:
             return {"status": "error", "message": "Sandbox pod not available."}
         params_payload = params or {}
-        request_timeout = self._proxy_timeout
+        request_timeout = getattr(
+            self,
+            "_tool_timeout",
+            getattr(self, "_proxy_timeout", int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))),
+        )
         if tool_name == "python_exec":
             normalized = _normalize_timeout(
                 params_payload.get("timeout_seconds"),
@@ -226,7 +250,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             )
             params_payload = dict(params_payload)
             params_payload["timeout_seconds"] = normalized
-            request_timeout = max(self._proxy_timeout, normalized + 10)
+            request_timeout = max(request_timeout, normalized + 10)
         payload = {
             "agent_id": str(agent.id),
             "tool_name": tool_name,
@@ -309,9 +333,40 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         if not server_payload:
             return {"status": "error", "message": "Missing MCP server payload for discovery."}
+
+        proxy_url: Optional[str] = None
+        no_proxy: Optional[str] = None
+        proxy_required = get_sandbox_compute_require_proxy()
+        try:
+            proxy = select_proxy(
+                allow_no_proxy_in_debug=not proxy_required,
+                context_id=f"sandbox_mcp_discovery_{server_config_id}",
+            )
+        except RuntimeError as exc:
+            if proxy_required:
+                return {"status": "error", "message": f"No proxy server available for MCP discovery: {exc}"}
+            logger.warning(
+                "MCP discovery proxy selection failed for server=%s; continuing without proxy: %s",
+                server_config_id,
+                exc,
+            )
+            proxy = None
+
+        if proxy_required and proxy is None:
+            return {"status": "error", "message": "No proxy server available for MCP discovery."}
+        if proxy is not None:
+            proxy_url = proxy.proxy_url
+            no_proxy = _merge_no_proxy_values(
+                self._no_proxy,
+                "localhost",
+                "127.0.0.1",
+                ".svc",
+                ".cluster.local",
+            )
+
         pod_name = _discovery_pod_name(server_config_id)
         try:
-            self._create_discovery_pod(pod_name)
+            self._create_discovery_pod(pod_name, proxy_url=proxy_url, no_proxy=no_proxy)
         except KubernetesApiError as exc:
             return {"status": "error", "message": f"Discovery pod create failed: {exc}"}
 
@@ -321,7 +376,20 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
         payload = {"server_id": server_config_id, "reason": reason, "server": server_payload}
         try:
-            response = self._proxy_post(pod_name, "/sandbox/compute/discover_mcp_tools", payload)
+            response = self._proxy_post(
+                pod_name,
+                "/sandbox/compute/discover_mcp_tools",
+                payload,
+                timeout=getattr(
+                    self,
+                    "_discovery_timeout",
+                    getattr(
+                        self,
+                        "_proxy_timeout",
+                        int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180)),
+                    ),
+                ),
+            )
             return response
         finally:
             self._delete_pod(pod_name)
@@ -433,7 +501,13 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             if exc.status_code != 409:
                 raise
 
-    def _create_discovery_pod(self, pod_name: str) -> None:
+    def _create_discovery_pod(
+        self,
+        pod_name: str,
+        *,
+        proxy_url: Optional[str] = None,
+        no_proxy: Optional[str] = None,
+    ) -> None:
         body = _build_discovery_pod_manifest(
             pod_name=pod_name,
             namespace=self._namespace,
@@ -442,6 +516,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             service_account=self._pod_service_account,
             configmap_name=self._pod_configmap,
             secret_name=self._pod_secret,
+            proxy_url=proxy_url,
+            no_proxy=no_proxy,
         )
         try:
             self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
@@ -741,12 +817,8 @@ def _build_pod_manifest(
     proxy_url: Optional[str],
     no_proxy: Optional[str],
 ) -> Dict[str, Any]:
-    env: list[Dict[str, str]] = []
-    if proxy_url:
-        env.append({"name": "HTTP_PROXY", "value": proxy_url})
-        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
-    if no_proxy:
-        env.append({"name": "NO_PROXY", "value": no_proxy})
+    env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
+    env.extend(_build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy))
 
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
@@ -766,6 +838,7 @@ def _build_pod_manifest(
         },
         "volumeMounts": [
             {"name": "workspace", "mountPath": "/workspace"},
+            {"name": "runtime-cache", "mountPath": "/runtime-cache"},
         ],
         "readinessProbe": {
             "httpGet": {"path": "/healthz", "port": 8080},
@@ -774,8 +847,7 @@ def _build_pod_manifest(
             "failureThreshold": 3,
         },
     }
-    if env:
-        container["env"] = env
+    container["env"] = env
 
     return {
         "apiVersion": "v1",
@@ -803,7 +875,8 @@ def _build_pod_manifest(
                 {
                     "name": "workspace",
                     "persistentVolumeClaim": {"claimName": pvc_name},
-                }
+                },
+                {"name": "runtime-cache", "emptyDir": {}},
             ],
         },
     }
@@ -818,7 +891,12 @@ def _build_discovery_pod_manifest(
     service_account: str,
     configmap_name: str,
     secret_name: str,
+    proxy_url: Optional[str],
+    no_proxy: Optional[str],
 ) -> Dict[str, Any]:
+    env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
+    env.extend(_build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy))
+
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
         "image": image,
@@ -837,6 +915,7 @@ def _build_discovery_pod_manifest(
         },
         "volumeMounts": [
             {"name": "workspace", "mountPath": "/workspace"},
+            {"name": "runtime-cache", "mountPath": "/runtime-cache"},
         ],
         "readinessProbe": {
             "httpGet": {"path": "/healthz", "port": 8080},
@@ -845,6 +924,7 @@ def _build_discovery_pod_manifest(
             "failureThreshold": 3,
         },
     }
+    container["env"] = env
 
     return {
         "apiVersion": "v1",
@@ -869,9 +949,20 @@ def _build_discovery_pod_manifest(
             "containers": [container],
             "volumes": [
                 {"name": "workspace", "emptyDir": {}},
+                {"name": "runtime-cache", "emptyDir": {}},
             ],
         },
     }
+
+
+def _build_proxy_env(*, proxy_url: Optional[str], no_proxy: Optional[str]) -> list[Dict[str, str]]:
+    env: list[Dict[str, str]] = []
+    if proxy_url:
+        env.append({"name": "HTTP_PROXY", "value": proxy_url})
+        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
+    if no_proxy:
+        env.append({"name": "NO_PROXY", "value": no_proxy})
+    return env
 
 
 def _build_egress_proxy_pod_manifest(

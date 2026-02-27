@@ -39,7 +39,7 @@ from .maintenance_tasks import (
 )
 
 # Sandbox compute tasks
-from .sandbox_compute import discover_mcp_tools  # noqa: F401
+from .sandbox_compute import discover_mcp_tools, sync_filespace_after_call  # noqa: F401
 from .sandbox_compute_lifecycle import sweep_idle_sandbox_sessions  # noqa: F401
 
 # Soft-expiration task (global sweeper)

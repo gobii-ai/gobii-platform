@@ -10,10 +10,13 @@ from datetime import timedelta
 from typing import Any, Dict, Optional
 
 import requests
+from celery.exceptions import CeleryError
 from django.conf import settings
 from django.utils.dateparse import parse_datetime
 from django.db import DatabaseError
 from django.utils import timezone
+from redis.exceptions import RedisError
+from kombu.exceptions import OperationalError as KombuOperationalError
 
 from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
@@ -21,12 +24,14 @@ from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
+from config.redis_client import get_redis_client
 from waffle import get_waffle_flag_model
 
 logger = logging.getLogger(__name__)
 
 
 SANDBOX_COMPUTE_WAFFLE_FLAG = "sandbox_compute"
+_POST_SYNC_QUEUE_KEY_PREFIX = "sandbox-compute:post-sync:queued"
 
 
 def sandbox_compute_enabled() -> bool:
@@ -75,6 +80,18 @@ def _http_timeout_seconds() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))
 
 
+def _mcp_request_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_MCP_REQUEST_TIMEOUT_SECONDS", _http_timeout_seconds()))
+
+
+def _tool_request_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_TOOL_REQUEST_TIMEOUT_SECONDS", _http_timeout_seconds()))
+
+
+def _discovery_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_DISCOVERY_TIMEOUT_SECONDS", _http_timeout_seconds()))
+
+
 def _run_command_timeout_seconds() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_RUN_COMMAND_TIMEOUT_SECONDS", 120))
 
@@ -97,6 +114,10 @@ def _sync_on_mcp_call() -> bool:
 
 def _sync_on_run_command() -> bool:
     return bool(getattr(settings, "SANDBOX_COMPUTE_SYNC_ON_RUN_COMMAND", False))
+
+
+def _post_sync_coalesce_ttl_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_POST_SYNC_COALESCE_TTL_SECONDS", 600))
 
 
 def _proxy_required() -> bool:
@@ -468,7 +489,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
         proxy_env = _proxy_env_for_session(session)
         if proxy_env:
             payload["proxy_env"] = proxy_env
-        return self._post("sandbox/compute/mcp_request", payload)
+        return self._post("sandbox/compute/mcp_request", payload, timeout=_mcp_request_timeout_seconds())
 
     def tool_request(
         self,
@@ -478,7 +499,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
         params_payload = params or {}
-        request_timeout = _http_timeout_seconds()
+        request_timeout = _tool_request_timeout_seconds()
         if tool_name == "python_exec":
             normalized = _normalize_timeout(
                 params_payload.get("timeout_seconds"),
@@ -487,7 +508,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
             )
             params_payload = dict(params_payload)
             params_payload["timeout_seconds"] = normalized
-            request_timeout = max(_http_timeout_seconds(), normalized + 10)
+            request_timeout = max(_tool_request_timeout_seconds(), normalized + 10)
 
         payload = {
             "agent_id": str(agent.id),
@@ -539,7 +560,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
         payload = {"server_id": server_config_id, "reason": reason}
         if server_payload:
             payload["server"] = server_payload
-        return self._post("sandbox/compute/discover_mcp_tools", payload)
+        return self._post("sandbox/compute/discover_mcp_tools", payload, timeout=_discovery_timeout_seconds())
 
     def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
         return {"status": "skipped", "message": "Workspace snapshots are not available via HTTP backend."}
@@ -762,6 +783,10 @@ def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]],
     return payload, runtime
 
 
+def _post_sync_queue_key(agent_id: str) -> str:
+    return f"{_POST_SYNC_QUEUE_KEY_PREFIX}:{agent_id}"
+
+
 class SandboxComputeService:
     def __init__(self, backend: Optional[SandboxComputeBackend] = None):
         if not sandbox_compute_enabled():
@@ -929,20 +954,66 @@ class SandboxComputeService:
         except (DatabaseError, ValueError, TypeError):
             return None
 
-    def _maybe_sync_after_tool(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not _sync_on_tool_call():
-            return None
-        return self._sync_workspace_push(agent, session)
+    def _enqueue_post_sync_after_call(self, agent, *, source: str) -> None:
+        if isinstance(self._backend, LocalSandboxBackend):
+            return
 
-    def _maybe_sync_after_mcp(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not _sync_on_mcp_call():
-            return None
-        return self._sync_workspace_push(agent, session)
+        agent_id = str(agent.id)
+        queue_key = _post_sync_queue_key(agent_id)
+        redis_client = None
+        should_enqueue = True
 
-    def _maybe_sync_after_run_command(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not _sync_on_run_command():
-            return None
-        return self._sync_workspace_push(agent, session)
+        try:
+            redis_client = get_redis_client()
+        except RedisError:
+            logger.warning(
+                "Sandbox post-sync Redis unavailable; enqueueing without coalescing agent=%s source=%s",
+                agent_id,
+                source,
+            )
+
+        if redis_client is not None:
+            try:
+                queued = redis_client.set(
+                    queue_key,
+                    source,
+                    nx=True,
+                    ex=_post_sync_coalesce_ttl_seconds(),
+                )
+                should_enqueue = bool(queued)
+            except RedisError:
+                logger.warning(
+                    "Sandbox post-sync coalescing failed; enqueueing without lock agent=%s source=%s",
+                    agent_id,
+                    source,
+                )
+                should_enqueue = True
+
+        if not should_enqueue:
+            logger.debug("Sandbox post-sync already queued agent=%s source=%s", agent_id, source)
+            return
+
+        try:
+            from api.tasks.sandbox_compute import sync_filespace_after_call
+
+            sync_filespace_after_call.delay(agent_id, source=source)
+        except (CeleryError, KombuOperationalError):
+            logger.warning(
+                "Sandbox post-sync task enqueue failed agent=%s source=%s",
+                agent_id,
+                source,
+                exc_info=True,
+            )
+            if redis_client is not None:
+                try:
+                    redis_client.delete(queue_key)
+                except RedisError:
+                    logger.warning(
+                        "Sandbox post-sync failed to clear coalesce key after enqueue error agent=%s source=%s",
+                        agent_id,
+                        source,
+                        exc_info=True,
+                    )
 
     def deploy_or_resume(self, agent, *, reason: str = "") -> AgentComputeSession:
         session = self._ensure_session(agent, source="deploy_or_resume")
@@ -971,9 +1042,8 @@ class SandboxComputeService:
             interactive=interactive,
         )
         if isinstance(result, dict) and result.get("status") != "error":
-            sync_result = self._maybe_sync_after_run_command(agent, session)
-            if sync_result and sync_result.get("status") != "ok":
-                return sync_result
+            if _sync_on_run_command():
+                self._enqueue_post_sync_after_call(agent, source="run_command")
         return result
 
     def mcp_request(
@@ -999,9 +1069,8 @@ class SandboxComputeService:
             server_payload=server_payload,
         )
         if isinstance(result, dict) and result.get("status") != "error":
-            sync_result = self._maybe_sync_after_mcp(agent, session)
-            if sync_result and sync_result.get("status") != "ok":
-                return sync_result
+            if _sync_on_mcp_call():
+                self._enqueue_post_sync_after_call(agent, source="mcp_request")
         _log_tool_call("mcp_request", tool_name, params, agent_id=str(agent.id))
         return result
 
@@ -1009,9 +1078,8 @@ class SandboxComputeService:
         session = self._ensure_session(agent, source="tool_request")
         result = self._backend.tool_request(agent, session, tool_name, params)
         if isinstance(result, dict) and result.get("status") != "error":
-            sync_result = self._maybe_sync_after_tool(agent, session)
-            if sync_result and sync_result.get("status") != "ok":
-                return sync_result
+            if _sync_on_tool_call():
+                self._enqueue_post_sync_after_call(agent, source="tool_request")
             export_path = result.get("export_path")
             if isinstance(export_path, str) and export_path.strip():
                 response = _build_filespace_export_response(agent, export_path)

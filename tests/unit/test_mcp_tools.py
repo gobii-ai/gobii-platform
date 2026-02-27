@@ -7,6 +7,8 @@ import time
 import uuid
 from datetime import datetime, timedelta, UTC
 from contextlib import nullcontext
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
@@ -343,36 +345,260 @@ class MCPToolManagerTests(TestCase):
                 patch.object(manager, "_ensure_event_loop", return_value=loop), \
                 patch.object(manager, "_select_discovery_proxy_url", return_value=None), \
                 patch.object(manager, "_fetch_server_tools", new=_fake_fetch):
-            manager._register_server(runtime)
+            manager._register_server(runtime, force_local=True)
         transport = manager._clients[runtime.config_id].transport
         self.assertEqual(transport.headers.get("Authorization"), "Bearer token-123")
+
+    @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=False)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=True)
+    @patch("api.agent.tools.mcp_manager.schedule_mcp_tool_discovery")
+    @patch("api.agent.tools.mcp_manager.get_cached_mcp_tool_definitions", return_value=None)
+    def test_register_server_schedules_discovery_on_cache_miss(
+        self,
+        _mock_cache_get,
+        mock_schedule,
+        _mock_sandbox_enabled,
+    ):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="cache-miss-server",
+            display_name="Cache Miss Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+
+        with patch.object(self.manager, "_ensure_event_loop") as mock_loop_factory:
+            self.manager._register_server(runtime)
+
+        mock_schedule.assert_called_once_with(runtime.config_id, reason="cache_miss")
+        mock_loop_factory.assert_not_called()
+        self.assertNotIn(runtime.config_id, self.manager._clients)
+        self.assertNotIn(runtime.config_id, self.manager._tools_cache)
+
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=False)
+    def test_get_tools_for_agent_passes_agent_to_runtime_registration(self, _mock_sandbox_enabled):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="agent-aware-server",
+            display_name="Agent-aware Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        agent = SimpleNamespace(id=uuid.uuid4(), user_id=runtime.user_id)
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+
+        observed_agents: list[Any] = []
+
+        def _fake_register(_runtime, *, agent=None, force_local=False, prefer_cache=True):
+            observed_agents.append(agent)
+            self.manager._tools_cache[_runtime.config_id] = []
+
+        with patch.object(self.manager, "_needs_refresh", return_value=False), patch(
+            "api.agent.tools.mcp_manager.agent_accessible_server_configs",
+            return_value=[SimpleNamespace(id=runtime.config_id)],
+        ), patch.object(self.manager, "_register_server", side_effect=_fake_register):
+            tools = self.manager.get_tools_for_agent(agent)
+
+        self.assertEqual(tools, [])
+        self.assertEqual(observed_agents, [agent])
+
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.mcp_manager.SandboxComputeService")
+    def test_execute_mcp_tool_sandbox_path_does_not_require_local_registration(
+        self,
+        mock_service_cls,
+        _mock_sandbox_enabled_for_agent,
+    ):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="sandbox-exec-server",
+            display_name="Sandbox Exec Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+
+        mock_service = MagicMock()
+        mock_service.mcp_request.return_value = {"status": "ok", "result": {"pong": True}}
+        mock_service_cls.return_value = mock_service
+        enabled_qs = MagicMock()
+        enabled_qs.exists.return_value = True
+        usage_row = SimpleNamespace(last_used_at=None, usage_count=0, save=MagicMock())
+
+        with patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.filter",
+            return_value=enabled_qs,
+        ), patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.get_or_create",
+            return_value=(usage_row, False),
+        ), patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+            side_effect=AssertionError("local registration should not run before sandbox dispatch"),
+        ):
+            result = self.manager.execute_mcp_tool(agent, tool.full_name, {})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("result"), {"pong": True})
+        mock_service.mcp_request.assert_called_once()
+
+    @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=True)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.mcp_manager.SandboxComputeService")
+    def test_execute_mcp_tool_sandbox_unsupported_falls_back_to_local(
+        self,
+        mock_service_cls,
+        _mock_sandbox_enabled_for_agent,
+    ):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="sandbox-fallback-server",
+            display_name="Sandbox Fallback Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+        self.manager._clients = {runtime.config_id: MagicMock()}
+
+        mock_service = MagicMock()
+        mock_service.mcp_request.return_value = {
+            "status": "error",
+            "error_code": "sandbox_unsupported_mcp",
+            "message": "unsupported",
+        }
+        mock_service_cls.return_value = mock_service
+
+        enabled_qs = MagicMock()
+        enabled_qs.exists.return_value = True
+        usage_row = SimpleNamespace(last_used_at=None, usage_count=0, save=MagicMock())
+        local_result = SimpleNamespace(data={"local": True}, content=[], is_error=False)
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        with patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.filter",
+            return_value=enabled_qs,
+        ), patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.get_or_create",
+            return_value=(usage_row, False),
+        ), patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+            return_value=True,
+        ) as mock_ensure_registered, patch.object(
+            self.manager,
+            "_ensure_event_loop",
+            return_value=loop,
+        ), patch.object(
+            self.manager,
+            "_execute_async",
+            new=AsyncMock(return_value=local_result),
+        ), patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            return_value=local_result,
+        ):
+            result = self.manager.execute_mcp_tool(agent, tool.full_name, {})
+
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(result.get("result"), {"local": True})
+        mock_service.mcp_request.assert_called_once()
+        mock_ensure_registered.assert_called_once_with(
+            runtime,
+            agent=agent,
+            force_local=True,
+            require_client=True,
+        )
 
     @tag("batch_mcp_tools")
     @patch("api.agent.tools.mcp_manager.requests.post")
     def test_build_runtime_refreshes_expired_oauth_token(self, mock_post):
-        config = MCPServerConfig.objects.create(
-            scope=MCPServerConfig.Scope.USER,
-            user=get_user_model().objects.create_user(
-                username="oauth-user", email="oauth@example.com"
-            ),
-            name=f"notion-{uuid.uuid4().hex[:8]}",
-            display_name="Notion",
-            url="https://notion.example.com/mcp",
-            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
-        )
-
-        credential = MCPServerOAuthCredential.objects.create(
-            server_config=config,
-            user=config.user,
-            client_id="client-123",
-        )
-        credential.client_secret = "secret-xyz"
-        credential.access_token = "expired-token"
-        credential.refresh_token = "refresh-123"
-        credential.token_type = "Bearer"
-        credential.expires_at = timezone.now() - timedelta(minutes=5)
-        credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
         with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            config = MCPServerConfig.objects.create(
+                scope=MCPServerConfig.Scope.USER,
+                user=get_user_model().objects.create_user(
+                    username="oauth-user", email="oauth@example.com"
+                ),
+                name=f"notion-{uuid.uuid4().hex[:8]}",
+                display_name="Notion",
+                url="https://notion.example.com/mcp",
+                auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            )
+
+            credential = MCPServerOAuthCredential.objects.create(
+                server_config=config,
+                user=config.user,
+                client_id="client-123",
+            )
+            credential.client_secret = "secret-xyz"
+            credential.access_token = "expired-token"
+            credential.refresh_token = "refresh-123"
+            credential.token_type = "Bearer"
+            credential.expires_at = timezone.now() - timedelta(minutes=5)
+            credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
             credential.save()
 
         mock_response = MagicMock()
@@ -387,7 +613,8 @@ class MCPToolManagerTests(TestCase):
         mock_post.return_value = mock_response
 
         manager = MCPToolManager()
-        runtime = manager._build_runtime_from_config(config)
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            runtime = manager._build_runtime_from_config(config)
 
         mock_post.assert_called_once_with(
             "https://notion.example.com/oauth/token",
@@ -413,31 +640,32 @@ class MCPToolManagerTests(TestCase):
     @tag("batch_mcp_tools")
     @patch("api.agent.tools.mcp_manager.requests.post")
     def test_build_runtime_skips_refresh_when_token_valid(self, mock_post):
-        user = get_user_model().objects.create_user(
-            username="fresh-user",
-            email="fresh@example.com",
-        )
-        config = MCPServerConfig.objects.create(
-            scope=MCPServerConfig.Scope.USER,
-            user=user,
-            name=f"fresh-notion-{uuid.uuid4().hex[:8]}",
-            display_name="Notion Fresh",
-            url="https://notion.example.com/mcp",
-            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
-        )
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            user = get_user_model().objects.create_user(
+                username="fresh-user",
+                email="fresh@example.com",
+            )
+            config = MCPServerConfig.objects.create(
+                scope=MCPServerConfig.Scope.USER,
+                user=user,
+                name=f"fresh-notion-{uuid.uuid4().hex[:8]}",
+                display_name="Notion Fresh",
+                url="https://notion.example.com/mcp",
+                auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            )
 
-        credential = MCPServerOAuthCredential.objects.create(
-            server_config=config,
-            user=user,
-            client_id="client-789",
-        )
-        credential.client_secret = "secret-abc"
-        credential.access_token = "valid-token"
-        credential.refresh_token = "refresh-abc"
-        credential.token_type = "Bearer"
-        credential.expires_at = timezone.now() + timedelta(minutes=10)
-        credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
-        credential.save()
+            credential = MCPServerOAuthCredential.objects.create(
+                server_config=config,
+                user=user,
+                client_id="client-789",
+            )
+            credential.client_secret = "secret-abc"
+            credential.access_token = "valid-token"
+            credential.refresh_token = "refresh-abc"
+            credential.token_type = "Bearer"
+            credential.expires_at = timezone.now() + timedelta(minutes=10)
+            credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
+            credential.save()
 
         manager = MCPToolManager()
         runtime = manager._build_runtime_from_config(config)
