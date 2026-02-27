@@ -973,7 +973,12 @@ class SandboxComputeService:
         if isinstance(result, dict) and result.get("status") != "error":
             sync_result = self._maybe_sync_after_run_command(agent, session)
             if sync_result and sync_result.get("status") != "ok":
-                return sync_result
+                logger.warning(
+                    "Sandbox post-run_command sync failed agent=%s sync_status=%s sync_result=%s",
+                    agent.id,
+                    sync_result.get("status"),
+                    sync_result,
+                )
         return result
 
     def mcp_request(
@@ -1001,7 +1006,13 @@ class SandboxComputeService:
         if isinstance(result, dict) and result.get("status") != "error":
             sync_result = self._maybe_sync_after_mcp(agent, session)
             if sync_result and sync_result.get("status") != "ok":
-                return sync_result
+                logger.warning(
+                    "Sandbox post-MCP sync failed agent=%s tool=%s sync_status=%s sync_result=%s",
+                    agent.id,
+                    tool_name,
+                    sync_result.get("status"),
+                    sync_result,
+                )
         _log_tool_call("mcp_request", tool_name, params, agent_id=str(agent.id))
         return result
 
@@ -1011,7 +1022,13 @@ class SandboxComputeService:
         if isinstance(result, dict) and result.get("status") != "error":
             sync_result = self._maybe_sync_after_tool(agent, session)
             if sync_result and sync_result.get("status") != "ok":
-                return sync_result
+                logger.warning(
+                    "Sandbox post-tool sync failed agent=%s tool=%s sync_status=%s sync_result=%s",
+                    agent.id,
+                    tool_name,
+                    sync_result.get("status"),
+                    sync_result,
+                )
             export_path = result.get("export_path")
             if isinstance(export_path, str) and export_path.strip():
                 response = _build_filespace_export_response(agent, export_path)
