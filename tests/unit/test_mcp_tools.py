@@ -566,34 +566,39 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(result.get("status"), "success")
         self.assertEqual(result.get("result"), {"local": True})
         mock_service.mcp_request.assert_called_once()
-        mock_ensure_registered.assert_called_once_with(runtime, agent=agent, force_local=True)
+        mock_ensure_registered.assert_called_once_with(
+            runtime,
+            agent=agent,
+            force_local=True,
+            require_client=True,
+        )
 
     @tag("batch_mcp_tools")
     @patch("api.agent.tools.mcp_manager.requests.post")
     def test_build_runtime_refreshes_expired_oauth_token(self, mock_post):
-        config = MCPServerConfig.objects.create(
-            scope=MCPServerConfig.Scope.USER,
-            user=get_user_model().objects.create_user(
-                username="oauth-user", email="oauth@example.com"
-            ),
-            name=f"notion-{uuid.uuid4().hex[:8]}",
-            display_name="Notion",
-            url="https://notion.example.com/mcp",
-            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
-        )
-
-        credential = MCPServerOAuthCredential.objects.create(
-            server_config=config,
-            user=config.user,
-            client_id="client-123",
-        )
-        credential.client_secret = "secret-xyz"
-        credential.access_token = "expired-token"
-        credential.refresh_token = "refresh-123"
-        credential.token_type = "Bearer"
-        credential.expires_at = timezone.now() - timedelta(minutes=5)
-        credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
         with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            config = MCPServerConfig.objects.create(
+                scope=MCPServerConfig.Scope.USER,
+                user=get_user_model().objects.create_user(
+                    username="oauth-user", email="oauth@example.com"
+                ),
+                name=f"notion-{uuid.uuid4().hex[:8]}",
+                display_name="Notion",
+                url="https://notion.example.com/mcp",
+                auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            )
+
+            credential = MCPServerOAuthCredential.objects.create(
+                server_config=config,
+                user=config.user,
+                client_id="client-123",
+            )
+            credential.client_secret = "secret-xyz"
+            credential.access_token = "expired-token"
+            credential.refresh_token = "refresh-123"
+            credential.token_type = "Bearer"
+            credential.expires_at = timezone.now() - timedelta(minutes=5)
+            credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
             credential.save()
 
         mock_response = MagicMock()
@@ -608,7 +613,8 @@ class MCPToolManagerTests(TestCase):
         mock_post.return_value = mock_response
 
         manager = MCPToolManager()
-        runtime = manager._build_runtime_from_config(config)
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            runtime = manager._build_runtime_from_config(config)
 
         mock_post.assert_called_once_with(
             "https://notion.example.com/oauth/token",
@@ -634,31 +640,32 @@ class MCPToolManagerTests(TestCase):
     @tag("batch_mcp_tools")
     @patch("api.agent.tools.mcp_manager.requests.post")
     def test_build_runtime_skips_refresh_when_token_valid(self, mock_post):
-        user = get_user_model().objects.create_user(
-            username="fresh-user",
-            email="fresh@example.com",
-        )
-        config = MCPServerConfig.objects.create(
-            scope=MCPServerConfig.Scope.USER,
-            user=user,
-            name=f"fresh-notion-{uuid.uuid4().hex[:8]}",
-            display_name="Notion Fresh",
-            url="https://notion.example.com/mcp",
-            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
-        )
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            user = get_user_model().objects.create_user(
+                username="fresh-user",
+                email="fresh@example.com",
+            )
+            config = MCPServerConfig.objects.create(
+                scope=MCPServerConfig.Scope.USER,
+                user=user,
+                name=f"fresh-notion-{uuid.uuid4().hex[:8]}",
+                display_name="Notion Fresh",
+                url="https://notion.example.com/mcp",
+                auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+            )
 
-        credential = MCPServerOAuthCredential.objects.create(
-            server_config=config,
-            user=user,
-            client_id="client-789",
-        )
-        credential.client_secret = "secret-abc"
-        credential.access_token = "valid-token"
-        credential.refresh_token = "refresh-abc"
-        credential.token_type = "Bearer"
-        credential.expires_at = timezone.now() + timedelta(minutes=10)
-        credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
-        credential.save()
+            credential = MCPServerOAuthCredential.objects.create(
+                server_config=config,
+                user=user,
+                client_id="client-789",
+            )
+            credential.client_secret = "secret-abc"
+            credential.access_token = "valid-token"
+            credential.refresh_token = "refresh-abc"
+            credential.token_type = "Bearer"
+            credential.expires_at = timezone.now() + timedelta(minutes=10)
+            credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
+            credential.save()
 
         manager = MCPToolManager()
         runtime = manager._build_runtime_from_config(config)

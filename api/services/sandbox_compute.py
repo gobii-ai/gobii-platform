@@ -954,21 +954,6 @@ class SandboxComputeService:
         except (DatabaseError, ValueError, TypeError):
             return None
 
-    def _maybe_sync_after_tool(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not _sync_on_tool_call():
-            return None
-        return self._sync_workspace_push(agent, session)
-
-    def _maybe_sync_after_mcp(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not _sync_on_mcp_call():
-            return None
-        return self._sync_workspace_push(agent, session)
-
-    def _maybe_sync_after_run_command(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not _sync_on_run_command():
-            return None
-        return self._sync_workspace_push(agent, session)
-
     def _enqueue_post_sync_after_call(self, agent, *, source: str) -> None:
         if isinstance(self._backend, LocalSandboxBackend):
             return

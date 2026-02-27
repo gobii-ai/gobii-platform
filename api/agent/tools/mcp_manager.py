@@ -485,17 +485,22 @@ class MCPToolManager:
         *,
         agent: Optional[PersistentAgent] = None,
         force_local: bool = False,
+        require_client: bool = False,
     ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
-        if config_id in self._tools_cache:
+        if config_id in self._tools_cache and (not require_client or config_id in self._clients):
             return True
         try:
             self._register_server(runtime, agent=agent, force_local=force_local)
         except Exception:
             logger.exception("Failed to register MCP server %s", runtime.name)
             return False
-        return config_id in self._tools_cache
+        if config_id not in self._tools_cache:
+            return False
+        if require_client and config_id not in self._clients:
+            return False
+        return True
 
     def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
         try:
@@ -984,7 +989,9 @@ class MCPToolManager:
         )
         cache_fingerprint = self._build_tool_cache_fingerprint(server)
         if prefer_cache and self._load_cached_tools(server, cache_fingerprint, sandbox_mode=sandbox_mode):
-            return
+            if not force_local:
+                return
+            # Force-local execution requires an active local client even when tools are cached.
         if sandbox_mode:
             if not _sandbox_mcp_fallback_enabled():
                 logger.info(
@@ -1356,7 +1363,7 @@ class MCPToolManager:
         if param_error:
             return param_error
 
-        if not self._ensure_runtime_registered(runtime):
+        if not self._ensure_runtime_registered(runtime, force_local=True, require_client=True):
             return {"status": "error", "message": f"MCP server '{runtime.name}' is not available"}
 
         client = self._clients.get(info.config_id)
@@ -1403,7 +1410,7 @@ class MCPToolManager:
             return {"status": "success", "result": content}
         except Exception as exc:
             logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
-        return {"status": "error", "message": str(exc)}
+            return {"status": "error", "message": str(exc)}
 
     def _dispatch_sandbox_mcp_request(
         self,
@@ -1535,7 +1542,12 @@ class MCPToolManager:
 
         if runtime and (not sandbox_routed or sandbox_fallback):
             local_force = force_local or sandbox_fallback
-            if not self._ensure_runtime_registered(runtime, agent=agent, force_local=local_force):
+            if not self._ensure_runtime_registered(
+                runtime,
+                agent=agent,
+                force_local=local_force,
+                require_client=True,
+            ):
                 return {
                     "status": "error",
                     "message": f"MCP server '{server_name}' is not available",
