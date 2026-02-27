@@ -67,7 +67,7 @@ export function SubscriptionUpgradeModal({
     : 'flex min-h-full items-start justify-center p-4 pb-20 sm:items-center sm:p-6'
 
   const modalClass = pricingModalAlmostFullScreen
-    ? 'relative z-50 w-full max-w-[96vw] max-h-[94vh] transform overflow-y-auto rounded-2xl bg-white shadow-2xl transition-all'
+    ? 'relative z-50 flex h-[94vh] w-full max-w-[96vw] transform flex-col overflow-hidden rounded-2xl bg-white shadow-2xl transition-all'
     : 'relative z-50 w-full max-w-4xl transform overflow-hidden rounded-2xl bg-white shadow-2xl transition-all'
 
   return createPortal(
@@ -115,12 +115,14 @@ export function SubscriptionUpgradeModal({
             </div>
           </div>
 
-          <SubscriptionUpgradePlans
-            currentPlan={currentPlan}
-            onUpgrade={onUpgrade}
-            source={source}
-            allowDowngrade={allowDowngrade}
-          />
+          <div className={pricingModalAlmostFullScreen ? 'min-h-0 flex-1' : ''}>
+            <SubscriptionUpgradePlans
+              currentPlan={currentPlan}
+              onUpgrade={onUpgrade}
+              source={source}
+              allowDowngrade={allowDowngrade}
+            />
+          </div>
         </div>
       </div>
     </div>,
