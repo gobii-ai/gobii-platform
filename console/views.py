@@ -16,7 +16,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
-from django.db import transaction, models, IntegrityError
+from django.db import transaction, models, IntegrityError, DatabaseError
 from django.db.models import Q, Sum
 from django.http import (
     FileResponse,
@@ -175,7 +175,7 @@ from console.agent_chat.access import resolve_agent_for_request, user_can_manage
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED, get_plan_config
-from waffle import flag_is_active
+from waffle import flag_is_active, get_waffle_flag_model
 from api.services.email_verification import has_verified_email
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 
@@ -448,7 +448,7 @@ from django.views.decorators.http import require_POST, require_http_methods
 from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSource
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
-from constants.feature_flags import ORGANIZATIONS
+from constants.feature_flags import ORGANIZATIONS, PRICING_MODAL_ALMOST_FULL_SCREEN
 from constants.grant_types import GrantTypeChoices
 from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
 from constants.stripe import (
@@ -600,6 +600,18 @@ def _is_checkout_trial_eligible(user) -> bool:
             exc_info=True,
         )
         return False
+
+
+def _is_pricing_modal_almost_full_screen_enabled(request: HttpRequest | None) -> bool:
+    """Default to enabled when the flag row is missing."""
+    try:
+        Flag = get_waffle_flag_model()
+        flag = Flag.objects.filter(name=PRICING_MODAL_ALMOST_FULL_SCREEN).first()
+        if flag is None:
+            return True
+        return flag.is_active(request)
+    except (DatabaseError, ImproperlyConfigured):
+        return True
 
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
@@ -2083,6 +2095,7 @@ def get_user_plan_api(request):
 
     startup_trial_days, scale_trial_days = _get_checkout_trial_days()
     trial_eligible = _is_checkout_trial_eligible(request.user)
+    pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
 
     try:
         plan = get_user_plan(request.user)
@@ -2099,6 +2112,7 @@ def get_user_plan_api(request):
             'startup_trial_days': startup_trial_days,
             'scale_trial_days': scale_trial_days,
             'trial_eligible': trial_eligible,
+            'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
         })
     except Exception as e:
         return JsonResponse({
@@ -2107,6 +2121,7 @@ def get_user_plan_api(request):
             'startup_trial_days': startup_trial_days,
             'scale_trial_days': scale_trial_days,
             'trial_eligible': trial_eligible,
+            'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'error': str(e),
         })
 
@@ -5732,6 +5747,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["startup_trial_days"] = startup_trial_days
         context["scale_trial_days"] = scale_trial_days
         context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user)
+        context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
 

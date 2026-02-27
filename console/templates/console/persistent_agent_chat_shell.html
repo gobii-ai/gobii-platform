@@ -20,6 +20,7 @@
        data-startup-trial-days="{{ startup_trial_days|default:0 }}"
        data-scale-trial-days="{{ scale_trial_days|default:0 }}"
        data-trial-eligible="{% if trial_eligible %}true{% else %}false{% endif %}"
+       data-pricing-modal-almost-full-screen="{% if pricing_modal_almost_full_screen %}true{% else %}false{% endif %}"
        data-is-proprietary-mode="{% if settings.GOBII_PROPRIETARY_MODE %}true{% else %}false{% endif %}"
        data-is-staff="{% if request.user.is_staff or request.user.is_superuser %}true{% else %}false{% endif %}"
        data-audit-url="{% if request.user.is_staff or request.user.is_superuser %}{% url 'console-agent-audit' agent_id=agent.id %}{% endif %}"
