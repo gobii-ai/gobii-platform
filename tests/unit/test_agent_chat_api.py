@@ -511,6 +511,53 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("cid:Screenshot%202026-02-25%20at%2019.51.54.png", rendered_html)
 
     @tag("batch_agent_chat")
+    def test_timeline_does_not_reuse_last_basename_attachment_url_when_cid_refs_exceed_matches(self):
+        html_body = "<p><img src='cid:charts/logo.png' /><img src='cid:footer/logo.png' /></p>"
+        email_address = "image-cid-overflow@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=html_body,
+            owner_agent=self.agent,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"image-bytes", name="logo.png"),
+            content_type="image/png",
+            file_size=11,
+            filename="logo.png",
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        cid_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == html_body
+        )
+
+        rendered_html = cid_event["message"]["bodyHtml"]
+        attachment_url = cid_event["message"]["attachments"][0]["url"]
+        self.assertEqual(rendered_html.count(attachment_url), 1)
+        self.assertEqual(rendered_html.count("src="), 1)
+        self.assertEqual(rendered_html.count("<img"), 2)
+
+    @tag("batch_agent_chat")
     def test_plaintext_and_markdown_prefer_body_text(self):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)

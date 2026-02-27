@@ -23,6 +23,7 @@ from bleach.sanitizer import Cleaner
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.agent.core.schedule_parser import ScheduleParser
+from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.models import (
     BrowserUseAgentTask,
@@ -200,12 +201,6 @@ def _humanize_body(body: str, channel: str | None = None, attachments: Sequence[
     return ""
 
 
-_CID_SRC_ATTR_RE = re.compile(
-    r"""(?P<prefix>\bsrc\s*=\s*)(?:"(?P<dq>cid:[^"]+)"|'(?P<sq>cid:[^']+)'|(?P<bare>cid:[^\s>]+))""",
-    re.IGNORECASE,
-)
-
-
 def _rewrite_email_cid_image_src(html_body: str, attachments: Sequence[dict]) -> str:
     if not html_body or not attachments:
         return html_body
@@ -262,7 +257,7 @@ def _rewrite_email_cid_image_src(html_body: str, attachments: Sequence[dict]) ->
                 continue
             index = basename_cursor.get(basename, 0)
             if index >= len(basename_matches):
-                index = len(basename_matches) - 1
+                continue
             resolved = basename_matches[index]
             basename_cursor[basename] = index + 1
             cid_cache[normalized_raw] = resolved
@@ -280,7 +275,7 @@ def _rewrite_email_cid_image_src(html_body: str, attachments: Sequence[dict]) ->
         prefix = match.group("prefix")
         return f'{prefix}"{resolved_url}"'
 
-    return _CID_SRC_ATTR_RE.sub(_replace, html_body)
+    return CID_SRC_REFERENCE_RE.sub(_replace, html_body)
 
 
 def _build_user_display_name(user) -> str | None:

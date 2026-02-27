@@ -403,6 +403,57 @@ class EmailDeliveryTests(TestCase):
     @patch(
         "api.agent.comms.outbound_delivery._prepare_email_content",
         return_value=(
+            "<p><img src='cid:photo.png' /><img src='cid:photo.png' /></p>",
+            "duplicate cid",
+        ),
+    )
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_production_email_delivery_rewrites_all_repeated_cid_references_for_single_attachment(
+        self,
+        mock_anymail,
+        _mock_prepare,
+    ):
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "test-message-id"
+
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "Repeated CID"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"abc", name="photo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="photo.png",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><img src='cid:photo.png' /><img src='cid:photo.png' /></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        mock_msg.attach.assert_called_once()
+        attachment_part = mock_msg.attach.call_args.args[0]
+        self.assertIsInstance(attachment_part, MIMEPart)
+        content_id = attachment_part["Content-ID"]
+        rewritten_html = mock_msg.attach_alternative.call_args.args[0]
+        self.assertEqual(rewritten_html.count(f"cid:{content_id[1:-1]}"), 2)
+        self.assertNotIn("cid:photo.png", rewritten_html)
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=(
             "<p>Screenshot:</p><p><img src='cid:Screenshot 2026-02-25 at 19.51.54.png' alt='shot' /></p>",
             "Screenshot:",
         ),

@@ -33,6 +33,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import postmark_status
 from util.text_sanitizer import decode_unicode_escapes, normalize_llm_output
 
+from .cid_references import CID_SRC_REFERENCE_RE
 from .email_content import convert_body_to_html_and_plaintext
 from .email_footer_service import append_footer_if_needed
 from .smtp_transport import SmtpTransport
@@ -239,10 +240,6 @@ logger = logging.getLogger(__name__)
 
 
 _postmark_connection = None
-_CID_SRC_REFERENCE_RE = re.compile(
-    r"""(?P<prefix>\bsrc\s*=\s*)(?:"(?P<dq>cid:[^"]+)"|'(?P<sq>cid:[^']+)'|(?P<bare>cid:[^\s>]+))""",
-    re.IGNORECASE,
-)
 _CID_UNSAFE_CHARS_RE = re.compile(r"[^a-z0-9._-]+")
 
 
@@ -327,7 +324,7 @@ def _extract_cid_references(html_body: str) -> list[dict[str, int | str]]:
         return []
 
     references: list[dict[str, int | str]] = []
-    for match in _CID_SRC_REFERENCE_RE.finditer(html_body):
+    for match in CID_SRC_REFERENCE_RE.finditer(html_body):
         raw_value = (match.group("dq") or match.group("sq") or match.group("bare") or "").strip()
         if not raw_value.lower().startswith("cid:"):
             continue
@@ -381,6 +378,17 @@ def _pop_next_reference_index(candidates: list[int], used_reference_indexes: set
         if candidate not in used_reference_indexes:
             return candidate
     return None
+
+
+def _build_cid_variants(raw_cid: str) -> list[str]:
+    normalized_raw = raw_cid.strip().lower()
+    if not normalized_raw:
+        return []
+    variants = [normalized_raw]
+    decoded = unquote(raw_cid).strip().lower()
+    if decoded and decoded != normalized_raw:
+        variants.append(decoded)
+    return variants
 
 
 def _canonicalize_inline_cid(raw_cid: str, filename: str, reference_index: int) -> str:
@@ -568,8 +576,19 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                 )
                 inline_part["Content-ID"] = f"<{canonical_cid}>"
                 msg.attach(inline_part)
-                used_reference_indexes.add(matched_reference_index)
-                cid_replacements[matched_reference_index] = canonical_cid
+                # A repeated CID token in HTML should resolve to the same inline attachment everywhere.
+                matched_indexes = {matched_reference_index}
+                for cid_variant in _build_cid_variants(raw_cid):
+                    cid_candidates = cid_lookup.get(cid_variant, [])
+                    while cid_candidates:
+                        duplicate_index = _pop_next_reference_index(cid_candidates, used_reference_indexes)
+                        if duplicate_index is None:
+                            break
+                        matched_indexes.add(duplicate_index)
+
+                for matched_index in matched_indexes:
+                    used_reference_indexes.add(matched_index)
+                    cid_replacements[matched_index] = canonical_cid
             else:
                 msg.attach(filename, content, content_type)
             attached += 1
