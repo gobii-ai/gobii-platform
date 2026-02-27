@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
+import os
 import re
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode
 import uuid
 from typing import Iterable, Literal, Sequence, Mapping
 
@@ -22,6 +23,7 @@ from bleach.sanitizer import Cleaner
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.agent.core.schedule_parser import ScheduleParser
+from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.models import (
     BrowserUseAgentTask,
@@ -179,7 +181,7 @@ class TimelineWindow:
         return self.processing_snapshot.active
 
 
-def _humanize_body(body: str, channel: str | None = None) -> str:
+def _humanize_body(body: str, channel: str | None = None, attachments: Sequence[dict] | None = None) -> str:
     """Convert message body to sanitized HTML for display.
 
     For email channel: Converts markdown to HTML for email client rendering.
@@ -192,9 +194,88 @@ def _humanize_body(body: str, channel: str | None = None) -> str:
             html_snippet, _ = convert_body_to_html_and_plaintext(body, emit_logs=False)
         except Exception:
             html_snippet = body
+        if html_snippet:
+            html_snippet = _rewrite_email_cid_image_src(html_snippet, attachments or ())
         return HTML_CLEANER.clean(html_snippet) if html_snippet else ""
     # Non-email channels: Let frontend render markdown (handles <br> naturally)
     return ""
+
+
+def _rewrite_email_cid_image_src(html_body: str, attachments: Sequence[dict]) -> str:
+    if not html_body or not attachments:
+        return html_body
+
+    exact_lookup: dict[str, str] = {}
+    basename_lookup: dict[str, list[str]] = {}
+    basename_cursor: dict[str, int] = {}
+    cid_cache: dict[str, str] = {}
+
+    for attachment in attachments:
+        filename = str(attachment.get("filename") or "").strip()
+        if not filename:
+            continue
+        resolved_url = attachment.get("downloadUrl") or attachment.get("url")
+        resolved_url = str(resolved_url or "").strip()
+        if not resolved_url:
+            continue
+
+        normalized_filename = filename.lower()
+        exact_lookup.setdefault(normalized_filename, resolved_url)
+
+        basename = os.path.basename(normalized_filename).strip()
+        if basename:
+            basename_lookup.setdefault(basename, []).append(resolved_url)
+
+    if not exact_lookup and not basename_lookup:
+        return html_body
+
+    def _resolve_cid_to_url(raw_cid: str) -> str | None:
+        normalized_raw = raw_cid.strip().lower()
+        if not normalized_raw:
+            return None
+        cached = cid_cache.get(normalized_raw)
+        if cached:
+            return cached
+
+        decoded = unquote(raw_cid).strip().lower()
+        cid_variants = [normalized_raw]
+        if decoded and decoded != normalized_raw:
+            cid_variants.append(decoded)
+
+        for cid_variant in cid_variants:
+            direct_match = exact_lookup.get(cid_variant)
+            if direct_match:
+                cid_cache[normalized_raw] = direct_match
+                return direct_match
+
+        for cid_variant in cid_variants:
+            basename = os.path.basename(cid_variant).strip()
+            if not basename:
+                continue
+            basename_matches = basename_lookup.get(basename, [])
+            if not basename_matches:
+                continue
+            index = basename_cursor.get(basename, 0)
+            if index >= len(basename_matches):
+                continue
+            resolved = basename_matches[index]
+            basename_cursor[basename] = index + 1
+            cid_cache[normalized_raw] = resolved
+            return resolved
+        return None
+
+    def _replace(match: re.Match[str]) -> str:
+        raw_value = match.group("dq") or match.group("sq") or match.group("bare") or ""
+        if not raw_value.lower().startswith("cid:"):
+            return match.group(0)
+        cid_token = raw_value[4:]
+        resolved_url = _resolve_cid_to_url(cid_token)
+        if not resolved_url:
+            return match.group(0)
+        prefix = match.group("prefix")
+        return f'{prefix}"{resolved_url}"'
+
+    return CID_SRC_REFERENCE_RE.sub(_replace, html_body)
 
 
 def _build_user_display_name(user) -> str | None:
@@ -455,6 +536,8 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         if not sender_name:
             sender_name = sender_address
 
+    body_html = _humanize_body(message.body or "", channel, attachments)
+
     return {
         "kind": "message",
         "cursor": env.cursor.encode(),
@@ -462,7 +545,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         "message": {
             "id": str(message.id),
             "cursor": env.cursor.encode(),
-            "bodyHtml": _humanize_body(message.body or "", channel),
+            "bodyHtml": body_html,
             "bodyText": message.body or "",
             "isOutbound": bool(message.is_outbound),
             "channel": channel,
