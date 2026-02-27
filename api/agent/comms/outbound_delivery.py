@@ -240,9 +240,10 @@ logger = logging.getLogger(__name__)
 
 _postmark_connection = None
 _CID_SRC_REFERENCE_RE = re.compile(
-    r"""src\s*=\s*(?:"cid:([^"]+)"|'cid:([^']+)'|cid:([^'">\s]+))""",
+    r"""(?P<prefix>\bsrc\s*=\s*)(?:"(?P<dq>cid:[^"]+)"|'(?P<sq>cid:[^']+)'|(?P<bare>cid:[^\s>]+))""",
     re.IGNORECASE,
 )
+_CID_UNSAFE_CHARS_RE = re.compile(r"[^a-z0-9._-]+")
 
 
 def _get_postmark_connection():
@@ -321,17 +322,40 @@ def _normalized_email_subject(message: PersistentAgentMessage) -> str:
     return decode_unicode_escapes(str(raw_subject))
 
 
-def _extract_cid_lookup(html_body: str) -> tuple[dict[str, str], dict[str, list[str]]]:
+def _extract_cid_references(html_body: str) -> list[dict[str, int | str]]:
     if not html_body:
-        return {}, {}
+        return []
 
-    cid_lookup: dict[str, str] = {}
-    basename_lookup: dict[str, list[str]] = {}
+    references: list[dict[str, int | str]] = []
     for match in _CID_SRC_REFERENCE_RE.finditer(html_body):
-        raw_cid = next((group for group in match.groups() if group), "").strip()
+        raw_value = (match.group("dq") or match.group("sq") or match.group("bare") or "").strip()
+        if not raw_value.lower().startswith("cid:"):
+            continue
+        raw_cid = raw_value[4:].strip()
         if not raw_cid:
             continue
+        quote = '"' if match.group("dq") is not None else "'" if match.group("sq") is not None else ""
+        references.append(
+            {
+                "start": match.start(),
+                "end": match.end(),
+                "prefix": match.group("prefix") or "src=",
+                "quote": quote,
+                "raw_cid": raw_cid,
+            }
+        )
+    return references
 
+
+def _build_cid_reference_lookup(
+    references: list[dict[str, int | str]],
+) -> tuple[dict[str, list[int]], dict[str, list[int]]]:
+    cid_lookup: dict[str, list[int]] = {}
+    basename_lookup: dict[str, list[int]] = {}
+    for index, reference in enumerate(references):
+        raw_cid = str(reference["raw_cid"]).strip()
+        if not raw_cid:
+            continue
         cid_variants = [raw_cid]
         decoded_cid = unquote(raw_cid).strip()
         if decoded_cid and decoded_cid != raw_cid:
@@ -339,14 +363,63 @@ def _extract_cid_lookup(html_body: str) -> tuple[dict[str, str], dict[str, list[
 
         for cid_variant in cid_variants:
             normalized = cid_variant.lower()
-            cid_lookup.setdefault(normalized, raw_cid)
+            cid_candidates = cid_lookup.setdefault(normalized, [])
+            if not cid_candidates or cid_candidates[-1] != index:
+                cid_candidates.append(index)
 
-            basename = os.path.basename(cid_variant).strip().lower()
+            basename = os.path.basename(normalized).strip()
             if basename:
-                basename_matches = basename_lookup.setdefault(basename, [])
-                if raw_cid not in basename_matches:
-                    basename_matches.append(raw_cid)
+                basename_candidates = basename_lookup.setdefault(basename, [])
+                if not basename_candidates or basename_candidates[-1] != index:
+                    basename_candidates.append(index)
     return cid_lookup, basename_lookup
+
+
+def _pop_next_reference_index(candidates: list[int], used_reference_indexes: set[int]) -> int | None:
+    while candidates:
+        candidate = candidates.pop(0)
+        if candidate not in used_reference_indexes:
+            return candidate
+    return None
+
+
+def _canonicalize_inline_cid(raw_cid: str, filename: str, reference_index: int) -> str:
+    base = unquote(raw_cid).strip() or filename.strip() or "attachment"
+    normalized = _CID_UNSAFE_CHARS_RE.sub("-", base.lower()).strip("-.")
+    if not normalized:
+        normalized = "attachment"
+    if len(normalized) > 80:
+        normalized = normalized[:80].rstrip("-.") or "attachment"
+    return f"inline-{reference_index + 1}-{normalized}"
+
+
+def _rewrite_inline_cid_references(
+    html_body: str,
+    references: list[dict[str, int | str]],
+    cid_replacements: dict[int, str],
+) -> str:
+    if not html_body or not references or not cid_replacements:
+        return html_body
+
+    parts: list[str] = []
+    cursor = 0
+    for index, reference in enumerate(references):
+        start = int(reference["start"])
+        end = int(reference["end"])
+        parts.append(html_body[cursor:start])
+        replacement_cid = cid_replacements.get(index)
+        if replacement_cid:
+            prefix = str(reference["prefix"])
+            quote = str(reference["quote"])
+            if quote:
+                parts.append(f"{prefix}{quote}cid:{replacement_cid}{quote}")
+            else:
+                parts.append(f"{prefix}cid:{replacement_cid}")
+        else:
+            parts.append(html_body[start:end])
+        cursor = end
+    parts.append(html_body[cursor:])
+    return "".join(parts)
 
 
 def _to_mime_type_parts(content_type: str) -> tuple[str, str]:
@@ -357,19 +430,21 @@ def _to_mime_type_parts(content_type: str) -> tuple[str, str]:
     return maintype or "application", subtype or "octet-stream"
 
 
-def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage, html_body: str) -> int:
+def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage, html_body: str) -> tuple[int, str]:
     attachments = list(message.attachments.select_related("filespace_node"))
     if not attachments:
-        return 0
+        return 0, html_body
 
-    cid_lookup, basename_cid_lookup = _extract_cid_lookup(html_body)
+    cid_references = _extract_cid_references(html_body)
+    cid_lookup, basename_cid_lookup = _build_cid_reference_lookup(cid_references)
     agent = getattr(message, "owner_agent", None)
     message_id = str(getattr(message, "id", "")) if getattr(message, "id", None) else None
     channel = getattr(getattr(message, "from_endpoint", None), "channel", None)
     user_initiated = bool(getattr(agent, "user_id", None)) if agent else None
     max_bytes = get_max_file_size()
     attached = 0
-    used_cids: set[str] = set()
+    used_reference_indexes: set[int] = set()
+    cid_replacements: dict[int, str] = {}
     for att in attachments:
         filename = att.filename or "attachment"
         content_type = att.content_type or "application/octet-stream"
@@ -466,20 +541,22 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
         try:
             with storage.open(name, "rb") as handle:
                 content = handle.read()
-            matched_cid = None
+            matched_reference_index = None
             normalized_filename = filename.strip().lower()
             if normalized_filename:
-                matched_cid = cid_lookup.get(normalized_filename)
-                if not matched_cid:
+                cid_candidates = cid_lookup.get(normalized_filename, [])
+                matched_reference_index = _pop_next_reference_index(cid_candidates, used_reference_indexes)
+                if matched_reference_index is None:
                     basename = os.path.basename(normalized_filename)
                     basename_candidates = basename_cid_lookup.get(basename, [])
-                    if basename_candidates:
-                        matched_cid = basename_candidates.pop(0)
+                    matched_reference_index = _pop_next_reference_index(
+                        basename_candidates,
+                        used_reference_indexes,
+                    )
 
-            if matched_cid in used_cids:
-                matched_cid = None
-
-            if matched_cid:
+            if matched_reference_index is not None:
+                raw_cid = str(cid_references[matched_reference_index]["raw_cid"])
+                canonical_cid = _canonicalize_inline_cid(raw_cid, filename, matched_reference_index)
                 maintype, subtype = _to_mime_type_parts(content_type)
                 inline_part = MIMEPart()
                 inline_part.set_content(
@@ -489,9 +566,10 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                     disposition="inline",
                     filename=filename,
                 )
-                inline_part["Content-ID"] = f"<{matched_cid}>"
+                inline_part["Content-ID"] = f"<{canonical_cid}>"
                 msg.attach(inline_part)
-                used_cids.add(matched_cid)
+                used_reference_indexes.add(matched_reference_index)
+                cid_replacements[matched_reference_index] = canonical_cid
             else:
                 msg.attach(filename, content, content_type)
             attached += 1
@@ -510,7 +588,8 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                 user_initiated=user_initiated,
             )
 
-    return attached
+    rewritten_html_body = _rewrite_inline_cid_references(html_body, cid_references, cid_replacements)
+    return attached, rewritten_html_body
 
 
 @tracer.start_as_current_span("AGENT - Deliver Agent Email")
@@ -902,17 +981,18 @@ def deliver_agent_email(message: PersistentAgentMessage):
             },
         )
 
-        # Attach the HTML alternative
-        logger.info("Attaching HTML alternative to message %s", message.id)
-        msg.attach_alternative(html_body, "text/html")
-
-        attachment_count = _attach_email_attachments(message, msg, html_body)
+        attachment_count, rewritten_html_body = _attach_email_attachments(message, msg, html_body)
+        html_body = rewritten_html_body
         if attachment_count:
             logger.info(
                 "Attached %d file(s) to email message %s",
                 attachment_count,
                 message.id,
             )
+        
+        # Attach the HTML alternative
+        logger.info("Attaching HTML alternative to message %s", message.id)
+        msg.attach_alternative(html_body, "text/html")
         
         # Send the message
         logger.info(

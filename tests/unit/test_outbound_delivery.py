@@ -389,8 +389,13 @@ class EmailDeliveryTests(TestCase):
         mock_msg.attach.assert_called_once()
         attachment_part = mock_msg.attach.call_args.args[0]
         self.assertIsInstance(attachment_part, MIMEPart)
-        self.assertEqual(attachment_part["Content-ID"], "<photo.png>")
+        content_id = attachment_part["Content-ID"]
+        self.assertTrue(content_id.startswith("<inline-"))
+        self.assertNotIn(" ", content_id)
         self.assertIn("inline", (attachment_part["Content-Disposition"] or "").lower())
+        rewritten_html = mock_msg.attach_alternative.call_args.args[0]
+        self.assertIn(f"cid:{content_id[1:-1]}", rewritten_html)
+        self.assertNotIn("cid:photo.png", rewritten_html)
         mock_msg.send.assert_called_once_with(fail_silently=False)
 
     @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
@@ -438,8 +443,13 @@ class EmailDeliveryTests(TestCase):
         mock_msg.attach.assert_called_once()
         attachment_part = mock_msg.attach.call_args.args[0]
         self.assertIsInstance(attachment_part, MIMEPart)
-        self.assertEqual(attachment_part["Content-ID"], "<Screenshot 2026-02-25 at 19.51.54.png>")
+        content_id = attachment_part["Content-ID"]
+        self.assertTrue(content_id.startswith("<inline-"))
+        self.assertNotIn(" ", content_id)
         self.assertIn("inline", (attachment_part["Content-Disposition"] or "").lower())
+        rewritten_html = mock_msg.attach_alternative.call_args.args[0]
+        self.assertIn(f"cid:{content_id[1:-1]}", rewritten_html)
+        self.assertNotIn("cid:Screenshot 2026-02-25 at 19.51.54.png", rewritten_html)
         mock_msg.send.assert_called_once_with(fail_silently=False)
 
     @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
@@ -487,8 +497,14 @@ class EmailDeliveryTests(TestCase):
         mock_msg.attach.assert_called_once()
         attachment_part = mock_msg.attach.call_args.args[0]
         self.assertIsInstance(attachment_part, MIMEPart)
-        self.assertEqual(attachment_part["Content-ID"], "<Screenshot%202026-02-25%20at%2019.51.54.png>")
+        content_id = attachment_part["Content-ID"]
+        self.assertTrue(content_id.startswith("<inline-"))
+        self.assertNotIn(" ", content_id)
+        self.assertNotIn("%", content_id)
         self.assertIn("inline", (attachment_part["Content-Disposition"] or "").lower())
+        rewritten_html = mock_msg.attach_alternative.call_args.args[0]
+        self.assertIn(f"cid:{content_id[1:-1]}", rewritten_html)
+        self.assertNotIn("cid:Screenshot%202026-02-25%20at%2019.51.54.png", rewritten_html)
         mock_msg.send.assert_called_once_with(fail_silently=False)
 
     @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
@@ -544,7 +560,15 @@ class EmailDeliveryTests(TestCase):
         attachment_parts = [call.args[0] for call in mock_msg.attach.call_args_list]
         self.assertTrue(all(isinstance(part, MIMEPart) for part in attachment_parts))
         content_ids = {part["Content-ID"] for part in attachment_parts}
-        self.assertEqual(content_ids, {"<charts/logo.png>", "<footer/logo.png>"})
+        self.assertEqual(len(content_ids), 2)
+        for content_id in content_ids:
+            self.assertTrue(content_id.startswith("<inline-"))
+            self.assertNotIn("/", content_id)
+        rewritten_html = mock_msg.attach_alternative.call_args.args[0]
+        for content_id in content_ids:
+            self.assertIn(f"cid:{content_id[1:-1]}", rewritten_html)
+        self.assertNotIn("cid:charts/logo.png", rewritten_html)
+        self.assertNotIn("cid:footer/logo.png", rewritten_html)
         mock_msg.send.assert_called_once_with(fail_silently=False)
 
     @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
