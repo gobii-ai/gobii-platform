@@ -101,6 +101,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
         self._snapshot_class = getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_CLASS", "")
         self._proxy_timeout = int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))
+        self._mcp_timeout = int(getattr(settings, "SANDBOX_COMPUTE_MCP_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
+        self._tool_timeout = int(getattr(settings, "SANDBOX_COMPUTE_TOOL_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
+        self._discovery_timeout = int(
+            getattr(settings, "SANDBOX_COMPUTE_DISCOVERY_TIMEOUT_SECONDS", self._proxy_timeout)
+        )
 
         if not self._pod_image:
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_POD_IMAGE is required for kubernetes backend.")
@@ -210,7 +215,17 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         }
         if server_payload:
             payload["server"] = server_payload
-        return self._proxy_post(session.pod_name, "/sandbox/compute/mcp_request", payload)
+        timeout_value = getattr(
+            self,
+            "_mcp_timeout",
+            getattr(self, "_proxy_timeout", int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))),
+        )
+        return self._proxy_post(
+            session.pod_name,
+            "/sandbox/compute/mcp_request",
+            payload,
+            timeout=timeout_value,
+        )
 
     def tool_request(
         self,
@@ -222,7 +237,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         if not session.pod_name:
             return {"status": "error", "message": "Sandbox pod not available."}
         params_payload = params or {}
-        request_timeout = self._proxy_timeout
+        request_timeout = getattr(
+            self,
+            "_tool_timeout",
+            getattr(self, "_proxy_timeout", int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))),
+        )
         if tool_name == "python_exec":
             normalized = _normalize_timeout(
                 params_payload.get("timeout_seconds"),
@@ -231,7 +250,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             )
             params_payload = dict(params_payload)
             params_payload["timeout_seconds"] = normalized
-            request_timeout = max(self._proxy_timeout, normalized + 10)
+            request_timeout = max(request_timeout, normalized + 10)
         payload = {
             "agent_id": str(agent.id),
             "tool_name": tool_name,
@@ -357,7 +376,20 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
         payload = {"server_id": server_config_id, "reason": reason, "server": server_payload}
         try:
-            response = self._proxy_post(pod_name, "/sandbox/compute/discover_mcp_tools", payload)
+            response = self._proxy_post(
+                pod_name,
+                "/sandbox/compute/discover_mcp_tools",
+                payload,
+                timeout=getattr(
+                    self,
+                    "_discovery_timeout",
+                    getattr(
+                        self,
+                        "_proxy_timeout",
+                        int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180)),
+                    ),
+                ),
+            )
             return response
         finally:
             self._delete_pod(pod_name)

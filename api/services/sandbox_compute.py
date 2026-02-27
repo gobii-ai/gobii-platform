@@ -75,6 +75,18 @@ def _http_timeout_seconds() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))
 
 
+def _mcp_request_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_MCP_REQUEST_TIMEOUT_SECONDS", _http_timeout_seconds()))
+
+
+def _tool_request_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_TOOL_REQUEST_TIMEOUT_SECONDS", _http_timeout_seconds()))
+
+
+def _discovery_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_DISCOVERY_TIMEOUT_SECONDS", _http_timeout_seconds()))
+
+
 def _run_command_timeout_seconds() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_RUN_COMMAND_TIMEOUT_SECONDS", 120))
 
@@ -468,7 +480,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
         proxy_env = _proxy_env_for_session(session)
         if proxy_env:
             payload["proxy_env"] = proxy_env
-        return self._post("sandbox/compute/mcp_request", payload)
+        return self._post("sandbox/compute/mcp_request", payload, timeout=_mcp_request_timeout_seconds())
 
     def tool_request(
         self,
@@ -478,7 +490,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
         params_payload = params or {}
-        request_timeout = _http_timeout_seconds()
+        request_timeout = _tool_request_timeout_seconds()
         if tool_name == "python_exec":
             normalized = _normalize_timeout(
                 params_payload.get("timeout_seconds"),
@@ -487,7 +499,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
             )
             params_payload = dict(params_payload)
             params_payload["timeout_seconds"] = normalized
-            request_timeout = max(_http_timeout_seconds(), normalized + 10)
+            request_timeout = max(_tool_request_timeout_seconds(), normalized + 10)
 
         payload = {
             "agent_id": str(agent.id),
@@ -539,7 +551,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
         payload = {"server_id": server_config_id, "reason": reason}
         if server_payload:
             payload["server"] = server_payload
-        return self._post("sandbox/compute/discover_mcp_tools", payload)
+        return self._post("sandbox/compute/discover_mcp_tools", payload, timeout=_discovery_timeout_seconds())
 
     def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
         return {"status": "skipped", "message": "Workspace snapshots are not available via HTTP backend."}
