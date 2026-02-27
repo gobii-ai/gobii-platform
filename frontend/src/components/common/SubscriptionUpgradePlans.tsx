@@ -70,7 +70,7 @@ export function SubscriptionUpgradePlans({
   source,
   allowDowngrade = false,
 }: SubscriptionUpgradePlansProps) {
-  const { trialDaysByPlan, trialEligible } = useSubscriptionStore()
+  const { trialDaysByPlan, trialEligible, pricingModalAlmostFullScreen } = useSubscriptionStore()
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const canSelectPlan = useCallback(
     (planId: PlanTier) => {
@@ -91,12 +91,34 @@ export function SubscriptionUpgradePlans({
     onUpgrade(planId)
   }, [currentPlan, onUpgrade, source])
 
-  const pricingUrl = appendReturnTo('/pricing/')
+  const viewComparisonClick = useCallback(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    window.gobiiTrackCta?.({
+      cta_id: 'pricing_modal_view_comparison',
+      destination: '/pricing/',
+      
+    })
+  }, [])
 
-  const wrapperClass = variant === 'inline' ? 'px-0 py-0' : 'px-6 py-6 sm:px-8'
+  const pricingUrl = appendReturnTo('/pricing/')
+  const isExpandedModal = variant === 'modal' && pricingModalAlmostFullScreen
+
+  const wrapperClass = variant === 'inline'
+    ? 'px-0 py-0'
+    : isExpandedModal
+      ? 'min-h-0 flex-1 overflow-y-auto px-6 py-4 sm:px-8 sm:py-5'
+      : 'px-6 py-6 sm:px-8'
+  const rootClass = isExpandedModal ? 'flex h-full min-h-0 flex-col' : ''
+  const gridClass = isExpandedModal
+    ? 'grid h-full min-h-full items-stretch gap-5 sm:grid-cols-2'
+    : 'grid gap-5 sm:grid-cols-2'
   const footerClass = variant === 'inline'
     ? 'mt-4 text-center'
-    : 'border-t border-slate-200 bg-white px-6 py-4 sm:px-8'
+    : isExpandedModal
+      ? 'border-t border-slate-200 bg-white px-6 py-2.5 sm:px-8 sm:py-3'
+      : 'border-t border-slate-200 bg-white px-6 py-4 sm:px-8'
   const hasAnyTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale) > 0
   const useTrialCopy = (
     trialEligible
@@ -106,9 +128,9 @@ export function SubscriptionUpgradePlans({
   )
 
   return (
-    <>
+    <div className={rootClass}>
       <div className={wrapperClass}>
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className={gridClass}>
           {PLANS.map((plan) => {
             const isCurrent = isCurrentPlan(plan.id)
             const canUpgrade = canSelectPlan(plan.id)
@@ -125,7 +147,7 @@ export function SubscriptionUpgradePlans({
                   plan.highlight
                     ? 'bg-gradient-to-b from-indigo-600 to-blue-700 p-[2px] shadow-lg shadow-blue-500/20'
                     : 'border border-slate-200 bg-white hover:border-slate-300 hover:shadow-md'
-                } ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
+                } ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''} ${isExpandedModal ? 'h-full' : ''}`}
               >
                 <div className={`relative flex h-full flex-col ${plan.highlight ? 'rounded-[14px] bg-white' : ''}`}>
                   {plan.badge && (
@@ -217,10 +239,11 @@ export function SubscriptionUpgradePlans({
         <a
           href={pricingUrl}
           className="text-sm font-medium text-slate-500 transition-colors hover:text-blue-600"
+          onClick={viewComparisonClick}
         >
           {pricingLinkLabel} &rarr;
         </a>
       </div>
-    </>
+    </div>
   )
 }
