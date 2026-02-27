@@ -12,8 +12,10 @@ from api.services.sandbox_compute import (
     SandboxComputeService,
     SandboxSessionUpdate,
     _build_nonzero_exit_error_payload,
+    _post_sync_queue_key,
 )
 from api.services.sandbox_filespace_sync import build_filespace_pull_manifest
+from api.tasks.sandbox_compute import sync_filespace_after_call
 
 
 class _DummyBackend:
@@ -32,6 +34,25 @@ class _DummyBackend:
             }
         )
         return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+    def run_command(self, agent, session, command, *, cwd=None, env=None, timeout=None, interactive=False):
+        return {"status": "ok", "exit_code": 0, "stdout": f"ran: {command}", "stderr": ""}
+
+    def mcp_request(
+        self,
+        agent,
+        session,
+        server_config_id,
+        tool_name,
+        params,
+        *,
+        full_tool_name=None,
+        server_payload=None,
+    ):
+        return {"status": "ok", "result": {"tool_name": tool_name, "params": params}}
+
+    def tool_request(self, agent, session, tool_name, params):
+        return {"status": "ok", "result": {"tool_name": tool_name, "params": params}}
 
 
 @tag("batch_agent_lifecycle")
@@ -160,3 +181,139 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(payload.get("stdout"), "partial output")
         self.assertEqual(payload.get("stderr"), "ValueError: boom\n")
         self.assertEqual(payload.get("message"), "ValueError: boom")
+
+    def test_mcp_request_enqueues_async_post_sync(self):
+        backend = _DummyBackend()
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._build_mcp_server_payload",
+            return_value=({"config_id": "cfg-1", "name": "postgres"}, object()),
+        ), patch.object(
+            SandboxComputeService,
+            "_enqueue_post_sync_after_call",
+        ) as mock_enqueue, patch.object(
+            SandboxComputeService,
+            "_sync_workspace_push",
+        ) as mock_sync:
+            service = SandboxComputeService(backend=backend)
+            result = service.mcp_request(self.agent, "cfg-1", "pg_execute_query", {"sql": "select 1"})
+
+        self.assertEqual(result.get("status"), "ok")
+        mock_enqueue.assert_called_once_with(self.agent, source="mcp_request")
+        mock_sync.assert_not_called()
+
+    def test_tool_request_enqueues_async_post_sync(self):
+        backend = _DummyBackend()
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch.object(
+            SandboxComputeService,
+            "_enqueue_post_sync_after_call",
+        ) as mock_enqueue, patch.object(
+            SandboxComputeService,
+            "_sync_workspace_push",
+        ) as mock_sync:
+            service = SandboxComputeService(backend=backend)
+            result = service.tool_request(self.agent, "create_file", {"path": "/tmp/a.txt", "content": "ok"})
+
+        self.assertEqual(result.get("status"), "ok")
+        mock_enqueue.assert_called_once_with(self.agent, source="tool_request")
+        mock_sync.assert_not_called()
+
+    def test_run_command_enqueues_async_post_sync(self):
+        backend = _DummyBackend()
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch("api.services.sandbox_compute._sync_on_run_command", return_value=True), patch.object(
+            SandboxComputeService,
+            "_enqueue_post_sync_after_call",
+        ) as mock_enqueue, patch.object(
+            SandboxComputeService,
+            "_sync_workspace_push",
+        ) as mock_sync:
+            service = SandboxComputeService(backend=backend)
+            result = service.run_command(self.agent, "echo hello")
+
+        self.assertEqual(result.get("status"), "ok")
+        mock_enqueue.assert_called_once_with(self.agent, source="run_command")
+        mock_sync.assert_not_called()
+
+    def test_enqueue_post_sync_coalesces_per_agent(self):
+        backend = _DummyBackend()
+        redis_mock = type("RedisMock", (), {})()
+        redis_mock.set_calls = []
+
+        def _set(name, value, nx=None, ex=None):
+            redis_mock.set_calls.append((name, value, nx, ex))
+            return len(redis_mock.set_calls) == 1
+
+        redis_mock.set = _set
+        redis_mock.delete = lambda key: 1
+
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute.get_redis_client",
+            return_value=redis_mock,
+        ), patch(
+            "api.tasks.sandbox_compute.sync_filespace_after_call.delay",
+        ) as mock_delay:
+            service = SandboxComputeService(backend=backend)
+            service._enqueue_post_sync_after_call(self.agent, source="mcp_request")
+            service._enqueue_post_sync_after_call(self.agent, source="tool_request")
+
+        self.assertEqual(len(redis_mock.set_calls), 2)
+        self.assertEqual(mock_delay.call_count, 1)
+
+    def test_async_post_sync_task_clears_coalesce_key_on_success(self):
+        AgentComputeSession.objects.create(agent=self.agent, state=AgentComputeSession.State.RUNNING)
+        redis_mock = type("RedisMock", (), {})()
+        redis_mock.deleted_keys = []
+        redis_mock.delete = lambda key: redis_mock.deleted_keys.append(key) or 1
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.tasks.sandbox_compute.get_redis_client",
+            return_value=redis_mock,
+        ), patch("api.tasks.sandbox_compute.SandboxComputeService") as mock_service_cls:
+            mock_service_cls.return_value._sync_workspace_push.return_value = {"status": "ok"}
+            result = sync_filespace_after_call(str(self.agent.id), source="mcp_request")
+
+        self.assertEqual(result.get("status"), "ok")
+        mock_service_cls.return_value._sync_workspace_push.assert_called_once()
+        self.assertEqual(
+            redis_mock.deleted_keys,
+            [_post_sync_queue_key(str(self.agent.id))],
+        )
+
+    def test_async_post_sync_task_clears_coalesce_key_on_failure(self):
+        AgentComputeSession.objects.create(agent=self.agent, state=AgentComputeSession.State.RUNNING)
+        redis_mock = type("RedisMock", (), {})()
+        redis_mock.deleted_keys = []
+        redis_mock.delete = lambda key: redis_mock.deleted_keys.append(key) or 1
+
+        with patch("api.tasks.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.tasks.sandbox_compute.get_redis_client",
+            return_value=redis_mock,
+        ), patch("api.tasks.sandbox_compute.SandboxComputeService") as mock_service_cls:
+            mock_service_cls.return_value._sync_workspace_push.return_value = {
+                "status": "error",
+                "message": "push failed",
+            }
+            result = sync_filespace_after_call(str(self.agent.id), source="tool_request")
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertEqual(
+            redis_mock.deleted_keys,
+            [_post_sync_queue_key(str(self.agent.id))],
+        )
