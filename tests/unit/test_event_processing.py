@@ -36,6 +36,8 @@ from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
     ProxyServer,
+    build_web_agent_address,
+    build_web_user_address,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
@@ -108,7 +110,7 @@ class PromptContextBuilderTests(TestCase):
     def test_message_metadata_in_prompt(self):
         """Test that message metadata (from, channel) is included in the prompt."""
         # Create a mock event window with one message
-        msg = PersistentAgentMessage.objects.create(
+        PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
             from_endpoint=self.external_endpoint,
             to_endpoint=self.endpoint,
@@ -145,6 +147,104 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
+
+    def test_unified_history_uses_collaborator_name_for_web_sender(self):
+        self.user.first_name = "Will"
+        self.user.save(update_fields=["first_name"])
+        collaborator = User.objects.create_user(
+            username="andrew-collab",
+            email="andrew@example.com",
+            password="secret",
+            first_name="Andrew",
+        )
+        agent_web_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel="web",
+            address=build_web_agent_address(self.agent.id),
+        )
+        collaborator_address = build_web_user_address(collaborator.id, self.agent.id)
+        collaborator_web_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="web",
+            address=collaborator_address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=collaborator_web_endpoint,
+            to_endpoint=agent_web_endpoint,
+            is_outbound=False,
+            body="Hello from Andrew",
+            seq=f"WEBNAME{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn(
+            f"On web, you received a message from {collaborator_address} - Andrew:",
+            content,
+        )
+        self.assertNotIn("On web, you received a message from Will:", content)
+
+    def test_unified_history_web_sender_has_no_email_fallback(self):
+        collaborator = User.objects.create_user(
+            username="andrew_handle",
+            email="andrew@example.com",
+            password="secret",
+            first_name="",
+            last_name="",
+        )
+        agent_web_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel="web",
+            address=build_web_agent_address(self.agent.id),
+        )
+        collaborator_address = build_web_user_address(collaborator.id, self.agent.id)
+        collaborator_web_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="web",
+            address=collaborator_address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=collaborator_web_endpoint,
+            to_endpoint=agent_web_endpoint,
+            is_outbound=False,
+            body="Web sender identity fallback check",
+            seq=f"WEBNOEMAIL{int(timezone.now().timestamp() * 1_000_000):016d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn(
+            f"On web, you received a message from {collaborator_address} - andrew_handle:",
+            content,
+        )
+        self.assertNotIn("On web, you received a message from andrew@example.com:", content)
+
+    def test_user_identity_mentions_shared_chat_sender_guidance(self):
+        self.user.first_name = "Will"
+        self.user.save(update_fields=["first_name"])
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("<user_identity>", content)
+        self.assertIn(
+            "In shared chats, address the most recent inbound sender from unified history/recent contacts;",
+            content,
+        )
 
     def test_build_prompt_context_populates_messages_sqlite_table(self):
         PersistentAgentMessage.objects.create(
