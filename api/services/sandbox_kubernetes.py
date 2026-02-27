@@ -785,12 +785,7 @@ def _build_pod_manifest(
     proxy_url: Optional[str],
     no_proxy: Optional[str],
 ) -> Dict[str, Any]:
-    env: list[Dict[str, str]] = []
-    if proxy_url:
-        env.append({"name": "HTTP_PROXY", "value": proxy_url})
-        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
-    if no_proxy:
-        env.append({"name": "NO_PROXY", "value": no_proxy})
+    env = _build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy)
 
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
@@ -865,12 +860,7 @@ def _build_discovery_pod_manifest(
     proxy_url: Optional[str],
     no_proxy: Optional[str],
 ) -> Dict[str, Any]:
-    env: list[Dict[str, str]] = []
-    if proxy_url:
-        env.append({"name": "HTTP_PROXY", "value": proxy_url})
-        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
-    if no_proxy:
-        env.append({"name": "NO_PROXY", "value": no_proxy})
+    env = _build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy)
 
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
@@ -927,6 +917,16 @@ def _build_discovery_pod_manifest(
             ],
         },
     }
+
+
+def _build_proxy_env(*, proxy_url: Optional[str], no_proxy: Optional[str]) -> list[Dict[str, str]]:
+    env: list[Dict[str, str]] = []
+    if proxy_url:
+        env.append({"name": "HTTP_PROXY", "value": proxy_url})
+        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
+    if no_proxy:
+        env.append({"name": "NO_PROXY", "value": no_proxy})
+    return env
 
 
 def _build_egress_proxy_pod_manifest(

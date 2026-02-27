@@ -484,6 +484,90 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(result.get("result"), {"pong": True})
         mock_service.mcp_request.assert_called_once()
 
+    @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=True)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.mcp_manager.SandboxComputeService")
+    def test_execute_mcp_tool_sandbox_unsupported_falls_back_to_local(
+        self,
+        mock_service_cls,
+        _mock_sandbox_enabled_for_agent,
+    ):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="sandbox-fallback-server",
+            display_name="Sandbox Fallback Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+        self.manager._clients = {runtime.config_id: MagicMock()}
+
+        mock_service = MagicMock()
+        mock_service.mcp_request.return_value = {
+            "status": "error",
+            "error_code": "sandbox_unsupported_mcp",
+            "message": "unsupported",
+        }
+        mock_service_cls.return_value = mock_service
+
+        enabled_qs = MagicMock()
+        enabled_qs.exists.return_value = True
+        usage_row = SimpleNamespace(last_used_at=None, usage_count=0, save=MagicMock())
+        local_result = SimpleNamespace(data={"local": True}, content=[], is_error=False)
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        with patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.filter",
+            return_value=enabled_qs,
+        ), patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.get_or_create",
+            return_value=(usage_row, False),
+        ), patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+            return_value=True,
+        ) as mock_ensure_registered, patch.object(
+            self.manager,
+            "_ensure_event_loop",
+            return_value=loop,
+        ), patch.object(
+            self.manager,
+            "_execute_async",
+            new=AsyncMock(return_value=local_result),
+        ), patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            return_value=local_result,
+        ):
+            result = self.manager.execute_mcp_tool(agent, tool.full_name, {})
+
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(result.get("result"), {"local": True})
+        mock_service.mcp_request.assert_called_once()
+        mock_ensure_registered.assert_called_once_with(runtime, agent=agent, force_local=True)
+
     @tag("batch_mcp_tools")
     @patch("api.agent.tools.mcp_manager.requests.post")
     def test_build_runtime_refreshes_expired_oauth_token(self, mock_post):

@@ -71,3 +71,31 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(proxy_args[1], "/sandbox/compute/discover_mcp_tools")
 
         mock_delete_pod.assert_called_once_with(_discovery_pod_name("cfg-2"))
+
+    def test_discovery_continues_without_proxy_when_not_required(self):
+        backend = self._backend()
+
+        with patch("api.services.sandbox_kubernetes.get_sandbox_compute_require_proxy", return_value=False), patch(
+            "api.services.sandbox_kubernetes.select_proxy",
+            side_effect=RuntimeError("no active proxy"),
+        ), patch.object(backend, "_create_discovery_pod") as mock_create_pod, patch.object(
+            backend,
+            "_wait_for_pod_ready",
+            return_value=True,
+        ), patch.object(
+            backend,
+            "_proxy_post",
+            return_value={"status": "ok", "tools": []},
+        ), patch.object(backend, "_delete_pod") as mock_delete_pod:
+            result = backend.discover_mcp_tools(
+                "cfg-3",
+                reason="unit-test",
+                server_payload={"config_id": "cfg-3", "command": "npx"},
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        create_args = mock_create_pod.call_args
+        self.assertEqual(create_args.args[0], _discovery_pod_name("cfg-3"))
+        self.assertIsNone(create_args.kwargs.get("proxy_url"))
+        self.assertIsNone(create_args.kwargs.get("no_proxy"))
+        mock_delete_pod.assert_called_once_with(_discovery_pod_name("cfg-3"))

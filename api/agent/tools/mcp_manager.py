@@ -488,14 +488,14 @@ class MCPToolManager:
     ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
-        if config_id in self._clients and config_id in self._tools_cache:
+        if config_id in self._tools_cache:
             return True
         try:
             self._register_server(runtime, agent=agent, force_local=force_local)
         except Exception:
             logger.exception("Failed to register MCP server %s", runtime.name)
             return False
-        return True
+        return config_id in self._tools_cache
 
     def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
         try:
@@ -938,7 +938,35 @@ class MCPToolManager:
                 )
             )
         return tools
-    
+
+    def _load_cached_tools(
+        self,
+        server: MCPServerRuntime,
+        cache_fingerprint: str,
+        *,
+        sandbox_mode: bool = False,
+    ) -> bool:
+        cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
+        if not cached_payload:
+            return False
+
+        cached_tools = self._deserialize_tools_from_cache(server, cached_payload)
+        if not cached_tools:
+            return False
+
+        self._tools_cache[server.config_id] = cached_tools
+        if sandbox_mode:
+            self._clients.pop(server.config_id, None)
+
+        logger.info(
+            "Loaded %d MCP tools for '%s' (%s) from cache%s",
+            len(cached_tools),
+            server.name,
+            server.config_id,
+            " (sandbox)" if sandbox_mode else "",
+        )
+        return True
+
     def _register_server(
         self,
         server: MCPServerRuntime,
@@ -949,25 +977,15 @@ class MCPToolManager:
     ):
         """Register an MCP server and cache its tools."""
 
-        if (
+        sandbox_mode = (
             server.scope != MCPServerConfig.Scope.PLATFORM
             and self._sandbox_mcp_enabled(agent)
             and not force_local
-        ):
-            cache_fingerprint = self._build_tool_cache_fingerprint(server)
-            cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
-            if cached_payload:
-                cached_tools = self._deserialize_tools_from_cache(server, cached_payload)
-                if cached_tools:
-                    self._tools_cache[server.config_id] = cached_tools
-                    self._clients.pop(server.config_id, None)
-                    logger.info(
-                        "Loaded %d MCP tools for '%s' (%s) from cache (sandbox)",
-                        len(cached_tools),
-                        server.name,
-                        server.config_id,
-                    )
-                    return
+        )
+        cache_fingerprint = self._build_tool_cache_fingerprint(server)
+        if prefer_cache and self._load_cached_tools(server, cache_fingerprint, sandbox_mode=sandbox_mode):
+            return
+        if sandbox_mode:
             if not _sandbox_mcp_fallback_enabled():
                 logger.info(
                     "No cached MCP tools for '%s' (%s); scheduling sandbox discovery",
@@ -1041,20 +1059,8 @@ class MCPToolManager:
         client = Client(transport)
         self._clients[server.config_id] = client
 
-        cache_fingerprint = self._build_tool_cache_fingerprint(server)
-        if prefer_cache:
-            cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
-            if cached_payload:
-                cached_tools = self._deserialize_tools_from_cache(server, cached_payload)
-                if cached_tools:
-                    self._tools_cache[server.config_id] = cached_tools
-                    logger.info(
-                        "Loaded %d MCP tools for '%s' (%s) from cache",
-                        len(cached_tools),
-                        server.name,
-                        server.config_id,
-                    )
-                    return
+        if prefer_cache and self._load_cached_tools(server, cache_fingerprint):
+            return
 
         loop = self._ensure_event_loop()
         proxy_url = self._select_discovery_proxy_url(server)
@@ -1397,7 +1403,52 @@ class MCPToolManager:
             return {"status": "success", "result": content}
         except Exception as exc:
             logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
-            return {"status": "error", "message": str(exc)}
+        return {"status": "error", "message": str(exc)}
+
+    def _dispatch_sandbox_mcp_request(
+        self,
+        *,
+        agent: PersistentAgent,
+        info: MCPToolInfo,
+        runtime: MCPServerRuntime,
+        server_name: str,
+        actual_tool_name: str,
+        params: Dict[str, Any],
+        full_tool_name: str,
+    ) -> Tuple[Optional[Any], bool]:
+        try:
+            service = SandboxComputeService()
+        except SandboxComputeUnavailable as exc:
+            return {"status": "error", "message": str(exc)}, False
+
+        sandbox_result = service.mcp_request(
+            agent,
+            runtime.config_id,
+            actual_tool_name,
+            params,
+            full_tool_name=full_tool_name,
+        )
+        if (
+            isinstance(sandbox_result, dict)
+            and sandbox_result.get("error_code") == "sandbox_unsupported_mcp"
+            and _sandbox_mcp_fallback_enabled()
+        ):
+            logger.info("Sandbox MCP fallback enabled for %s; executing locally.", info.full_name)
+            return None, True
+
+        if isinstance(sandbox_result, dict):
+            if sandbox_result.get("status") == "error":
+                return sandbox_result, False
+            if "result" in sandbox_result:
+                adapted = self._adapt_tool_result(
+                    server_name,
+                    actual_tool_name,
+                    sandbox_result.get("result"),
+                )
+                adapted_result = dict(sandbox_result)
+                adapted_result["result"] = adapted
+                return adapted_result, False
+        return sandbox_result, False
 
     def execute_mcp_tool(
         self,
@@ -1466,41 +1517,20 @@ class MCPToolManager:
         sandbox_routed = bool(
             runtime
             and runtime.scope != MCPServerConfig.Scope.PLATFORM
-            and sandbox_compute_enabled_for_agent(agent)
+            and self._sandbox_mcp_enabled(agent)
             and not force_local
         )
         if sandbox_routed:
-            try:
-                service = SandboxComputeService()
-            except SandboxComputeUnavailable as exc:
-                return {"status": "error", "message": str(exc)}
-            sandbox_result = service.mcp_request(
-                agent,
-                runtime.config_id,
-                actual_tool_name,
-                params,
+            sandbox_result, sandbox_fallback = self._dispatch_sandbox_mcp_request(
+                agent=agent,
+                info=info,
+                runtime=runtime,
+                server_name=server_name,
+                actual_tool_name=actual_tool_name,
+                params=params,
                 full_tool_name=tool_name,
             )
-            if (
-                isinstance(sandbox_result, dict)
-                and sandbox_result.get("error_code") == "sandbox_unsupported_mcp"
-                and _sandbox_mcp_fallback_enabled()
-            ):
-                logger.info("Sandbox MCP fallback enabled for %s; executing locally.", info.full_name)
-                sandbox_fallback = True
-            else:
-                if isinstance(sandbox_result, dict):
-                    if sandbox_result.get("status") == "error":
-                        return sandbox_result
-                    if "result" in sandbox_result:
-                        adapted = self._adapt_tool_result(
-                            server_name,
-                            actual_tool_name,
-                            sandbox_result.get("result"),
-                        )
-                        adapted_result = dict(sandbox_result)
-                        adapted_result["result"] = adapted
-                        return adapted_result
+            if sandbox_result is not None:
                 return sandbox_result
 
         if runtime and (not sandbox_routed or sandbox_fallback):
