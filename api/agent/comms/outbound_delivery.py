@@ -3,6 +3,7 @@ import os
 import re
 from email.message import MIMEPart
 from email.utils import formataddr
+from urllib.parse import unquote
 
 from django.core.mail import get_connection
 from django.conf import settings
@@ -238,7 +239,10 @@ logger = logging.getLogger(__name__)
 
 
 _postmark_connection = None
-_CID_REFERENCE_RE = re.compile(r"cid:([^'\"<>\s)]+)", re.IGNORECASE)
+_CID_SRC_REFERENCE_RE = re.compile(
+    r"""src\s*=\s*(?:"cid:([^"]+)"|'cid:([^']+)'|cid:([^'">\s]+))""",
+    re.IGNORECASE,
+)
 
 
 def _get_postmark_connection():
@@ -323,18 +327,25 @@ def _extract_cid_lookup(html_body: str) -> tuple[dict[str, str], dict[str, list[
 
     cid_lookup: dict[str, str] = {}
     basename_lookup: dict[str, list[str]] = {}
-    for match in _CID_REFERENCE_RE.finditer(html_body):
-        raw_cid = (match.group(1) or "").strip()
+    for match in _CID_SRC_REFERENCE_RE.finditer(html_body):
+        raw_cid = next((group for group in match.groups() if group), "").strip()
         if not raw_cid:
             continue
-        normalized = raw_cid.lower()
-        cid_lookup.setdefault(normalized, raw_cid)
 
-        basename = os.path.basename(raw_cid).strip().lower()
-        if basename:
-            basename_matches = basename_lookup.setdefault(basename, [])
-            if raw_cid not in basename_matches:
-                basename_matches.append(raw_cid)
+        cid_variants = [raw_cid]
+        decoded_cid = unquote(raw_cid).strip()
+        if decoded_cid and decoded_cid != raw_cid:
+            cid_variants.append(decoded_cid)
+
+        for cid_variant in cid_variants:
+            normalized = cid_variant.lower()
+            cid_lookup.setdefault(normalized, raw_cid)
+
+            basename = os.path.basename(cid_variant).strip().lower()
+            if basename:
+                basename_matches = basename_lookup.setdefault(basename, [])
+                if raw_cid not in basename_matches:
+                    basename_matches.append(raw_cid)
     return cid_lookup, basename_lookup
 
 
