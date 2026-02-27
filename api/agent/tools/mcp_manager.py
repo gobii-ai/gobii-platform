@@ -60,6 +60,7 @@ from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
 from ...services.sandbox_compute import (
     SandboxComputeService,
     SandboxComputeUnavailable,
+    sandbox_compute_enabled,
     sandbox_compute_enabled_for_agent,
 )
 from ...services.mcp_tool_cache import (
@@ -472,13 +473,25 @@ class MCPToolManager:
         if self._last_refresh_marker is None or marker > self._last_refresh_marker:
             self._last_refresh_marker = marker
 
-    def _ensure_runtime_registered(self, runtime: MCPServerRuntime, *, force_local: bool = False) -> bool:
+    def _sandbox_mcp_enabled(self, agent: Optional[PersistentAgent]) -> bool:
+        """Return whether non-platform MCP servers should prefer sandbox routing."""
+        if agent is None:
+            return sandbox_compute_enabled()
+        return sandbox_compute_enabled_for_agent(agent)
+
+    def _ensure_runtime_registered(
+        self,
+        runtime: MCPServerRuntime,
+        *,
+        agent: Optional[PersistentAgent] = None,
+        force_local: bool = False,
+    ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
         if config_id in self._clients and config_id in self._tools_cache:
             return True
         try:
-            self._register_server(runtime, force_local=force_local)
+            self._register_server(runtime, agent=agent, force_local=force_local)
         except Exception:
             logger.exception("Failed to register MCP server %s", runtime.name)
             return False
@@ -930,6 +943,7 @@ class MCPToolManager:
         self,
         server: MCPServerRuntime,
         *,
+        agent: Optional[PersistentAgent] = None,
         force_local: bool = False,
         prefer_cache: bool = True,
     ):
@@ -937,7 +951,7 @@ class MCPToolManager:
 
         if (
             server.scope != MCPServerConfig.Scope.PLATFORM
-            and sandbox_compute_enabled_for_agent(None)
+            and self._sandbox_mcp_enabled(agent)
             and not force_local
         ):
             cache_fingerprint = self._build_tool_cache_fingerprint(server)
@@ -1242,7 +1256,7 @@ class MCPToolManager:
             runtime = self._server_cache.get(config_id)
             if not runtime:
                 continue
-            if not self._ensure_runtime_registered(runtime):
+            if not self._ensure_runtime_registered(runtime, agent=agent):
                 continue
             server_tools = self._tools_cache.get(config_id)
             if server_tools:
@@ -1428,11 +1442,6 @@ class MCPToolManager:
         server_name = info.server_name
         actual_tool_name = info.tool_name
         runtime = self._server_cache.get(info.config_id)
-        if runtime and not self._ensure_runtime_registered(runtime, force_local=force_local):
-            return {
-                "status": "error",
-                "message": f"MCP server '{server_name}' is not available",
-            }
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
 
@@ -1453,21 +1462,14 @@ class MCPToolManager:
         if param_error:
             return param_error
 
-        proxy_url = None
-        proxy_error: Optional[str] = None
-        if runtime and runtime.url:
-            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
-            if proxy_error:
-                return {"status": "error", "message": proxy_error}
-
         sandbox_fallback = False
-        if (
+        sandbox_routed = bool(
             runtime
             and runtime.scope != MCPServerConfig.Scope.PLATFORM
             and sandbox_compute_enabled_for_agent(agent)
             and not force_local
-        ):
-
+        )
+        if sandbox_routed:
             try:
                 service = SandboxComputeService()
             except SandboxComputeUnavailable as exc:
@@ -1501,12 +1503,20 @@ class MCPToolManager:
                         return adapted_result
                 return sandbox_result
 
-        if sandbox_fallback and runtime:
-            if not self._ensure_runtime_registered(runtime, force_local=True):
+        if runtime and (not sandbox_routed or sandbox_fallback):
+            local_force = force_local or sandbox_fallback
+            if not self._ensure_runtime_registered(runtime, agent=agent, force_local=local_force):
                 return {
                     "status": "error",
                     "message": f"MCP server '{server_name}' is not available",
                 }
+
+        proxy_url = None
+        proxy_error: Optional[str] = None
+        if runtime and runtime.url:
+            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
+            if proxy_error:
+                return {"status": "error", "message": proxy_error}
 
         if server_name == "pipedream":
             app_slug, mode = self._pd_parse_tool(info.tool_name)

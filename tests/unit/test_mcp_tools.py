@@ -7,6 +7,8 @@ import time
 import uuid
 from datetime import datetime, timedelta, UTC
 from contextlib import nullcontext
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
@@ -343,9 +345,144 @@ class MCPToolManagerTests(TestCase):
                 patch.object(manager, "_ensure_event_loop", return_value=loop), \
                 patch.object(manager, "_select_discovery_proxy_url", return_value=None), \
                 patch.object(manager, "_fetch_server_tools", new=_fake_fetch):
-            manager._register_server(runtime)
+            manager._register_server(runtime, force_local=True)
         transport = manager._clients[runtime.config_id].transport
         self.assertEqual(transport.headers.get("Authorization"), "Bearer token-123")
+
+    @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=False)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=True)
+    @patch("api.agent.tools.mcp_manager.schedule_mcp_tool_discovery")
+    @patch("api.agent.tools.mcp_manager.get_cached_mcp_tool_definitions", return_value=None)
+    def test_register_server_schedules_discovery_on_cache_miss(
+        self,
+        _mock_cache_get,
+        mock_schedule,
+        _mock_sandbox_enabled,
+    ):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="cache-miss-server",
+            display_name="Cache Miss Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+
+        with patch.object(self.manager, "_ensure_event_loop") as mock_loop_factory:
+            self.manager._register_server(runtime)
+
+        mock_schedule.assert_called_once_with(runtime.config_id, reason="cache_miss")
+        mock_loop_factory.assert_not_called()
+        self.assertNotIn(runtime.config_id, self.manager._clients)
+        self.assertNotIn(runtime.config_id, self.manager._tools_cache)
+
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=False)
+    def test_get_tools_for_agent_passes_agent_to_runtime_registration(self, _mock_sandbox_enabled):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="agent-aware-server",
+            display_name="Agent-aware Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        agent = SimpleNamespace(id=uuid.uuid4(), user_id=runtime.user_id)
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+
+        observed_agents: list[Any] = []
+
+        def _fake_register(_runtime, *, agent=None, force_local=False, prefer_cache=True):
+            observed_agents.append(agent)
+            self.manager._tools_cache[_runtime.config_id] = []
+
+        with patch.object(self.manager, "_needs_refresh", return_value=False), patch(
+            "api.agent.tools.mcp_manager.agent_accessible_server_configs",
+            return_value=[SimpleNamespace(id=runtime.config_id)],
+        ), patch.object(self.manager, "_register_server", side_effect=_fake_register):
+            tools = self.manager.get_tools_for_agent(agent)
+
+        self.assertEqual(tools, [])
+        self.assertEqual(observed_agents, [agent])
+
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.mcp_manager.SandboxComputeService")
+    def test_execute_mcp_tool_sandbox_path_does_not_require_local_registration(
+        self,
+        mock_service_cls,
+        _mock_sandbox_enabled_for_agent,
+    ):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="sandbox-exec-server",
+            display_name="Sandbox Exec Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+
+        mock_service = MagicMock()
+        mock_service.mcp_request.return_value = {"status": "ok", "result": {"pong": True}}
+        mock_service_cls.return_value = mock_service
+        enabled_qs = MagicMock()
+        enabled_qs.exists.return_value = True
+        usage_row = SimpleNamespace(last_used_at=None, usage_count=0, save=MagicMock())
+
+        with patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.filter",
+            return_value=enabled_qs,
+        ), patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.get_or_create",
+            return_value=(usage_row, False),
+        ), patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+            side_effect=AssertionError("local registration should not run before sandbox dispatch"),
+        ):
+            result = self.manager.execute_mcp_tool(agent, tool.full_name, {})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("result"), {"pong": True})
+        mock_service.mcp_request.assert_called_once()
 
     @tag("batch_mcp_tools")
     @patch("api.agent.tools.mcp_manager.requests.post")

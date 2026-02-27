@@ -9,9 +9,14 @@ import requests
 from django.conf import settings
 
 from api.models import AgentComputeSession
+from api.proxy_selection import select_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate
-from api.services.system_settings import get_sandbox_compute_pod_image, get_sandbox_egress_proxy_pod_image
+from api.services.system_settings import (
+    get_sandbox_compute_pod_image,
+    get_sandbox_compute_require_proxy,
+    get_sandbox_egress_proxy_pod_image,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -309,9 +314,40 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         if not server_payload:
             return {"status": "error", "message": "Missing MCP server payload for discovery."}
+
+        proxy_url: Optional[str] = None
+        no_proxy: Optional[str] = None
+        proxy_required = get_sandbox_compute_require_proxy()
+        try:
+            proxy = select_proxy(
+                allow_no_proxy_in_debug=not proxy_required,
+                context_id=f"sandbox_mcp_discovery_{server_config_id}",
+            )
+        except RuntimeError as exc:
+            if proxy_required:
+                return {"status": "error", "message": f"No proxy server available for MCP discovery: {exc}"}
+            logger.warning(
+                "MCP discovery proxy selection failed for server=%s; continuing without proxy: %s",
+                server_config_id,
+                exc,
+            )
+            proxy = None
+
+        if proxy_required and proxy is None:
+            return {"status": "error", "message": "No proxy server available for MCP discovery."}
+        if proxy is not None:
+            proxy_url = proxy.proxy_url
+            no_proxy = _merge_no_proxy_values(
+                self._no_proxy,
+                "localhost",
+                "127.0.0.1",
+                ".svc",
+                ".cluster.local",
+            )
+
         pod_name = _discovery_pod_name(server_config_id)
         try:
-            self._create_discovery_pod(pod_name)
+            self._create_discovery_pod(pod_name, proxy_url=proxy_url, no_proxy=no_proxy)
         except KubernetesApiError as exc:
             return {"status": "error", "message": f"Discovery pod create failed: {exc}"}
 
@@ -433,7 +469,13 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             if exc.status_code != 409:
                 raise
 
-    def _create_discovery_pod(self, pod_name: str) -> None:
+    def _create_discovery_pod(
+        self,
+        pod_name: str,
+        *,
+        proxy_url: Optional[str] = None,
+        no_proxy: Optional[str] = None,
+    ) -> None:
         body = _build_discovery_pod_manifest(
             pod_name=pod_name,
             namespace=self._namespace,
@@ -442,6 +484,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             service_account=self._pod_service_account,
             configmap_name=self._pod_configmap,
             secret_name=self._pod_secret,
+            proxy_url=proxy_url,
+            no_proxy=no_proxy,
         )
         try:
             self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
@@ -818,7 +862,16 @@ def _build_discovery_pod_manifest(
     service_account: str,
     configmap_name: str,
     secret_name: str,
+    proxy_url: Optional[str],
+    no_proxy: Optional[str],
 ) -> Dict[str, Any]:
+    env: list[Dict[str, str]] = []
+    if proxy_url:
+        env.append({"name": "HTTP_PROXY", "value": proxy_url})
+        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
+    if no_proxy:
+        env.append({"name": "NO_PROXY", "value": no_proxy})
+
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
         "image": image,
@@ -845,6 +898,8 @@ def _build_discovery_pod_manifest(
             "failureThreshold": 3,
         },
     }
+    if env:
+        container["env"] = env
 
     return {
         "apiVersion": "v1",
