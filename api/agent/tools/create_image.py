@@ -1,4 +1,5 @@
 import base64
+from dataclasses import dataclass
 import logging
 import mimetypes
 from typing import Any, Dict, Optional
@@ -8,12 +9,13 @@ from urllib.parse import urlparse
 import httpx
 from django.db import DatabaseError
 
-from api.models import AgentFsNode, PersistentAgent
+from api.models import AgentFsNode, PersistentAgent, PersistentAgentCompletion
 from api.agent.core.image_generation_config import (
     get_image_generation_llm_configs,
     is_image_generation_configured,
 )
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.token_usage import log_agent_completion
 from api.agent.files.attachment_helpers import (
     build_signed_filespace_download_url,
     load_signed_filespace_download_payload,
@@ -26,6 +28,44 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ASPECT_RATIO = "1:1"
 MAX_SOURCE_IMAGES = 4
+
+
+@dataclass(frozen=True)
+class GeneratedImageResult:
+    image_bytes: bytes
+    mime_type: str
+    response: Any
+
+
+class ImageGenerationResponseError(ValueError):
+    def __init__(self, message: str, *, response: Any = None) -> None:
+        super().__init__(message)
+        self.response = response
+
+
+def _provider_hint_from_model(model_name: str | None) -> str | None:
+    if not isinstance(model_name, str):
+        return None
+    if "/" not in model_name:
+        return None
+    return model_name.split("/", 1)[0]
+
+
+def _log_image_generation_completion(
+    *,
+    agent: PersistentAgent,
+    model_name: str,
+    response: Any,
+) -> None:
+    if response is None:
+        return
+    log_agent_completion(
+        agent,
+        completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+        response=response,
+        model=model_name,
+        provider=_provider_hint_from_model(model_name),
+    )
 
 
 def is_image_generation_available_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -311,7 +351,7 @@ def _generate_image_bytes(
     prompt: str,
     aspect_ratio: str,
     source_image_data_uris: list[str] | None = None,
-) -> tuple[bytes, str]:
+) -> GeneratedImageResult:
     if source_image_data_uris:
         content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
         for image_url in source_image_data_uris:
@@ -339,17 +379,22 @@ def _generate_image_bytes(
 
     image_url = _extract_image_url(response)
     if not image_url:
-        raise ValueError("endpoint returned no image payload")
+        raise ImageGenerationResponseError("endpoint returned no image payload", response=response)
 
     decoded = _decode_data_uri(image_url)
     if decoded:
-        return decoded
+        image_bytes, mime_type = decoded
+        return GeneratedImageResult(image_bytes=image_bytes, mime_type=mime_type, response=response)
 
     downloaded = _download_image(image_url)
     if downloaded:
-        return downloaded
+        image_bytes, mime_type = downloaded
+        return GeneratedImageResult(image_bytes=image_bytes, mime_type=mime_type, response=response)
 
-    raise ValueError("endpoint returned an unsupported image URL format")
+    raise ImageGenerationResponseError(
+        "endpoint returned an unsupported image URL format",
+        response=response,
+    )
 
 
 def get_create_image_tool() -> Dict[str, Any]:
@@ -435,13 +480,20 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             errors.append(f"{config.endpoint_key or config.model}: endpoint does not support image-to-image")
             continue
         try:
-            image_bytes, mime_type = _generate_image_bytes(
+            generated = _generate_image_bytes(
                 config,
                 prompt=prompt.strip(),
                 aspect_ratio=aspect_ratio,
                 source_image_data_uris=source_image_data_uris,
             )
+            _log_image_generation_completion(agent=agent, model_name=config.model, response=generated.response)
+            image_bytes = generated.image_bytes
+            mime_type = generated.mime_type
             break
+        except ImageGenerationResponseError as exc:
+            _log_image_generation_completion(agent=agent, model_name=config.model, response=exc.response)
+            errors.append(f"{config.endpoint_key or config.model}: {exc}")
+            logger.info("Image generation attempt failed: %s", errors[-1])
         except ValueError as exc:
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
             logger.info("Image generation attempt failed: %s", errors[-1])

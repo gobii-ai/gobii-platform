@@ -128,6 +128,25 @@ def _coerce_tool_calls(raw_tool_calls: Any) -> list[Any]:
         return [raw_tool_calls]
 
 
+def _message_has_images(message: Any) -> bool:
+    if message is None:
+        return False
+    images = message.get("images") if isinstance(message, dict) else getattr(message, "images", None)
+    if images:
+        return True
+
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+    if isinstance(content, list):
+        for part in content:
+            part_type = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+            if isinstance(part_type, str) and part_type.lower() in {"image_url", "image", "output_image", "input_image"}:
+                return True
+    return False
+
+
 def _message_has_tool_calls(message: Any) -> bool:
     if message is None:
         return False
@@ -189,6 +208,8 @@ def is_empty_litellm_response(response: Any) -> bool:
         return False
     reasoning_text = extract_reasoning_content(response)
     if isinstance(reasoning_text, str) and reasoning_text.strip():
+        return False
+    if _message_has_images(message):
         return False
     if _message_has_tool_calls(message):
         return False
