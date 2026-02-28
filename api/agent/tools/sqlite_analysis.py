@@ -969,7 +969,9 @@ def analyze_cardinality(values: list) -> CardinalityInfo:
     # Check if sequential (like auto-increment)
     if info.is_unique and all(isinstance(v, int) for v in non_null):
         sorted_vals = sorted(non_null)
-        if sorted_vals == list(range(sorted_vals[0], sorted_vals[-1] + 1)):
+        # Avoid materializing huge ranges (can explode memory for sparse large ints).
+        span = sorted_vals[-1] - sorted_vals[0] + 1
+        if len(sorted_vals) > 1 and span == len(sorted_vals):
             info.is_sequential = True
 
     return info

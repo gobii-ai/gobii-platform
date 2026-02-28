@@ -527,6 +527,25 @@ class CardinalityTests(SimpleTestCase):
         self.assertEqual(info.distinct_count, 3)
         self.assertEqual(info.total_count, 5)
 
+    def test_sparse_large_integers_do_not_materialize_huge_range(self):
+        """Regression: sparse large unique ints should not trigger huge range allocations."""
+        values = [
+            134662,
+            2049749369,
+            1284876922,
+            26350935,
+            142935447,
+            31654357,
+            15168993,
+            93864,
+            242,
+        ]
+        info = sqlite_analysis.analyze_cardinality(values)
+
+        self.assertEqual(info.cardinality_type, "unique")
+        self.assertTrue(info.is_unique)
+        self.assertFalse(info.is_sequential)
+
 
 @tag("sqlite_analysis")
 class DataQualityTests(SimpleTestCase):
