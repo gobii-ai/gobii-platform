@@ -12,6 +12,9 @@ from api.models import (
     BrowserLLMTier,
     BrowserTierEndpoint,
     BrowserModelEndpoint,
+    DatabaseLLMTier,
+    DatabaseTierEndpoint,
+    DatabaseModelEndpoint,
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
     EmbeddingsModelEndpoint,
@@ -104,7 +107,7 @@ def _serialize_embedding_endpoint(endpoint: EmbeddingsModelEndpoint) -> dict[str
 
 
 def _serialize_aux_endpoint(
-    endpoint: EmbeddingsModelEndpoint | FileHandlerModelEndpoint | ImageGenerationModelEndpoint,
+    endpoint: EmbeddingsModelEndpoint | FileHandlerModelEndpoint | ImageGenerationModelEndpoint | DatabaseModelEndpoint,
     *,
     endpoint_type: str,
 ) -> dict[str, Any]:
@@ -132,6 +135,10 @@ def _serialize_file_handler_endpoint(endpoint: FileHandlerModelEndpoint) -> dict
 
 def _serialize_image_generation_endpoint(endpoint: ImageGenerationModelEndpoint) -> dict[str, Any]:
     return _serialize_aux_endpoint(endpoint, endpoint_type="image_generation")
+
+
+def _serialize_database_endpoint(endpoint: DatabaseModelEndpoint) -> dict[str, Any]:
+    return _serialize_aux_endpoint(endpoint, endpoint_type="database")
 
 
 def _serialize_weighted_endpoint_reference(endpoint, tier_endpoint) -> dict[str, Any]:
@@ -171,6 +178,7 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("persistent_endpoints", queryset=PersistentModelEndpoint.objects.select_related("provider")),
             Prefetch("browser_endpoints", queryset=BrowserModelEndpoint.objects.select_related("provider")),
             Prefetch("embedding_endpoints", queryset=EmbeddingsModelEndpoint.objects.select_related("provider")),
+            Prefetch("database_endpoints", queryset=DatabaseModelEndpoint.objects.select_related("provider")),
             Prefetch("file_handler_endpoints", queryset=FileHandlerModelEndpoint.objects.select_related("provider")),
             Prefetch("image_generation_endpoints", queryset=ImageGenerationModelEndpoint.objects.select_related("provider")),
         )
@@ -180,6 +188,7 @@ def build_llm_overview() -> dict[str, Any]:
     persistent_choices: list[dict[str, Any]] = []
     browser_choices: list[dict[str, Any]] = []
     embedding_choices: list[dict[str, Any]] = []
+    database_choices: list[dict[str, Any]] = []
     file_handler_choices: list[dict[str, Any]] = []
     image_generation_choices: list[dict[str, Any]] = []
 
@@ -196,6 +205,10 @@ def build_llm_overview() -> dict[str, Any]:
             _serialize_embedding_endpoint(endpoint)
             for endpoint in provider.embedding_endpoints.all()
         ]
+        database_endpoints = [
+            _serialize_database_endpoint(endpoint)
+            for endpoint in provider.database_endpoints.all()
+        ]
         file_handler_endpoints = [
             _serialize_file_handler_endpoint(endpoint)
             for endpoint in provider.file_handler_endpoints.all()
@@ -208,6 +221,7 @@ def build_llm_overview() -> dict[str, Any]:
         persistent_choices.extend(persistent_endpoints)
         browser_choices.extend(browser_endpoints)
         embedding_choices.extend(embedding_endpoints)
+        database_choices.extend(database_endpoints)
         file_handler_choices.extend(file_handler_endpoints)
         image_generation_choices.extend(image_generation_endpoints)
 
@@ -227,6 +241,7 @@ def build_llm_overview() -> dict[str, Any]:
                     persistent_endpoints
                     + browser_endpoints
                     + embedding_endpoints
+                    + database_endpoints
                     + file_handler_endpoints
                     + image_generation_endpoints
                 ),
@@ -368,6 +383,14 @@ def build_llm_overview() -> dict[str, Any]:
     ).order_by("order")
     embedding_payload = _serialize_weighted_tier_payload(embedding_tiers)
 
+    database_tiers = DatabaseLLMTier.objects.prefetch_related(
+        Prefetch(
+            "tier_endpoints",
+            queryset=DatabaseTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
+        )
+    ).order_by("order")
+    database_payload = _serialize_weighted_tier_payload(database_tiers)
+
     file_handler_tiers = FileHandlerLLMTier.objects.prefetch_related(
         Prefetch(
             "tier_endpoints",
@@ -407,12 +430,14 @@ def build_llm_overview() -> dict[str, Any]:
         "persistent": {"ranges": persistent_payload},
         "browser": browser_payload,
         "embeddings": {"tiers": embedding_payload},
+        "databases": {"tiers": database_payload},
         "file_handlers": {"tiers": file_handler_payload},
         "image_generations": {"tiers": image_generation_payload},
         "choices": {
             "persistent_endpoints": persistent_choices,
             "browser_endpoints": browser_choices,
             "embedding_endpoints": embedding_choices,
+            "database_endpoints": database_choices,
             "file_handler_endpoints": file_handler_choices,
             "image_generation_endpoints": image_generation_choices,
         },

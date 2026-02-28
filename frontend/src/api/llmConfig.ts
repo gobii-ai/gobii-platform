@@ -25,10 +25,10 @@ export type ProviderEndpoint = {
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null
-  type: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation'
+  type: 'persistent' | 'browser' | 'embedding' | 'database' | 'file_handler' | 'image_generation'
   low_latency?: boolean
   enabled: boolean
-  provider_id: string
+  provider_id: string | null
 }
 
 export type Provider = {
@@ -110,6 +110,13 @@ export type FileHandlerTier = {
   endpoints: TierEndpoint[]
 }
 
+export type DatabaseTier = {
+  id: string
+  order: number
+  description: string
+  endpoints: TierEndpoint[]
+}
+
 export type ImageGenerationTier = {
   id: string
   order: number
@@ -121,6 +128,7 @@ export type EndpointChoices = {
   persistent_endpoints: ProviderEndpoint[]
   browser_endpoints: ProviderEndpoint[]
   embedding_endpoints: ProviderEndpoint[]
+  database_endpoints: ProviderEndpoint[]
   file_handler_endpoints: ProviderEndpoint[]
   image_generation_endpoints: ProviderEndpoint[]
 }
@@ -132,6 +140,7 @@ export type LlmOverviewResponse = {
   persistent: { ranges: TokenRange[] }
   browser: BrowserPolicy | null
   embeddings: { tiers: EmbeddingTier[] }
+  databases: { tiers: DatabaseTier[] }
   file_handlers: { tiers: FileHandlerTier[] }
   image_generations: { tiers: ImageGenerationTier[] }
   choices: EndpointChoices
@@ -172,6 +181,7 @@ const endpointPaths = {
   persistent: `${base}/persistent/endpoints/`,
   browser: `${base}/browser/endpoints/`,
   embedding: `${base}/embeddings/endpoints/`,
+  database: `${base}/database/endpoints/`,
   file_handler: `${base}/file-handlers/endpoints/`,
   image_generation: `${base}/image-generations/endpoints/`,
 } as const
@@ -299,6 +309,30 @@ export function updateFileHandlerTierEndpoint(tierEndpointId: string, payload: R
 
 export function deleteFileHandlerTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/file-handlers/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createDatabaseTier(payload: { description?: string }) {
+  return jsonRequest(`${base}/database/tiers/`, withCsrf(payload))
+}
+
+export function updateDatabaseTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/database/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteDatabaseTier(tierId: string) {
+  return jsonRequest(`${base}/database/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addDatabaseTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${base}/database/tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateDatabaseTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/database/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteDatabaseTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${base}/database/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
 export function createImageGenerationTier(payload: { description?: string }) {

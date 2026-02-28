@@ -199,6 +199,13 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconColorClass: 'text-emerald-600',
     detailKind: 'sqliteBatch',
     derive(entry, parameters) {
+      const resultObject = parseResultObject(entry.result)
+      const translationValue = resultObject?.['translation']
+      const translation =
+        translationValue && typeof translationValue === 'object' && !Array.isArray(translationValue)
+          ? (translationValue as Record<string, unknown>)
+          : null
+
       const sqlParam = parameters?.sql
       const queryParam = parameters?.query
       const queriesParam = parameters?.queries
@@ -212,9 +219,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       } else if (Array.isArray(parameters?.operations)) {
         // Fallback for backward compatibility with older tool calls
         rawQueries = parameters.operations
+      } else if (Array.isArray(translation?.queries)) {
+        rawQueries = translation.queries
+      } else if (Array.isArray(translation?.generated_statements)) {
+        rawQueries = translation.generated_statements
       }
 
       const statements = expandSqlStatements(rawQueries.map(String))
+      const instruction = coerceString(parameters?.instruction) || coerceString(translation?.instruction)
       const agentConfigUpdate = parseAgentConfigUpdates(statements)
 
       // Detect kanban-only SQL batches and transform them into a nice display
@@ -310,7 +322,11 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       }
 
       return {
-        caption: statements.length ? `${statements.length} statement${statements.length === 1 ? '' : 's'}` : 'SQL batch',
+        caption: statements.length
+          ? `${statements.length} statement${statements.length === 1 ? '' : 's'}`
+          : instruction
+            ? truncate(instruction, 56)
+            : 'SQL batch',
         sqlStatements: statements,
       }
     },

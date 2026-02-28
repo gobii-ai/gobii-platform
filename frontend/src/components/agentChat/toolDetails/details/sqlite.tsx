@@ -39,6 +39,20 @@ export function SqliteBatchDetail({ entry }: ToolDetailProps) {
     if (Array.isArray(params['operations'])) {
       return params['operations'].map(String)
     }
+    const resultObject = parseResultObject(entry.result)
+    const translationValue = resultObject?.['translation']
+    const translation =
+      translationValue && typeof translationValue === 'object' && !Array.isArray(translationValue)
+        ? (translationValue as Record<string, unknown>)
+        : null
+    const translatedQueries = translation?.['queries']
+    if (Array.isArray(translatedQueries)) {
+      return translatedQueries.map(String)
+    }
+    const generatedStatements = translation?.['generated_statements']
+    if (Array.isArray(generatedStatements)) {
+      return generatedStatements.map(String)
+    }
     return null
   })()
   const result = entry.result
