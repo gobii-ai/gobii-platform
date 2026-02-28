@@ -13,6 +13,7 @@ Set these environment variables (usually via Django settings) to enable each pro
 - `TIKTOK_ACCESS_TOKEN`
 - `GA_MEASUREMENT_ID` (already used by frontend gtag)
 - `GA_MEASUREMENT_API_SECRET` (enables server-side GA4 events)
+- `CAPI_START_TRIAL_DELAY_MINUTES` (optional, defaults to `60`; delays `StartTrial` dispatch)
 
 If a provider’s credentials are missing the task will skip it automatically.
 

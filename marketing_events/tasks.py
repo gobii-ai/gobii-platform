@@ -1,10 +1,13 @@
 import logging
 import time
+from typing import Any
 
 from celery import shared_task
 from django.conf import settings
 
 from util.analytics import Analytics
+from util.integrations import stripe_status
+from util.payments_helper import PaymentsHelper
 from .providers import get_providers
 from .providers.base import TemporaryError, PermanentError
 from .schema import normalize_event
@@ -25,6 +28,141 @@ _PROVIDER_TARGET_ALIASES = {
     "ga4": "google_analytics",
     "googleanalyticsmp": "google_analytics",
 }
+
+
+def _extract_value(container: Any, key: str):
+    if isinstance(container, dict):
+        return container.get(key)
+
+    getter = getattr(container, "get", None)
+    if callable(getter):
+        try:
+            return getter(key)
+        except TypeError:
+            pass
+
+    try:
+        return getattr(container, key)
+    except AttributeError:
+        return None
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "1", "yes"}:
+            return True
+        if lowered in {"false", "0", "no"}:
+            return False
+    return None
+
+
+def _cancel_at_period_end_from_db(subscription_id: str) -> bool | None:
+    try:
+        from djstripe.models import Subscription
+    except ImportError:
+        return None
+
+    subscription = (
+        Subscription.objects.filter(id=subscription_id)
+        .only("cancel_at_period_end", "stripe_data")
+        .first()
+    )
+    if not subscription:
+        return None
+
+    cancel_at_period_end = _coerce_bool(getattr(subscription, "cancel_at_period_end", None))
+    if cancel_at_period_end is not None:
+        return cancel_at_period_end
+
+    stripe_data = getattr(subscription, "stripe_data", {}) or {}
+    if isinstance(stripe_data, dict):
+        return _coerce_bool(stripe_data.get("cancel_at_period_end"))
+
+    return None
+
+
+def _cancel_at_period_end_from_stripe(subscription_id: str) -> bool | None:
+    status = stripe_status()
+    if not status.enabled:
+        return None
+
+    stripe_key = PaymentsHelper.get_stripe_key()
+    if not stripe_key:
+        return None
+
+    try:
+        import stripe
+    except ImportError:
+        return None
+
+    stripe.api_key = stripe_key
+    try:
+        live_subscription = stripe.Subscription.retrieve(subscription_id)
+    except stripe.error.StripeError:
+        logger.warning(
+            "Failed to refresh Stripe subscription %s before StartTrial CAPI send",
+            subscription_id,
+            exc_info=True,
+        )
+        return None
+
+    return _coerce_bool(_extract_value(live_subscription, "cancel_at_period_end"))
+
+
+def _should_send_start_trial(payload: dict) -> tuple[bool, str | None]:
+    properties = ((payload or {}).get("properties") or {})
+    subscription_id = properties.get("subscription_id")
+    if not subscription_id:
+        return True, None
+
+    normalized_subscription_id = str(subscription_id).strip()
+    if not normalized_subscription_id:
+        return True, None
+
+    decision_source: str | None = None
+    cancel_at_period_end = _cancel_at_period_end_from_stripe(normalized_subscription_id)
+    if cancel_at_period_end is not None:
+        decision_source = "stripe"
+    if cancel_at_period_end is None:
+        cancel_at_period_end = _cancel_at_period_end_from_db(normalized_subscription_id)
+        if cancel_at_period_end is not None:
+            decision_source = "db"
+
+    if cancel_at_period_end:
+        logger.info(
+            "Skipping StartTrial marketing event because subscription %s is set to cancel at period end.",
+            normalized_subscription_id,
+        )
+        return False, decision_source
+
+    return True, decision_source
+
+
+def _track_start_trial_skip(payload: dict, *, reason: str, decision_source: str | None = None) -> None:
+    user_payload = (payload or {}).get("user") or {}
+    analytics_user_id = _analytics_user_id(user_payload.get("id"), None)
+    properties_payload = (payload or {}).get("properties") or {}
+    skip_properties = {
+        "event_name": "StartTrial",
+        "reason": reason,
+    }
+
+    subscription_id = properties_payload.get("subscription_id")
+    if subscription_id:
+        skip_properties["subscription_id"] = str(subscription_id)
+    if decision_source:
+        skip_properties["decision_source"] = decision_source
+
+    Analytics.track(
+        user_id=analytics_user_id,
+        event="CAPI Event Skipped",
+        properties=skip_properties,
+    )
 
 
 def _analytics_user_id(raw_user_id, hashed_external_id):
@@ -65,16 +203,7 @@ def _provider_target_key(provider) -> str:
     return _PROVIDER_TARGET_KEY_BY_CLASS.get(provider_name, provider_name.lower())
 
 
-@shared_task(
-    bind=True,
-    autoretry_for=(TemporaryError,),
-    retry_backoff=True,
-    retry_backoff_max=60,
-    max_retries=6,
-)
-def enqueue_marketing_event(self, payload: dict):
-    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
-        return
+def _dispatch_marketing_event(payload: dict):
     evt = normalize_event(payload)
     provider_targets = _normalize_provider_targets((payload or {}).get("provider_targets"))
     analytics_user_id = _analytics_user_id(
@@ -94,7 +223,7 @@ def enqueue_marketing_event(self, payload: dict):
             if provider_targets and _provider_target_key(provider) not in provider_targets:
                 continue
             try:
-                response = provider.send(evt)
+                provider.send(evt)
                 # Track successful CAPI send for observability
                 Analytics.track(
                     user_id=analytics_user_id,
@@ -125,3 +254,37 @@ def enqueue_marketing_event(self, payload: dict):
                     },
                 )
                 continue
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(TemporaryError,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=6,
+)
+def enqueue_marketing_event(self, payload: dict):
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return
+    _dispatch_marketing_event(payload)
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(TemporaryError,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=6,
+)
+def enqueue_start_trial_marketing_event(self, payload: dict):
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return
+    should_send, decision_source = _should_send_start_trial(payload)
+    if not should_send:
+        _track_start_trial_skip(
+            payload,
+            reason="cancel_at_period_end",
+            decision_source=decision_source,
+        )
+        return
+    _dispatch_marketing_event(payload)
