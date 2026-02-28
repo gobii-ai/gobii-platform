@@ -971,7 +971,7 @@ def analyze_cardinality(values: list) -> CardinalityInfo:
         sorted_vals = sorted(non_null)
         # Avoid materializing huge ranges (can explode memory for sparse large ints).
         span = sorted_vals[-1] - sorted_vals[0] + 1
-        if span == len(sorted_vals):
+        if len(sorted_vals) > 1 and span == len(sorted_vals):
             info.is_sequential = True
 
     return info
