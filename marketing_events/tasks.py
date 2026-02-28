@@ -61,44 +61,52 @@ def _coerce_bool(value: Any) -> bool | None:
     return None
 
 
-def _cancel_at_period_end_from_db(subscription_id: str) -> bool | None:
+def _subscription_state_from_db(subscription_id: str) -> tuple[bool | None, str | None]:
     try:
         from djstripe.models import Subscription
     except ImportError:
-        return None
+        return None, None
 
     subscription = (
         Subscription.objects.filter(id=subscription_id)
-        .only("cancel_at_period_end", "stripe_data")
+        .only("cancel_at_period_end", "status", "stripe_data")
         .first()
     )
     if not subscription:
-        return None
+        return None, None
 
     cancel_at_period_end = _coerce_bool(getattr(subscription, "cancel_at_period_end", None))
-    if cancel_at_period_end is not None:
-        return cancel_at_period_end
+    status = getattr(subscription, "status", None)
+    if isinstance(status, str):
+        status = status.strip().lower() or None
+    else:
+        status = None
 
     stripe_data = getattr(subscription, "stripe_data", {}) or {}
     if isinstance(stripe_data, dict):
-        return _coerce_bool(stripe_data.get("cancel_at_period_end"))
+        if cancel_at_period_end is None:
+            cancel_at_period_end = _coerce_bool(stripe_data.get("cancel_at_period_end"))
+        if status is None:
+            raw_status = stripe_data.get("status")
+            if isinstance(raw_status, str):
+                status = raw_status.strip().lower() or None
 
-    return None
+    return cancel_at_period_end, status
 
 
-def _cancel_at_period_end_from_stripe(subscription_id: str) -> bool | None:
+def _subscription_state_from_stripe(subscription_id: str) -> tuple[bool | None, str | None]:
     status = stripe_status()
     if not status.enabled:
-        return None
+        return None, None
 
     stripe_key = PaymentsHelper.get_stripe_key()
     if not stripe_key:
-        return None
+        return None, None
 
     try:
         import stripe
     except ImportError:
-        return None
+        return None, None
 
     stripe.api_key = stripe_key
     try:
@@ -109,9 +117,13 @@ def _cancel_at_period_end_from_stripe(subscription_id: str) -> bool | None:
             subscription_id,
             exc_info=True,
         )
-        return None
+        return None, None
 
-    return _coerce_bool(_extract_value(live_subscription, "cancel_at_period_end"))
+    cancel_at_period_end = _coerce_bool(_extract_value(live_subscription, "cancel_at_period_end"))
+    raw_status = _extract_value(live_subscription, "status")
+    normalized_status = raw_status.strip().lower() if isinstance(raw_status, str) else None
+
+    return cancel_at_period_end, normalized_status
 
 
 def _should_send_start_trial(payload: dict) -> tuple[bool, str | None]:
@@ -125,17 +137,24 @@ def _should_send_start_trial(payload: dict) -> tuple[bool, str | None]:
         return True, None
 
     decision_source: str | None = None
-    cancel_at_period_end = _cancel_at_period_end_from_stripe(normalized_subscription_id)
-    if cancel_at_period_end is not None:
+    cancel_at_period_end, subscription_status = _subscription_state_from_stripe(normalized_subscription_id)
+    if cancel_at_period_end is not None or subscription_status is not None:
         decision_source = "stripe"
-    if cancel_at_period_end is None:
-        cancel_at_period_end = _cancel_at_period_end_from_db(normalized_subscription_id)
-        if cancel_at_period_end is not None:
+    if cancel_at_period_end is None and subscription_status is None:
+        cancel_at_period_end, subscription_status = _subscription_state_from_db(normalized_subscription_id)
+        if cancel_at_period_end is not None or subscription_status is not None:
             decision_source = "db"
 
     if cancel_at_period_end:
         logger.info(
             "Skipping StartTrial marketing event because subscription %s is set to cancel at period end.",
+            normalized_subscription_id,
+        )
+        return False, decision_source
+
+    if subscription_status == "canceled":
+        logger.info(
+            "Skipping StartTrial marketing event because subscription %s is already canceled.",
             normalized_subscription_id,
         )
         return False, decision_source
@@ -283,7 +302,7 @@ def enqueue_start_trial_marketing_event(self, payload: dict):
     if not should_send:
         _track_start_trial_skip(
             payload,
-            reason="cancel_at_period_end",
+            reason="subscription_canceled_or_cancel_at_period_end",
             decision_source=decision_source,
         )
         return
