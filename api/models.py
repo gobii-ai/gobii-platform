@@ -695,6 +695,10 @@ class TaskCredit(models.Model):
         default=False,
         help_text="Whether this credit was granted as an additional task beyond the plan limits"
     )
+    free_trial_start = models.BooleanField(
+        default=False,
+        help_text="Whether this credit grant was issued to start a free trial",
+    )
 
     available_credits = models.GeneratedField(
         expression=models.F('credits') - models.F('credits_used'),

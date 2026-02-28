@@ -13,6 +13,9 @@ AGENT_CRON_THROTTLE = "agent_cron_throttle"
 # Controls favicon/logo collateral assets across templates and app shell
 FISH_COLLATERAL = "fish_collateral"
 
+# Controls whether the pricing upgrade modal renders in an almost full-screen layout.
+PRICING_MODAL_ALMOST_FULL_SCREEN = "pricing_modal_almost_full_screen"
+
 
 
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
