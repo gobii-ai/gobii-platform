@@ -3,7 +3,11 @@ from unittest.mock import MagicMock, patch
 from django.test import SimpleTestCase, tag, override_settings
 
 from marketing_events.providers.base import PermanentError
-from marketing_events.tasks import _analytics_user_id, enqueue_marketing_event
+from marketing_events.tasks import (
+    _analytics_user_id,
+    enqueue_marketing_event,
+    enqueue_start_trial_marketing_event,
+)
 
 
 @tag("batch_marketing_events")
@@ -97,3 +101,104 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["user_id"], 88)
         self.assertEqual(kwargs["event"], "CAPI Event Sent")
         self.assertEqual(kwargs["properties"]["provider"], "GoogleAnalyticsMP")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._subscription_state_from_db", return_value=(None, None))
+    @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(True, "trialing"))
+    def test_enqueue_start_trial_skips_when_cancel_at_period_end(
+        self,
+        _mock_cancel_from_stripe,
+        _mock_cancel_from_db,
+        mock_track,
+        mock_dispatch,
+    ):
+        enqueue_start_trial_marketing_event(
+            {
+                "event_name": "StartTrial",
+                "properties": {
+                    "event_time": 1_900_000_000,
+                    "event_id": "evt-123",
+                    "subscription_id": "sub_123",
+                },
+                "user": {"id": "42", "email": "test@example.com"},
+                "context": {},
+            }
+        )
+
+        mock_dispatch.assert_not_called()
+        mock_track.assert_called_once()
+        track_kwargs = mock_track.call_args.kwargs
+        self.assertEqual(track_kwargs["user_id"], 42)
+        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["properties"]["event_name"], "StartTrial")
+        self.assertEqual(
+            track_kwargs["properties"]["reason"],
+            "subscription_canceled_or_cancel_at_period_end",
+        )
+        self.assertEqual(track_kwargs["properties"]["subscription_id"], "sub_123")
+        self.assertEqual(track_kwargs["properties"]["decision_source"], "stripe")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._subscription_state_from_db", return_value=(False, "trialing"))
+    @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(None, None))
+    def test_enqueue_start_trial_uses_db_fallback_and_dispatches(
+        self,
+        _mock_cancel_from_stripe,
+        _mock_cancel_from_db,
+        mock_track,
+        mock_dispatch,
+    ):
+        payload = {
+            "event_name": "StartTrial",
+            "properties": {
+                "event_time": 1_900_000_000,
+                "event_id": "evt-124",
+                "subscription_id": "sub_124",
+            },
+            "user": {"id": "42", "email": "test@example.com"},
+            "context": {},
+        }
+
+        enqueue_start_trial_marketing_event(payload)
+
+        mock_dispatch.assert_called_once_with(payload)
+        mock_track.assert_not_called()
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._subscription_state_from_db", return_value=(None, None))
+    @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(False, "canceled"))
+    def test_enqueue_start_trial_skips_when_subscription_already_canceled(
+        self,
+        _mock_state_from_stripe,
+        _mock_state_from_db,
+        mock_track,
+        mock_dispatch,
+    ):
+        enqueue_start_trial_marketing_event(
+            {
+                "event_name": "StartTrial",
+                "properties": {
+                    "event_time": 1_900_000_000,
+                    "event_id": "evt-125",
+                    "subscription_id": "sub_125",
+                },
+                "user": {"id": "42", "email": "test@example.com"},
+                "context": {},
+            }
+        )
+
+        mock_dispatch.assert_not_called()
+        mock_track.assert_called_once()
+        track_kwargs = mock_track.call_args.kwargs
+        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(
+            track_kwargs["properties"]["reason"],
+            "subscription_canceled_or_cancel_at_period_end",
+        )
+        self.assertEqual(track_kwargs["properties"]["decision_source"], "stripe")
