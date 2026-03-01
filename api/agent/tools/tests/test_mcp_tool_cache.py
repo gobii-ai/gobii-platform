@@ -126,3 +126,17 @@ class MCPToolCacheTests(SimpleTestCase):
         with patch.object(manager, "_register_server") as register_mock:
             self.assertFalse(manager._ensure_runtime_registered(runtime, require_client=True))
         register_mock.assert_called_once()
+
+    def test_ensure_runtime_registered_forces_local_register_when_shared_client_required(self):
+        manager = MCPToolManager()
+        runtime = self._runtime()
+
+        def _fake_register(server, *, agent=None, force_local=False, prefer_cache=True):
+            manager._tools_cache[server.config_id] = [self._tool(server.config_id, "mcp_example_first")]
+            if force_local:
+                manager._clients[server.config_id] = object()
+
+        with patch.object(manager, "_register_server", side_effect=_fake_register) as register_mock:
+            self.assertTrue(manager._ensure_runtime_registered(runtime, require_client=True))
+
+        register_mock.assert_called_once()

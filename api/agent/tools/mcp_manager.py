@@ -492,13 +492,18 @@ class MCPToolManager:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
         uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
+        needs_shared_client = require_client and not uses_per_agent_client
         if config_id in self._tools_cache:
             if not require_client or config_id in self._clients:
                 return True
             if uses_per_agent_client:
                 return self._runtime_per_agent_client_ready(runtime)
         try:
-            self._register_server(runtime, agent=agent, force_local=force_local)
+            self._register_server(
+                runtime,
+                agent=agent,
+                force_local=force_local or needs_shared_client,
+            )
         except Exception:
             logger.exception("Failed to register MCP server %s", runtime.name)
             return False
