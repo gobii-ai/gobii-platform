@@ -271,6 +271,8 @@ class GobiiStdioTransport(FastMCPStdioTransport):
 class MCPToolManager:
     """Manages MCP tool connections and provides search/enable/disable functionality."""
 
+    PIPEDREAM_RUNTIME_NAME = "pipedream"
+
     # Default MCP tools that should be enabled for all agents
     DEFAULT_ENABLED_TOOLS = [
         "mcp_brightdata_search_engine",
@@ -489,8 +491,12 @@ class MCPToolManager:
     ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
-        if config_id in self._tools_cache and (not require_client or config_id in self._clients):
-            return True
+        uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
+        if config_id in self._tools_cache:
+            if not require_client or config_id in self._clients:
+                return True
+            if uses_per_agent_client:
+                return self._runtime_per_agent_client_ready(runtime)
         try:
             self._register_server(runtime, agent=agent, force_local=force_local)
         except Exception:
@@ -499,8 +505,20 @@ class MCPToolManager:
         if config_id not in self._tools_cache:
             return False
         if require_client and config_id not in self._clients:
+            if uses_per_agent_client:
+                return self._runtime_per_agent_client_ready(runtime)
             return False
         return True
+
+    def _runtime_uses_per_agent_client(self, runtime: MCPServerRuntime) -> bool:
+        """Return True when execution uses dedicated per-agent clients, not shared runtime clients."""
+        return runtime.name == self.PIPEDREAM_RUNTIME_NAME
+
+    def _runtime_per_agent_client_ready(self, runtime: MCPServerRuntime) -> bool:
+        """Validate readiness for runtimes that establish clients per execution context."""
+        if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
+            return bool(self._get_pipedream_access_token())
+        return False
 
     def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
         try:
@@ -1560,9 +1578,12 @@ class MCPToolManager:
             if proxy_error:
                 return {"status": "error", "message": proxy_error}
 
-        if server_name == "pipedream":
+        if server_name == self.PIPEDREAM_RUNTIME_NAME:
             app_slug, mode = self._pd_parse_tool(info.tool_name)
-            client = self._get_pipedream_agent_client(agent, app_slug=app_slug, mode=mode)
+            try:
+                client = self._get_pipedream_agent_client(agent, app_slug=app_slug, mode=mode)
+            except RuntimeError as exc:
+                return {"status": "error", "message": str(exc)}
         else:
             client = self._clients.get(info.config_id)
             if not client:
