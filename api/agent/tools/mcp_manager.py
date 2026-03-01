@@ -489,7 +489,12 @@ class MCPToolManager:
     ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
-        if config_id in self._tools_cache and (not require_client or config_id in self._clients):
+        uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
+        if config_id in self._tools_cache and (
+            not require_client
+            or config_id in self._clients
+            or uses_per_agent_client
+        ):
             return True
         try:
             self._register_server(runtime, agent=agent, force_local=force_local)
@@ -498,9 +503,13 @@ class MCPToolManager:
             return False
         if config_id not in self._tools_cache:
             return False
-        if require_client and config_id not in self._clients:
+        if require_client and config_id not in self._clients and not uses_per_agent_client:
             return False
         return True
+
+    def _runtime_uses_per_agent_client(self, runtime: MCPServerRuntime) -> bool:
+        """Return True when execution uses dedicated per-agent clients, not shared runtime clients."""
+        return runtime.name == "pipedream"
 
     def _safe_register_runtime(self, runtime: MCPServerRuntime) -> bool:
         try:

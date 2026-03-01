@@ -1,4 +1,5 @@
 from dataclasses import replace
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag, override_settings
 from django.utils import timezone
@@ -100,3 +101,19 @@ class MCPToolCacheTests(SimpleTestCase):
         custom_fingerprint = manager._build_tool_cache_fingerprint(runtime_with_prefetch)
 
         self.assertNotEqual(fallback_fingerprint, custom_fingerprint)
+
+    def test_ensure_runtime_registered_allows_pipedream_without_shared_client(self):
+        manager = MCPToolManager()
+        runtime = replace(self._runtime(), name="pipedream")
+        manager._tools_cache[runtime.config_id] = [self._tool(runtime.config_id, "google_sheets-create-spreadsheet")]
+
+        self.assertTrue(manager._ensure_runtime_registered(runtime, require_client=True))
+
+    def test_ensure_runtime_registered_requires_shared_client_for_non_pipedream(self):
+        manager = MCPToolManager()
+        runtime = self._runtime()
+        manager._tools_cache[runtime.config_id] = [self._tool(runtime.config_id, "mcp_example_first")]
+
+        with patch.object(manager, "_register_server") as register_mock:
+            self.assertFalse(manager._ensure_runtime_registered(runtime, require_client=True))
+        register_mock.assert_called_once()
