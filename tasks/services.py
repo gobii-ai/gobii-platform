@@ -201,7 +201,15 @@ class TaskCreditService:
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Grant Subscription Credits")
-    def grant_subscription_credits(user, credit_override=None, plan=None, invoice_id="", grant_date=None, expiration_date=None) -> int:
+    def grant_subscription_credits(
+        user,
+        credit_override=None,
+        plan=None,
+        invoice_id="",
+        grant_date=None,
+        expiration_date=None,
+        free_trial_start: bool = False,
+    ) -> int:
         """
         Grants task credits to a user based on their subscription plan.
 
@@ -234,6 +242,9 @@ class TaskCreditService:
             The date when the credits expire. If not provided, it defaults to end of the users active subscription (if any),
             or 30 days from the grant date whether the grant date is provided or the current date and time.
 
+        free_trial_start : bool, optional
+            Whether this grant was issued to start a free trial.
+
         Returns:
         -------
         int
@@ -246,6 +257,7 @@ class TaskCreditService:
             span.set_attribute('user.id', user.id)
             TaskCredit = apps.get_model("api", "TaskCredit")
             existing_credit = None
+            free_trial_start = bool(free_trial_start)
 
             if invoice_id:
                 existing_credit = TaskCredit.objects.filter(
@@ -283,6 +295,7 @@ class TaskCreditService:
             span.set_attribute('credits_to_grant', credits_to_grant)
             span.set_attribute('subscription.plan', plan_id)
             span.set_attribute('subscription.invoice_id', invoice_id)
+            span.set_attribute("task_credit.free_trial_start", free_trial_start)
 
             plan_choice = PlanNamesChoices(plan_id)
 
@@ -307,8 +320,14 @@ class TaskCreditService:
                 existing_plan = getattr(existing_credit, "plan", None)
                 existing_credits = getattr(existing_credit, "credits", None)
                 existing_expiration = getattr(existing_credit, "expiration_date", None)
+                existing_free_trial_start = bool(getattr(existing_credit, "free_trial_start", False))
+                merged_free_trial_start = existing_free_trial_start or free_trial_start
 
-                if existing_plan == plan_choice and existing_credits == credits_to_grant:
+                if (
+                    existing_plan == plan_choice
+                    and existing_credits == credits_to_grant
+                    and existing_free_trial_start == merged_free_trial_start
+                ):
                     logger.debug(
                         "grant_subscription_credits %s: already granted credits for invoice %s and plan %s (same amount), returning 0",
                         user.id,
@@ -321,11 +340,14 @@ class TaskCreditService:
                 existing_credit.plan = plan_choice
                 existing_credit.credits = credits_to_grant
                 existing_credit.granted_date = grant_date
+                existing_credit.free_trial_start = merged_free_trial_start
                 if existing_expiration and expiration_date:
                     existing_credit.expiration_date = max(existing_expiration, expiration_date)
                 else:
                     existing_credit.expiration_date = expiration_date or existing_expiration
-                existing_credit.save(update_fields=["plan", "credits", "granted_date", "expiration_date"])
+                existing_credit.save(
+                    update_fields=["plan", "credits", "granted_date", "expiration_date", "free_trial_start"]
+                )
 
                 logger.info(
                     "grant_subscription_credits %s: updated TaskCredit %s for invoice %s to plan %s with %s credits",
@@ -349,6 +371,7 @@ class TaskCreditService:
                     plan=plan_choice,
                     grant_type=GrantTypeChoices.PLAN,
                     additional_task=False,  # This is a regular task credit, not an additional task
+                    free_trial_start=free_trial_start,
                 )
             except IntegrityError as exc:
                 if plan_id == PlanNames.FREE and "uniq_free_plan_block_per_month" in str(exc):

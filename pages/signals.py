@@ -2034,8 +2034,13 @@ def handle_subscription_event(event, **kwargs):
                     credit_override = None
                     grant_invoice_id = invoice_id or ""
                     expiration_override = None
+                    free_trial_start_grant = False
                     if sub.status == "trialing":
                         expiration_override = _trial_paid_period_end(trial_end_dt, current_period_end_dt)
+                        free_trial_start_grant = bool(
+                            billing_reason == "subscription_create"
+                            or (billing_reason is None and event_type == "customer.subscription.created")
+                        )
                         if not grant_invoice_id:
                             anchor_dt = trial_start_dt or current_period_start_dt
                             anchor = anchor_dt.date().isoformat() if anchor_dt else "start"
@@ -2109,6 +2114,7 @@ def handle_subscription_event(event, **kwargs):
                             invoice_id=grant_invoice_id,
                             credit_override=credit_override,
                             expiration_date=expiration_override,
+                            free_trial_start=free_trial_start_grant,
                         )
 
                 try:
