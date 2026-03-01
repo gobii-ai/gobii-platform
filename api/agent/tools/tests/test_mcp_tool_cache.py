@@ -107,7 +107,16 @@ class MCPToolCacheTests(SimpleTestCase):
         runtime = replace(self._runtime(), name="pipedream")
         manager._tools_cache[runtime.config_id] = [self._tool(runtime.config_id, "google_sheets-create-spreadsheet")]
 
-        self.assertTrue(manager._ensure_runtime_registered(runtime, require_client=True))
+        with patch.object(manager, "_get_pipedream_access_token", return_value="token"):
+            self.assertTrue(manager._ensure_runtime_registered(runtime, require_client=True))
+
+    def test_ensure_runtime_registered_requires_pipedream_credentials(self):
+        manager = MCPToolManager()
+        runtime = replace(self._runtime(), name="pipedream")
+        manager._tools_cache[runtime.config_id] = [self._tool(runtime.config_id, "google_sheets-create-spreadsheet")]
+
+        with patch.object(manager, "_get_pipedream_access_token", return_value=None):
+            self.assertFalse(manager._ensure_runtime_registered(runtime, require_client=True))
 
     def test_ensure_runtime_registered_requires_shared_client_for_non_pipedream(self):
         manager = MCPToolManager()
