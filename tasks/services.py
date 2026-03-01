@@ -322,17 +322,31 @@ class TaskCreditService:
                 existing_expiration = getattr(existing_credit, "expiration_date", None)
                 existing_free_trial_start = bool(getattr(existing_credit, "free_trial_start", False))
                 merged_free_trial_start = existing_free_trial_start or free_trial_start
-
-                if (
+                same_plan_and_amount = (
                     existing_plan == plan_choice
                     and existing_credits == credits_to_grant
-                    and existing_free_trial_start == merged_free_trial_start
-                ):
+                )
+
+                if same_plan_and_amount and existing_free_trial_start == merged_free_trial_start:
                     logger.debug(
                         "grant_subscription_credits %s: already granted credits for invoice %s and plan %s (same amount), returning 0",
                         user.id,
                         invoice_id,
                         plan_choice,
+                    )
+                    return 0
+
+                # Merge trial-start attribution for replayed invoice events without
+                # mutating historical grant timing.
+                if same_plan_and_amount:
+                    existing_credit.free_trial_start = merged_free_trial_start
+                    existing_credit.save(update_fields=["free_trial_start"])
+                    logger.info(
+                        "grant_subscription_credits %s: updated TaskCredit %s for invoice %s to free_trial_start=%s",
+                        user.id,
+                        existing_credit.id,
+                        invoice_id,
+                        merged_free_trial_start,
                     )
                     return 0
 

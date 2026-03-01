@@ -107,6 +107,7 @@ class TaskCreditServiceGrantSubscriptionCreditsTests(TestCase):
         existing_credit.plan = PlanNames.STARTUP
         existing_credit.credits = 5
         existing_credit.expiration_date = datetime(2024, 1, 31)
+        existing_credit.granted_date = datetime(2023, 12, 31)
         existing_credit.free_trial_start = False
         TaskCredit.objects.filter.return_value.first.return_value = existing_credit
 
@@ -126,11 +127,13 @@ class TaskCreditServiceGrantSubscriptionCreditsTests(TestCase):
             free_trial_start=True,
         )
 
-        self.assertEqual(granted, 5)
+        self.assertEqual(granted, 0)
         self.assertTrue(existing_credit.free_trial_start)
+        self.assertEqual(existing_credit.granted_date, datetime(2023, 12, 31))
+        self.assertEqual(existing_credit.expiration_date, datetime(2024, 1, 31))
         existing_credit.save.assert_called_once()
         save_kwargs = existing_credit.save.call_args.kwargs
-        self.assertIn("free_trial_start", save_kwargs["update_fields"])
+        self.assertEqual(save_kwargs["update_fields"], ["free_trial_start"])
 
 
 @tag("batch_task_credits")
