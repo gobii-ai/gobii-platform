@@ -257,11 +257,13 @@ def max_allowed_tier_for_plan(
     return AgentLLMTier.STANDARD
 
 
-def apply_user_quota_tier_override(owner: Any | None, max_allowed: AgentLLMTier) -> AgentLLMTier:
-    """Apply a per-user quota tier override when configured for user-owned agents."""
+
+
+def get_user_quota_tier_override(owner: Any | None) -> AgentLLMTier | None:
+    """Return a valid per-user tier override, or None when unset/invalid."""
 
     if owner is None or _is_org_owner(owner):
-        return max_allowed
+        return None
 
     tier_key: str | None = None
     quota = getattr(owner, "quota", None)
@@ -276,17 +278,21 @@ def apply_user_quota_tier_override(owner: Any | None, max_allowed: AgentLLMTier)
                 .first()
             )
         except (AppRegistryNotReady, DatabaseError, LookupError):
-            tier_key = None
+            return None
 
     if not tier_key:
-        return max_allowed
+        return None
 
     try:
-        cap_tier = AgentLLMTier(str(tier_key).strip().lower())
+        return AgentLLMTier(str(tier_key).strip().lower())
     except ValueError:
-        return max_allowed
+        return None
 
-    return cap_tier
+def apply_user_quota_tier_override(owner: Any | None, max_allowed: AgentLLMTier) -> AgentLLMTier:
+    """Apply a per-user quota tier override when configured for user-owned agents."""
+
+    override_tier = get_user_quota_tier_override(owner)
+    return override_tier if override_tier is not None else max_allowed
 
 def apply_user_quota_tier_cap(owner: Any | None, max_allowed: AgentLLMTier) -> AgentLLMTier:
     """Backwards-compatible alias for apply_user_quota_tier_override."""
@@ -557,6 +563,8 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
         allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
 
     if is_first_loop:
+        if get_user_quota_tier_override(owner) is None:
+            return AgentLLMTier.PREMIUM
         return _clamp_tier(AgentLLMTier.PREMIUM, allowed_tier)
 
     preferred_value = getattr(agent, "preferred_llm_tier", None)
