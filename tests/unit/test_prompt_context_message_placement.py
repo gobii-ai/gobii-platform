@@ -40,6 +40,8 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertNotIn(sqlite_examples, user_message["content"])
         all_contents = "\n".join(message["content"] for message in context)
         self.assertEqual(all_contents.count(sqlite_examples), 1)
+        self.assertIn("<sqlite_examples>", system_message["content"])
+        self.assertIn("</sqlite_examples>", system_message["content"])
 
     @patch("api.agent.core.prompt_context.get_prompt_token_budget", return_value=1000)
     @patch("api.agent.core.prompt_context._create_token_estimator", return_value=lambda _: 100)
