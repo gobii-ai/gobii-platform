@@ -46,13 +46,25 @@ class _DummyBackend:
         )
         return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
 
-    def run_command(self, agent, session, command, *, cwd=None, env=None, timeout=None, interactive=False):
+    def run_command(
+        self,
+        agent,
+        session,
+        command,
+        *,
+        cwd=None,
+        env=None,
+        trusted_env_keys=None,
+        timeout=None,
+        interactive=False,
+    ):
         self.run_command_calls.append(
             {
                 "agent_id": str(agent.id),
                 "command": command,
                 "cwd": cwd,
                 "env": env or {},
+                "trusted_env_keys": trusted_env_keys or [],
                 "timeout": timeout,
                 "interactive": interactive,
             }
@@ -331,6 +343,7 @@ class SandboxComputeSyncTests(TestCase):
         merged_env = backend.run_command_calls[0]["env"]
         self.assertEqual(merged_env["SANDBOX_TOKEN"], "from-secret")
         self.assertEqual(merged_env["EXTRA"], "caller-value")
+        self.assertEqual(backend.run_command_calls[0]["trusted_env_keys"], ["SANDBOX_TOKEN"])
 
     def test_python_exec_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()
@@ -364,6 +377,10 @@ class SandboxComputeSyncTests(TestCase):
         merged_env = backend.tool_calls[0]["params"]["env"]
         self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")
         self.assertEqual(merged_env["KEEP_ME"], "yes")
+        self.assertEqual(
+            backend.tool_calls[0]["params"]["trusted_env_keys"],
+            ["OPENAI_API_KEY"],
+        )
 
     def test_mcp_request_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()

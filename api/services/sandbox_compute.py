@@ -7,7 +7,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 
 import requests
 from celery.exceptions import CeleryError
@@ -151,13 +151,18 @@ def _allowed_env_keys() -> set[str]:
     }
 
 
-def _sanitize_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+def _sanitize_env(
+    extra_env: Optional[Dict[str, str]] = None,
+    trusted_env_keys: Optional[Sequence[str]] = None,
+) -> Dict[str, str]:
     allowed = _allowed_env_keys()
+    trusted = {str(key) for key in (trusted_env_keys or []) if isinstance(key, str) and key.strip()}
     env = {key: value for key, value in os.environ.items() if key in allowed}
     env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
     if extra_env:
         for key, value in extra_env.items():
-            if key in allowed or str(key).startswith("SANDBOX_"):
+            key_str = str(key)
+            if key_str in allowed or key_str.startswith("SANDBOX_") or key_str in trusted:
                 env[str(key)] = str(value)
     return env
 
@@ -196,9 +201,18 @@ def _merge_agent_env_vars(
     agent: Optional[PersistentAgent],
     base_env: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
-    merged = {str(k): str(v) for k, v in (base_env or {}).items()}
-    merged.update(_resolved_env_var_secrets_for_agent(agent))
+    merged, _ = _merge_agent_env_vars_with_secret_keys(agent, base_env)
     return merged
+
+
+def _merge_agent_env_vars_with_secret_keys(
+    agent: Optional[PersistentAgent],
+    base_env: Optional[Dict[str, Any]] = None,
+) -> tuple[Dict[str, str], list[str]]:
+    merged = {str(k): str(v) for k, v in (base_env or {}).items()}
+    secret_env = _resolved_env_var_secrets_for_agent(agent)
+    merged.update(secret_env)
+    return merged, sorted(secret_env.keys())
 
 
 def _stderr_summary(stderr: str) -> str:
@@ -252,6 +266,7 @@ class SandboxComputeBackend:
         *,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
+        trusted_env_keys: Optional[Sequence[str]] = None,
         timeout: Optional[int] = None,
         interactive: bool = False,
     ) -> Dict[str, Any]:
@@ -324,6 +339,7 @@ class LocalSandboxBackend(SandboxComputeBackend):
         *,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
+        trusted_env_keys: Optional[Sequence[str]] = None,
         timeout: Optional[int] = None,
         interactive: bool = False,
     ) -> Dict[str, Any]:
@@ -338,7 +354,7 @@ class LocalSandboxBackend(SandboxComputeBackend):
                 command,
                 shell=True,
                 cwd=cwd or None,
-                env=_sanitize_env(env),
+                env=_sanitize_env(env, trusted_env_keys=trusted_env_keys),
                 capture_output=True,
                 text=True,
                 timeout=timeout_value,
@@ -488,6 +504,7 @@ class HttpSandboxBackend(SandboxComputeBackend):
         *,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
+        trusted_env_keys: Optional[Sequence[str]] = None,
         timeout: Optional[int] = None,
         interactive: bool = False,
     ) -> Dict[str, Any]:
@@ -500,6 +517,8 @@ class HttpSandboxBackend(SandboxComputeBackend):
             "timeout": timeout_value,
             "interactive": interactive,
         }
+        if trusted_env_keys:
+            payload["trusted_env_keys"] = [str(key) for key in trusted_env_keys if str(key)]
         proxy_env = _proxy_env_for_session(session)
         if proxy_env:
             payload["proxy_env"] = proxy_env
@@ -669,11 +688,14 @@ def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
     extra_env = params.get("env")
     if not isinstance(extra_env, dict):
         extra_env = None
+    trusted_env_keys = params.get("trusted_env_keys")
+    if not isinstance(trusted_env_keys, list):
+        trusted_env_keys = []
 
     try:
         result = subprocess.run(
             [sys.executable, "-c", code],
-            env=_sanitize_env(extra_env),
+            env=_sanitize_env(extra_env, trusted_env_keys=trusted_env_keys),
             capture_output=True,
             text=True,
             timeout=timeout_value,
@@ -1079,7 +1101,7 @@ class SandboxComputeService:
         interactive: bool = False,
     ) -> Dict[str, Any]:
         session = self._ensure_session(agent, source="run_command")
-        merged_env = _merge_agent_env_vars(agent, env)
+        merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, env)
         backend_env = merged_env if merged_env else (env if env else None)
         result = self._backend.run_command(
             agent,
@@ -1087,6 +1109,7 @@ class SandboxComputeService:
             command,
             cwd=cwd,
             env=backend_env,
+            trusted_env_keys=trusted_secret_keys or None,
             timeout=timeout,
             interactive=interactive,
         )
@@ -1131,9 +1154,11 @@ class SandboxComputeService:
             existing_env = params_payload.get("env")
             if not isinstance(existing_env, dict):
                 existing_env = {}
-            merged_env = _merge_agent_env_vars(agent, existing_env)
+            merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, existing_env)
             if merged_env:
                 params_payload["env"] = merged_env
+            if trusted_secret_keys:
+                params_payload["trusted_env_keys"] = trusted_secret_keys
         result = self._backend.tool_request(agent, session, tool_name, params_payload)
         if isinstance(result, dict) and result.get("status") != "error":
             if _sync_on_tool_call():
