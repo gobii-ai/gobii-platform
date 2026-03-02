@@ -62,6 +62,7 @@ from api.agent.core.llm_config import (
     get_llm_tier_label,
     get_llm_tier_multipliers,
     get_llm_tier_ranks,
+    apply_user_quota_tier_override,
     max_allowed_tier_for_plan,
 )
 from api.agent.avatar import maybe_schedule_agent_avatar
@@ -326,6 +327,7 @@ def build_llm_intelligence_props(
             plan = get_user_plan(owner)
 
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
+    allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
     system_default_tier = get_system_default_tier().value
     tier_ranks = get_llm_tier_ranks()
     allowed_rank = tier_ranks.get(allowed_tier.value)
@@ -4870,6 +4872,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 plan = None
 
         allowed_llm_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
+        allowed_llm_tier = apply_user_quota_tier_override(owner, allowed_llm_tier)
         if settings.GOBII_PROPRIETARY_MODE:
             can_edit_intelligence = bool(
                 owner is not None
