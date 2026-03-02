@@ -615,14 +615,14 @@ class PersistentAgentToolCreditTests(TestCase):
     def test_daily_credit_state_multi_week_decay_enables_pause(self):
         state = self._build_daily_state_with_inactivity(
             inactive_days=21,
-            burn_rate_per_hour=Decimal("3"),
+            burn_rate_per_hour=Decimal("6"),
         )
 
         self.assertEqual(state["burn_rate_inactive_weeks"], 3)
         self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("8"))
-        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("1.000"))
+        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("4.000"))
         self.assertLess(state["burn_rate_threshold_per_hour"], state["burn_rate_per_hour"])
-        self.assertGreater(state["burn_rate_base_threshold_per_hour"], state["burn_rate_per_hour"])
+        self.assertLess(state["burn_rate_per_hour"], state["burn_rate_base_threshold_per_hour"])
 
         with patch(
             "api.agent.core.burn_control.has_recent_user_message",

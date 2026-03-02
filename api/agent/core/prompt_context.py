@@ -1431,7 +1431,7 @@ def _get_effective_burn_threshold(
         if effective_threshold <= Decimal("0"):
             effective_threshold = Decimal("0")
         elif inactive_weeks > 0:
-            effective_threshold = effective_threshold / (Decimal("2") ** inactive_weeks)
+            effective_threshold = effective_threshold / Decimal("2")
         return effective_threshold.quantize(
             Decimal("0.001"),
             rounding=ROUND_HALF_UP,
