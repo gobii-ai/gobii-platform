@@ -1175,7 +1175,6 @@ class PromptConfigAdmin(admin.ModelAdmin):
                     "max_tool_call_history_limit",
                     "ultra_tool_call_history_limit",
                     "ultra_max_tool_call_history_limit",
-                    "browser_task_unified_history_limit",
                 )
             },
         ),
@@ -1200,6 +1199,7 @@ class PromptConfigAdmin(admin.ModelAdmin):
                     "max_unified_history_limit",
                     "ultra_unified_history_limit",
                     "ultra_max_unified_history_limit",
+                    "browser_task_unified_history_limit",
                 )
             },
         ),
