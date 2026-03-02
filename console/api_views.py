@@ -415,6 +415,7 @@ def _build_completion_params(
     *,
     model_attr: str,
     base_attr: str,
+    normalize_model: bool = True,
     default_temperature: float = 0.1,
     default_max_tokens: int = 96,
 ) -> tuple[str, dict[str, Any]]:
@@ -429,7 +430,7 @@ def _build_completion_params(
     if not raw_model:
         raise ValueError("Endpoint does not specify a model identifier")
     api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
-    model = normalize_model_name(provider, raw_model, api_base=api_base)
+    model = normalize_model_name(provider, raw_model, api_base=api_base) if normalize_model else raw_model
 
     supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
     temperature: float | None = None
@@ -518,12 +519,21 @@ def _extract_completion_preview(response: Any) -> str:
     return (content or "").strip()
 
 
-def _run_completion_test(endpoint, provider: LLMProvider, *, model_attr: str, base_attr: str, default_max_tokens: int) -> dict[str, Any]:
+def _run_completion_test(
+    endpoint,
+    provider: LLMProvider,
+    *,
+    model_attr: str,
+    base_attr: str,
+    default_max_tokens: int,
+    normalize_model: bool = True,
+) -> dict[str, Any]:
     model, params = _build_completion_params(
         endpoint,
         provider,
         model_attr=model_attr,
         base_attr=base_attr,
+        normalize_model=normalize_model,
         default_max_tokens=default_max_tokens,
     )
     started = time.monotonic()
@@ -3080,6 +3090,7 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
                     model_attr="browser_model",
                     base_attr="browser_base_url",
                     default_max_tokens=endpoint.max_output_tokens or 128,
+                    normalize_model=False,
                 )
             elif kind == "embedding":
                 endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
