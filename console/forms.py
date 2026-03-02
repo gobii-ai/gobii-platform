@@ -795,7 +795,7 @@ class PersistentAgentEditSecretForm(forms.Form):
             'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
         }),
         label='Secret Name',
-        help_text='Human-readable name for this secret. The key will be updated automatically.'
+        help_text='Human-readable name for this secret. Existing key references remain stable.'
     )
     
     description = forms.CharField(

@@ -555,6 +555,38 @@ class AgentSecretsRequestViewTests(TestCase):
         self.assertFalse(s1.requested)
         self.assertTrue(s2.requested)
 
+    def test_edit_secret_keeps_existing_key_when_name_changes(self):
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://api.example.com",
+            name="Original Name",
+            key="api_key",
+            requested=False,
+        )
+        secret.set_value("old-value")
+        secret.save()
+
+        edit_url = reverse(
+            "agent_secrets_edit",
+            kwargs={"pk": self.agent.id, "secret_id": secret.id},
+        )
+        response = self.client.post(
+            edit_url,
+            data={
+                "secret_type": "credential",
+                "domain": "https://api.example.com",
+                "name": "Updated Display Name",
+                "description": "updated description",
+                "value": "new-value",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        secret.refresh_from_db()
+        self.assertEqual(secret.key, "api_key")
+        self.assertEqual(secret.name, "Updated Display Name")
+
 
     def test_missing_required_fields(self):
         """Test that missing required fields in credentials causes error."""

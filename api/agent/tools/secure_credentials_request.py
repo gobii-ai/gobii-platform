@@ -124,7 +124,9 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
                 normalized_key = str(key).strip().upper()
             else:
                 if not domain_pattern:
-                    errors.append(f"Missing required fields for credential: {cred}")
+                    errors.append(
+                        f"Missing required fields for credential (domain_pattern required for secret_type=credential): {cred}"
+                    )
                     continue
                 try:
                     DomainPatternValidator.validate_domain_pattern(str(domain_pattern))

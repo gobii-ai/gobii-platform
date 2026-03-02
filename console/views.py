@@ -6240,8 +6240,7 @@ class AgentSecretsEditView(LoginRequiredMixin, TemplateView):
                     # Update name and description
                     secret.name = new_name
                     secret.description = new_description
-                    # Force key regeneration from the edited name/type/scope.
-                    secret.key = ""
+                    # Preserve key stability on edit to avoid breaking existing references.
                     secret.full_clean()
                     secret.set_value(new_value)  # This validates and encrypts the value
                     secret.save()
