@@ -38,8 +38,8 @@ class ConsoleLlmEndpointTestApiTests(TestCase):
             content_type="application/json",
         )
 
-    @patch("console.api_views.run_completion")
-    def test_browser_test_endpoint_uses_raw_model(self, mock_run_completion):
+    @patch("console.api_views._init_browser_chat_client")
+    def test_browser_test_endpoint_uses_raw_model(self, mock_init_browser_chat_client):
         endpoint = BrowserModelEndpoint.objects.create(
             key="browser-endpoint-raw-model",
             provider=self.provider,
@@ -47,10 +47,8 @@ class ConsoleLlmEndpointTestApiTests(TestCase):
             browser_base_url="https://proxy.example/v1",
             enabled=True,
         )
-        mock_run_completion.return_value = SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="READY"))],
-            usage={"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
-        )
+        mock_client = SimpleNamespace(invoke=lambda _: SimpleNamespace(content="READY"))
+        mock_init_browser_chat_client.return_value = mock_client
 
         with patch.dict(environ, {"TEST_CONSOLE_PROVIDER_KEY": "test-key"}):
             response = self._post_json(
@@ -60,8 +58,31 @@ class ConsoleLlmEndpointTestApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["model"], "gpt-4o-mini")
-        mock_run_completion.assert_called_once()
-        self.assertEqual(mock_run_completion.call_args.kwargs["model"], "gpt-4o-mini")
+        mock_init_browser_chat_client.assert_called_once()
+        self.assertEqual(mock_init_browser_chat_client.call_args.kwargs["model"], "gpt-4o-mini")
+
+
+    @patch("console.api_views._init_browser_chat_client")
+    def test_browser_test_endpoint_uses_sk_noauth_for_openai_compat_base(self, mock_init_browser_chat_client):
+        endpoint = BrowserModelEndpoint.objects.create(
+            key="browser-openai-compat-noauth",
+            provider=self.provider,
+            browser_model="gpt-4o-mini",
+            browser_base_url="https://proxy.example/v1",
+            enabled=True,
+        )
+        mock_init_browser_chat_client.return_value = SimpleNamespace(
+            invoke=lambda _: SimpleNamespace(content="READY")
+        )
+
+        with patch.dict(environ, {"TEST_CONSOLE_PROVIDER_KEY": ""}):
+            response = self._post_json(
+                "console_llm_test_endpoint",
+                {"endpoint_id": str(endpoint.id), "kind": "browser"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(mock_init_browser_chat_client.call_args.kwargs["api_key"], "sk-noauth")
 
     @patch("console.api_views.run_completion")
     def test_persistent_test_endpoint_still_normalizes_model(self, mock_run_completion):

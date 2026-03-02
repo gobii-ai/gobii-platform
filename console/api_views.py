@@ -415,7 +415,6 @@ def _build_completion_params(
     *,
     model_attr: str,
     base_attr: str,
-    normalize_model: bool = True,
     default_temperature: float = 0.1,
     default_max_tokens: int = 96,
 ) -> tuple[str, dict[str, Any]]:
@@ -430,7 +429,7 @@ def _build_completion_params(
     if not raw_model:
         raise ValueError("Endpoint does not specify a model identifier")
     api_base = (getattr(endpoint, base_attr, "") or "").strip() or None
-    model = normalize_model_name(provider, raw_model, api_base=api_base) if normalize_model else raw_model
+    model = normalize_model_name(provider, raw_model, api_base=api_base)
 
     supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
     temperature: float | None = None
@@ -519,21 +518,92 @@ def _extract_completion_preview(response: Any) -> str:
     return (content or "").strip()
 
 
-def _run_completion_test(
-    endpoint,
-    provider: LLMProvider,
-    *,
-    model_attr: str,
-    base_attr: str,
-    default_max_tokens: int,
-    normalize_model: bool = True,
-) -> dict[str, Any]:
+def _init_browser_chat_client(*, provider: LLMProvider, model: str, api_key: str, api_base: str | None, max_tokens: int):
+    params: dict[str, Any] = {
+        "api_key": api_key,
+        "temperature": 0,
+        "model": model,
+        "max_output_tokens": max_tokens,
+    }
+
+    backend = provider.browser_backend
+    if backend == LLMProvider.BrowserBackend.GOOGLE:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(**params)
+    if backend == LLMProvider.BrowserBackend.ANTHROPIC:
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(**params)
+
+    if provider.key == "openrouter":
+        headers = get_attribution_headers()
+        if headers:
+            params["default_headers"] = headers
+    if api_base:
+        params["base_url"] = api_base
+
+    from langchain_openai import ChatOpenAI
+
+    return ChatOpenAI(**params)
+
+
+def _run_browser_completion_test(endpoint: BrowserModelEndpoint) -> dict[str, Any]:
+    if not endpoint.enabled:
+        raise ValueError("Endpoint is disabled")
+    provider = endpoint.provider
+    if provider is None:
+        raise ValueError("Endpoint is missing a linked provider")
+    if not provider.enabled:
+        raise ValueError("Provider is disabled")
+
+    raw_model = (endpoint.browser_model or "").strip()
+    if not raw_model:
+        raise ValueError("Endpoint does not specify a model identifier")
+
+    api_base = (endpoint.browser_base_url or "").strip() or None
+    api_key = _resolve_provider_api_key(provider)
+    if (
+        not api_key
+        and provider.browser_backend == LLMProvider.BrowserBackend.OPENAI_COMPAT
+        and api_base
+    ):
+        api_key = "sk-noauth"
+    if not api_key:
+        raise ValueError("Configure an API key or environment variable for this provider before testing")
+
+    max_tokens = endpoint.max_output_tokens or 128
+    llm = _init_browser_chat_client(
+        provider=provider,
+        model=raw_model,
+        api_key=api_key,
+        api_base=api_base,
+        max_tokens=max_tokens,
+    )
+
+    started = time.monotonic()
+    response = llm.invoke("Respond with the word READY.")
+    latency_ms = int((time.monotonic() - started) * 1000)
+    preview = (getattr(response, "content", "") or "").strip()
+
+    return {
+        "message": "Endpoint responded successfully.",
+        "model": raw_model,
+        "provider": provider.display_name,
+        "preview": preview,
+        "latency_ms": latency_ms,
+        "total_tokens": None,
+        "prompt_tokens": None,
+        "completion_tokens": None,
+    }
+
+
+def _run_completion_test(endpoint, provider: LLMProvider, *, model_attr: str, base_attr: str, default_max_tokens: int) -> dict[str, Any]:
     model, params = _build_completion_params(
         endpoint,
         provider,
         model_attr=model_attr,
         base_attr=base_attr,
-        normalize_model=normalize_model,
         default_max_tokens=default_max_tokens,
     )
     started = time.monotonic()
@@ -3084,14 +3154,7 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
                 )
             elif kind == "browser":
                 endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
-                result = _run_completion_test(
-                    endpoint,
-                    endpoint.provider,
-                    model_attr="browser_model",
-                    base_attr="browser_base_url",
-                    default_max_tokens=endpoint.max_output_tokens or 128,
-                    normalize_model=False,
-                )
+                result = _run_browser_completion_test(endpoint)
             elif kind == "embedding":
                 endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
                 result = _run_embedding_test(endpoint)
