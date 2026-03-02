@@ -106,8 +106,45 @@ type MessageSignature = {
   timestampMs: number | null
 }
 
+function normalizePlainSignatureText(value: string): string {
+  return value
+    .trim()
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, '&')
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+}
+
+function normalizeHtmlSignatureText(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+  if (typeof document === 'undefined') {
+    return normalizePlainSignatureText(decodeHtmlEntities(trimmed.replace(/<[^>]+>/g, ' ')))
+  }
+
+  const container = document.createElement('div')
+  container.innerHTML = trimmed
+  return normalizePlainSignatureText(container.textContent || container.innerText || '')
+}
+
 function buildMessageSignature(message: AgentMessage): MessageSignature {
-  const text = (message.bodyText || message.bodyHtml || '').trim()
+  const textSource = message.bodyText?.trim() ? message.bodyText : message.bodyHtml || ''
+  const text = message.bodyText?.trim()
+    ? normalizePlainSignatureText(textSource)
+    : normalizeHtmlSignatureText(textSource)
   const attachmentsCount = message.attachments?.length ?? 0
   const timestampMs = message.timestamp ? Date.parse(message.timestamp) : null
   return {
