@@ -1923,6 +1923,17 @@ class PromptConfigFunctionTests(TestCase):
             self.assertEqual(tool_call_history_limit(self.agent), config.max_tool_call_history_limit)
 
 
+    def test_browser_task_unified_history_limit_setting(self):
+        from api.agent.core.prompt_context import browser_task_unified_history_limit
+
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.browser_task_unified_history_limit = 12
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        self.assertEqual(browser_task_unified_history_limit(), 12)
+
+
 @tag("batch_event_processing")
 class EventProcessingRuntimeGuardTests(TestCase):
     def setUp(self):

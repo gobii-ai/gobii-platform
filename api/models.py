@@ -39,6 +39,7 @@ from api.services.prompt_settings import (
     DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT,
     DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET,
     DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
+    DEFAULT_BROWSER_TASK_UNIFIED_HISTORY_LIMIT,
     DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT,
     DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET,
     DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT,
@@ -1548,6 +1549,11 @@ class PromptConfig(models.Model):
         default=DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Number of recent tool calls included for ultra max tier agents.",
+    )
+    browser_task_unified_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_BROWSER_TASK_UNIFIED_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Maximum number of completed browser tasks included in unified history.",
     )
     standard_enabled_tool_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
