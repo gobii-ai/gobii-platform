@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 import shutil
 import tempfile
@@ -147,6 +148,53 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
+
+    def test_prompt_discourages_messages_freshness_polling(self):
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Fresh inbound message for this run",
+            seq=f"FRESH{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        system_content = system_message["content"]
+        user_content = user_message["content"]
+        combined = f"{system_content}\n{user_content}"
+
+        self.assertRegex(
+            combined,
+            re.compile(r"do not (?:query|poll)\s+__messages.*anything new", re.IGNORECASE),
+        )
+        self.assertRegex(
+            combined,
+            re.compile(
+                r"use\s+__messages\s+only\s+for\s+structured\s+analysis,\s+filtering/aggregation,\s+or\s+historical\s+lookup",
+                re.IGNORECASE,
+            ),
+        )
+        self.assertRegex(
+            combined,
+            re.compile(r"new inbound messages.*already.*(unified history|shown below)", re.IGNORECASE),
+        )
+        self.assertNotIn(
+            "inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC",
+            system_content,
+        )
+        self.assertNotIn(
+            "recent_messages → SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 20",
+            system_content,
+        )
 
     def test_unified_history_uses_collaborator_name_for_web_sender(self):
         self.user.first_name = "Will"
