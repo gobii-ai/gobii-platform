@@ -20,6 +20,7 @@ from api.models import (
     PersistentAgent,
     TaskCredit,
     TaskCreditConfig,
+    UserQuota,
 )
 from constants.plans import PlanNames
 from tests.utils.llm_seed import get_intelligence_tier
@@ -59,6 +60,16 @@ class AgentTierPreferenceTests(TestCase):
         discounted = apply_tier_credit_multiplier(self.agent, amount)
         self.assertEqual(discounted, Decimal("1.000"))
 
+    def test_user_quota_standard_blocks_trial_boost(self):
+        self.user.quota.max_intelligence_tier = AgentLLMTier.STANDARD.value
+        self.user.quota.save(update_fields=["max_intelligence_tier"])
+        self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.STANDARD)
+
+    def test_user_quota_standard_blocks_first_loop_trial_boost(self):
+        self.user.quota.max_intelligence_tier = AgentLLMTier.STANDARD.value
+        self.user.quota.save(update_fields=["max_intelligence_tier"])
+        self.assertEqual(get_agent_llm_tier(self.agent, is_first_loop=True), AgentLLMTier.STANDARD)
+
 
 @tag("batch_llm_intelligence")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -85,6 +96,19 @@ class SystemDefaultTierTests(TestCase):
         # Free plan users are limited to STANDARD; preferences/defaults should be clamped.
         self.assertEqual(resolve_preferred_tier_for_owner(self.user, None), AgentLLMTier.STANDARD)
         self.assertEqual(resolve_preferred_tier_for_owner(self.user, "max"), AgentLLMTier.STANDARD)
+
+    def test_user_quota_can_cap_paid_plan_tier(self):
+        self.user.quota.max_intelligence_tier = AgentLLMTier.PREMIUM.value
+        self.user.quota.save(update_fields=["max_intelligence_tier"])
+        with patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}):
+            resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
+        self.assertEqual(resolved, AgentLLMTier.PREMIUM)
+
+    def test_user_quota_can_override_free_plan_limit(self):
+        self.user.quota.max_intelligence_tier = AgentLLMTier.MAX.value
+        self.user.quota.save(update_fields=["max_intelligence_tier"])
+        resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
+        self.assertEqual(resolved, AgentLLMTier.MAX)
 
 
 @tag("batch_llm_intelligence")

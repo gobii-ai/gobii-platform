@@ -195,6 +195,7 @@ def resolve_preferred_tier_for_owner(owner: Any | None, tier_key: str | None) ->
         plan = None
 
     allowed = max_allowed_tier_for_plan(plan, is_organization=_is_org_owner(owner))
+    allowed = apply_user_quota_tier_override(owner, allowed)
     return _clamp_tier(resolved, allowed)
 
 
@@ -256,6 +257,43 @@ def max_allowed_tier_for_plan(
     return AgentLLMTier.STANDARD
 
 
+def apply_user_quota_tier_override(owner: Any | None, max_allowed: AgentLLMTier) -> AgentLLMTier:
+    """Apply a per-user quota tier override when configured for user-owned agents."""
+
+    if owner is None or _is_org_owner(owner):
+        return max_allowed
+
+    tier_key: str | None = None
+    quota = getattr(owner, "quota", None)
+    if quota is not None:
+        tier_key = getattr(quota, "max_intelligence_tier", None)
+    elif getattr(owner, "pk", None):
+        try:
+            UserQuota = apps.get_model("api", "UserQuota")
+            tier_key = (
+                UserQuota.objects.filter(user_id=owner.pk)
+                .values_list("max_intelligence_tier", flat=True)
+                .first()
+            )
+        except (AppRegistryNotReady, DatabaseError, LookupError):
+            tier_key = None
+
+    if not tier_key:
+        return max_allowed
+
+    try:
+        cap_tier = AgentLLMTier(str(tier_key).strip().lower())
+    except ValueError:
+        return max_allowed
+
+    return cap_tier
+
+def apply_user_quota_tier_cap(owner: Any | None, max_allowed: AgentLLMTier) -> AgentLLMTier:
+    """Backwards-compatible alias for apply_user_quota_tier_override."""
+
+    return apply_user_quota_tier_override(owner, max_allowed)
+
+
 def _clamp_tier(target: AgentLLMTier, max_allowed: AgentLLMTier) -> AgentLLMTier:
     if TIER_ORDER[target] <= TIER_ORDER[max_allowed]:
         return target
@@ -277,6 +315,7 @@ def default_preferred_tier_for_owner(owner: Any | None) -> AgentLLMTier:
         plan = None
 
     allowed = max_allowed_tier_for_plan(plan, is_organization=_is_org_owner(owner))
+    allowed = apply_user_quota_tier_override(owner, allowed)
     if allowed != AgentLLMTier.STANDARD and resolved == AgentLLMTier.STANDARD:
         resolved = AgentLLMTier.PREMIUM
 
@@ -511,12 +550,14 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
     is_org_owned = bool(getattr(agent, "organization_id", None))
     trial_eligible = bool(not is_org_owned and _within_new_account_premium_window(owner))
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=is_org_owned)
+    allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
     trial_boost_active = trial_eligible and allowed_tier == AgentLLMTier.STANDARD
     if trial_boost_active:
         allowed_tier = AgentLLMTier.PREMIUM
+        allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
 
     if is_first_loop:
-        return AgentLLMTier.PREMIUM
+        return _clamp_tier(AgentLLMTier.PREMIUM, allowed_tier)
 
     preferred_value = getattr(agent, "preferred_llm_tier", None)
     if preferred_value:

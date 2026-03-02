@@ -125,7 +125,7 @@ class ApiKeyAdmin(admin.ModelAdmin):
 
 @admin.register(UserQuota)
 class UserQuotaAdmin(admin.ModelAdmin):
-    list_display = ("user", "agent_limit")
+    list_display = ("user", "agent_limit", "max_intelligence_tier")
     search_fields = ("user__email", "user__id")
 
 
