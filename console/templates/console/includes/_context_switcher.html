@@ -86,14 +86,50 @@
 </div>
 
 <script>
+const CONSOLE_CONTEXT_STORAGE_KEYS = {
+  type: 'gobii:console:context-type',
+  id: 'gobii:console:context-id',
+  name: 'gobii:console:context-name'
+};
+
+function writeConsoleContext(type, id, name) {
+  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
+  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
+  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
+  try {
+    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
+    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
+    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
+  } catch (error) {
+    console.warn('Unable to update session console context storage.', error);
+  }
+}
+
+window.writeConsoleContext = writeConsoleContext;
+
+function readInitialConsoleContext() {
+  try {
+    const sessionType = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.type);
+    const sessionId = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.id);
+    const sessionName = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.name);
+    if (sessionType && sessionId) {
+      return { type: sessionType, id: sessionId, name: sessionName || '' };
+    }
+  } catch (error) {
+    console.warn('Unable to read session console context storage.', error);
+  }
+
+  return {
+    type: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.type) || localStorage.getItem('contextType') || '{{ current_context.type|default:"personal" }}',
+    id: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.id) || localStorage.getItem('contextId') || '{{ current_context.id|default:user.id }}',
+    name: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.name) || localStorage.getItem('contextName') || '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}'
+  };
+}
+
 function contextSwitcher() {
   return {
     open: false,
-    currentContext: {
-      type: localStorage.getItem('contextType') || '{{ current_context.type|default:"personal" }}',
-      id: localStorage.getItem('contextId') || '{{ current_context.id|default:user.id }}',
-      name: localStorage.getItem('contextName') || '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}'
-    },
+    currentContext: readInitialConsoleContext(),
 
     init() {
       // Sync localStorage with server session context if they differ
@@ -101,21 +137,15 @@ function contextSwitcher() {
       const serverId = '{{ current_context.id|default:user.id }}';
       const serverName = '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}';
 
-      const lsType = localStorage.getItem('contextType');
-      const lsId = localStorage.getItem('contextId');
-      if (!lsType || lsType !== serverType || lsId !== serverId) {
-        localStorage.setItem('contextType', serverType);
-        localStorage.setItem('contextId', serverId);
-        localStorage.setItem('contextName', serverName);
+      if (this.currentContext.type !== serverType || this.currentContext.id !== serverId) {
+        writeConsoleContext(serverType, serverId, serverName);
         this.currentContext = { type: serverType, id: serverId, name: serverName };
       }
     },
     
     async switchContext(type, id, name) {
-      // Save to localStorage for immediate UI updates
-      localStorage.setItem('contextType', type);
-      localStorage.setItem('contextId', id);
-      localStorage.setItem('contextName', name);
+      // Save to browser storage for immediate UI updates
+      writeConsoleContext(type, id, name);
       
       // Update current context
       this.currentContext = { type, id, name };

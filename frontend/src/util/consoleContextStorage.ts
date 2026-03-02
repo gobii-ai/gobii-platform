@@ -10,6 +10,23 @@ const STORAGE_KEYS = {
   name: 'gobii:console:context-name',
 }
 
+const LEGACY_LOCAL_STORAGE_KEYS = {
+  type: 'contextType',
+  id: 'contextId',
+  name: 'contextName',
+}
+
+function getLocalStorage(): Storage | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
 function getSessionStorage(): Storage | null {
   if (typeof window === 'undefined') {
     return null
@@ -54,11 +71,22 @@ export function storeConsoleContext(context: StoredConsoleContext): void {
 }
 
 export function clearStoredConsoleContext(): void {
-  const storage = getSessionStorage()
-  if (!storage) {
+  const sessionStorageRef = getSessionStorage()
+  if (sessionStorageRef) {
+    sessionStorageRef.removeItem(STORAGE_KEYS.type)
+    sessionStorageRef.removeItem(STORAGE_KEYS.id)
+    sessionStorageRef.removeItem(STORAGE_KEYS.name)
+  }
+
+  const localStorageRef = getLocalStorage()
+  if (!localStorageRef) {
     return
   }
-  storage.removeItem(STORAGE_KEYS.type)
-  storage.removeItem(STORAGE_KEYS.id)
-  storage.removeItem(STORAGE_KEYS.name)
+
+  localStorageRef.removeItem(STORAGE_KEYS.type)
+  localStorageRef.removeItem(STORAGE_KEYS.id)
+  localStorageRef.removeItem(STORAGE_KEYS.name)
+  localStorageRef.removeItem(LEGACY_LOCAL_STORAGE_KEYS.type)
+  localStorageRef.removeItem(LEGACY_LOCAL_STORAGE_KEYS.id)
+  localStorageRef.removeItem(LEGACY_LOCAL_STORAGE_KEYS.name)
 }
