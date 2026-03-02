@@ -32,23 +32,6 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
   return applied
 }
 
-function isInvalidContextOverrideError(payload: unknown): boolean {
-  if (!payload) {
-    return false
-  }
-  // Match all context override errors: "Invalid context override.",
-  // "Invalid personal context override.", "Invalid organization context override."
-  const pattern = /Invalid\s+(\w+\s+)?context override/i
-  if (typeof payload === 'string') {
-    return pattern.test(payload)
-  }
-  if (typeof payload === 'object' && 'error' in payload) {
-    const errorValue = (payload as { error?: unknown }).error
-    return typeof errorValue === 'string' && pattern.test(errorValue)
-  }
-  return false
-}
-
 function buildLoginUrl(): string {
   if (typeof window === 'undefined') {
     return '/accounts/login/'
@@ -131,12 +114,7 @@ async function jsonFetchInternal<T>(
   }
 
   if (!response.ok) {
-    if (
-      allowRetry &&
-      appliedContextHeaders &&
-      response.status === 403 &&
-      isInvalidContextOverrideError(payload)
-    ) {
+    if (allowRetry && appliedContextHeaders && response.status === 403) {
       clearStoredConsoleContext()
       const retryHeaders = new Headers(initHeaders ?? undefined)
       retryHeaders.delete('X-Gobii-Context-Type')

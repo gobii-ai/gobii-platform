@@ -253,6 +253,16 @@
   if (select) {
     if (!window._postConsoleContextSwitch) {
       window._postConsoleContextSwitch = async function (type, id, name) {
+        localStorage.setItem('contextType', type);
+        localStorage.setItem('contextId', id);
+        localStorage.setItem('contextName', name);
+        try {
+          sessionStorage.setItem('gobii:console:context-type', type);
+          sessionStorage.setItem('gobii:console:context-id', id);
+          sessionStorage.setItem('gobii:console:context-name', name);
+        } catch (error) {
+          console.warn('Unable to update session console context storage.', error);
+        }
         try {
           const response = await fetch('{% url "switch_context" %}', {
             method: 'POST',
