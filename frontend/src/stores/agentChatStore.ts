@@ -106,8 +106,29 @@ type MessageSignature = {
   timestampMs: number | null
 }
 
+function normalizeSignatureText(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+  if (typeof document === 'undefined') {
+    return trimmed
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  const container = document.createElement('div')
+  container.innerHTML = trimmed
+  return (container.textContent || container.innerText || '')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 function buildMessageSignature(message: AgentMessage): MessageSignature {
-  const text = (message.bodyText || message.bodyHtml || '').trim()
+  const text = normalizeSignatureText(message.bodyText || message.bodyHtml || '')
   const attachmentsCount = message.attachments?.length ?? 0
   const timestampMs = message.timestamp ? Date.parse(message.timestamp) : null
   return {
