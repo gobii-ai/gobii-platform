@@ -189,6 +189,12 @@ def message_history_limit(agent: PersistentAgent) -> int:
     return limit_map.get(tier, settings.standard_message_history_limit)
 
 
+def browser_task_unified_history_limit() -> int:
+    """Return max completed browser tasks included in unified history."""
+
+    return get_prompt_settings().browser_task_unified_history_limit
+
+
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
     """Return the configured prompt token budget for the agent's LLM tier.
 
@@ -4835,7 +4841,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 )
             )
         )
-        completed_tasks = list(completed_tasks_qs[:limit_tool_history])
+        completed_tasks = list(completed_tasks_qs[:browser_task_unified_history_limit()])
     else:
         completed_tasks = []
 

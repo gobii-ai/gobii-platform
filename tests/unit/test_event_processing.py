@@ -25,7 +25,7 @@ from api.agent.core.prompt_context import (
     message_history_limit,
     tool_call_history_limit,
 )
-from api.admin import PersistentAgentPromptArchiveAdmin
+from api.admin import PersistentAgentPromptArchiveAdmin, PromptConfigAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
 from api.agent.files.filespace_service import DOWNLOADS_DIR_NAME
@@ -1921,6 +1921,29 @@ class PromptConfigFunctionTests(TestCase):
             self.assertEqual(get_prompt_token_budget(self.agent), config.max_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.max_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.max_tool_call_history_limit)
+
+
+    def test_browser_task_unified_history_limit_setting(self):
+        from api.agent.core.prompt_context import browser_task_unified_history_limit
+
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.browser_task_unified_history_limit = 12
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        self.assertEqual(browser_task_unified_history_limit(), 12)
+
+    def test_prompt_config_admin_exposes_browser_task_unified_history_limit(self):
+        admin_view = PromptConfigAdmin(PromptConfig, django_admin.site)
+
+        self.assertIn("browser_task_unified_history_limit", admin_view.list_display)
+
+        unified_fields = next(
+            fields["fields"]
+            for title, fields in admin_view.fieldsets
+            if title == "Unified history limits"
+        )
+        self.assertIn("browser_task_unified_history_limit", unified_fields)
 
 
 @tag("batch_event_processing")
