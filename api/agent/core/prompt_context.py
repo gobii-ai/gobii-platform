@@ -6,7 +6,7 @@ import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
@@ -1407,6 +1407,50 @@ def _archive_rendered_prompt(
         return None, None, None, None
 
 
+
+
+def _get_inactive_weeks(interaction_anchor: Optional[datetime], now: datetime) -> int:
+    """Return whole inactive weeks since the last known interaction anchor."""
+
+    if interaction_anchor is None:
+        return 0
+    anchor = interaction_anchor
+    if dj_timezone.is_naive(anchor):
+        anchor = dj_timezone.make_aware(anchor, timezone.utc)
+    elapsed_days = max((now - anchor).days, 0)
+    return elapsed_days // 7
+
+
+def _get_effective_burn_threshold(
+    base_threshold: Optional[Decimal],
+    *,
+    inactive_weeks: int,
+    agent_id: UUID,
+) -> Optional[Decimal]:
+    """Apply inactivity decay to burn threshold while preserving credit safeguards."""
+
+    if base_threshold is None:
+        return None
+
+    effective_threshold = base_threshold
+    try:
+        if effective_threshold <= Decimal("0"):
+            effective_threshold = Decimal("0")
+        elif inactive_weeks > 0:
+            effective_threshold = effective_threshold / Decimal("2")
+        return effective_threshold.quantize(
+            Decimal("0.001"),
+            rounding=ROUND_HALF_UP,
+        )
+    except (InvalidOperation, TypeError):
+        logger.debug(
+            "Failed to apply inactivity decay to burn-rate threshold for agent %s",
+            agent_id,
+            exc_info=True,
+        )
+        return base_threshold
+
+
 def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     """Return daily credit usage/limit information for the agent."""
     today = dj_timezone.localdate()
@@ -1449,7 +1493,8 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         except Exception:
             soft_remaining = Decimal("0")
 
-    local_now = dj_timezone.localtime(dj_timezone.now())
+    now = dj_timezone.now()
+    local_now = dj_timezone.localtime(now)
     next_reset = (local_now + timedelta(days=1)).replace(
         hour=0,
         minute=0,
@@ -1474,6 +1519,14 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     else:
         if result is not None:
             scaled_threshold = result
+    interaction_anchor = agent.last_interaction_at or agent.created_at
+    inactive_weeks = _get_inactive_weeks(interaction_anchor, now)
+    effective_threshold = _get_effective_burn_threshold(
+        scaled_threshold,
+        inactive_weeks=inactive_weeks,
+        agent_id=agent.id,
+    )
+
     state = {
         "date": today,
         "soft_target": soft_target,
@@ -1488,7 +1541,9 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         ),
         "burn_rate_per_hour": burn_details.get("burn_rate_per_hour"),
         "burn_rate_window_minutes": burn_details.get("window_minutes"),
-        "burn_rate_threshold_per_hour": scaled_threshold,
+        "burn_rate_threshold_per_hour": effective_threshold,
+        "burn_rate_base_threshold_per_hour": scaled_threshold,
+        "burn_rate_inactive_weeks": inactive_weeks,
     }
     return state
 

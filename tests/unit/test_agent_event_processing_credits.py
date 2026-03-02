@@ -25,6 +25,7 @@ from api.agent.core.event_processing import _ensure_credit_for_tool
 from api.agent.core.prompt_context import (
     add_budget_awareness_sections,
     compute_burn_rate,
+    get_agent_daily_credit_state,
 )
 from constants.plans import PlanNames
 from api.agent.core import event_processing as ep
@@ -566,6 +567,76 @@ class PersistentAgentToolCreditTests(TestCase):
         metrics = compute_burn_rate(self.agent, window_minutes=60)
         self.assertEqual(metrics["burn_rate_per_hour"], Decimal("3"))
         self.assertEqual(metrics["window_total"], Decimal("3"))
+
+    def _build_daily_state_with_inactivity(self, *, inactive_days: int, burn_rate_per_hour: Decimal):
+        now = timezone.now()
+        self.agent.last_interaction_at = now - timezone.timedelta(days=inactive_days)
+        self.agent.created_at = now - timezone.timedelta(days=120)
+        self.agent.save(update_fields=["last_interaction_at", "created_at"])
+
+        with patch(
+            "api.agent.core.prompt_context.apply_tier_credit_multiplier",
+            return_value=Decimal("8"),
+        ), patch(
+            "api.agent.core.prompt_context.get_daily_credit_settings_for_owner",
+            return_value=MagicMock(
+                burn_rate_window_minutes=60,
+                burn_rate_threshold_per_hour=Decimal("4"),
+            ),
+        ), patch(
+            "api.agent.core.prompt_context.compute_burn_rate",
+            return_value={
+                "burn_rate_per_hour": burn_rate_per_hour,
+                "window_minutes": 60,
+            },
+        ):
+            return get_agent_daily_credit_state(self.agent)
+
+    def test_daily_credit_state_burn_threshold_no_inactivity_keeps_base(self):
+        state = self._build_daily_state_with_inactivity(
+            inactive_days=0,
+            burn_rate_per_hour=Decimal("1"),
+        )
+
+        self.assertEqual(state["burn_rate_inactive_weeks"], 0)
+        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("8"))
+        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("8.000"))
+
+    def test_daily_credit_state_burn_threshold_one_week_halves(self):
+        state = self._build_daily_state_with_inactivity(
+            inactive_days=7,
+            burn_rate_per_hour=Decimal("5"),
+        )
+
+        self.assertEqual(state["burn_rate_inactive_weeks"], 1)
+        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("8"))
+        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("4.000"))
+
+    def test_daily_credit_state_multi_week_decay_enables_pause(self):
+        state = self._build_daily_state_with_inactivity(
+            inactive_days=21,
+            burn_rate_per_hour=Decimal("6"),
+        )
+
+        self.assertEqual(state["burn_rate_inactive_weeks"], 3)
+        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("8"))
+        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("4.000"))
+        self.assertLess(state["burn_rate_threshold_per_hour"], state["burn_rate_per_hour"])
+        self.assertLess(state["burn_rate_per_hour"], state["burn_rate_base_threshold_per_hour"])
+
+        with patch(
+            "api.agent.core.burn_control.has_recent_user_message",
+            return_value=False,
+        ), patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
+            should_pause = bc.should_pause_for_burn_rate(
+                self.agent,
+                budget_ctx=None,
+                daily_state=state,
+                redis_client=MagicMock(get=MagicMock(return_value=None)),
+            )
+
+        self.assertTrue(should_pause)
+        pause_mock.assert_called_once()
 
     @patch(
         "api.agent.core.prompt_context.get_tool_cost_overview",
