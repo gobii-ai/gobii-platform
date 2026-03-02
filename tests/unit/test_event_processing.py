@@ -148,6 +148,50 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
 
+    def test_prompt_discourages_messages_freshness_polling(self):
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Fresh inbound message for this run",
+            seq=f"FRESH{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        system_content = system_message["content"]
+        user_content = user_message["content"]
+        combined = f"{system_content}\n{user_content}"
+
+        self.assertIn(
+            "do NOT query __messages for \"anything new\"",
+            combined,
+        )
+        self.assertIn(
+            "Use __messages only for structured analysis, filtering/aggregation, or historical lookup.",
+            combined,
+        )
+        self.assertIn(
+            "Do not poll __messages for freshness: new inbound messages are already in unified history for this run.",
+            user_content,
+        )
+        self.assertNotIn(
+            "inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC",
+            system_content,
+        )
+        self.assertNotIn(
+            "recent_messages → SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 20",
+            system_content,
+        )
+
     def test_unified_history_uses_collaborator_name_for_web_sender(self):
         self.user.first_name = "Will"
         self.user.save(update_fields=["first_name"])

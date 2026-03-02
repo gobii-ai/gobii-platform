@@ -335,9 +335,9 @@ do not invent columns; only use those listed above
 
 # __messages (special table)
 __messages.columns = {message_id, seq, timestamp, channel, is_outbound, direction, from_address, to_address, conversation_id, conversation_address, is_peer_dm, peer_agent_id, subject, body, body_bytes, body_is_truncated, body_truncated_bytes, attachment_paths_json, attachment_count, latest_status, latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, is_hidden_in_chat}
-recent_messages → SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 20
-inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC
 attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json)
+freshness_check → do NOT query __messages for "anything new"; new inbound messages are already injected into this run's unified history
+use_case → query __messages only for structured analysis, filtering/aggregation, or historical lookup
 __messages is per-cycle snapshot: newest→oldest full bodies up to ~5MB total; dropped before persistence
 
 # __files (special table; metadata only)
@@ -2186,7 +2186,9 @@ def build_prompt_context(
         "__messages stores a newest-first communication snapshot (full bodies up to ~5MB total). "
         f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
         "All are per-cycle snapshots dropped before persistence. "
-        "Query them with sqlite_batch (not read_file). "
+        "Query __tool_results and __files with sqlite_batch (not read_file). "
+        "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
+        "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
         "CREATE TABLE AS SELECT is a fast way to persist tool results. "
         "Source all identifiers from ground truth—schema, tool results, prior query output, or context "
