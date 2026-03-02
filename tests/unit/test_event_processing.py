@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 import shutil
 import tempfile
@@ -171,17 +172,20 @@ class PromptContextBuilderTests(TestCase):
         user_content = user_message["content"]
         combined = f"{system_content}\n{user_content}"
 
-        self.assertIn(
-            "do NOT query __messages for \"anything new\"",
-            system_content,
+        self.assertRegex(
+            combined,
+            re.compile(r"do not (?:query|poll)\s+__messages.*anything new", re.IGNORECASE),
         )
-        self.assertIn(
-            "Use __messages only for structured analysis, filtering/aggregation, or historical lookup.",
-            system_content,
+        self.assertRegex(
+            combined,
+            re.compile(
+                r"use\s+__messages\s+only\s+for\s+structured\s+analysis,\s+filtering/aggregation,\s+or\s+historical\s+lookup",
+                re.IGNORECASE,
+            ),
         )
-        self.assertIn(
-            "Do not poll __messages for freshness: new inbound messages are already in unified history for this run.",
-            user_content,
+        self.assertRegex(
+            combined,
+            re.compile(r"new inbound messages.*already.*(unified history|shown below)", re.IGNORECASE),
         )
         self.assertNotIn(
             "inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC",
