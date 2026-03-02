@@ -86,24 +86,32 @@
 </div>
 
 <script>
+const CONSOLE_CONTEXT_STORAGE_KEYS = {
+  type: 'gobii:console:context-type',
+  id: 'gobii:console:context-id',
+  name: 'gobii:console:context-name'
+};
+
 function writeConsoleContext(type, id, name) {
-  localStorage.setItem('contextType', type);
-  localStorage.setItem('contextId', id);
-  localStorage.setItem('contextName', name);
+  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
+  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
+  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
   try {
-    sessionStorage.setItem('gobii:console:context-type', type);
-    sessionStorage.setItem('gobii:console:context-id', id);
-    sessionStorage.setItem('gobii:console:context-name', name);
+    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
+    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
+    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
   } catch (error) {
     console.warn('Unable to update session console context storage.', error);
   }
 }
 
+window.writeConsoleContext = writeConsoleContext;
+
 function readInitialConsoleContext() {
   try {
-    const sessionType = sessionStorage.getItem('gobii:console:context-type');
-    const sessionId = sessionStorage.getItem('gobii:console:context-id');
-    const sessionName = sessionStorage.getItem('gobii:console:context-name');
+    const sessionType = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.type);
+    const sessionId = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.id);
+    const sessionName = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.name);
     if (sessionType && sessionId) {
       return { type: sessionType, id: sessionId, name: sessionName || '' };
     }
@@ -112,9 +120,9 @@ function readInitialConsoleContext() {
   }
 
   return {
-    type: localStorage.getItem('contextType') || '{{ current_context.type|default:"personal" }}',
-    id: localStorage.getItem('contextId') || '{{ current_context.id|default:user.id }}',
-    name: localStorage.getItem('contextName') || '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}'
+    type: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.type) || localStorage.getItem('contextType') || '{{ current_context.type|default:"personal" }}',
+    id: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.id) || localStorage.getItem('contextId') || '{{ current_context.id|default:user.id }}',
+    name: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.name) || localStorage.getItem('contextName') || '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}'
   };
 }
 
