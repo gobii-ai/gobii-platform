@@ -20,6 +20,7 @@ from api.models import (
     PersistentAgent,
     TaskCredit,
     TaskCreditConfig,
+    UserQuota,
 )
 from constants.plans import PlanNames
 from tests.utils.llm_seed import get_intelligence_tier
@@ -85,6 +86,17 @@ class SystemDefaultTierTests(TestCase):
         # Free plan users are limited to STANDARD; preferences/defaults should be clamped.
         self.assertEqual(resolve_preferred_tier_for_owner(self.user, None), AgentLLMTier.STANDARD)
         self.assertEqual(resolve_preferred_tier_for_owner(self.user, "max"), AgentLLMTier.STANDARD)
+
+    def test_user_quota_can_cap_paid_plan_tier(self):
+        UserQuota.objects.filter(user=self.user).update(max_intelligence_tier=AgentLLMTier.PREMIUM.value)
+        with patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}):
+            resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
+        self.assertEqual(resolved, AgentLLMTier.PREMIUM)
+
+    def test_user_quota_can_override_free_plan_limit(self):
+        UserQuota.objects.filter(user=self.user).update(max_intelligence_tier=AgentLLMTier.MAX.value)
+        resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
+        self.assertEqual(resolved, AgentLLMTier.MAX)
 
 
 @tag("batch_llm_intelligence")

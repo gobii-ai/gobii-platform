@@ -506,6 +506,14 @@ class ApiKey(models.Model):
 
 
 class UserQuota(models.Model):
+    INTELLIGENCE_TIER_CHOICES = (
+        ("standard", "Standard"),
+        ("premium", "Premium"),
+        ("max", "Max"),
+        ("ultra", "Ultra"),
+        ("ultra_max", "Ultra Max"),
+    )
+
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="quota"
     )
@@ -513,6 +521,14 @@ class UserQuota(models.Model):
     # Optional per-user override for max contacts per agent; when null or <= 0, plan default applies
     max_agent_contacts = models.PositiveIntegerField(null=True, blank=True, default=None,
                                                     help_text="If set (>0), overrides plan max contacts per agent for this user")
+    max_intelligence_tier = models.CharField(
+        max_length=16,
+        null=True,
+        blank=True,
+        choices=INTELLIGENCE_TIER_CHOICES,
+        default=None,
+        help_text="If set, overrides the plan max and caps the highest intelligence tier this user can select for persistent agents.",
+    )
 
     def __str__(self):
         return f"Quota for {self.user.email}"
