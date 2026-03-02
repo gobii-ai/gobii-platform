@@ -173,11 +173,11 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIn(
             "do NOT query __messages for \"anything new\"",
-            combined,
+            system_content,
         )
         self.assertIn(
             "Use __messages only for structured analysis, filtering/aggregation, or historical lookup.",
-            combined,
+            system_content,
         )
         self.assertIn(
             "Do not poll __messages for freshness: new inbound messages are already in unified history for this run.",
