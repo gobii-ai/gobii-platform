@@ -50,7 +50,7 @@ def get_secure_credentials_request_tool() -> dict:
                                 "secret_type": {
                                     "type": "string",
                                     "enum": ["credential", "env_var"],
-                                    "description": "Optional. credential (default) for domain-scoped secrets, env_var for global sandbox env vars."
+                                    "description": "Optional. credential (default) for domain-scoped secrets, env_var for global sandbox env vars. "
                                                    "env_var secrets are used for MCP servers, run_command, and python_exec tools.",
                                 },
                             },
