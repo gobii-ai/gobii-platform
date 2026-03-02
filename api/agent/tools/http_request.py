@@ -348,7 +348,11 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     # Build a mapping of secret_key -> decrypted value for this agent (exclude requested secrets)
     secret_map = {
         s.key: s.get_value()
-        for s in PersistentAgentSecret.objects.filter(agent=agent, requested=False)
+        for s in PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+        )
     }
 
     UNIQUE_PATTERN_RE = re.compile(r"<<<\s*([A-Za-z0-9_]+)\s*>>>")

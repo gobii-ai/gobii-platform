@@ -18,7 +18,7 @@ from django.utils import timezone
 from redis.exceptions import RedisError
 from kombu.exceptions import OperationalError as KombuOperationalError
 
-from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig
+from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig, PersistentAgentSecret
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
@@ -160,6 +160,45 @@ def _sanitize_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
             if key in allowed or str(key).startswith("SANDBOX_"):
                 env[str(key)] = str(value)
     return env
+
+
+def _resolved_env_var_secrets_for_agent(agent: Optional[PersistentAgent]) -> Dict[str, str]:
+    if agent is None or not sandbox_compute_enabled_for_agent(agent):
+        return {}
+
+    merged: Dict[str, str] = {}
+    secrets = (
+        PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+        )
+        .order_by("updated_at", "created_at")
+        .only("key", "encrypted_value")
+    )
+    for secret in secrets:
+        key = str(secret.key or "").strip()
+        if not key:
+            continue
+        try:
+            merged[key] = secret.get_value()
+        except Exception:
+            logger.warning(
+                "Failed to decrypt env_var secret for agent=%s key=%s",
+                agent.id,
+                key,
+                exc_info=True,
+            )
+    return merged
+
+
+def _merge_agent_env_vars(
+    agent: Optional[PersistentAgent],
+    base_env: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    merged = {str(k): str(v) for k, v in (base_env or {}).items()}
+    merged.update(_resolved_env_var_secrets_for_agent(agent))
+    return merged
 
 
 def _stderr_summary(stderr: str) -> str:
@@ -627,10 +666,14 @@ def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
         maximum=_python_max_timeout(),
     )
 
+    extra_env = params.get("env")
+    if not isinstance(extra_env, dict):
+        extra_env = None
+
     try:
         result = subprocess.run(
             [sys.executable, "-c", code],
-            env=_sanitize_env(),
+            env=_sanitize_env(extra_env),
             capture_output=True,
             text=True,
             timeout=timeout_value,
@@ -743,7 +786,11 @@ def _proxy_env_for_session(session: AgentComputeSession) -> Optional[Dict[str, s
     return env
 
 
-def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]], Optional[Any]]:
+def _build_mcp_server_payload(
+    config_id: str,
+    *,
+    agent: Optional[PersistentAgent] = None,
+) -> tuple[Optional[Dict[str, Any]], Optional[Any]]:
     if not config_id:
         return None, None
 
@@ -775,7 +822,7 @@ def _build_mcp_server_payload(config_id: str) -> tuple[Optional[Dict[str, Any]],
         "command": runtime.command or "",
         "command_args": list(runtime.args or []),
         "url": runtime.url or "",
-        "env": runtime.env or {},
+        "env": _merge_agent_env_vars(agent, runtime.env or {}),
         "headers": headers,
         "auth_method": runtime.auth_method,
         "scope": runtime.scope,
@@ -1032,12 +1079,14 @@ class SandboxComputeService:
         interactive: bool = False,
     ) -> Dict[str, Any]:
         session = self._ensure_session(agent, source="run_command")
+        merged_env = _merge_agent_env_vars(agent, env)
+        backend_env = merged_env if merged_env else (env if env else None)
         result = self._backend.run_command(
             agent,
             session,
             command,
             cwd=cwd,
-            env=env,
+            env=backend_env,
             timeout=timeout,
             interactive=interactive,
         )
@@ -1056,7 +1105,7 @@ class SandboxComputeService:
         full_tool_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         session = self._ensure_session(agent, source="mcp_request")
-        server_payload, _runtime = _build_mcp_server_payload(server_config_id)
+        server_payload, _runtime = _build_mcp_server_payload(server_config_id, agent=agent)
         if not server_payload:
             return {"status": "error", "message": "MCP server config not available."}
         result = self._backend.mcp_request(
@@ -1076,7 +1125,16 @@ class SandboxComputeService:
 
     def tool_request(self, agent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         session = self._ensure_session(agent, source="tool_request")
-        result = self._backend.tool_request(agent, session, tool_name, params)
+        params_payload = params or {}
+        if tool_name == "python_exec":
+            params_payload = dict(params_payload)
+            existing_env = params_payload.get("env")
+            if not isinstance(existing_env, dict):
+                existing_env = {}
+            merged_env = _merge_agent_env_vars(agent, existing_env)
+            if merged_env:
+                params_payload["env"] = merged_env
+        result = self._backend.tool_request(agent, session, tool_name, params_payload)
         if isinstance(result, dict) and result.get("status") != "error":
             if _sync_on_tool_call():
                 self._enqueue_post_sync_after_call(agent, source="tool_request")

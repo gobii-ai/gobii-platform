@@ -199,8 +199,11 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             eval_run_id=getattr(budget_ctx, "eval_run_id", None),
         )
 
-        # Copy secrets from persistent agent to browser task (exclude requested secrets)
-        agent_secrets = agent.secrets.filter(requested=False)
+        # Copy credential secrets from persistent agent to browser task (exclude requested secrets)
+        agent_secrets = agent.secrets.filter(
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+        )
         
         # Filter secrets if specific ones were requested
         if requested_secrets:

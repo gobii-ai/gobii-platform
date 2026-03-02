@@ -8,8 +8,12 @@ these credentials before the agent can proceed with certain tasks.
 """
 import logging
 from django.contrib.sites.models import Site
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError
 from django.urls import reverse
 from ...models import PersistentAgent, PersistentAgentSecret
+from ...services.sandbox_compute import sandbox_compute_enabled_for_agent
+from ...domain_validation import DomainPatternValidator
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +28,7 @@ def get_secure_credentials_request_tool() -> dict:
                 "Request secure credentials from the user ONLY when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
                 "or `spawn_web_task` (classic username/password website login). Do NOT use this tool for MCP tools (e.g., Google Sheets, Slack); "
                 "for MCP tools, call the tool first—if it returns 'action_required' with a connect/auth link, surface that link to the user and wait. "
+                "Use secret_type='credential' for domain-scoped placeholders, or secret_type='env_var' for sandbox environment variables. "
                 "You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. "
                 "IT WILL RETURN URL(S). ALWAYS MESSAGE THE USER WITH THE CORRECT ONE: "
                 "- For new/pending requests, send the credentials-request URL so they can enter the requested secret(s). "
@@ -41,9 +46,14 @@ def get_secure_credentials_request_tool() -> dict:
                                 "name": {"type": "string", "description": "Human-readable name for the credential."},
                                 "description": {"type": "string", "description": "Description of what this credential is used for."},
                                 "key": {"type": "string", "description": "Unique key identifier for this credential (e.g., 'api_key', 'username')."},
-                                "domain_pattern": {"type": "string", "description": "Domain pattern this credential applies to (e.g., 'api.example.com', '*.example.com')."}
+                                "domain_pattern": {"type": "string", "description": "Domain pattern this credential applies to (required for credential type)."},
+                                "secret_type": {
+                                    "type": "string",
+                                    "enum": ["credential", "env_var"],
+                                    "description": "Optional. credential (default) for domain-scoped secrets, env_var for global sandbox env vars.",
+                                },
                             },
-                            "required": ["name", "description", "key", "domain_pattern"]
+                            "required": ["name", "description", "key"]
                         },
                         "description": "List of credentials to request from the user."
                     }
@@ -77,24 +87,58 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
         "Agent %s requesting %d credentials",
         agent.id, len(credentials)
     )
+
+    sandbox_enabled = sandbox_compute_enabled_for_agent(agent)
     
     for cred in credentials:
+        if not isinstance(cred, dict):
+            errors.append(f"Invalid credential payload: {cred!r}")
+            continue
         try:
             # Validate required fields
             name = cred.get("name")
             description = cred.get("description") 
             key = cred.get("key")
+            secret_type = str(cred.get("secret_type") or PersistentAgentSecret.SecretType.CREDENTIAL).strip().lower()
             domain_pattern = cred.get("domain_pattern")
             
-            if not all([name, description, key, domain_pattern]):
+            if secret_type not in {
+                PersistentAgentSecret.SecretType.CREDENTIAL,
+                PersistentAgentSecret.SecretType.ENV_VAR,
+            }:
+                errors.append(f"Invalid secret_type for credential '{name or 'unknown'}': {secret_type}")
+                continue
+
+            if not all([name, description, key]):
                 errors.append(f"Missing required fields for credential: {cred}")
                 continue
-            
+
+            if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+                if not sandbox_enabled:
+                    errors.append(
+                        f"Cannot request env_var secret '{name}' because sandbox compute is not enabled for this agent."
+                    )
+                    continue
+                normalized_domain = PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL
+                normalized_key = str(key).strip().upper()
+            else:
+                if not domain_pattern:
+                    errors.append(f"Missing required fields for credential: {cred}")
+                    continue
+                try:
+                    DomainPatternValidator.validate_domain_pattern(str(domain_pattern))
+                    normalized_domain = DomainPatternValidator.normalize_domain_pattern(str(domain_pattern))
+                except ValueError as exc:
+                    errors.append(f"Invalid domain pattern for credential '{name}': {exc}")
+                    continue
+                normalized_key = str(key).strip()
+
             # Check if a credential with this key already exists for this agent
             existing = PersistentAgentSecret.objects.filter(
                 agent=agent, 
-                key=key, 
-                domain_pattern=domain_pattern
+                key=normalized_key,
+                secret_type=secret_type,
+                domain_pattern=normalized_domain,
             ).first()
             
             if existing:
@@ -102,13 +146,14 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
                     # Already requested, skip creating another
                     logger.info(
                         "Credential %s for domain %s already requested for agent %s",
-                        key, domain_pattern, agent.id
+                        normalized_key, normalized_domain, agent.id
                     )
                     created_credentials.append(
                         {
                             "name": existing.name,
                             "key": existing.key,
                             "domain_pattern": existing.domain_pattern,
+                            "secret_type": existing.secret_type,
                         }
                     )
                     continue
@@ -116,42 +161,47 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
                 # Fulfilled secret: ask user to update instead of wiping or toggling requested
                 logger.info(
                     "Re-requesting existing credential %s for domain %s for agent %s",
-                    key, domain_pattern, agent.id
+                    normalized_key, normalized_domain, agent.id
                 )
                 rerequested_credentials.append(
                     {
                         "name": existing.name,
                         "key": existing.key,
                         "domain_pattern": existing.domain_pattern,
+                        "secret_type": existing.secret_type,
                     }
                 )
                 continue
 
             # Create the credential request
-            secret = PersistentAgentSecret.objects.create(
+            secret = PersistentAgentSecret(
                 agent=agent,
                 name=name,
                 description=description,
-                key=key,
-                domain_pattern=domain_pattern,
+                key=normalized_key,
+                secret_type=secret_type,
+                domain_pattern=normalized_domain,
                 requested=True,
                 # Use empty bytes since this is just a request and the field cannot be NULL
-                encrypted_value=b''
+                encrypted_value=b'',
             )
+            secret.full_clean()
+            secret.save()
             
             created_credentials.append({
                 "name": name,
-                "key": key,
-                "domain_pattern": domain_pattern
+                "key": secret.key,
+                "domain_pattern": secret.domain_pattern,
+                "secret_type": secret.secret_type,
             })
             
             logger.info(
                 "Created credential request for agent %s: %s (%s) for domain %s",
-                agent.id, name, key, domain_pattern
+                agent.id, name, secret.key, secret.domain_pattern
             )
             
-        except Exception as e:
-            error_msg = f"Failed to create credential request '{cred.get('name', 'unknown')}': {str(e)}"
+        except (ValidationError, IntegrityError, ValueError, TypeError) as exc:
+            error_msg = f"Failed to create credential request '{cred.get('name', 'unknown')}': {str(exc)}"
             errors.append(error_msg)
             logger.exception("Error creating credential request for agent %s", agent.id)
     

@@ -1,4 +1,5 @@
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -7,7 +8,14 @@ from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
-from api.models import AgentComputeSession, AgentFsNode, BrowserUseAgent, PersistentAgent
+from api.models import (
+    AgentComputeSession,
+    AgentFsNode,
+    BrowserUseAgent,
+    MCPServerConfig,
+    PersistentAgent,
+    PersistentAgentSecret,
+)
 from api.services.sandbox_compute import (
     SandboxComputeService,
     SandboxSessionUpdate,
@@ -21,6 +29,9 @@ from api.tasks.sandbox_compute import sync_filespace_after_call
 class _DummyBackend:
     def __init__(self) -> None:
         self.sync_calls: list[dict] = []
+        self.run_command_calls: list[dict] = []
+        self.mcp_calls: list[dict] = []
+        self.tool_calls: list[dict] = []
 
     def deploy_or_resume(self, agent, session):
         return SandboxSessionUpdate(state=AgentComputeSession.State.RUNNING)
@@ -36,6 +47,16 @@ class _DummyBackend:
         return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
 
     def run_command(self, agent, session, command, *, cwd=None, env=None, timeout=None, interactive=False):
+        self.run_command_calls.append(
+            {
+                "agent_id": str(agent.id),
+                "command": command,
+                "cwd": cwd,
+                "env": env or {},
+                "timeout": timeout,
+                "interactive": interactive,
+            }
+        )
         return {"status": "ok", "exit_code": 0, "stdout": f"ran: {command}", "stderr": ""}
 
     def mcp_request(
@@ -49,9 +70,26 @@ class _DummyBackend:
         full_tool_name=None,
         server_payload=None,
     ):
+        self.mcp_calls.append(
+            {
+                "agent_id": str(agent.id),
+                "server_config_id": str(server_config_id),
+                "tool_name": tool_name,
+                "params": params,
+                "full_tool_name": full_tool_name,
+                "server_payload": server_payload or {},
+            }
+        )
         return {"status": "ok", "result": {"tool_name": tool_name, "params": params}}
 
     def tool_request(self, agent, session, tool_name, params):
+        self.tool_calls.append(
+            {
+                "agent_id": str(agent.id),
+                "tool_name": tool_name,
+                "params": params,
+            }
+        )
         return {"status": "ok", "result": {"tool_name": tool_name, "params": params}}
 
 
@@ -71,6 +109,19 @@ class SandboxComputeSyncTests(TestCase):
             charter="sandbox sync charter",
             browser_use_agent=browser_agent,
         )
+
+    def _create_env_var_secret(self, key: str, value: str) -> PersistentAgentSecret:
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name=key,
+            key=key,
+            requested=False,
+        )
+        secret.set_value(value)
+        secret.save()
+        return secret
 
     def test_pull_manifest_includes_checksum_and_cursor(self):
         write_result = write_bytes_to_dir(
@@ -250,6 +301,125 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(result.get("status"), "ok")
         mock_enqueue.assert_called_once_with(self.agent, source="run_command")
         mock_sync.assert_not_called()
+
+    def test_run_command_merges_env_var_secrets_with_precedence(self):
+        backend = _DummyBackend()
+        self._create_env_var_secret("SANDBOX_TOKEN", "from-secret")
+
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_run_command",
+            return_value=False,
+        ):
+            service = SandboxComputeService(backend=backend)
+            result = service.run_command(
+                self.agent,
+                "echo hello",
+                env={"SANDBOX_TOKEN": "from-caller", "EXTRA": "caller-value"},
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(len(backend.run_command_calls), 1)
+        merged_env = backend.run_command_calls[0]["env"]
+        self.assertEqual(merged_env["SANDBOX_TOKEN"], "from-secret")
+        self.assertEqual(merged_env["EXTRA"], "caller-value")
+
+    def test_python_exec_merges_env_var_secrets_with_precedence(self):
+        backend = _DummyBackend()
+        self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
+
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_tool_call",
+            return_value=False,
+        ):
+            service = SandboxComputeService(backend=backend)
+            result = service.tool_request(
+                self.agent,
+                "python_exec",
+                {
+                    "code": "print('ok')",
+                    "env": {"OPENAI_API_KEY": "from-caller", "KEEP_ME": "yes"},
+                },
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(len(backend.tool_calls), 1)
+        merged_env = backend.tool_calls[0]["params"]["env"]
+        self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")
+        self.assertEqual(merged_env["KEEP_ME"], "yes")
+
+    def test_mcp_request_merges_env_var_secrets_with_precedence(self):
+        backend = _DummyBackend()
+        self._create_env_var_secret("SANDBOX_TOKEN", "from-secret")
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="example-mcp",
+            display_name="Example MCP",
+            command="mcp-server",
+            command_args=["--stdio"],
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            environment={"SANDBOX_TOKEN": "from-runtime", "RUNTIME_ONLY": "1"},
+            is_active=True,
+        )
+
+        runtime = SimpleNamespace(
+            config_id=str(config.id),
+            name=config.name,
+            command=config.command,
+            args=config.command_args,
+            url=config.url,
+            env=dict(config.environment or {}),
+            headers={},
+            auth_method=config.auth_method,
+            scope=config.scope,
+        )
+
+        manager_mock = type("ManagerMock", (), {})()
+        manager_mock._build_runtime_from_config = lambda cfg: runtime
+        manager_mock._build_auth_headers = lambda _runtime: {}
+
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ), patch(
+            "api.services.sandbox_compute._sync_on_mcp_call",
+            return_value=False,
+        ), patch(
+            "api.agent.tools.mcp_manager.get_mcp_manager",
+            return_value=manager_mock,
+        ):
+            service = SandboxComputeService(backend=backend)
+            result = service.mcp_request(self.agent, str(config.id), "ping", {"hello": "world"})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(len(backend.mcp_calls), 1)
+        payload_env = backend.mcp_calls[0]["server_payload"]["env"]
+        self.assertEqual(payload_env["SANDBOX_TOKEN"], "from-secret")
+        self.assertEqual(payload_env["RUNTIME_ONLY"], "1")
 
     def test_enqueue_post_sync_coalesces_per_agent(self):
         backend = _DummyBackend()

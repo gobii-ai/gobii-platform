@@ -6,8 +6,7 @@ Tests the core logic around:
 2. secure_credentials_request tool execution
 3. Proper filtering of requested vs fulfilled secrets
 """
-import uuid
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 
@@ -21,6 +20,7 @@ from api.agent.tools.secure_credentials_request import (
     execute_secure_credentials_request,
     get_secure_credentials_request_tool,
 )
+from console.forms import PersistentAgentAddSecretForm, PersistentAgentEditSecretForm
 
 User = get_user_model()
 
@@ -105,6 +105,59 @@ class GetSecretsBlockTests(TestCase):
         self.assertIn("waiting_secret", result)
         self.assertIn("https://pending.example.com", result)
         self.assertIn("https://waiting.example.com", result)
+
+    def test_secrets_context_separates_secret_types_and_hides_values(self):
+        credential_secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://api.example.com",
+            name="API Credential",
+            key="api_credential",
+            requested=False,
+        )
+        credential_secret.set_value("credential-secret-value")
+        credential_secret.save()
+
+        env_var_secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="Sandbox Token",
+            key="SANDBOX_TOKEN",
+            requested=False,
+        )
+        env_var_secret.set_value("env-var-secret-value")
+        env_var_secret.save()
+
+        PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://api.example.com",
+            name="Pending API Credential",
+            key="pending_api_credential",
+            requested=True,
+            encrypted_value=b"",
+        )
+        PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="Pending Sandbox Token",
+            key="PENDING_SANDBOX_TOKEN",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        result = _get_secrets_block(self.agent)
+
+        self.assertIn("These domain-scoped credential secrets are available to you:", result)
+        self.assertIn("These global sandbox environment variable secrets are available to you:", result)
+        self.assertIn("Pending domain-scoped credentials:", result)
+        self.assertIn("Pending sandbox environment variables:", result)
+        self.assertIn("Key: api_credential", result)
+        self.assertIn("Env Key: SANDBOX_TOKEN", result)
+        self.assertNotIn("credential-secret-value", result)
+        self.assertNotIn("env-var-secret-value", result)
 
     def test_no_secrets_returns_empty_message(self):
         """Test that when no fulfilled secrets exist, appropriate message is returned."""
@@ -249,6 +302,11 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertEqual(tool_def["function"]["name"], "secure_credentials_request")
         self.assertIn("credentials", tool_def["function"]["parameters"]["properties"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["required"])
+        item_properties = (
+            tool_def["function"]["parameters"]["properties"]["credentials"]["items"]["properties"]
+        )
+        self.assertIn("secret_type", item_properties)
+        self.assertEqual(item_properties["secret_type"]["enum"], ["credential", "env_var"])
 
     def test_create_new_credential_requests(self):
         """Test creating new credential requests."""
@@ -294,7 +352,7 @@ class SecureCredentialsRequestToolTests(TestCase):
 
         auth_token_secret = created_secrets.get(key="auth_token")
         self.assertEqual(auth_token_secret.name, "Secret Token")
-        self.assertEqual(auth_token_secret.domain_pattern, "*.auth.example.com")
+        self.assertEqual(auth_token_secret.domain_pattern, "https://*.auth.example.com")
 
     def test_duplicate_request_skipped(self):
         """Requesting an already-requested credential does not duplicate and reports success."""
@@ -333,6 +391,66 @@ class SecureCredentialsRequestToolTests(TestCase):
         )
         self.assertEqual(secrets.count(), 1)
         self.assertTrue(secrets.first().requested)
+
+    @patch("api.agent.tools.secure_credentials_request.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_env_var_request_without_domain(self, _mock_sandbox_enabled):
+        params = {
+            "credentials": [
+                {
+                    "name": "OpenAI API Key",
+                    "description": "Token for sandbox python code",
+                    "key": "openai_api_key",
+                    "secret_type": "env_var",
+                }
+            ]
+        }
+
+        result = execute_secure_credentials_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["created_count"], 1)
+        secret = PersistentAgentSecret.objects.get(agent=self.agent, key="OPENAI_API_KEY")
+        self.assertEqual(secret.secret_type, PersistentAgentSecret.SecretType.ENV_VAR)
+        self.assertEqual(secret.domain_pattern, PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL)
+        self.assertTrue(secret.requested)
+
+    @patch("api.agent.tools.secure_credentials_request.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_env_var_request_requires_sandbox_eligibility(self, _mock_sandbox_enabled):
+        params = {
+            "credentials": [
+                {
+                    "name": "OpenAI API Key",
+                    "description": "Token for sandbox python code",
+                    "key": "OPENAI_API_KEY",
+                    "secret_type": "env_var",
+                }
+            ]
+        }
+
+        result = execute_secure_credentials_request(self.agent, params)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("sandbox compute is not enabled", result["message"])
+        self.assertEqual(PersistentAgentSecret.objects.filter(agent=self.agent).count(), 0)
+
+    @patch("api.agent.tools.secure_credentials_request.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_env_var_request_rejects_invalid_env_key(self, _mock_sandbox_enabled):
+        params = {
+            "credentials": [
+                {
+                    "name": "Invalid Env",
+                    "description": "Invalid key format",
+                    "key": "bad-key",
+                    "secret_type": "env_var",
+                }
+            ]
+        }
+
+        result = execute_secure_credentials_request(self.agent, params)
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Failed to create any credential requests", result["message"])
+        self.assertEqual(PersistentAgentSecret.objects.filter(agent=self.agent).count(), 0)
 
     def test_re_request_already_fulfilled_secret(self):
         """Re-requesting a fulfilled credential now leaves it fulfilled and points user to update."""
@@ -568,6 +686,110 @@ class AgentSecretsRequestViewTests(TestCase):
         )
         self.assertEqual(created.count(), 1)
         self.assertTrue(created.first().requested)
+
+
+@tag("batch_agent_secrets_ctx")
+class AgentSecretFormsTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="form-tests@example.com",
+            email="form-tests@example.com",
+            password="password",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="FormBrowserAgent",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            browser_use_agent=self.browser_agent,
+            name="FormAgent",
+        )
+        self.existing_secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://api.example.com",
+            name="Existing Secret",
+            key="existing_secret",
+            requested=False,
+        )
+        self.existing_secret.set_value("existing-value")
+        self.existing_secret.save()
+
+    def test_add_form_requires_domain_for_credential(self):
+        form = PersistentAgentAddSecretForm(
+            data={
+                "secret_type": "credential",
+                "domain": "",
+                "name": "Credential Secret",
+                "description": "Credential secret",
+                "value": "credential-value",
+            },
+            agent=self.agent,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("domain", form.errors)
+
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_add_form_env_var_allows_blank_domain_and_uses_sentinel(self, _mock_sandbox_enabled):
+        form = PersistentAgentAddSecretForm(
+            data={
+                "secret_type": "env_var",
+                "domain": "",
+                "name": "Sandbox Token",
+                "description": "Sandbox env token",
+                "value": "env-value",
+            },
+            agent=self.agent,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors.as_json())
+        self.assertEqual(
+            form.cleaned_data["domain"],
+            PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+        )
+
+    @patch("api.secret_key_generator.SecretKeyGenerator.generate_key_from_name", return_value="bad-key")
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_add_form_env_var_rejects_invalid_generated_env_key(
+        self,
+        _mock_sandbox_enabled,
+        _mock_generate_key,
+    ):
+        form = PersistentAgentAddSecretForm(
+            data={
+                "secret_type": "env_var",
+                "domain": "",
+                "name": "Sandbox Token",
+                "description": "Sandbox env token",
+                "value": "env-value",
+            },
+            agent=self.agent,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("name", form.errors)
+
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_edit_form_env_var_allows_blank_domain(self, _mock_sandbox_enabled):
+        form = PersistentAgentEditSecretForm(
+            data={
+                "secret_type": "env_var",
+                "domain": "",
+                "name": "Sandbox Token",
+                "description": "Updated env token",
+                "value": "new-env-value",
+            },
+            agent=self.agent,
+            secret=self.existing_secret,
+        )
+
+        self.assertTrue(form.is_valid(), form.errors.as_json())
+        self.assertEqual(
+            form.cleaned_data["domain"],
+            PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+        )
 
 
 @tag("batch_agent_secrets_ctx")

@@ -565,15 +565,31 @@ class AllowlistEntryForm(forms.Form):
 
 class PersistentAgentAddSecretForm(forms.Form):
     """Form for adding a single secret to an agent."""
-    
+
+    SECRET_TYPE_CHOICES = (
+        ("credential", "Credential (domain scoped)"),
+        ("env_var", "Environment Variable (global sandbox env)"),
+    )
+
+    secret_type = forms.ChoiceField(
+        choices=SECRET_TYPE_CHOICES,
+        initial="credential",
+        widget=forms.Select(attrs={
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Secret Type',
+        help_text='Choose "credential" for domain placeholders or "environment variable" for sandbox env injection.'
+    )
+
     domain = forms.CharField(
         max_length=256,
+        required=False,
         widget=forms.TextInput(attrs={
             'placeholder': 'e.g., https://example.com, *.google.com, chrome-extension://abcd1234',
             'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
         }),
         label='Domain Pattern',
-        help_text='Website domain pattern where this secret can be used. Required for security.'
+        help_text='Required only for credential secrets.'
     )
     
     name = forms.CharField(
@@ -609,25 +625,45 @@ class PersistentAgentAddSecretForm(forms.Form):
     def __init__(self, *args, agent=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.agent = agent
+
+    def _is_env_var_type(self) -> bool:
+        return (self.cleaned_data.get("secret_type") or "credential") == "env_var"
+
+    def _validate_env_var_key_from_name(self, name: str) -> None:
+        from api.models import PersistentAgentSecret
+        from api.secret_key_generator import SecretKeyGenerator
+
+        generated_key = SecretKeyGenerator.generate_key_from_name(name).upper()
+        if not PersistentAgentSecret.ENV_VAR_KEY_PATTERN.match(generated_key):
+            raise forms.ValidationError(
+                "Environment variable key derived from name must match ^[A-Z_][A-Z0-9_]*$."
+            )
     
     def clean_domain(self):
-        domain = self.cleaned_data['domain'].strip()
-        
+        domain = (self.cleaned_data.get('domain') or '').strip()
+
+        if self._is_env_var_type():
+            from api.models import PersistentAgentSecret
+            return PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL
+
         try:
             from api.domain_validation import DomainPatternValidator
             from constants.security import SecretLimits
-            
+
+            if not domain:
+                raise forms.ValidationError("Domain pattern is required for credential secrets.")
+
             # Additional length check with user-friendly message
             if len(domain) > SecretLimits.MAX_DOMAIN_PATTERN_LENGTH:
                 raise forms.ValidationError(
                     f"Domain pattern is too long. Maximum {SecretLimits.MAX_DOMAIN_PATTERN_LENGTH} characters allowed."
                 )
-            
+
             DomainPatternValidator.validate_domain_pattern(domain)
             return DomainPatternValidator.normalize_domain_pattern(domain)
         except ValueError as e:
             raise forms.ValidationError(str(e))
-    
+
     def clean_name(self):
         name = self.cleaned_data['name'].strip()
         
@@ -642,6 +678,9 @@ class PersistentAgentAddSecretForm(forms.Form):
             
             if not name:
                 raise forms.ValidationError("Secret name is required.")
+
+            if self._is_env_var_type():
+                self._validate_env_var_key_from_name(name)
             
             return name
         except ValueError as e:
@@ -672,17 +711,26 @@ class PersistentAgentAddSecretForm(forms.Form):
         cleaned_data = super().clean()
         domain = cleaned_data.get('domain')
         name = cleaned_data.get('name')
-        
+        secret_type = cleaned_data.get('secret_type') or "credential"
+
+        if secret_type == "env_var":
+            from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
+            if not self.agent or not sandbox_compute_enabled_for_agent(self.agent):
+                raise forms.ValidationError("Environment variable secrets require sandbox compute to be enabled for this agent.")
+
         if domain and name and self.agent:
             from api.models import PersistentAgentSecret
             from constants.security import SecretLimits
-            
+
             # Check for duplicates by name (which is now the primary identifier)
             if PersistentAgentSecret.objects.filter(
                 agent=self.agent,
+                secret_type=secret_type,
                 domain_pattern=domain,
                 name=name
             ).exists():
+                if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+                    raise forms.ValidationError(f"Environment variable secret name '{name}' already exists.")
                 raise forms.ValidationError(f"Secret name '{name}' already exists for domain '{domain}'.")
             
             # Check limits before adding new secret
@@ -692,25 +740,54 @@ class PersistentAgentAddSecretForm(forms.Form):
                     f"Cannot add more secrets. Maximum {SecretLimits.MAX_SECRETS_PER_AGENT} secrets allowed per agent."
                 )
             
-            # Check domain limit
-            distinct_domains = PersistentAgentSecret.objects.filter(
-                agent=self.agent
-            ).values('domain_pattern').distinct().count()
-            
-            if not PersistentAgentSecret.objects.filter(
-                agent=self.agent, 
-                domain_pattern=domain
-            ).exists() and distinct_domains >= SecretLimits.MAX_DOMAINS_PER_AGENT:
-                raise forms.ValidationError(
-                    f"Cannot add more domains. Maximum {SecretLimits.MAX_DOMAINS_PER_AGENT} domains allowed per agent."
-                )
-        
+            # Check domain limit for credential secrets only
+            if secret_type == PersistentAgentSecret.SecretType.CREDENTIAL:
+                distinct_domains = PersistentAgentSecret.objects.filter(
+                    agent=self.agent,
+                    secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+                ).values('domain_pattern').distinct().count()
+
+                if not PersistentAgentSecret.objects.filter(
+                    agent=self.agent,
+                    secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+                    domain_pattern=domain,
+                ).exists() and distinct_domains >= SecretLimits.MAX_DOMAINS_PER_AGENT:
+                    raise forms.ValidationError(
+                        f"Cannot add more domains. Maximum {SecretLimits.MAX_DOMAINS_PER_AGENT} domains allowed per agent."
+                    )
+
         return cleaned_data
 
 
 class PersistentAgentEditSecretForm(forms.Form):
     """Form for editing an existing secret."""
-    
+
+    SECRET_TYPE_CHOICES = (
+        ("credential", "Credential (domain scoped)"),
+        ("env_var", "Environment Variable (global sandbox env)"),
+    )
+
+    secret_type = forms.ChoiceField(
+        choices=SECRET_TYPE_CHOICES,
+        initial="credential",
+        widget=forms.Select(attrs={
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Secret Type',
+        help_text='Choose "credential" for domain placeholders or "environment variable" for sandbox env injection.'
+    )
+
+    domain = forms.CharField(
+        max_length=256,
+        required=False,
+        widget=forms.TextInput(attrs={
+            'placeholder': 'e.g., https://example.com, *.google.com, chrome-extension://abcd1234',
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+        }),
+        label='Domain Pattern',
+        help_text='Required only for credential secrets.'
+    )
+
     name = forms.CharField(
         max_length=128,
         widget=forms.TextInput(attrs={
@@ -748,8 +825,51 @@ class PersistentAgentEditSecretForm(forms.Form):
         
         # Pre-populate form with existing values if secret is provided
         if secret and not kwargs.get('data'):
+            self.fields['secret_type'].initial = secret.secret_type
+            self.fields['domain'].initial = (
+                ""
+                if secret.secret_type == "env_var"
+                else secret.domain_pattern
+            )
             self.fields['name'].initial = secret.name
             self.fields['description'].initial = secret.description
+
+    def _is_env_var_type(self) -> bool:
+        return (self.cleaned_data.get("secret_type") or "credential") == "env_var"
+
+    def _validate_env_var_key_from_name(self, name: str) -> None:
+        from api.models import PersistentAgentSecret
+        from api.secret_key_generator import SecretKeyGenerator
+
+        generated_key = SecretKeyGenerator.generate_key_from_name(name).upper()
+        if not PersistentAgentSecret.ENV_VAR_KEY_PATTERN.match(generated_key):
+            raise forms.ValidationError(
+                "Environment variable key derived from name must match ^[A-Z_][A-Z0-9_]*$."
+            )
+
+    def clean_domain(self):
+        domain = (self.cleaned_data.get('domain') or '').strip()
+
+        if self._is_env_var_type():
+            from api.models import PersistentAgentSecret
+            return PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL
+
+        try:
+            from api.domain_validation import DomainPatternValidator
+            from constants.security import SecretLimits
+
+            if not domain:
+                raise forms.ValidationError("Domain pattern is required for credential secrets.")
+
+            if len(domain) > SecretLimits.MAX_DOMAIN_PATTERN_LENGTH:
+                raise forms.ValidationError(
+                    f"Domain pattern is too long. Maximum {SecretLimits.MAX_DOMAIN_PATTERN_LENGTH} characters allowed."
+                )
+
+            DomainPatternValidator.validate_domain_pattern(domain)
+            return DomainPatternValidator.normalize_domain_pattern(domain)
+        except ValueError as e:
+            raise forms.ValidationError(str(e))
 
     def clean_name(self):
         name = self.cleaned_data['name'].strip()
@@ -762,6 +882,9 @@ class PersistentAgentEditSecretForm(forms.Form):
                 raise forms.ValidationError(
                     f"Secret name is too long. Maximum 128 characters allowed."
                 )
+
+            if self._is_env_var_type():
+                self._validate_env_var_key_from_name(name)
             
             return name
         except ValueError as e:
@@ -770,16 +893,26 @@ class PersistentAgentEditSecretForm(forms.Form):
     def clean(self):
         cleaned_data = super().clean()
         name = cleaned_data.get('name')
-        
+        domain = cleaned_data.get('domain')
+        secret_type = cleaned_data.get('secret_type') or "credential"
+
+        if secret_type == "env_var":
+            from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
+            if not self.agent or not sandbox_compute_enabled_for_agent(self.agent):
+                raise forms.ValidationError("Environment variable secrets require sandbox compute to be enabled for this agent.")
+
         if name and self.agent and self.secret:
             from api.models import PersistentAgentSecret
-            
+
             # Check for duplicates by name (excluding current secret)
             if PersistentAgentSecret.objects.filter(
                 agent=self.agent,
-                domain_pattern=self.secret.domain_pattern,
+                secret_type=secret_type,
+                domain_pattern=domain,
                 name=name
             ).exclude(pk=self.secret.pk).exists():
+                if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+                    raise forms.ValidationError(f"Environment variable secret name '{name}' already exists.")
                 raise forms.ValidationError(f"Secret name '{name}' already exists for this domain.")
         
         return cleaned_data
