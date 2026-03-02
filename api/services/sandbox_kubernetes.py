@@ -334,9 +334,14 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         if not server_payload:
             return {"status": "error", "message": "Missing MCP server payload for discovery."}
         if not _requires_discovery_pod(server_payload):
+            from api.agent.tools.mcp_manager import get_mcp_manager
+
+            manager = get_mcp_manager()
+            ok = manager.discover_tools_for_server(server_config_id)
             return {
-                "status": "skipped",
-                "message": "Discovery pod only applies to user-scoped stdio MCP servers.",
+                "status": "ok" if ok else "error",
+                "reason": reason,
+                "message": "Discovery pod skipped for non-stdio user server.",
             }
 
         proxy_url: Optional[str] = None
