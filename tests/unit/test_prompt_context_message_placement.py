@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from unittest.mock import patch
 
-from api.agent.core.event_processing import build_prompt_context
+from api.agent.core.prompt_context import build_prompt_context
 from api.agent.core import prompt_context
 from api.models import BrowserUseAgent, PersistentAgent
 
