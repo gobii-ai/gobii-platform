@@ -29,7 +29,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.discover_mcp_tools(
                 "cfg-1",
                 reason="unit-test",
-                server_payload={"config_id": "cfg-1", "command": "npx"},
+                server_payload={"config_id": "cfg-1", "scope": "user", "command": "npx"},
             )
 
         self.assertEqual(result.get("status"), "error")
@@ -55,7 +55,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.discover_mcp_tools(
                 "cfg-2",
                 reason="unit-test",
-                server_payload={"config_id": "cfg-2", "command": "npx"},
+                server_payload={"config_id": "cfg-2", "scope": "user", "command": "npx"},
             )
 
         self.assertEqual(result.get("status"), "ok")
@@ -90,7 +90,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.discover_mcp_tools(
                 "cfg-3",
                 reason="unit-test",
-                server_payload={"config_id": "cfg-3", "command": "npx"},
+                server_payload={"config_id": "cfg-3", "scope": "user", "command": "npx"},
             )
 
         self.assertEqual(result.get("status"), "ok")
@@ -99,3 +99,25 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertIsNone(create_args.kwargs.get("proxy_url"))
         self.assertIsNone(create_args.kwargs.get("no_proxy"))
         mock_delete_pod.assert_called_once_with(_discovery_pod_name("cfg-3"))
+
+    def test_discovery_uses_local_discovery_for_user_scope_http_server(self):
+        backend = self._backend()
+
+        with patch.object(backend, "_create_discovery_pod") as mock_create_pod, patch(
+            "api.agent.tools.mcp_manager.get_mcp_manager"
+        ) as mock_get_manager:
+            mock_get_manager.return_value.discover_tools_for_server.return_value = True
+            result = backend.discover_mcp_tools(
+                "cfg-4",
+                reason="unit-test",
+                server_payload={
+                    "config_id": "cfg-4",
+                    "scope": "user",
+                    "url": "https://example.com/mcp",
+                    "command": "",
+                },
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        mock_get_manager.return_value.discover_tools_for_server.assert_called_once_with("cfg-4")
+        mock_create_pod.assert_not_called()

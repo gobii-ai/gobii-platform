@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 import requests
 from django.conf import settings
 
-from api.models import AgentComputeSession
+from api.models import AgentComputeSession, MCPServerConfig
 from api.proxy_selection import select_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate
@@ -333,6 +333,16 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         if not server_payload:
             return {"status": "error", "message": "Missing MCP server payload for discovery."}
+        if not _requires_discovery_pod(server_payload):
+            from api.agent.tools.mcp_manager import get_mcp_manager
+
+            manager = get_mcp_manager()
+            ok = manager.discover_tools_for_server(server_config_id)
+            return {
+                "status": "ok" if ok else "error",
+                "reason": reason,
+                "message": "Discovery pod skipped for non-stdio user server.",
+            }
 
         proxy_url: Optional[str] = None
         no_proxy: Optional[str] = None
@@ -713,6 +723,13 @@ def _pod_name(agent_id: Any) -> str:
 
 def _discovery_pod_name(config_id: Any) -> str:
     return _slugify(f"sandbox-discovery-{config_id}")
+
+
+def _requires_discovery_pod(server_payload: Dict[str, Any]) -> bool:
+    scope = str(server_payload.get("scope") or "").strip()
+    command = str(server_payload.get("command") or "").strip()
+    url = str(server_payload.get("url") or "").strip()
+    return scope == MCPServerConfig.Scope.USER and bool(command) and not bool(url)
 
 
 def _pvc_name(agent_id: Any) -> str:
