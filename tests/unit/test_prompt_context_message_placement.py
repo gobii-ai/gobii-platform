@@ -33,10 +33,13 @@ class PromptContextSqlitePlacementTests(TestCase):
         ):
             context, _, _ = build_prompt_context(self.agent)
 
-        system_message = next(message for message in context if message["role"] == "system")
-        user_message = next(message for message in context if message["role"] == "user")
+        system_message_count = 0
+        other_messages_count = 0
+        for message in context:
+            if message["role"] == "system":
+                system_message_count += message["content"].count(sqlite_examples)
+            else:
+                other_messages_count += message["content"].count(sqlite_examples)
 
-        self.assertEqual(system_message["content"].count(sqlite_examples), 1)
-        self.assertNotIn(sqlite_examples, user_message["content"])
-        all_contents = "\n".join(message["content"] for message in context)
-        self.assertEqual(all_contents.count(sqlite_examples), 1)
+        self.assertEqual(system_message_count, 1, "sqlite_examples should appear exactly once in the system message.")
+        self.assertEqual(other_messages_count, 0, "sqlite_examples should not appear in any non-system messages.")
