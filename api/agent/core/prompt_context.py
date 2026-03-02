@@ -2292,25 +2292,20 @@ def build_prompt_context(
         if agent.preferred_contact_endpoint.channel == CommsChannel.SMS:
             prompt.section_text("sms_guidelines", _get_sms_prompt_addendum(agent), weight=2, non_shrinkable=True)
     
-    # Render the prompt within the token budget, accounting for system prompt tokens.
-    # This keeps fitted_token_count aligned with actual message payload size used for routing.
+    # Render the prompt within the token budget
     token_budget = get_prompt_token_budget(agent)
-    system_tokens = token_estimator(system_prompt)
-    user_budget = max(0, token_budget - system_tokens)
-    user_content = prompt.render(user_budget)
+    user_content = prompt.render(token_budget)
 
-    # Get token counts before and after fitting (include system prompt in totals)
-    user_tokens_before = prompt.get_tokens_before_fitting()
-    user_tokens_after = prompt.get_tokens_after_fitting()
-    tokens_before = user_tokens_before + system_tokens
-    tokens_after = user_tokens_after + system_tokens
+    # Get token counts before and after fitting
+    tokens_before = prompt.get_tokens_before_fitting()
+    tokens_after = prompt.get_tokens_after_fitting()
     tokens_saved = tokens_before - tokens_after
 
     # Log token usage for monitoring
     logger.info(
         f"Prompt rendered for agent {agent.id}: {tokens_before} tokens before fitting, "
         f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
-        f"budget was {token_budget} tokens, system used {system_tokens}, user budget {user_budget})"
+        f"budget was {token_budget} tokens)"
     )
 
     archive_key, archive_raw_bytes, archive_compressed_bytes, archive_id = _archive_rendered_prompt(

@@ -42,15 +42,3 @@ class PromptContextSqlitePlacementTests(TestCase):
         self.assertEqual(all_contents.count(sqlite_examples), 1)
         self.assertIn("<sqlite_examples>", system_message["content"])
         self.assertIn("</sqlite_examples>", system_message["content"])
-
-    @patch("api.agent.core.prompt_context.get_prompt_token_budget", return_value=1000)
-    @patch("api.agent.core.prompt_context._create_token_estimator", return_value=lambda _: 100)
-    def test_prompt_render_budget_subtracts_system_tokens(self, _mock_token_estimator, _mock_budget):
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ), patch("api.agent.core.prompt_context.Prompt.render", autospec=True, wraps=prompt_context.Prompt.render) as mock_render:
-            _context, fitted_token_count, _archive_id = build_prompt_context(self.agent)
-
-        render_budget = mock_render.call_args.args[1]
-        self.assertEqual(render_budget, 900)
-        self.assertGreaterEqual(fitted_token_count, 100)
