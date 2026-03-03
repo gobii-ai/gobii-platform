@@ -174,6 +174,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         *,
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
+        trusted_env_keys: Optional[list[str]] = None,
         timeout: Optional[int] = None,
         interactive: bool = False,
     ) -> Dict[str, Any]:
@@ -192,6 +193,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             "timeout": timeout_value,
             "interactive": interactive,
         }
+        if trusted_env_keys:
+            payload["trusted_env_keys"] = [str(key) for key in trusted_env_keys if str(key)]
         return self._proxy_post(session.pod_name, "/sandbox/compute/run_command", payload, timeout=request_timeout)
 
     def mcp_request(

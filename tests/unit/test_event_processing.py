@@ -1382,13 +1382,24 @@ class HttpRequestSecretPlaceholderTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
-    def _create_secret(self, key, value, domain="*", name=None):
+    def _create_secret(
+        self,
+        key,
+        value,
+        domain="*",
+        name=None,
+        secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+    ):
         """Helper to create a secret for the agent."""
+        if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+            domain = PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL
+            key = str(key).upper()
         secret = PersistentAgentSecret(
             agent=self.agent,
             domain_pattern=domain,
             name=name or key,
-            key=key
+            key=key,
+            secret_type=secret_type,
         )
         secret.set_value(value)
         secret.save()
@@ -1655,6 +1666,38 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         headers = call_args[1]["headers"]
         self.assertEqual(headers["Real-Key"], "real_value")
         self.assertEqual(headers["Fake-Key"], "<<<fake_secret>>>")  # Unchanged
+
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_env_var_secret_is_ignored_for_placeholder_substitution(self, mock_proxy, mock_request):
+        self._create_secret(
+            "API_TOKEN",
+            "env-var-token-value",
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+        )
+
+        mock_proxy.return_value = type('ProxyServer', (), {'proxy_url': 'http://proxy:8080'})()
+        mock_response = type('Response', (), {
+            'status_code': 200,
+            'headers': {'Content-Type': 'text/plain'},
+            'iter_content': lambda self, chunk_size: [b'ok'],
+            'close': lambda self: None
+        })()
+        mock_request.return_value = mock_response
+
+        params = {
+            "method": "GET",
+            "url": "https://api.example.com/data",
+            "headers": {
+                "Authorization": "Bearer <<<API_TOKEN>>>",
+            },
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok")
+        headers = mock_request.call_args[1]["headers"]
+        self.assertEqual(headers["Authorization"], "Bearer <<<API_TOKEN>>>")
 
     @patch('api.agent.tools.http_request.build_signed_filespace_download_url')
     @patch('api.agent.tools.http_request.write_bytes_to_dir')

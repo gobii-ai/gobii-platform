@@ -6751,6 +6751,14 @@ class PersistentAgentSecret(models.Model):
     """
     A secret (encrypted key-value pair) for a persistent agent, scoped to a domain pattern.
     """
+
+    class SecretType(models.TextChoices):
+        CREDENTIAL = "credential", "Credential"
+        ENV_VAR = "env_var", "Environment Variable"
+
+    ENV_VAR_DOMAIN_SENTINEL = "__gobii_env_var__"
+    ENV_VAR_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
         PersistentAgent,
@@ -6774,6 +6782,12 @@ class PersistentAgentSecret(models.Model):
         blank=True,
         help_text="Secret key name (auto-generated from name, alphanumeric with underscores only)"
     )
+    secret_type = models.CharField(
+        max_length=16,
+        choices=SecretType.choices,
+        default=SecretType.CREDENTIAL,
+        help_text="Secret behavior type: credential (domain-scoped) or env_var (global sandbox env).",
+    )
     encrypted_value = models.BinaryField(
         help_text="AES-256-GCM encrypted secret value"
     )
@@ -6787,16 +6801,16 @@ class PersistentAgentSecret(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['agent', 'domain_pattern', 'name'],
-                name='unique_agent_domain_secret_name'
+                fields=['agent', 'secret_type', 'domain_pattern', 'name'],
+                name='unique_agent_type_domain_secret_name'
             ),
             models.UniqueConstraint(
-                fields=['agent', 'domain_pattern', 'key'],
-                name='unique_agent_domain_secret_key'
+                fields=['agent', 'secret_type', 'domain_pattern', 'key'],
+                name='unique_agent_type_domain_secret_key'
             )
         ]
         indexes = [
-            models.Index(fields=['agent', 'domain_pattern'], name='pa_secret_agent_domain_idx'),
+            models.Index(fields=['agent', 'secret_type', 'domain_pattern'], name='pa_secret_agent_type_dom_idx'),
             models.Index(fields=['agent'], name='pa_secret_agent_idx'),
         ]
         ordering = ['domain_pattern', 'name']
@@ -6811,7 +6825,8 @@ class PersistentAgentSecret(models.Model):
         # Get existing keys for this agent and domain (excluding self if updating)
         existing_secrets = PersistentAgentSecret.objects.filter(
             agent=self.agent,
-            domain_pattern=self.domain_pattern
+            secret_type=self.secret_type,
+            domain_pattern=self.domain_pattern,
         )
         if self.pk:
             existing_secrets = existing_secrets.exclude(pk=self.pk)
@@ -6823,27 +6838,39 @@ class PersistentAgentSecret(models.Model):
     def clean(self):
         """Validate the secret fields."""
         super().clean()
-        
-        # Validate domain pattern
-        if self.domain_pattern:
+
+        # Validate type-specific scope
+        if self.secret_type == self.SecretType.ENV_VAR:
+            # Env vars are global per-agent and intentionally not domain-scoped.
+            self.domain_pattern = self.ENV_VAR_DOMAIN_SENTINEL
+        elif self.domain_pattern:
             from .domain_validation import DomainPatternValidator
             try:
                 DomainPatternValidator.validate_domain_pattern(self.domain_pattern)
                 self.domain_pattern = DomainPatternValidator.normalize_domain_pattern(self.domain_pattern)
             except ValueError as e:
                 raise ValidationError({'domain_pattern': str(e)})
-        
-        # Generate key from name if name is provided
-        if self.name and self.agent:
+        else:
+            raise ValidationError({'domain_pattern': "Domain pattern is required for credential secrets."})
+
+        # Generate key from name only when key is empty. Some flows (agent requests)
+        # intentionally provide an explicit key.
+        if self.name and self.agent and not self.key:
             self.key = self.generate_key_from_name()
-        
+
         # Validate secret key
         if self.key:
-            from .domain_validation import DomainPatternValidator
-            try:
-                DomainPatternValidator._validate_secret_key(self.key)
-            except ValueError as e:
-                raise ValidationError({'key': str(e)})
+            if self.secret_type == self.SecretType.ENV_VAR:
+                key = str(self.key).strip().upper()
+                if not self.ENV_VAR_KEY_PATTERN.match(key):
+                    raise ValidationError({'key': "Environment variable key must match ^[A-Z_][A-Z0-9_]*$."})
+                self.key = key
+            else:
+                from .domain_validation import DomainPatternValidator
+                try:
+                    DomainPatternValidator._validate_secret_key(self.key)
+                except ValueError as e:
+                    raise ValidationError({'key': str(e)})
 
     def set_value(self, value: str):
         """
@@ -6885,6 +6912,8 @@ class PersistentAgentSecret(models.Model):
         return self.requested
 
     def __str__(self):
+        if self.secret_type == self.SecretType.ENV_VAR:
+            return f"Env Var '{self.name}' ({self.key}) for {self.agent.name}"
         return f"Secret '{self.name}' ({self.key}) for {self.agent.name} on {self.domain_pattern}"
 
 

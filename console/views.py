@@ -6034,25 +6034,42 @@ class AgentSecretsView(LoginRequiredMixin, TemplateView):
         
         # Get secrets from the new model, split by requested/fulfilled
         from api.models import PersistentAgentSecret
-        fulfilled_qs = PersistentAgentSecret.objects.filter(agent=agent, requested=False).order_by('domain_pattern', 'name')
-        requested_qs = PersistentAgentSecret.objects.filter(agent=agent, requested=True).order_by('domain_pattern', 'name')
+        fulfilled_credential_qs = PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+        ).order_by('domain_pattern', 'name')
+        fulfilled_env_var_qs = PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+        ).order_by('name')
+        requested_qs = PersistentAgentSecret.objects.filter(agent=agent, requested=True).order_by('secret_type', 'domain_pattern', 'name')
+        requested_credential_qs = requested_qs.filter(secret_type=PersistentAgentSecret.SecretType.CREDENTIAL)
+        requested_env_var_qs = requested_qs.filter(secret_type=PersistentAgentSecret.SecretType.ENV_VAR)
 
-        # Group fulfilled secrets by domain for display
-        secrets = {}
-        for secret in fulfilled_qs:
-            if secret.domain_pattern not in secrets:
-                secrets[secret.domain_pattern] = {}
-            secrets[secret.domain_pattern][secret.name] = {
+        # Group fulfilled credential secrets by domain for display
+        credential_secrets = {}
+        for secret in fulfilled_credential_qs:
+            if secret.domain_pattern not in credential_secrets:
+                credential_secrets[secret.domain_pattern] = {}
+            credential_secrets[secret.domain_pattern][secret.name] = {
                 'id': secret.id,
                 'name': secret.name,
                 'description': secret.description,
                 'key': secret.key,
+                'secret_type': secret.secret_type,
                 'created_at': secret.created_at,
                 'updated_at': secret.updated_at
             }
-        context['secrets'] = secrets
-        context['has_secrets'] = bool(secrets)
+        env_var_secrets = list(fulfilled_env_var_qs)
+        context['secrets'] = credential_secrets
+        context['credential_secrets'] = credential_secrets
+        context['env_var_secrets'] = env_var_secrets
+        context['has_secrets'] = bool(credential_secrets or env_var_secrets)
         context['requested_secrets'] = requested_qs
+        context['requested_credential_secrets'] = requested_credential_qs
+        context['requested_env_var_secrets'] = requested_env_var_qs
         context['has_requested_secrets'] = requested_qs.exists()
 
         return context
@@ -6081,6 +6098,7 @@ class AgentSecretsAddView(LoginRequiredMixin, View):
                     from api.models import PersistentAgentSecret
                     
                     # Create the new secret
+                    secret_type = form.cleaned_data['secret_type']
                     domain = form.cleaned_data['domain']
                     name = form.cleaned_data['name']
                     description = form.cleaned_data.get('description', '')
@@ -6089,6 +6107,7 @@ class AgentSecretsAddView(LoginRequiredMixin, View):
                     # Create and save the secret
                     secret = PersistentAgentSecret(
                         agent=agent,
+                        secret_type=secret_type,
                         domain_pattern=domain,
                         name=name,
                         description=description
@@ -6098,7 +6117,10 @@ class AgentSecretsAddView(LoginRequiredMixin, View):
                     secret.set_value(value)  # This validates and encrypts the value
                     secret.save()
                     
-                    messages.success(request, f"Secret '{name}' added successfully for domain '{domain}'.")
+                    if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+                        messages.success(request, f"Environment variable secret '{name}' added successfully.")
+                    else:
+                        messages.success(request, f"Secret '{name}' added successfully for domain '{domain}'.")
 
                     # Count total secrets for analytics
                     total_secrets = PersistentAgentSecret.objects.filter(agent=agent).count()
@@ -6112,6 +6134,7 @@ class AgentSecretsAddView(LoginRequiredMixin, View):
                             'agent_name': agent.name,
                             'secret_name': name,
                             'secret_key': secret.key,  # Generated key
+                            'secret_type': secret.secret_type,
                             'domain': domain,
                             'total_secrets': total_secrets,
                         }
@@ -6174,7 +6197,12 @@ class AgentSecretsEditView(LoginRequiredMixin, TemplateView):
         context['agent'] = agent
         context['secret_key'] = secret_obj.key if secret_obj else None
         context['secret_name'] = secret_obj.name if secret_obj else None
-        context['domain'] = secret_obj.domain_pattern if secret_obj else None
+        context['secret_type'] = secret_obj.secret_type if secret_obj else None
+        context['domain'] = (
+            None
+            if (secret_obj and secret_obj.secret_type == "env_var")
+            else (secret_obj.domain_pattern if secret_obj else None)
+        )
         context['form'] = PersistentAgentEditSecretForm(agent=agent, secret=secret_obj)
         return context
 
@@ -6201,18 +6229,26 @@ class AgentSecretsEditView(LoginRequiredMixin, TemplateView):
             try:
                 with transaction.atomic():
                     # Update the secret fields
+                    new_secret_type = form.cleaned_data['secret_type']
+                    new_domain = form.cleaned_data['domain']
                     new_name = form.cleaned_data['name']
                     new_description = form.cleaned_data.get('description', '')
                     new_value = form.cleaned_data['value']
                     
+                    secret.secret_type = new_secret_type
+                    secret.domain_pattern = new_domain
                     # Update name and description
                     secret.name = new_name
                     secret.description = new_description
-                    secret.full_clean()  # This will regenerate the key if name changed
+                    # Preserve key stability on edit to avoid breaking existing references.
+                    secret.full_clean()
                     secret.set_value(new_value)  # This validates and encrypts the value
                     secret.save()
                     
-                    messages.success(request, f"Secret '{secret.name}' updated successfully.")
+                    if secret.secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+                        messages.success(request, f"Environment variable secret '{secret.name}' updated successfully.")
+                    else:
+                        messages.success(request, f"Secret '{secret.name}' updated successfully.")
 
                     transaction.on_commit(lambda: Analytics.track_event(
                         user_id=request.user.id,
@@ -6223,6 +6259,7 @@ class AgentSecretsEditView(LoginRequiredMixin, TemplateView):
                             'agent_name': agent.name,
                             'secret_name': secret.name,
                             'secret_key': secret.key,
+                            'secret_type': secret.secret_type,
                             'domain': secret.domain_pattern,
                         }
                     ))
@@ -6275,6 +6312,7 @@ class AgentSecretsDeleteView(LoginRequiredMixin, View):
             with transaction.atomic():
                 secret_key = secret.key
                 secret_domain = secret.domain_pattern
+                secret_type = secret.secret_type
 
                 # Delete the secret
                 secret.delete()
@@ -6292,6 +6330,7 @@ class AgentSecretsDeleteView(LoginRequiredMixin, View):
                         'agent_id': str(agent.pk),
                         'agent_name': agent.name,
                         'secret_key': secret_key,
+                        'secret_type': secret_type,
                         'domain': secret_domain,
                         'remaining_secrets': remaining_secrets,
                     }
@@ -6773,6 +6812,7 @@ class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):
                     from api.models import PersistentAgentSecret
                     
                     # Create the new secret
+                    secret_type = form.cleaned_data['secret_type']
                     domain = form.cleaned_data['domain']
                     name = form.cleaned_data['name']
                     description = form.cleaned_data.get('description', '')
@@ -6781,6 +6821,7 @@ class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):
                     # Create and save the secret
                     secret = PersistentAgentSecret(
                         agent=agent,
+                        secret_type=secret_type,
                         domain_pattern=domain,
                         name=name,
                         description=description
@@ -6790,7 +6831,10 @@ class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):
                     secret.set_value(value)  # This validates and encrypts the value
                     secret.save()
 
-                    messages.success(request, f"Secret '{name}' added successfully for domain '{domain}'.")
+                    if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+                        messages.success(request, f"Environment variable secret '{name}' added successfully.")
+                    else:
+                        messages.success(request, f"Secret '{name}' added successfully for domain '{domain}'.")
 
                     # Count total secrets for analytics
                     total_secrets = PersistentAgentSecret.objects.filter(agent=agent).count()
@@ -6804,6 +6848,7 @@ class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):
                             'agent_name': agent.name,
                             'secret_name': name,
                             'secret_key': secret.key,  # Generated key
+                            'secret_type': secret.secret_type,
                             'domain': domain,
                             'total_secrets': total_secrets,
                         }
@@ -6898,7 +6943,7 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
         requested_secrets = PersistentAgentSecret.objects.filter(
             agent=agent,
             requested=True
-        ).order_by('domain_pattern', 'name')
+        ).order_by('secret_type', 'domain_pattern', 'name')
 
         context['requested_secrets'] = requested_secrets
         context['has_requested_secrets'] = requested_secrets.exists()
@@ -6950,7 +6995,7 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
         requested_secrets = PersistentAgentSecret.objects.filter(
             agent=agent,
             requested=True
-        ).order_by('domain_pattern', 'name')
+        ).order_by('secret_type', 'domain_pattern', 'name')
 
         form = PersistentAgentSecretsRequestForm(request.POST, requested_secrets=requested_secrets)
 
@@ -6958,6 +7003,7 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
             try:
                 with transaction.atomic():
                     updated_count = 0
+                    provided_secret_types = set()
                     for secret in requested_secrets:
                         field_name = f'secret_{secret.id}'
                         value = form.cleaned_data.get(field_name)
@@ -6966,6 +7012,7 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
                             secret.requested = False
                             secret.save()
                             updated_count += 1
+                            provided_secret_types.add(secret.secret_type)
 
                     if updated_count > 0:
                         from api.models import PersistentAgentStep, PersistentAgentSystemStep
@@ -6988,6 +7035,7 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
                                 'agent_id': str(agent.pk),
                                 'agent_name': agent.name,
                                 'secrets_provided': updated_count,
+                                'secret_types': sorted(provided_secret_types),
                             },
                         )
                         return redirect('agent_secrets_request_thanks', pk=agent.pk)
