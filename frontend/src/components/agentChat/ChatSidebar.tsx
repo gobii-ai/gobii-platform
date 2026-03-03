@@ -2,11 +2,11 @@ import { memo, useState, useCallback, useEffect, useMemo } from 'react'
 import { PanelLeft, PanelLeftClose, Plus, ArrowLeftRight } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
-import type { AgentRosterEntry } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
-import { AgentEmptyState, AgentListItem, AgentSearchInput } from './ChatSidebarParts'
+import { AgentEmptyState, AgentListItem, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 
 const SEARCH_THRESHOLD = 6
 
@@ -20,6 +20,8 @@ type ChatSidebarProps = {
   onToggle?: (collapsed: boolean) => void
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onCreateAgent?: () => void
+  rosterSortMode?: AgentRosterSortMode
+  onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
 }
 
@@ -33,6 +35,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   onToggle,
   onSelectAgent,
   onCreateAgent,
+  rosterSortMode = 'recent',
+  onRosterSortModeChange,
   contextSwitcher,
 }: ChatSidebarProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
@@ -102,6 +106,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   }, [isMobile, onCreateAgent])
 
   const hasAgents = agents.length > 0
+  const showSortToggle = agents.length >= 2
 
   const fishCollateralEnabled = useMemo(() => {
     if (typeof document === 'undefined') {
@@ -174,6 +179,13 @@ export const ChatSidebar = memo(function ChatSidebar({
               value={searchQuery}
               onChange={setSearchQuery}
               onClear={() => setSearchQuery('')}
+            />
+          ) : null}
+          {showSortToggle ? (
+            <AgentSortToggle
+              variant="drawer"
+              value={rosterSortMode}
+              onChange={(mode) => onRosterSortModeChange?.(mode)}
             />
           ) : null}
           <div className="agent-drawer-list" role="list">
@@ -265,6 +277,13 @@ export const ChatSidebar = memo(function ChatSidebar({
               value={searchQuery}
               onChange={setSearchQuery}
               onClear={() => setSearchQuery('')}
+            />
+          ) : null}
+          {!collapsed && showSortToggle ? (
+            <AgentSortToggle
+              variant="sidebar"
+              value={rosterSortMode}
+              onChange={(mode) => onRosterSortModeChange?.(mode)}
             />
           ) : null}
 

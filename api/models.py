@@ -573,6 +573,95 @@ class UserFlags(models.Model):
         return cls.objects.get_or_create(user=user)[0]
 
 
+class UserPreference(models.Model):
+    """Per-user application preferences persisted across devices."""
+
+    class AgentRosterSortMode(models.TextChoices):
+        RECENT = "recent", "Most recent"
+        ALPHABETICAL = "alphabetical", "Alphabetical (A-Z)"
+
+    KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
+    PREFERENCE_DEFINITIONS = {
+        KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
+            "default": AgentRosterSortMode.RECENT,
+            "allowed_values": frozenset(AgentRosterSortMode.values),
+        },
+    }
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="preferences",
+    )
+    preferences = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Arbitrary preference map keyed by namespaced setting identifiers.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User preference"
+        verbose_name_plural = "User preferences"
+
+    @classmethod
+    def _known_defaults(cls) -> dict[str, str]:
+        return {key: definition["default"] for key, definition in cls.PREFERENCE_DEFINITIONS.items()}
+
+    @classmethod
+    def get_for_user(cls, user):
+        if not user or not getattr(user, "pk", None):
+            return None
+        return cls.objects.filter(user=user).only("preferences").first()
+
+    @classmethod
+    def resolve_known_preferences(cls, user) -> dict[str, str]:
+        resolved = cls._known_defaults()
+        pref = cls.get_for_user(user)
+        stored = pref.preferences if pref and isinstance(pref.preferences, dict) else {}
+        for key, definition in cls.PREFERENCE_DEFINITIONS.items():
+            value = stored.get(key)
+            if isinstance(value, str) and value in definition["allowed_values"]:
+                resolved[key] = value
+        return resolved
+
+    @classmethod
+    def resolve_agent_roster_sort_mode(cls, user) -> str:
+        resolved = cls.resolve_known_preferences(user)
+        return resolved[cls.KEY_AGENT_CHAT_ROSTER_SORT_MODE]
+
+    @classmethod
+    def update_known_preferences(cls, user, updates: dict[str, str]) -> dict[str, str]:
+        if not isinstance(updates, dict):
+            raise ValueError("preferences must be an object.")
+
+        unknown_keys = [key for key in updates if key not in cls.PREFERENCE_DEFINITIONS]
+        if unknown_keys:
+            unknown_keys.sort()
+            raise ValueError(f"Unknown preference keys: {', '.join(unknown_keys)}")
+
+        for key, value in updates.items():
+            allowed_values = cls.PREFERENCE_DEFINITIONS[key]["allowed_values"]
+            if not isinstance(value, str) or value not in allowed_values:
+                allowed = ", ".join(sorted(allowed_values))
+                raise ValueError(f"Invalid value for '{key}'. Allowed values: {allowed}")
+
+        preference, _ = cls.objects.get_or_create(user=user)
+        stored = preference.preferences if isinstance(preference.preferences, dict) else {}
+        known_stored = {}
+        for key, definition in cls.PREFERENCE_DEFINITIONS.items():
+            value = stored.get(key)
+            if isinstance(value, str) and value in definition["allowed_values"]:
+                known_stored[key] = value
+        next_stored = {**known_stored, **updates}
+        if next_stored != stored:
+            preference.preferences = next_stored
+            preference.save(update_fields=["preferences", "updated_at"])
+
+        return cls.resolve_known_preferences(user)
+
+
 def _user_is_vip(self):
     """Safe VIP accessor that tolerates missing flags rows."""
     if not getattr(self, "pk", None):

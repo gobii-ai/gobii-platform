@@ -2,9 +2,10 @@ import type { CSSProperties } from 'react'
 import { Check, Search, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
-import type { AgentRosterEntry } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 
 type SearchVariant = 'drawer' | 'sidebar'
+type SortVariant = SearchVariant
 
 const SEARCH_VARIANTS: Record<
   SearchVariant,
@@ -64,6 +65,37 @@ export function AgentSearchInput({ variant, value, onChange, onClear }: AgentSea
           <X className={variant === 'drawer' ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
         </button>
       ) : null}
+    </div>
+  )
+}
+
+type AgentSortToggleProps = {
+  variant: SortVariant
+  value: AgentRosterSortMode
+  onChange: (value: AgentRosterSortMode) => void
+}
+
+export function AgentSortToggle({ variant, value, onChange }: AgentSortToggleProps) {
+  const containerClass = variant === 'drawer' ? 'agent-drawer-sort-toggle' : 'chat-sidebar-sort-toggle'
+  const buttonClass = variant === 'drawer' ? 'agent-drawer-sort-toggle-button' : 'chat-sidebar-sort-toggle-button'
+  return (
+    <div className={containerClass} role="group" aria-label="Sort agents">
+      <button
+        type="button"
+        className={buttonClass}
+        data-active={value === 'recent' ? 'true' : 'false'}
+        onClick={() => onChange('recent')}
+      >
+        Most recent
+      </button>
+      <button
+        type="button"
+        className={buttonClass}
+        data-active={value === 'alphabetical' ? 'true' : 'false'}
+        onClick={() => onChange('alphabetical')}
+      >
+        A-Z
+      </button>
     </div>
   )
 }

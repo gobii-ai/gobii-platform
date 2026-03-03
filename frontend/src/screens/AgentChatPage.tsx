@@ -4,6 +4,10 @@ import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
+import {
+  updateUserPreferences,
+  USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
+} from '../api/userPreferences'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
@@ -25,13 +29,14 @@ import { refreshTimelineLatestInCache } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
-import type { AgentRosterEntry } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
+import { parseAgentRosterSortMode, sortRosterEntries } from '../util/agentRosterSort'
 import { appendReturnTo } from '../util/returnTo'
 
 function deriveFirstName(agentName?: string | null): string {
@@ -145,10 +150,6 @@ function buildFallbackFaviconDataUrl(colorHex: string): string {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 
-function compareRosterNames(left: string, right: string): number {
-  return left.localeCompare(right, undefined, { sensitivity: 'base' })
-}
-
 function resolveBillingAlertMessage(reason?: string | null): string {
   switch ((reason || '').toLowerCase()) {
     case 'requires_action':
@@ -249,20 +250,12 @@ function buildCreateAgentError(err: unknown, isProprietaryMode: boolean): Create
   }
 }
 
-function insertRosterEntry(agents: AgentRosterEntry[], entry: AgentRosterEntry): AgentRosterEntry[] {
-  const insertionIndex = agents.findIndex((agent) => compareRosterNames(entry.name, agent.name) < 0)
-  if (insertionIndex === -1) {
-    return [...agents, entry]
-  }
-  return [...agents.slice(0, insertionIndex), entry, ...agents.slice(insertionIndex)]
-}
-
 function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRosterEntry): AgentRosterEntry[] {
   const roster = agents ?? []
   if (roster.some((agent) => agent.id === entry.id)) {
     return roster
   }
-  return insertRosterEntry(roster, entry)
+  return [...roster, entry]
 }
 
 function prunePendingAvatarTracking(
@@ -303,6 +296,7 @@ function prunePendingAvatarTracking(
 
 type AgentRosterQueryData = {
   context: ConsoleContext
+  agentRosterSortMode?: AgentRosterSortMode
   agents: AgentRosterEntry[]
   llmIntelligence?: unknown
 }
@@ -779,9 +773,7 @@ export function AgentChatPage({
       queryClient.setQueriesData(
         { queryKey: ['agent-roster'] },
         (
-          current:
-            | { context: ConsoleContext; agents: AgentRosterEntry[]; llmIntelligence?: unknown }
-            | undefined,
+          current: AgentRosterQueryData | undefined,
         ) => {
           if (!current?.agents?.length) {
             return current
@@ -839,7 +831,7 @@ export function AgentChatPage({
 
           return {
             ...current,
-            agents: hasName ? [...nextAgents].sort((left, right) => compareRosterNames(left.name, right.name)) : nextAgents,
+            agents: nextAgents,
           }
         },
       )
@@ -863,6 +855,65 @@ export function AgentChatPage({
     forAgentId: rosterQueryAgentId,
     refetchIntervalMs: rosterRefreshIntervalMs,
   })
+  const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
+  const hasHydratedAgentRosterSortModeRef = useRef(false)
+
+  useEffect(() => {
+    const serverSortMode = rosterQuery.data?.agentRosterSortMode
+    if (!serverSortMode || hasHydratedAgentRosterSortModeRef.current) {
+      return
+    }
+    hasHydratedAgentRosterSortModeRef.current = true
+    setAgentRosterSortMode(serverSortMode)
+  }, [rosterQuery.data?.agentRosterSortMode])
+
+  const handleAgentRosterSortModeChange = useCallback(
+    (nextSortMode: AgentRosterSortMode) => {
+      setAgentRosterSortMode(nextSortMode)
+      queryClient.setQueriesData<AgentRosterQueryData>(
+        { queryKey: ['agent-roster'] },
+        (current) => {
+          if (!isAgentRosterQueryData(current)) {
+            return current
+          }
+          if (current.agentRosterSortMode === nextSortMode) {
+            return current
+          }
+          return {
+            ...current,
+            agentRosterSortMode: nextSortMode,
+          }
+        },
+      )
+
+      void updateUserPreferences({
+        preferences: {
+          [USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE]: nextSortMode,
+        },
+      }).then((response) => {
+        const persistedSortMode = parseAgentRosterSortMode(
+          response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE],
+        )
+        setAgentRosterSortMode(persistedSortMode)
+        queryClient.setQueriesData<AgentRosterQueryData>(
+          { queryKey: ['agent-roster'] },
+          (current) => {
+            if (!isAgentRosterQueryData(current)) {
+              return current
+            }
+            if (current.agentRosterSortMode === persistedSortMode) {
+              return current
+            }
+            return {
+              ...current,
+              agentRosterSortMode: persistedSortMode,
+            }
+          },
+        )
+      }).catch(() => undefined)
+    },
+    [queryClient],
+  )
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1696,6 +1747,7 @@ export function AgentChatPage({
       avatarUrl: resolvedAvatarUrl,
       displayColorHex: resolvedAgentColorHex ?? null,
       isActive: true,
+      lastInteractionAt: null,
       miniDescription: '',
       shortDescription: '',
       isOrgOwned: false,
@@ -1753,19 +1805,23 @@ export function AgentChatPage({
     resolvedIsOrgOwned,
     rosterAgents,
   ])
+  const sortedSidebarAgents = useMemo(
+    () => sortRosterEntries(rosterAgentsWithActiveMeta, agentRosterSortMode),
+    [agentRosterSortMode, rosterAgentsWithActiveMeta],
+  )
   const sidebarAgents = useMemo(() => {
     if (!contextReady) {
       return []
     }
     if (!activeAgentId) {
-      return rosterAgentsWithActiveMeta
+      return sortedSidebarAgents
     }
-    const hasActive = rosterAgentsWithActiveMeta.some((agent) => agent.id === activeAgentId)
+    const hasActive = sortedSidebarAgents.some((agent) => agent.id === activeAgentId)
     if (hasActive || !fallbackAgent) {
-      return rosterAgentsWithActiveMeta
+      return sortedSidebarAgents
     }
-    return [fallbackAgent, ...rosterAgentsWithActiveMeta]
-  }, [activeAgentId, contextReady, fallbackAgent, rosterAgentsWithActiveMeta])
+    return [fallbackAgent, ...sortedSidebarAgents]
+  }, [activeAgentId, contextReady, fallbackAgent, sortedSidebarAgents])
 
   const resolvedInviteUrl = useMemo(() => {
     if (collaboratorInviteUrl) {
@@ -1929,6 +1985,7 @@ export function AgentChatPage({
           avatarUrl: null,
           displayColorHex: null,
           isActive: true,
+          lastInteractionAt: new Date().toISOString(),
           miniDescription: '',
           shortDescription: '',
           email: createdAgentEmail,
@@ -2089,12 +2146,14 @@ export function AgentChatPage({
 
   const selectionMainClassName = `has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
   const selectionSidebarProps = {
-    agents: rosterAgents,
+    agents: sidebarAgents,
     activeAgentId: null,
     loading: rosterLoading,
     errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
     onCreateAgent: handleCreateAgent,
+    rosterSortMode: agentRosterSortMode,
+    onRosterSortModeChange: handleAgentRosterSortModeChange,
     defaultCollapsed: selectionSidebarCollapsed,
     onToggle: setSelectionSidebarCollapsed,
     contextSwitcher: contextSwitcher ?? undefined,
@@ -2539,6 +2598,8 @@ export function AgentChatPage({
         rosterError={rosterErrorMessage}
         onSelectAgent={handleSelectAgent}
         onCreateAgent={handleCreateAgent}
+        agentRosterSortMode={agentRosterSortMode}
+        onAgentRosterSortModeChange={handleAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher ?? undefined}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}

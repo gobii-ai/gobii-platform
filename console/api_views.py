@@ -76,6 +76,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     AgentCollaborator,
+    UserPreference,
     build_web_agent_address,
     build_web_user_address,
     UserPhoneNumber,
@@ -258,6 +259,39 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
                 "email": request.user.email,
             }
         )
+
+
+class UserPreferencesAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "patch"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse({"preferences": UserPreference.resolve_known_preferences(request.user)})
+
+    def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if not isinstance(payload, dict):
+            return HttpResponseBadRequest("JSON body must be an object.")
+
+        unknown_top_level_keys = sorted(key for key in payload.keys() if key != "preferences")
+        if unknown_top_level_keys:
+            return HttpResponseBadRequest(
+                f"Unknown top-level fields: {', '.join(unknown_top_level_keys)}"
+            )
+
+        if "preferences" not in payload:
+            return HttpResponseBadRequest("Missing 'preferences' field.")
+
+        raw_preferences = payload["preferences"]
+        try:
+            resolved_preferences = UserPreference.update_known_preferences(request.user, raw_preferences)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        return JsonResponse({"preferences": resolved_preferences})
 
 
 class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
@@ -1700,6 +1734,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         override = get_context_override(request)
         for_agent_id = request.GET.get("for_agent")
         requested_agent_status = None
+        agent_roster_sort_mode = UserPreference.resolve_agent_roster_sort_mode(request.user)
         if for_agent_id:
             override_for_agent, error_response, requested_agent_status = self._resolve_override_for_agent(
                 request,
@@ -1825,6 +1860,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
                 "email": get_display_email(agent),
                 "sms": get_primary_sms(agent),
+                "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
             }
             for agent in agents
         ]
@@ -1836,6 +1872,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "name": context_info.current_context.name,
                 },
                 "requested_agent_status": requested_agent_status,
+                "agent_roster_sort_mode": agent_roster_sort_mode,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,
             }

@@ -27,7 +27,7 @@ import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
-import type { AgentRosterEntry } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
@@ -68,6 +68,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   rosterError?: string | null
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onCreateAgent?: () => void
+  agentRosterSortMode?: AgentRosterSortMode
+  onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
@@ -167,6 +169,8 @@ export function AgentChatLayout({
   rosterError,
   onSelectAgent,
   onCreateAgent,
+  agentRosterSortMode = 'recent',
+  onAgentRosterSortModeChange,
   contextSwitcher,
   autoFocusComposer = false,
   kanbanSnapshot,
@@ -719,6 +723,8 @@ export function AgentChatLayout({
         errorMessage={rosterError}
         onSelectAgent={onSelectAgent}
         onCreateAgent={onCreateAgent}
+        rosterSortMode={agentRosterSortMode}
+        onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
       />
 	      {showBanner && (
