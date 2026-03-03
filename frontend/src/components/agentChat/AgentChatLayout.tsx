@@ -27,7 +27,7 @@ import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
-import type { AgentRosterEntry } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
@@ -61,13 +61,17 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   connectionLabel?: string
   connectionDetail?: string | null
   agentRoster?: AgentRosterEntry[]
+  favoriteAgentIds?: string[]
   activeAgentId?: string | null
   insightsPanelStorageKey?: string | null
   switchingAgentId?: string | null
   rosterLoading?: boolean
   rosterError?: string | null
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
+  agentRosterSortMode?: AgentRosterSortMode
+  onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
@@ -160,13 +164,17 @@ export function AgentChatLayout({
   connectionLabel,
   connectionDetail,
   agentRoster,
+  favoriteAgentIds,
   activeAgentId,
   insightsPanelStorageKey,
   switchingAgentId,
   rosterLoading,
   rosterError,
   onSelectAgent,
+  onToggleAgentFavorite,
   onCreateAgent,
+  agentRosterSortMode = 'recent',
+  onAgentRosterSortModeChange,
   contextSwitcher,
   autoFocusComposer = false,
   kanbanSnapshot,
@@ -713,12 +721,16 @@ export function AgentChatLayout({
         defaultCollapsed={sidebarCollapsed}
         onToggle={handleSidebarToggle}
         agents={agentRoster}
+        favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}
         switchingAgentId={switchingAgentId}
         loading={rosterLoading}
         errorMessage={rosterError}
         onSelectAgent={onSelectAgent}
+        onToggleAgentFavorite={onToggleAgentFavorite}
         onCreateAgent={onCreateAgent}
+        rosterSortMode={agentRosterSortMode}
+        onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
       />
 	      {showBanner && (

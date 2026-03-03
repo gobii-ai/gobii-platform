@@ -1,6 +1,6 @@
 import { jsonFetch, jsonRequest } from './http'
 import type { ConsoleContext } from './context'
-import type { AgentRosterEntry } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode } from '../types/agentRoster'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
 export type UpdateAgentPayload = {
@@ -16,6 +16,8 @@ export type CreateAgentResponse = {
 type AgentRosterPayload = {
   context: ConsoleContext
   requested_agent_status?: 'deleted' | 'missing' | null
+  agent_roster_sort_mode?: AgentRosterSortMode
+  favorite_agent_ids?: string[]
   llmIntelligence?: LlmIntelligenceConfig | null
   agents: {
     id: string
@@ -33,6 +35,7 @@ type AgentRosterPayload = {
     preferred_llm_tier: string | null
     email: string | null
     sms: string | null
+    last_interaction_at: string | null
   }[]
 }
 
@@ -41,6 +44,8 @@ export async function fetchAgentRoster(
 ): Promise<{
   context: ConsoleContext
   agents: AgentRosterEntry[]
+  agentRosterSortMode: AgentRosterSortMode
+  favoriteAgentIds: string[]
   requestedAgentStatus?: 'deleted' | 'missing' | null
   llmIntelligence?: LlmIntelligenceConfig | null
 }> {
@@ -62,10 +67,15 @@ export async function fetchAgentRoster(
     preferredLlmTier: agent.preferred_llm_tier,
     email: agent.email,
     sms: agent.sms,
+    lastInteractionAt: agent.last_interaction_at,
   }))
   return {
     context: payload.context,
     agents,
+    agentRosterSortMode: payload.agent_roster_sort_mode ?? 'recent',
+    favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
+      ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')
+      : [],
     requestedAgentStatus: payload.requested_agent_status ?? null,
     llmIntelligence: payload.llmIntelligence,
   }

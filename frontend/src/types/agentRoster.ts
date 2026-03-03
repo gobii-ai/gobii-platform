@@ -1,9 +1,12 @@
+export type AgentRosterSortMode = 'recent' | 'alphabetical'
+
 export type AgentRosterEntry = {
   id: string
   name: string
   avatarUrl: string | null
   displayColorHex: string | null
   isActive: boolean
+  lastInteractionAt: string | null
   miniDescription: string
   shortDescription: string
   auditUrl?: string | null

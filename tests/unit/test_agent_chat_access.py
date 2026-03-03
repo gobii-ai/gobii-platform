@@ -2,9 +2,17 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
+from django.utils import timezone
 from unittest.mock import patch
 
-from api.models import AgentCollaborator, BrowserUseAgent, Organization, OrganizationMembership, PersistentAgent
+from api.models import (
+    AgentCollaborator,
+    BrowserUseAgent,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+    UserPreference,
+)
 from console.agent_chat.access import resolve_agent
 
 
@@ -108,6 +116,10 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(agent.id, self.personal_agent.id)
 
     def test_roster_uses_org_agents_for_active_org_agent(self):
+        expected_last_interaction = timezone.now().replace(microsecond=0)
+        self.org_agent.last_interaction_at = expected_last_interaction
+        self.org_agent.save(update_fields=["last_interaction_at"])
+
         url = reverse("console_agent_roster")
         response = self.client.get(
             url,
@@ -116,10 +128,35 @@ class AgentChatAccessTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
+        self.assertEqual(payload.get("agent_roster_sort_mode"), "recent")
+        self.assertEqual(payload.get("favorite_agent_ids"), [])
         roster_ids = {entry["id"] for entry in payload.get("agents", [])}
         self.assertIn(str(self.org_agent.id), roster_ids)
         self.assertIn(str(self.org_agent_two.id), roster_ids)
         self.assertNotIn(str(self.personal_agent.id), roster_ids)
+        matching_entry = next(
+            entry for entry in payload.get("agents", []) if entry.get("id") == str(self.org_agent.id)
+        )
+        self.assertEqual(matching_entry.get("last_interaction_at"), expected_last_interaction.isoformat())
+
+    def test_roster_includes_favorite_agent_ids(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: [
+                    str(self.org_agent.id),
+                ],
+            },
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("favorite_agent_ids"), [str(self.org_agent.id)])
 
     def test_roster_includes_mini_and_short_descriptions(self):
         self.org_agent.mini_description = "Revenue pipeline assistant"
