@@ -1934,6 +1934,12 @@ def handle_subscription_event(event, **kwargs):
                 )
                 return
 
+            ################################################################################
+            #
+            # Trial ended due to user choice (for example, they canceled the trial so it would
+            # not convert)
+            #
+            ################################################################################
             try:
                 if is_trial_ended_non_renewal(
                     event_type=event_type,

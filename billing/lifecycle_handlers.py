@@ -57,6 +57,9 @@ def _track_event(*, payload, event: AnalyticsEvent, event_name: str) -> None:
 
 
 def _handle_trial_cancel_scheduled(sender, payload, **_kwargs) -> None:
+    """
+    This is called when a trial is canceled, but the user is still on the trial - it is NOT the end of the trial.
+    """
     _track_event(
         payload=payload,
         event=AnalyticsEvent.BILLING_TRIAL_CANCEL_SCHEDULED,
@@ -65,22 +68,35 @@ def _handle_trial_cancel_scheduled(sender, payload, **_kwargs) -> None:
 
 
 def _handle_trial_ended_non_renewal(sender, payload, **_kwargs) -> None:
+    """
+    This is called when a trial ends, but the user is not renewing.
+    """
     _track_event(
         payload=payload,
         event=AnalyticsEvent.BILLING_TRIAL_ENDED,
         event_name=TRIAL_ENDED_NON_RENEWAL,
     )
 
+    # TODO: Make sure we downgrade users credit to free
+
 
 def _handle_trial_conversion_failed(sender, payload, **_kwargs) -> None:
+    """
+    This is called when a trial payment fails and enters Past Due state. User has not cancelled, though
+    """
     _track_event(
         payload=payload,
         event=AnalyticsEvent.BILLING_TRIAL_PAYMENT_FAILURE,
         event_name=TRIAL_CONVERSION_FAILED,
     )
 
+    # TODO: lock account
+
 
 def _handle_subscription_delinquency_entered(sender, payload, **_kwargs) -> None:
+    """
+    This is called when a subscription enters a delinquency state. User has not canceled, though
+    """
     _track_event(
         payload=payload,
         event=AnalyticsEvent.BILLING_DELINQUENCY_ENTERED,
