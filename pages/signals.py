@@ -40,6 +40,20 @@ import logging
 import stripe
 
 from billing.addons import AddonEntitlementService
+from billing.lifecycle_classifier import (
+    is_subscription_delinquency_entered,
+    is_trial_cancel_scheduled,
+    is_trial_conversion_failure,
+    is_trial_ended_non_renewal,
+)
+from billing.lifecycle_signals import (
+    BillingLifecyclePayload,
+    SUBSCRIPTION_DELINQUENCY_ENTERED,
+    TRIAL_CANCEL_SCHEDULED,
+    TRIAL_CONVERSION_FAILED,
+    TRIAL_ENDED_NON_RENEWAL,
+    emit_billing_lifecycle_event,
+)
 from billing.plan_resolver import (
     get_plan_context_for_version,
     get_plan_version_by_price_id,
@@ -474,6 +488,14 @@ def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
             owner_type = "organization"
 
     return owner, owner_type, organization_billing, customer_id
+
+
+def _resolve_actor_user_id(owner: Any, owner_type: str) -> int | None:
+    if owner_type == "user":
+        return getattr(owner, "id", None)
+    if owner_type == "organization":
+        return getattr(owner, "created_by_id", None)
+    return None
 
 
 def _build_invoice_properties(
@@ -1319,6 +1341,69 @@ def handle_invoice_payment_failed(event, **kwargs):
             lines=lines,
         )
 
+        try:
+            subscription_obj = getattr(invoice, "subscription", None) if invoice else None
+            subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
+            if not isinstance(subscription_data, Mapping):
+                subscription_data = {}
+
+            billing_reason = payload.get("billing_reason")
+            line_period_start_dt = _line_period_start(lines)
+            trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
+            if trial_end_dt is None:
+                trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_obj, "trial_end"))
+            subscription_current_period_start_dt = _coerce_datetime(
+                _get_stripe_data_value(subscription_data, "current_period_start")
+            )
+            if subscription_current_period_start_dt is None:
+                subscription_current_period_start_dt = _coerce_datetime(
+                    _get_stripe_data_value(subscription_obj, "current_period_start")
+                )
+
+            attempt_count_raw = payload.get("attempt_count")
+            try:
+                attempt_count = int(attempt_count_raw) if attempt_count_raw is not None else None
+            except (TypeError, ValueError):
+                attempt_count = None
+
+            subscription_status = _get_stripe_data_value(subscription_data, "status")
+            if subscription_status is None:
+                subscription_status = _get_stripe_data_value(subscription_obj, "status")
+            if isinstance(subscription_status, str):
+                subscription_status = subscription_status.strip().lower()
+            else:
+                subscription_status = None
+
+            if owner and owner_type and is_trial_conversion_failure(
+                billing_reason=billing_reason,
+                trial_end_dt=trial_end_dt,
+                line_period_start_dt=line_period_start_dt,
+                subscription_current_period_start_dt=subscription_current_period_start_dt,
+                subscription_status=subscription_status,
+                attempt_count=attempt_count,
+            ):
+                emit_billing_lifecycle_event(
+                    TRIAL_CONVERSION_FAILED,
+                    sender=handle_invoice_payment_failed,
+                    payload=BillingLifecyclePayload(
+                        owner_type=owner_type,
+                        owner_id=str(getattr(owner, "id", "")),
+                        actor_user_id=_resolve_actor_user_id(owner, owner_type),
+                        subscription_id=str(subscription_id) if subscription_id else None,
+                        invoice_id=str(payload.get("id", "")) or None,
+                        stripe_event_id=str(getattr(event, "id", "")) or None,
+                        subscription_status=subscription_status,
+                        attempt_count=attempt_count,
+                        final_attempt=_is_final_payment_attempt(payload),
+                        occurred_at=timezone.now(),
+                    ),
+                )
+        except Exception:
+            logger.exception(
+                "Failed to emit trial conversion failure lifecycle event for invoice %s",
+                payload.get("id"),
+            )
+
         properties = Analytics.with_org_properties(
             properties,
             organization=owner if owner_type == "organization" else None,
@@ -1709,6 +1794,81 @@ def handle_subscription_event(event, **kwargs):
             event_type = ""
 
         span.set_attribute('subscription.event_type', event_type)
+        previous_attributes = {}
+        if isinstance(getattr(event, "data", None), Mapping):
+            raw_previous_attributes = event.data.get("previous_attributes")
+            if isinstance(raw_previous_attributes, Mapping):
+                previous_attributes = raw_previous_attributes
+
+        actor_user_id = _resolve_actor_user_id(owner, owner_type)
+        owner_id_str = str(getattr(owner, "id", ""))
+        stripe_event_id = str(getattr(event, "id", "")) or None
+
+        current_subscription_status = _get_stripe_data_value(source_data, "status")
+        if current_subscription_status is None:
+            current_subscription_status = getattr(sub, "status", None)
+        if isinstance(current_subscription_status, str):
+            current_subscription_status = current_subscription_status.strip().lower()
+        else:
+            current_subscription_status = None
+
+        current_cancel_at_period_end = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
+        if current_cancel_at_period_end is None:
+            current_cancel_at_period_end = _coerce_bool(getattr(sub, "cancel_at_period_end", None))
+
+        classification_trial_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "trial_end"))
+        if classification_trial_end_dt is None:
+            classification_trial_end_dt = _coerce_datetime(getattr(sub, "trial_end", None))
+        classification_current_period_end_dt = _coerce_datetime(
+            _get_stripe_data_value(source_data, "current_period_end")
+        )
+        if classification_current_period_end_dt is None:
+            classification_current_period_end_dt = _coerce_datetime(getattr(sub, "current_period_end", None))
+
+        try:
+            if is_trial_cancel_scheduled(
+                event_type=event_type,
+                current_status=current_subscription_status,
+                current_cancel_at_period_end=current_cancel_at_period_end,
+                previous_attributes=previous_attributes,
+            ):
+                emit_billing_lifecycle_event(
+                    TRIAL_CANCEL_SCHEDULED,
+                    sender=handle_subscription_event,
+                    payload=BillingLifecyclePayload(
+                        owner_type=owner_type,
+                        owner_id=owner_id_str,
+                        actor_user_id=actor_user_id,
+                        subscription_id=str(subscription_id) if subscription_id else None,
+                        stripe_event_id=stripe_event_id,
+                        subscription_status=current_subscription_status,
+                        occurred_at=timezone.now(),
+                    ),
+                )
+
+            if is_subscription_delinquency_entered(
+                event_type=event_type,
+                current_status=current_subscription_status,
+                previous_attributes=previous_attributes,
+            ):
+                emit_billing_lifecycle_event(
+                    SUBSCRIPTION_DELINQUENCY_ENTERED,
+                    sender=handle_subscription_event,
+                    payload=BillingLifecyclePayload(
+                        owner_type=owner_type,
+                        owner_id=owner_id_str,
+                        actor_user_id=actor_user_id,
+                        subscription_id=str(subscription_id) if subscription_id else None,
+                        stripe_event_id=stripe_event_id,
+                        subscription_status=current_subscription_status,
+                        occurred_at=timezone.now(),
+                    ),
+                )
+        except Exception:
+            logger.exception(
+                "Failed to emit billing lifecycle transition event for subscription %s",
+                subscription_id,
+            )
 
         # Guardrail: when Stripe fires a new individual (non-org) subscription, ensure we reuse one subscription
         # per customer and cancel any older duplicates. This preserves add-ons (e.g., dedicated IPs/meters) on the newest sub.
@@ -1773,6 +1933,34 @@ def handle_subscription_event(event, **kwargs):
                     getattr(active_sub, "id", None),
                 )
                 return
+
+            try:
+                if is_trial_ended_non_renewal(
+                    event_type=event_type,
+                    current_status=current_subscription_status,
+                    previous_attributes=previous_attributes,
+                    trial_end_dt=classification_trial_end_dt,
+                    current_period_end_dt=classification_current_period_end_dt,
+                    now_dt=timezone.now(),
+                ):
+                    emit_billing_lifecycle_event(
+                        TRIAL_ENDED_NON_RENEWAL,
+                        sender=handle_subscription_event,
+                        payload=BillingLifecyclePayload(
+                            owner_type=owner_type,
+                            owner_id=owner_id_str,
+                            actor_user_id=actor_user_id,
+                            subscription_id=str(subscription_id) if subscription_id else None,
+                            stripe_event_id=stripe_event_id,
+                            subscription_status=current_subscription_status,
+                            occurred_at=timezone.now(),
+                        ),
+                    )
+            except Exception:
+                logger.exception(
+                    "Failed to emit trial ended lifecycle event for subscription %s",
+                    subscription_id,
+                )
 
             downgrade_owner_to_free_plan(owner)
 

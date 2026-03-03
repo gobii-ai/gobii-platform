@@ -429,8 +429,16 @@ def _build_event_payload(
     return payload
 
 
-def _build_djstripe_event(payload, event_type="customer.subscription.updated"):
-    return SimpleNamespace(data={"object": payload}, type=event_type)
+def _build_djstripe_event(
+    payload,
+    event_type="customer.subscription.updated",
+    previous_attributes=None,
+    event_id="evt_test",
+):
+    data = {"object": payload}
+    if previous_attributes is not None:
+        data["previous_attributes"] = previous_attributes
+    return SimpleNamespace(data=data, type=event_type, id=event_id)
 
 
 def _build_invoice_payload(
@@ -1072,6 +1080,93 @@ class SubscriptionSignalTests(TestCase):
         self.assertTrue(capi_kwargs["context"].get("consent"))
 
     @tag("batch_pages")
+    def test_trial_cancel_scheduled_emits_lifecycle_event(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(status="trialing", billing_reason="subscription_update")
+        payload["cancel_at_period_end"] = True
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            previous_attributes={"cancel_at_period_end": False},
+            event_id="evt_trial_cancel_scheduled",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "trialing"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit:
+
+            handle_subscription_event(event)
+
+        emitted_names = [call.args[0] for call in mock_emit.call_args_list]
+        self.assertIn("trial_cancel_scheduled", emitted_names)
+
+    @tag("batch_pages")
+    def test_subscription_delinquency_entered_emits_lifecycle_event(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(status="past_due", billing_reason="subscription_update")
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            previous_attributes={"status": "active"},
+            event_id="evt_delinquency_entered",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "past_due"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit:
+
+            handle_subscription_event(event)
+
+        emitted_names = [call.args[0] for call in mock_emit.call_args_list]
+        self.assertIn("subscription_delinquency_entered", emitted_names)
+
+    @tag("batch_pages")
+    def test_trial_ended_non_renewal_emits_lifecycle_event(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(status="canceled")
+        payload["cancel_at_period_end"] = True
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        payload["trial_end"] = str(trial_end)
+        payload["current_period_end"] = str(trial_end)
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.deleted",
+            previous_attributes={"status": "trialing", "cancel_at_period_end": True},
+            event_id="evt_trial_ended_non_renewal",
+        )
+
+        sub = self._mock_subscription(current_period_day=8, subscriber=self.user)
+        sub.status = "canceled"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_active_subscription", return_value=None), \
+            patch("pages.signals.downgrade_owner_to_free_plan"), \
+            patch("pages.signals.DedicatedProxyService.release_for_owner"), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit:
+
+            handle_subscription_event(event)
+
+        emitted_names = [call.args[0] for call in mock_emit.call_args_list]
+        self.assertIn("trial_ended_non_renewal", emitted_names)
+
+    @tag("batch_pages")
     def test_dedicated_ip_allocation_from_subscription(self):
         self.mock_capi.reset_mock()
         dedicated_item = {
@@ -1600,6 +1695,50 @@ class PaymentFailedSignalTests(TestCase):
         self.assertTrue(props["final_attempt"])
         self.assertEqual(props["stripe.invoice_id"], payload["id"])
         self.assertEqual(props["stripe.subscription_id"], payload["subscription"])
+
+    def test_invoice_payment_failed_emits_trial_conversion_failed_lifecycle_event(self):
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        payload = _build_invoice_payload(
+            customer_id="cus_user",
+            subscription_id="sub_user",
+            attempt_count=1,
+            next_payment_attempt=timezone.now().timestamp() + 3600,
+            auto_advance=True,
+            amount_due=2500,
+            billing_reason="subscription_cycle",
+        )
+        payload["lines"]["data"][0]["period"] = {
+            "start": int(trial_end.timestamp()),
+            "end": int((trial_end + timedelta(days=30)).timestamp()),
+        }
+        event = _build_djstripe_event(payload, event_type="invoice.payment_failed", event_id="evt_trial_fail")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user", subscriber=self.user),
+            subscription=SimpleNamespace(
+                id="sub_user",
+                stripe_data={
+                    "status": "past_due",
+                    "trial_end": str(trial_end),
+                    "current_period_start": str(trial_end),
+                },
+            ),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.Analytics.track_event_anonymous"), \
+            patch("pages.signals.get_plan_by_product_id", return_value=None), \
+            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit:
+
+            handle_invoice_payment_failed(event)
+
+        emitted_names = [call.args[0] for call in mock_emit.call_args_list]
+        self.assertIn("trial_conversion_failed", emitted_names)
 
     def test_invoice_payment_failed_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-fail", email="org-fail@example.com", password="pw")
