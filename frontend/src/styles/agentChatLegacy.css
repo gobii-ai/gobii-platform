@@ -9,6 +9,8 @@
    ========================================================================== */
 
 .agent-chat-page {
+  --agent-chat-sidebar-width: 16rem;
+  --agent-chat-sidebar-width-collapsed: 5rem;
   position: relative;
   /* Use dvh for dynamic mobile viewport (adjusts with address bar) */
   height: 100vh;
@@ -68,7 +70,7 @@
 .banner-shell {
   position: fixed;
   top: 0;
-  left: 5rem;
+  left: var(--agent-chat-sidebar-width-collapsed, 5rem);
   right: 0;
   z-index: 25;
   transition: left 0.2s ease;
@@ -76,11 +78,11 @@
 }
 
 .banner-shell--sidebar-expanded {
-  left: 15rem;
+  left: var(--agent-chat-sidebar-width, 16rem);
 }
 
 .banner-shell--sidebar-collapsed {
-  left: 5rem;
+  left: var(--agent-chat-sidebar-width-collapsed, 5rem);
 }
 
 @media (max-width: 767px) {
@@ -946,12 +948,12 @@
   overflow: hidden;
   position: relative;
   /* Sidebar offset */
-  padding-left: 15rem;
+  padding-left: var(--agent-chat-sidebar-width, 16rem);
   transition: padding-left 0.2s ease;
 }
 
 .agent-chat-main--sidebar-collapsed {
-  padding-left: 5rem;
+  padding-left: var(--agent-chat-sidebar-width-collapsed, 5rem);
 }
 
 @media (max-width: 767px) {
@@ -1816,16 +1818,16 @@
 
 /* Offset for sidebar */
 .has-sidebar .jump-to-latest {
-  left: calc(50% + 7.5rem);
+  left: calc(50% + (var(--agent-chat-sidebar-width, 16rem) / 2));
 }
 
 .agent-chat-main .jump-to-latest {
-  left: calc(50% + 7.5rem);
+  left: calc(50% + (var(--agent-chat-sidebar-width, 16rem) / 2));
 }
 
 .has-sidebar--collapsed .jump-to-latest,
 .agent-chat-main--sidebar-collapsed .jump-to-latest {
-  left: calc(50% + 2.5rem);
+  left: calc(50% + (var(--agent-chat-sidebar-width-collapsed, 5rem) / 2));
 }
 
 @media (max-width: 767px) {
@@ -5457,7 +5459,7 @@
   top: 0;
   left: 0;
   bottom: 0;
-  width: 15rem;
+  width: var(--agent-chat-sidebar-width, 16rem);
   z-index: 40;
   display: flex;
   flex-direction: column;
@@ -5482,7 +5484,7 @@
 }
 
 .chat-sidebar--collapsed {
-  width: 5rem;
+  width: var(--agent-chat-sidebar-width-collapsed, 5rem);
 }
 
 .chat-sidebar-inner {
@@ -5491,7 +5493,7 @@
   height: 100%;
   min-height: 0;
   gap: 1rem;
-  padding: 0 0.75rem;
+  padding: 0 0.625rem;
 }
 
 .chat-sidebar--collapsed .chat-sidebar-inner {
@@ -5817,6 +5819,18 @@
   letter-spacing: 0;
 }
 
+.chat-sidebar-subsection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.2rem 0.5rem 0.1rem;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
 .chat-sidebar-agent-list {
   display: flex;
   flex-direction: column;
@@ -5939,11 +5953,50 @@
   padding-top: 0.125rem;
 }
 
+.chat-sidebar-agent-trailing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 0.35rem;
+}
+
+.chat-sidebar-agent-favorite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: none;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.42);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.chat-sidebar-agent-favorite:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.chat-sidebar-agent-favorite[data-active='true'] {
+  color: #fbbf24;
+}
+
+.chat-sidebar-agent-favorite:focus-visible {
+  outline: 2px solid rgba(167, 139, 250, 0.45);
+  outline-offset: 1px;
+}
+
 .chat-sidebar-agent-name {
+  display: block;
   font-weight: 500;
   font-size: 0.8125rem;
   color: rgba(255, 255, 255, 0.9);
   line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
 }
 
 .chat-sidebar-agent[data-active='true'] .chat-sidebar-agent-name {
@@ -6297,12 +6350,12 @@
 
 /* Adjust main content when sidebar is present */
 .has-sidebar {
-  padding-left: 15rem;
+  padding-left: var(--agent-chat-sidebar-width, 16rem);
   transition: padding-left 0.2s ease;
 }
 
 .has-sidebar--collapsed {
-  padding-left: 5rem;
+  padding-left: var(--agent-chat-sidebar-width-collapsed, 5rem);
 }
 
 @media (max-width: 767px) {
@@ -6597,7 +6650,11 @@
 }
 
 .agent-mobile-sheet-body {
-  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .agent-mobile-sheet-body--padded {
@@ -6676,6 +6733,18 @@
   background: linear-gradient(180deg, rgba(99, 102, 241, 0.08), rgba(99, 102, 241, 0.03));
 }
 
+.agent-drawer-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem 1rem 0.15rem;
+  color: #64748b;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
 .agent-drawer-sort-toggle-button {
   border: none;
   border-radius: 0.5rem;
@@ -6700,6 +6769,7 @@
 
 .agent-drawer-list {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 0.75rem 0 1.5rem;
   display: flex;
@@ -6707,6 +6777,7 @@
   gap: 0.375rem;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .agent-drawer-item {
@@ -6790,11 +6861,50 @@
   padding-top: 0.125rem;
 }
 
+.agent-drawer-item-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-left: 0.45rem;
+}
+
+.agent-drawer-item-favorite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border: none;
+  border-radius: 0.55rem;
+  background: rgba(99, 102, 241, 0.09);
+  color: #64748b;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.agent-drawer-item-favorite[data-active='true'] {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.14);
+}
+
+.agent-drawer-item-favorite:active {
+  background: rgba(99, 102, 241, 0.16);
+}
+
+.agent-drawer-item-favorite:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.32);
+  outline-offset: 1px;
+}
+
 .agent-drawer-item-name {
+  display: block;
   font-weight: 600;
   font-size: 0.9375rem;
   color: #1e293b;
   line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
 }
 
 .agent-drawer-item-desc {
@@ -6818,7 +6928,6 @@
 .agent-drawer-item-check {
   width: 1.25rem;
   height: 1.25rem;
-  margin-top: 0.375rem;
   color: #6366f1;
   flex-shrink: 0;
 }

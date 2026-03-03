@@ -6,6 +6,8 @@ import { createAgent, updateAgent } from '../api/agents'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
   updateUserPreferences,
+  parseFavoriteAgentIdsPreference,
+  USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
 } from '../api/userPreferences'
 import type { ConsoleContext } from '../api/context'
@@ -258,6 +260,18 @@ function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRo
   return [...roster, entry]
 }
 
+function areStringArraysEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return false
+    }
+  }
+  return true
+}
+
 function touchRosterEntryLastInteraction(
   current: AgentRosterQueryData | undefined,
   agentId: string,
@@ -331,6 +345,7 @@ function prunePendingAvatarTracking(
 type AgentRosterQueryData = {
   context: ConsoleContext
   agentRosterSortMode?: AgentRosterSortMode
+  favoriteAgentIds?: string[]
   agents: AgentRosterEntry[]
   llmIntelligence?: unknown
 }
@@ -890,6 +905,7 @@ export function AgentChatPage({
     refetchIntervalMs: rosterRefreshIntervalMs,
   })
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
+  const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
   const hasHydratedAgentRosterSortModeRef = useRef(false)
 
   useEffect(() => {
@@ -900,6 +916,17 @@ export function AgentChatPage({
     hasHydratedAgentRosterSortModeRef.current = true
     setAgentRosterSortMode(serverSortMode)
   }, [rosterQuery.data?.agentRosterSortMode])
+
+  useEffect(() => {
+    const serverFavoriteAgentIds = Array.isArray(rosterQuery.data?.favoriteAgentIds)
+      ? rosterQuery.data.favoriteAgentIds
+      : []
+    setFavoriteAgentIds((current) => (
+      areStringArraysEqual(current, serverFavoriteAgentIds)
+        ? current
+        : serverFavoriteAgentIds
+    ))
+  }, [rosterQuery.data?.favoriteAgentIds])
 
   const handleAgentRosterSortModeChange = useCallback(
     (nextSortMode: AgentRosterSortMode) => {
@@ -947,6 +974,54 @@ export function AgentChatPage({
       }).catch(() => undefined)
     },
     [queryClient],
+  )
+
+  const updateFavoriteAgentIdsInRosterCache = useCallback(
+    (nextFavoriteAgentIds: string[]) => {
+      queryClient.setQueriesData<AgentRosterQueryData>(
+        { queryKey: ['agent-roster'] },
+        (current) => {
+          if (!isAgentRosterQueryData(current)) {
+            return current
+          }
+          const currentFavoriteAgentIds = Array.isArray(current.favoriteAgentIds)
+            ? current.favoriteAgentIds.filter((value): value is string => typeof value === 'string')
+            : []
+          if (areStringArraysEqual(currentFavoriteAgentIds, nextFavoriteAgentIds)) {
+            return current
+          }
+          return {
+            ...current,
+            favoriteAgentIds: nextFavoriteAgentIds,
+          }
+        },
+      )
+    },
+    [queryClient],
+  )
+
+  const handleToggleAgentFavorite = useCallback(
+    (agentId: string) => {
+      const nextFavoriteAgentIds = favoriteAgentIds.includes(agentId)
+        ? favoriteAgentIds.filter((candidateId) => candidateId !== agentId)
+        : [...favoriteAgentIds, agentId]
+
+      setFavoriteAgentIds(nextFavoriteAgentIds)
+      updateFavoriteAgentIdsInRosterCache(nextFavoriteAgentIds)
+
+      void updateUserPreferences({
+        preferences: {
+          [USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS]: nextFavoriteAgentIds,
+        },
+      }).then((response) => {
+        const persistedFavoriteAgentIds = parseFavoriteAgentIdsPreference(
+          response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS],
+        )
+        setFavoriteAgentIds(persistedFavoriteAgentIds)
+        updateFavoriteAgentIdsInRosterCache(persistedFavoriteAgentIds)
+      }).catch(() => undefined)
+    },
+    [favoriteAgentIds, updateFavoriteAgentIdsInRosterCache],
   )
 
   useEffect(() => {
@@ -2181,10 +2256,12 @@ export function AgentChatPage({
   const selectionMainClassName = `has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
   const selectionSidebarProps = {
     agents: sidebarAgents,
+    favoriteAgentIds,
     activeAgentId: null,
     loading: rosterLoading,
     errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
+    onToggleAgentFavorite: handleToggleAgentFavorite,
     onCreateAgent: handleCreateAgent,
     rosterSortMode: agentRosterSortMode,
     onRosterSortModeChange: handleAgentRosterSortModeChange,
@@ -2637,12 +2714,14 @@ export function AgentChatPage({
         connectionDetail={connectionIndicator.detail}
         kanbanSnapshot={latestKanbanSnapshot}
         agentRoster={sidebarAgents}
+        favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}
         insightsPanelStorageKey={activeAgentId}
         switchingAgentId={switchingAgentId}
         rosterLoading={rosterLoading}
         rosterError={rosterErrorMessage}
         onSelectAgent={handleSelectAgent}
+        onToggleAgentFavorite={handleToggleAgentFavorite}
         onCreateAgent={handleCreateAgent}
         agentRosterSortMode={agentRosterSortMode}
         onAgentRosterSortModeChange={handleAgentRosterSortModeChange}

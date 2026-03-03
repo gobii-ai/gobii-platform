@@ -17,6 +17,7 @@ type AgentRosterPayload = {
   context: ConsoleContext
   requested_agent_status?: 'deleted' | 'missing' | null
   agent_roster_sort_mode?: AgentRosterSortMode
+  favorite_agent_ids?: string[]
   llmIntelligence?: LlmIntelligenceConfig | null
   agents: {
     id: string
@@ -44,6 +45,7 @@ export async function fetchAgentRoster(
   context: ConsoleContext
   agents: AgentRosterEntry[]
   agentRosterSortMode: AgentRosterSortMode
+  favoriteAgentIds: string[]
   requestedAgentStatus?: 'deleted' | 'missing' | null
   llmIntelligence?: LlmIntelligenceConfig | null
 }> {
@@ -71,6 +73,9 @@ export async function fetchAgentRoster(
     context: payload.context,
     agents,
     agentRosterSortMode: payload.agent_roster_sort_mode ?? 'recent',
+    favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
+      ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')
+      : [],
     requestedAgentStatus: payload.requested_agent_status ?? null,
     llmIntelligence: payload.llmIntelligence,
   }

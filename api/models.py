@@ -581,10 +581,16 @@ class UserPreference(models.Model):
         ALPHABETICAL = "alphabetical", "Alphabetical (A-Z)"
 
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
+    KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
             "default": AgentRosterSortMode.RECENT,
+            "type": "choice",
             "allowed_values": frozenset(AgentRosterSortMode.values),
+        },
+        KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: {
+            "default": [],
+            "type": "uuid_list",
         },
     }
 
@@ -606,8 +612,63 @@ class UserPreference(models.Model):
         verbose_name_plural = "User preferences"
 
     @classmethod
-    def _known_defaults(cls) -> dict[str, str]:
-        return {key: definition["default"] for key, definition in cls.PREFERENCE_DEFINITIONS.items()}
+    def _clone_preference_default(cls, default_value: object) -> object:
+        if isinstance(default_value, list):
+            return list(default_value)
+        if isinstance(default_value, dict):
+            return dict(default_value)
+        return default_value
+
+    @classmethod
+    def _known_defaults(cls) -> dict[str, object]:
+        return {
+            key: cls._clone_preference_default(definition["default"])
+            for key, definition in cls.PREFERENCE_DEFINITIONS.items()
+        }
+
+    @classmethod
+    def _normalize_uuid_list_preference_value(cls, key: str, value: object) -> list[str]:
+        if not isinstance(value, list):
+            raise ValueError(f"Invalid value for '{key}'. Expected an array of UUID strings.")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for entry in value:
+            if not isinstance(entry, str):
+                raise ValueError(f"Invalid value for '{key}'. Expected an array of UUID strings.")
+            raw_uuid = entry.strip()
+            if not raw_uuid:
+                raise ValueError(f"Invalid value for '{key}'. Expected an array of UUID strings.")
+            try:
+                canonical_uuid = str(uuid.UUID(raw_uuid))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValueError(f"Invalid value for '{key}'. Expected an array of UUID strings.") from exc
+            if canonical_uuid in seen:
+                continue
+            seen.add(canonical_uuid)
+            normalized.append(canonical_uuid)
+
+        return normalized
+
+    @classmethod
+    def _normalize_preference_value(
+        cls,
+        key: str,
+        value: object,
+        definition: dict[str, object],
+    ) -> object:
+        preference_type = definition.get("type")
+        if preference_type == "choice":
+            allowed_values = definition["allowed_values"]
+            if not isinstance(value, str) or value not in allowed_values:
+                allowed = ", ".join(sorted(allowed_values))
+                raise ValueError(f"Invalid value for '{key}'. Allowed values: {allowed}")
+            return value
+
+        if preference_type == "uuid_list":
+            return cls._normalize_uuid_list_preference_value(key, value)
+
+        raise ValueError(f"Unsupported preference type for '{key}'.")
 
     @classmethod
     def get_for_user(cls, user):
@@ -616,14 +677,17 @@ class UserPreference(models.Model):
         return cls.objects.filter(user=user).only("preferences").first()
 
     @classmethod
-    def resolve_known_preferences(cls, user) -> dict[str, str]:
+    def resolve_known_preferences(cls, user) -> dict[str, object]:
         resolved = cls._known_defaults()
         pref = cls.get_for_user(user)
         stored = pref.preferences if pref and isinstance(pref.preferences, dict) else {}
         for key, definition in cls.PREFERENCE_DEFINITIONS.items():
-            value = stored.get(key)
-            if isinstance(value, str) and value in definition["allowed_values"]:
-                resolved[key] = value
+            if key not in stored:
+                continue
+            try:
+                resolved[key] = cls._normalize_preference_value(key, stored.get(key), definition)
+            except ValueError:
+                continue
         return resolved
 
     @classmethod
@@ -632,7 +696,13 @@ class UserPreference(models.Model):
         return resolved[cls.KEY_AGENT_CHAT_ROSTER_SORT_MODE]
 
     @classmethod
-    def update_known_preferences(cls, user, updates: dict[str, str]) -> dict[str, str]:
+    def resolve_agent_favorite_ids(cls, user) -> list[str]:
+        resolved = cls.resolve_known_preferences(user)
+        favorite_ids = resolved[cls.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS]
+        return list(favorite_ids) if isinstance(favorite_ids, list) else []
+
+    @classmethod
+    def update_known_preferences(cls, user, updates: dict[str, object]) -> dict[str, object]:
         if not isinstance(updates, dict):
             raise ValueError("preferences must be an object.")
 
@@ -641,20 +711,25 @@ class UserPreference(models.Model):
             unknown_keys.sort()
             raise ValueError(f"Unknown preference keys: {', '.join(unknown_keys)}")
 
+        normalized_updates: dict[str, object] = {}
         for key, value in updates.items():
-            allowed_values = cls.PREFERENCE_DEFINITIONS[key]["allowed_values"]
-            if not isinstance(value, str) or value not in allowed_values:
-                allowed = ", ".join(sorted(allowed_values))
-                raise ValueError(f"Invalid value for '{key}'. Allowed values: {allowed}")
+            normalized_updates[key] = cls._normalize_preference_value(
+                key,
+                value,
+                cls.PREFERENCE_DEFINITIONS[key],
+            )
 
         preference, _ = cls.objects.get_or_create(user=user)
         stored = preference.preferences if isinstance(preference.preferences, dict) else {}
-        known_stored = {}
+        known_stored: dict[str, object] = {}
         for key, definition in cls.PREFERENCE_DEFINITIONS.items():
-            value = stored.get(key)
-            if isinstance(value, str) and value in definition["allowed_values"]:
-                known_stored[key] = value
-        next_stored = {**known_stored, **updates}
+            if key not in stored:
+                continue
+            try:
+                known_stored[key] = cls._normalize_preference_value(key, stored.get(key), definition)
+            except ValueError:
+                continue
+        next_stored = {**known_stored, **normalized_updates}
         if next_stored != stored:
             preference.preferences = next_stored
             preference.save(update_fields=["preferences", "updated_at"])

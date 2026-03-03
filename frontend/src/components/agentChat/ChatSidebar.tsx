@@ -6,12 +6,13 @@ import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRos
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
-import { AgentEmptyState, AgentListItem, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
+import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 
 const SEARCH_THRESHOLD = 6
 
 type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
+  favoriteAgentIds?: string[]
   activeAgentId?: string | null
   switchingAgentId?: string | null
   loading?: boolean
@@ -19,6 +20,7 @@ type ChatSidebarProps = {
   defaultCollapsed?: boolean
   onToggle?: (collapsed: boolean) => void
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   rosterSortMode?: AgentRosterSortMode
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
@@ -27,6 +29,7 @@ type ChatSidebarProps = {
 
 export const ChatSidebar = memo(function ChatSidebar({
   agents = [],
+  favoriteAgentIds = [],
   activeAgentId,
   switchingAgentId,
   loading = false,
@@ -34,6 +37,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   defaultCollapsed = true,
   onToggle,
   onSelectAgent,
+  onToggleAgentFavorite,
   onCreateAgent,
   rosterSortMode = 'recent',
   onRosterSortModeChange,
@@ -60,6 +64,24 @@ export const ChatSidebar = memo(function ChatSidebar({
         agent.shortDescription?.toLowerCase().includes(query),
     )
   }, [agents, searchQuery])
+
+  const favoriteAgentIdSet = useMemo(() => new Set(favoriteAgentIds), [favoriteAgentIds])
+  const hasFavoritesInRoster = useMemo(
+    () => agents.some((agent) => favoriteAgentIdSet.has(agent.id)),
+    [agents, favoriteAgentIdSet],
+  )
+  const favoriteFilteredAgents = useMemo(
+    () => filteredAgents.filter((agent) => favoriteAgentIdSet.has(agent.id)),
+    [filteredAgents, favoriteAgentIdSet],
+  )
+  const allFilteredAgents = useMemo(
+    () => filteredAgents.filter((agent) => !favoriteAgentIdSet.has(agent.id)),
+    [filteredAgents, favoriteAgentIdSet],
+  )
+  const collapsedFilteredAgents = useMemo(
+    () => hasFavoritesInRoster ? [...favoriteFilteredAgents, ...allFilteredAgents] : filteredAgents,
+    [allFilteredAgents, favoriteFilteredAgents, filteredAgents, hasFavoritesInRoster],
+  )
 
   // Clear search when drawer closes
   useEffect(() => {
@@ -210,21 +232,72 @@ export const ChatSidebar = memo(function ChatSidebar({
               filteredCount={filteredAgents.length}
               searchQuery={searchQuery}
             />
-            {filteredAgents.map((agent) => {
-              const isActive = agent.id === activeAgentId
-              const isSwitching = agent.id === switchingAgentId
-              return (
-                <AgentListItem
-                  key={agent.id}
+            {hasFavoritesInRoster ? (
+              <>
+                <AgentListSectionHeader
                   variant="drawer"
-                  agent={agent}
-                  isActive={isActive}
-                  isSwitching={isSwitching}
-                  onSelect={handleAgentSelect}
-                  accentColor={agent.displayColorHex}
+                  label="Favorites"
+                  count={favoriteFilteredAgents.length}
                 />
-              )
-            })}
+                {favoriteFilteredAgents.map((agent) => {
+                  const isActive = agent.id === activeAgentId
+                  const isSwitching = agent.id === switchingAgentId
+                  return (
+                    <AgentListItem
+                      key={agent.id}
+                      variant="drawer"
+                      agent={agent}
+                      isActive={isActive}
+                      isSwitching={isSwitching}
+                      isFavorite={true}
+                      onSelect={handleAgentSelect}
+                      onToggleFavorite={onToggleAgentFavorite}
+                      accentColor={agent.displayColorHex}
+                    />
+                  )
+                })}
+                <AgentListSectionHeader
+                  variant="drawer"
+                  label="All agents"
+                  count={allFilteredAgents.length}
+                />
+                {allFilteredAgents.map((agent) => {
+                  const isActive = agent.id === activeAgentId
+                  const isSwitching = agent.id === switchingAgentId
+                  return (
+                    <AgentListItem
+                      key={agent.id}
+                      variant="drawer"
+                      agent={agent}
+                      isActive={isActive}
+                      isSwitching={isSwitching}
+                      isFavorite={false}
+                      onSelect={handleAgentSelect}
+                      onToggleFavorite={onToggleAgentFavorite}
+                      accentColor={agent.displayColorHex}
+                    />
+                  )
+                })}
+              </>
+            ) : (
+              filteredAgents.map((agent) => {
+                const isActive = agent.id === activeAgentId
+                const isSwitching = agent.id === switchingAgentId
+                return (
+                  <AgentListItem
+                    key={agent.id}
+                    variant="drawer"
+                    agent={agent}
+                    isActive={isActive}
+                    isSwitching={isSwitching}
+                    isFavorite={false}
+                    onSelect={handleAgentSelect}
+                    onToggleFavorite={onToggleAgentFavorite}
+                    accentColor={agent.displayColorHex}
+                  />
+                )
+              })
+            )}
           </div>
         </AgentChatMobileSheet>
       </>
@@ -309,25 +382,98 @@ export const ChatSidebar = memo(function ChatSidebar({
               hasAgents={hasAgents}
               loading={loading}
               errorMessage={errorMessage}
-              filteredCount={filteredAgents.length}
+              filteredCount={collapsed ? collapsedFilteredAgents.length : filteredAgents.length}
               searchQuery={searchQuery}
             />
-            {filteredAgents.map((agent) => {
-              const isActive = agent.id === activeAgentId
-              const isSwitching = agent.id === switchingAgentId
-              return (
-                <AgentListItem
-                  key={agent.id}
+            {collapsed ? (
+              collapsedFilteredAgents.map((agent) => {
+                const isActive = agent.id === activeAgentId
+                const isSwitching = agent.id === switchingAgentId
+                return (
+                  <AgentListItem
+                    key={agent.id}
+                    variant="sidebar"
+                    agent={agent}
+                    isActive={isActive}
+                    isSwitching={isSwitching}
+                    isFavorite={favoriteAgentIdSet.has(agent.id)}
+                    onSelect={handleAgentSelect}
+                    onToggleFavorite={onToggleAgentFavorite}
+                    accentColor={agent.displayColorHex}
+                    collapsed={collapsed}
+                    showFavoriteToggle={false}
+                  />
+                )
+              })
+            ) : hasFavoritesInRoster ? (
+              <>
+                <AgentListSectionHeader
                   variant="sidebar"
-                  agent={agent}
-                  isActive={isActive}
-                  isSwitching={isSwitching}
-                  onSelect={handleAgentSelect}
-                  accentColor={agent.displayColorHex}
-                  collapsed={collapsed}
+                  label="Favorites"
+                  count={favoriteFilteredAgents.length}
                 />
-              )
-            })}
+                {favoriteFilteredAgents.map((agent) => {
+                  const isActive = agent.id === activeAgentId
+                  const isSwitching = agent.id === switchingAgentId
+                  return (
+                    <AgentListItem
+                      key={agent.id}
+                      variant="sidebar"
+                      agent={agent}
+                      isActive={isActive}
+                      isSwitching={isSwitching}
+                      isFavorite={true}
+                      onSelect={handleAgentSelect}
+                      onToggleFavorite={onToggleAgentFavorite}
+                      accentColor={agent.displayColorHex}
+                      collapsed={collapsed}
+                    />
+                  )
+                })}
+                <AgentListSectionHeader
+                  variant="sidebar"
+                  label="All agents"
+                  count={allFilteredAgents.length}
+                />
+                {allFilteredAgents.map((agent) => {
+                  const isActive = agent.id === activeAgentId
+                  const isSwitching = agent.id === switchingAgentId
+                  return (
+                    <AgentListItem
+                      key={agent.id}
+                      variant="sidebar"
+                      agent={agent}
+                      isActive={isActive}
+                      isSwitching={isSwitching}
+                      isFavorite={false}
+                      onSelect={handleAgentSelect}
+                      onToggleFavorite={onToggleAgentFavorite}
+                      accentColor={agent.displayColorHex}
+                      collapsed={collapsed}
+                    />
+                  )
+                })}
+              </>
+            ) : (
+              filteredAgents.map((agent) => {
+                const isActive = agent.id === activeAgentId
+                const isSwitching = agent.id === switchingAgentId
+                return (
+                  <AgentListItem
+                    key={agent.id}
+                    variant="sidebar"
+                    agent={agent}
+                    isActive={isActive}
+                    isSwitching={isSwitching}
+                    isFavorite={false}
+                    onSelect={handleAgentSelect}
+                    onToggleFavorite={onToggleAgentFavorite}
+                    accentColor={agent.displayColorHex}
+                    collapsed={collapsed}
+                  />
+                )
+              })
+            )}
           </div>
         </div>
       </div>

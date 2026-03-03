@@ -61,12 +61,14 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   connectionLabel?: string
   connectionDetail?: string | null
   agentRoster?: AgentRosterEntry[]
+  favoriteAgentIds?: string[]
   activeAgentId?: string | null
   insightsPanelStorageKey?: string | null
   switchingAgentId?: string | null
   rosterLoading?: boolean
   rosterError?: string | null
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
@@ -162,12 +164,14 @@ export function AgentChatLayout({
   connectionLabel,
   connectionDetail,
   agentRoster,
+  favoriteAgentIds,
   activeAgentId,
   insightsPanelStorageKey,
   switchingAgentId,
   rosterLoading,
   rosterError,
   onSelectAgent,
+  onToggleAgentFavorite,
   onCreateAgent,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
@@ -717,11 +721,13 @@ export function AgentChatLayout({
         defaultCollapsed={sidebarCollapsed}
         onToggle={handleSidebarToggle}
         agents={agentRoster}
+        favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}
         switchingAgentId={switchingAgentId}
         loading={rosterLoading}
         errorMessage={rosterError}
         onSelectAgent={onSelectAgent}
+        onToggleAgentFavorite={onToggleAgentFavorite}
         onCreateAgent={onCreateAgent}
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}

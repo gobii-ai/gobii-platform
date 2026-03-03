@@ -1,5 +1,5 @@
-import type { CSSProperties } from 'react'
-import { Check, Search, X } from 'lucide-react'
+import type { CSSProperties, KeyboardEvent, MouseEvent } from 'react'
+import { Check, Search, Star, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -134,13 +134,32 @@ export function AgentEmptyState({
   return <div className={className}>{message}</div>
 }
 
+type AgentListSectionHeaderProps = {
+  variant: 'drawer' | 'sidebar'
+  label: string
+  count: number
+}
+
+export function AgentListSectionHeader({ variant, label, count }: AgentListSectionHeaderProps) {
+  const className = variant === 'drawer' ? 'agent-drawer-section-header' : 'chat-sidebar-subsection-header'
+  return (
+    <div className={className}>
+      <span>{label}</span>
+      <span>{count}</span>
+    </div>
+  )
+}
+
 type AgentListItemProps = {
   agent: AgentRosterEntry
   isActive: boolean
   isSwitching: boolean
+  isFavorite?: boolean
   onSelect: (agent: AgentRosterEntry) => void
+  onToggleFavorite?: (agentId: string) => void
   variant: 'drawer' | 'sidebar'
   collapsed?: boolean
+  showFavoriteToggle?: boolean
   accentColor?: string | null
 }
 
@@ -171,9 +190,12 @@ export function AgentListItem({
   agent,
   isActive,
   isSwitching,
+  isFavorite = false,
   onSelect,
+  onToggleFavorite,
   variant,
   collapsed,
+  showFavoriteToggle = true,
   accentColor,
 }: AgentListItemProps) {
   const styles = ITEM_STYLES[variant]
@@ -184,6 +206,22 @@ export function AgentListItem({
   const miniDescription = (agent.miniDescription || '').trim()
   const longDescription = (agent.shortDescription || '').trim()
   const hoverDescription = longDescription && longDescription !== miniDescription ? longDescription : undefined
+  const showFavoriteButton = Boolean(onToggleFavorite) && (variant === 'drawer' || !collapsed) && showFavoriteToggle
+
+  const handleToggleFavorite = (event: MouseEvent<HTMLElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    onToggleFavorite?.(agent.id)
+  }
+
+  const handleFavoriteKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    onToggleFavorite?.(agent.id)
+  }
 
   return (
     <button
@@ -217,8 +255,26 @@ export function AgentListItem({
           ) : null}
         </span>
       ) : null}
-      {variant === 'drawer' && isActive ? (
-        <Check className="agent-drawer-item-check" aria-hidden="true" />
+      {showFavoriteButton || (variant === 'drawer' && isActive) ? (
+        <span className={variant === 'drawer' ? 'agent-drawer-item-trailing' : 'chat-sidebar-agent-trailing'}>
+          {variant === 'drawer' && isActive ? (
+            <Check className="agent-drawer-item-check" aria-hidden="true" />
+          ) : null}
+          {showFavoriteButton ? (
+            <span
+              className={variant === 'drawer' ? 'agent-drawer-item-favorite' : 'chat-sidebar-agent-favorite'}
+              data-active={isFavorite ? 'true' : 'false'}
+              onClick={handleToggleFavorite}
+              onKeyDown={handleFavoriteKeyDown}
+              role="button"
+              tabIndex={0}
+              aria-label={isFavorite ? 'Remove favorite' : 'Add favorite'}
+              title={isFavorite ? 'Remove favorite' : 'Add favorite'}
+            >
+              <Star className={variant === 'drawer' ? 'h-4 w-4' : 'h-3.5 w-3.5'} />
+            </span>
+          ) : null}
+        </span>
       ) : null}
     </button>
   )

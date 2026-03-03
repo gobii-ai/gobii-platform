@@ -1,5 +1,6 @@
 import { jsonRequest } from './http'
 export const USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE = 'agent.chat.roster.sort_mode' as const
+export const USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = 'agent.chat.roster.favorite_agent_ids' as const
 
 export type UserPreferencesMap = Record<string, unknown>
 
@@ -37,4 +38,26 @@ export async function fetchUserPreferences(): Promise<{ preferences: UserPrefere
   return {
     preferences: normalizePreferences(response.preferences),
   }
+}
+
+export function parseFavoriteAgentIdsPreference(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const normalized: string[] = []
+  const seen = new Set<string>()
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      continue
+    }
+    const candidate = entry.trim()
+    if (!candidate || seen.has(candidate)) {
+      continue
+    }
+    seen.add(candidate)
+    normalized.push(candidate)
+  }
+
+  return normalized
 }

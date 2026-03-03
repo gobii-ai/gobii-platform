@@ -1,4 +1,5 @@
 import json
+import uuid
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -27,6 +28,10 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertEqual(
             preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_SORT_MODE),
             UserPreference.AgentRosterSortMode.RECENT,
+        )
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
+            [],
         )
 
     def test_patch_updates_preference_and_get_returns_persisted_value(self):
@@ -83,6 +88,54 @@ class ConsoleUserPreferencesApiTests(TestCase):
         response = self.client.patch(
             self.url,
             data=json.dumps({"preferences": {"unknown.key": "anything"}}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_patch_updates_favorite_agent_ids_and_dedupes(self):
+        favorite_agent_id = str(uuid.uuid4())
+        duplicate_agent_id = favorite_agent_id.upper()
+        second_agent_id = str(uuid.uuid4())
+
+        patch_response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: [
+                            favorite_agent_id,
+                            duplicate_agent_id,
+                            second_agent_id,
+                        ],
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        patch_preferences = patch_response.json().get("preferences", {})
+        self.assertEqual(
+            patch_preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
+            [favorite_agent_id, second_agent_id],
+        )
+
+        stored = UserPreference.objects.get(user=self.user)
+        self.assertEqual(
+            (stored.preferences or {}).get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
+            [favorite_agent_id, second_agent_id],
+        )
+
+    def test_patch_rejects_invalid_favorite_agent_ids(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: ["not-a-uuid"],
+                    }
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
