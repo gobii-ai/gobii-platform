@@ -258,6 +258,40 @@ function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRo
   return [...roster, entry]
 }
 
+function touchRosterEntryLastInteraction(
+  current: AgentRosterQueryData | undefined,
+  agentId: string,
+  isoTimestamp: string,
+): AgentRosterQueryData | undefined {
+  if (!isAgentRosterQueryData(current) || !current.agents?.length) {
+    return current
+  }
+
+  let changed = false
+  const nextAgents = current.agents.map((agent) => {
+    if (agent.id !== agentId) {
+      return agent
+    }
+    if (agent.lastInteractionAt === isoTimestamp) {
+      return agent
+    }
+    changed = true
+    return {
+      ...agent,
+      lastInteractionAt: isoTimestamp,
+    }
+  })
+
+  if (!changed) {
+    return current
+  }
+
+  return {
+    ...current,
+    agents: nextAgents,
+  }
+}
+
 function prunePendingAvatarTracking(
   pending: PendingAvatarTracking,
   rosterAgents: AgentRosterEntry[],
@@ -2336,6 +2370,10 @@ export function AgentChatPage({
     if (!activeAgentId && !isNewAgent) {
       return
     }
+    const hasMessageContent = body.trim().length > 0 || attachments.length > 0
+    if (!hasMessageContent) {
+      return
+    }
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
       const authenticated = await ensureAuthenticated()
@@ -2395,6 +2433,13 @@ export function AgentChatPage({
       await createNewAgent(body, selectedTier, charterOverride)
       return
     }
+    if (activeAgentId) {
+      const sentAt = new Date().toISOString()
+      queryClient.setQueriesData<AgentRosterQueryData>(
+        { queryKey: ['agent-roster'] },
+        (current) => touchRosterEntryLastInteraction(current, activeAgentId, sentAt),
+      )
+    }
     await sendMessage(body, attachments)
     if (!autoScrollPinnedRef.current) return
     scrollToBottom()
@@ -2411,6 +2456,7 @@ export function AgentChatPage({
     llmIntelligence?.maxAllowedTier,
     llmIntelligence?.maxAllowedTierRank,
     llmIntelligence?.options,
+    queryClient,
     resolvedIntelligenceTier,
     refetchBurnRateSummary,
     scrollToBottom,
