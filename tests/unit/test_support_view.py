@@ -72,8 +72,7 @@ class SupportViewTurnstileTests(TestCase):
     def test_get_shows_intercom_copy_when_flag_enabled(self):
         with override_flag(SUPPORT_INTERCOM, active=True):
             response = self.client.get(reverse("proprietary:support"))
-
-        self.assertContains(response, "routed through our Intercom support inbox")
+            self.assertContains(response, "routed through our Intercom support inbox")
 
     @tag(BATCH_TAG)
     def test_post_without_turnstile_returns_error(self):
