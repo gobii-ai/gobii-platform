@@ -2984,6 +2984,7 @@ export function AgentChatPage({
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
         events={timelineEvents}
+        displayEvents={displayEvents}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}

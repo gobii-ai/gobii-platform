@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { TimelineEvent, ToolCallEntry } from '../types/agentChat'
+import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,48 +51,9 @@ export function isScheduleEntry(entry: ToolCallEntry): boolean {
   return entry.toolName === 'update_schedule'
 }
 
-const KANBAN_TABLE_RE = /__kanban/i
-
-/**
- * Check whether a ToolCallEntry is a kanban-only SQL batch.
- * The raw SQL may live in `entry.sqlStatements` (pre-parsed) or in
- * `entry.parameters.sql` / `entry.parameters.operations` (raw from backend).
- */
-function isKanbanOnlySql(entry: ToolCallEntry): boolean {
-  // Try pre-parsed sqlStatements first
-  const stmts = entry.sqlStatements
-  if (stmts && stmts.length > 0) {
-    return stmts.every((s) => KANBAN_TABLE_RE.test(s))
-  }
-  // Fall back to parameters.sql (single string with semicolons)
-  const params = entry.parameters as Record<string, unknown> | undefined | null
-  if (params) {
-    const rawSql = typeof params.sql === 'string' ? params.sql : null
-    if (rawSql) {
-      const lines = rawSql.split(/;\s*/).filter((s) => s.trim().length > 0)
-      return lines.length > 0 && lines.every((s) => KANBAN_TABLE_RE.test(s))
-    }
-  }
-  return false
-}
-
-/**
- * Returns true when every entry in a steps event is "invisible" — either
- * kanban-only SQL (the transform marks them skip:true), or a charter/schedule
- * entry that will be shown inline.  We strip these from collapsed groups so
- * the user doesn't see a pill that opens an empty overlay.
- */
-function isEmptySteps(event: TimelineEvent): boolean {
-  if (event.kind !== 'steps') return false
-  if (event.entries.length === 0) return true
-  return event.entries.every((entry) => {
-    // Charter / schedule entries are shown inline — treat as invisible here
-    if (isCharterEntry(entry)) return true
-    if (isScheduleEntry(entry)) return true
-    // Kanban-only SQL batches render empty (skip:true in tool transform)
-    if (isKanbanOnlySql(entry)) return true
-    return false
-  })
+function isRenderableCollapsedEvent(event: TimelineEvent): boolean {
+  if (event.kind !== 'steps') return true
+  return isClusterRenderable(transformToolCluster(event))
 }
 
 function countByKind(events: TimelineEvent[]) {
@@ -161,7 +123,8 @@ function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
       kanbanCursor = event.cursor
     }
     if (event.kind === 'steps') {
-      for (const entry of event.entries) {
+      for (let j = event.entries.length - 1; j >= 0; j--) {
+        const entry = event.entries[j]
         if (isCharterEntry(entry) && !charterClusterCursor) {
           charterClusterCursor = event.cursor
           charterEntry = entry
@@ -198,8 +161,7 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
 
   const flush = () => {
     if (buffer.length === 0) return
-    // Drop steps events whose entries are all invisible (kanban SQL, charter, schedule)
-    const meaningful = buffer.filter((e) => !isEmptySteps(e))
+    const meaningful = buffer.filter(isRenderableCollapsedEvent)
     if (meaningful.length > 0) {
       result.push(makeCollapsedGroup(meaningful))
     }
@@ -227,8 +189,27 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
       const hasSchedule = event.cursor === latest.scheduleClusterCursor
 
       if (hasCharter || hasSchedule) {
-        // The cluster itself still collapses (may have other entries)
-        buffer.push(event)
+        const filteredEntries = event.entries.filter((entry) => {
+          if (hasCharter && latest.charterEntry && entry.id === latest.charterEntry.id) {
+            return false
+          }
+          if (hasSchedule && latest.scheduleEntry && entry.id === latest.scheduleEntry.id) {
+            return false
+          }
+          return true
+        })
+
+        const clusterForCollapse = filteredEntries.length === event.entries.length
+          ? event
+          : {
+            ...event,
+            entries: filteredEntries,
+            entryCount: filteredEntries.length,
+            collapsible: filteredEntries.length >= event.collapseThreshold,
+          }
+
+        // Keep remaining cluster content collapsible, but avoid duplicating inline status entries.
+        buffer.push(clusterForCollapse)
         flush()
         // Emit inline items for the latest charter/schedule
         if (hasCharter && latest.charterEntry) {
