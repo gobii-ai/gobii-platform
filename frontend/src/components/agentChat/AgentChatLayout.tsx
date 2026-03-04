@@ -10,6 +10,7 @@ import { TimelineVirtualItem } from './TimelineVirtualItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { StreamingThinkingCard } from './StreamingThinkingCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
+import { TypingStatusCard } from './TypingStatusCard'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
@@ -20,6 +21,7 @@ import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
+import { SimplifiedScheduledEventCard } from './SimplifiedScheduledEventCard'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
@@ -142,6 +144,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   spawnIntentLoading?: boolean
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
+  simplifiedChatUiEnabled?: boolean
 }
 
 export function AgentChatLayout({
@@ -245,6 +248,7 @@ export function AgentChatLayout({
   spawnIntentLoading = false,
   composerError = null,
   composerErrorShowUpgrade = false,
+  simplifiedChatUiEnabled = false,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
@@ -503,6 +507,29 @@ export function AgentChatLayout({
   const hideResponseSkeleton = isActivelyStreamingContent || hasMoreNewer
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
+  const typingStatusLabel = useMemo(() => {
+    if (streaming?.content?.trim()) {
+      return 'responding…'
+    }
+    if (streaming?.reasoning?.trim()) {
+      return 'thinking…'
+    }
+    const activeTask = processingWebTasks.find((task) => task.status?.toLowerCase() === 'running') ?? processingWebTasks[0]
+    const taskLabel = activeTask?.statusLabel?.toLowerCase() ?? ''
+    if (taskLabel.includes('tool')) {
+      return 'calling tools…'
+    }
+    if (taskLabel.includes('search') || taskLabel.includes('crawl') || taskLabel.includes('browse')) {
+      return 'searching…'
+    }
+    if (taskLabel.includes('draft') || taskLabel.includes('write')) {
+      return 'drafting…'
+    }
+    if (taskLabel) {
+      return `${taskLabel}…`
+    }
+    return 'working…'
+  }, [processingWebTasks, streaming?.content, streaming?.reasoning])
   const showScheduledResumeEvent = Boolean(
     !initialLoading
     && !processingActive
@@ -511,6 +538,7 @@ export function AgentChatLayout({
     && !hasMoreNewer
     && nextScheduledAt,
   )
+  const simplifiedScheduledAt = showScheduledResumeEvent && nextScheduledAt ? nextScheduledAt : null
   const showScheduledCreditActions = Boolean(
     showScheduledResumeEvent
     && (
@@ -806,7 +834,7 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'} data-simplified-chat-ui={simplifiedChatUiEnabled ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
@@ -867,16 +895,20 @@ export function AgentChatLayout({
                   </div>
                 ) : null}
                 {showScheduledResumeEvent ? (
-                  <ScheduledResumeCard
-                    nextScheduledAt={nextScheduledAt}
-                    onDoubleLimit={scheduledDoubleLimitTarget !== null ? handleScheduledDoubleLimit : undefined}
-                    doubleLimitLabel={scheduledDoubleLimitLabel ?? undefined}
-                    onSetUnlimited={canSetUnlimitedFromSchedule ? handleScheduledSetUnlimited : undefined}
-                    onOpenSettings={showScheduledCreditActions && onUpdateDailyCredits ? handleSettingsOpen : undefined}
-                    onOpenTaskPacks={showScheduledCreditActions ? resolvedOpenTaskPacks : undefined}
-                    onUpgrade={canShowScheduledUpgrade ? handleScheduledUpgrade : undefined}
-                    actionBusy={scheduledActionBusy}
-                  />
+                  simplifiedChatUiEnabled ? (
+                    <SimplifiedScheduledEventCard nextScheduledAt={simplifiedScheduledAt} />
+                  ) : (
+                    <ScheduledResumeCard
+                      nextScheduledAt={nextScheduledAt}
+                      onDoubleLimit={scheduledDoubleLimitTarget !== null ? handleScheduledDoubleLimit : undefined}
+                      doubleLimitLabel={scheduledDoubleLimitLabel ?? undefined}
+                      onSetUnlimited={canSetUnlimitedFromSchedule ? handleScheduledSetUnlimited : undefined}
+                      onOpenSettings={showScheduledCreditActions && onUpdateDailyCredits ? handleSettingsOpen : undefined}
+                      onOpenTaskPacks={showScheduledCreditActions ? resolvedOpenTaskPacks : undefined}
+                      onUpgrade={canShowScheduledUpgrade ? handleScheduledUpgrade : undefined}
+                      actionBusy={scheduledActionBusy}
+                    />
+                  )
                 ) : null}
                 {showHardLimitCallout ? (
                   <HardLimitCalloutCard
@@ -930,7 +962,9 @@ export function AgentChatLayout({
                 ) : null}
 
                 {shouldRenderResponseSkeleton ? (
-                  <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
+                  simplifiedChatUiEnabled
+                    ? (!hideResponseSkeleton ? <TypingStatusCard label={typingStatusLabel} /> : null)
+                    : <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
                 ) : null}
 
                 {showBottomSentinel ? (

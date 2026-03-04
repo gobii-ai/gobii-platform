@@ -450,7 +450,7 @@ from django.views.decorators.http import require_POST, require_http_methods
 from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSource
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
-from constants.feature_flags import ORGANIZATIONS
+from constants.feature_flags import ORGANIZATIONS, SIMPLIFIED_AGENT_CHAT_UI
 from constants.grant_types import GrantTypeChoices
 from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
 from constants.stripe import (
@@ -5735,6 +5735,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["startup_trial_days"] = startup_trial_days
         context["scale_trial_days"] = scale_trial_days
         context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user)
+        context["simplified_chat_ui_enabled"] = flag_is_active(self.request, SIMPLIFIED_AGENT_CHAT_UI)
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
 

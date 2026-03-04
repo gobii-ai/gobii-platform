@@ -74,6 +74,7 @@ const isCollaborator =
     : isCollaboratorRaw === 'false'
       ? false
       : null
+const simplifiedChatUiEnabled = mountNode.dataset.simplifiedChatUiEnabled === 'true'
 
 let screen: ReactElement
 
@@ -119,6 +120,7 @@ switch (appName) {
         auditUrlTemplate={auditUrlTemplate}
         canManageCollaborators={canManageCollaborators}
         isCollaborator={isCollaborator}
+        simplifiedChatUiEnabled={simplifiedChatUiEnabled}
         viewerUserId={viewerUserId}
         viewerEmail={viewerEmail}
         onClose={handleEmbeddedClose}

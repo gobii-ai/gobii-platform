@@ -28,6 +28,7 @@ import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatSt
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse } from '../hooks/useAgentTimeline'
 import { refreshTimelineLatestInCache } from '../hooks/useTimelineCacheInjector'
+import { collapseTimelineEvents } from '../components/agentChat/collapseTimelineEvents'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
@@ -531,6 +532,7 @@ export type AgentChatPageProps = {
   viewerEmail?: string | null
   canManageCollaborators?: boolean | null
   isCollaborator?: boolean | null
+  simplifiedChatUiEnabled?: boolean
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
@@ -568,6 +570,7 @@ export function AgentChatPage({
   viewerEmail,
   canManageCollaborators,
   isCollaborator,
+  simplifiedChatUiEnabled = false,
   onClose,
   onCreateAgent,
   onAgentCreated,
@@ -707,6 +710,10 @@ export function AgentChatPage({
   const hasMoreOlder = timelineQuery.hasPreviousPage ?? false
   const hasMoreNewer = timelineQuery.hasNextPage ?? false
   const timelineEvents = !isNewAgent ? flatEvents : []
+  const displayedTimelineEvents = useMemo(
+    () => (simplifiedChatUiEnabled ? collapseTimelineEvents(timelineEvents) : timelineEvents),
+    [simplifiedChatUiEnabled, timelineEvents],
+  )
   const timelineHasMoreOlder = !isNewAgent ? hasMoreOlder : false
   const timelineHasMoreNewer = !isNewAgent ? hasMoreNewer : false
   const timelineHasUnseenActivity = !isNewAgent && isStoreSynced ? hasUnseenActivity : false
@@ -723,7 +730,7 @@ export function AgentChatPage({
   // Set up virtualizer
   const scrollContainerRef = useRef<HTMLElement | null>(null)
   const virtualizer = useTimelineVirtualizer({
-    events: timelineEvents,
+    events: displayedTimelineEvents,
     scrollContainerRef,
   })
 
@@ -1310,12 +1317,12 @@ export function AgentChatPage({
   }, [timelineProcessingActive, setAutoScrollPinned])
 
   // Capture scroll decision BEFORE content changes to avoid race with scroll handler
-  const prevEventsRef = useRef(timelineEvents)
+  const prevEventsRef = useRef(displayedTimelineEvents)
   const prevStreamingRef = useRef(timelineStreaming)
 
-  if (timelineEvents !== prevEventsRef.current || timelineStreaming !== prevStreamingRef.current) {
+  if (displayedTimelineEvents !== prevEventsRef.current || timelineStreaming !== prevStreamingRef.current) {
     shouldScrollOnNextUpdateRef.current = autoScrollPinned
-    prevEventsRef.current = timelineEvents
+    prevEventsRef.current = displayedTimelineEvents
     prevStreamingRef.current = timelineStreaming
   }
 
@@ -1332,10 +1339,14 @@ export function AgentChatPage({
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     // Already at bottom — skip to avoid triggering scroll events
     if (distanceFromBottom < 2) return
-    container.scrollTop = container.scrollHeight
+    if (simplifiedChatUiEnabled && typeof container.scrollTo === 'function') {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+    } else {
+      container.scrollTop = container.scrollHeight
+    }
     isNearBottomRef.current = true
     setIsNearBottom(true)
-  }, [])
+  }, [simplifiedChatUiEnabled])
 
   // Full jump with iOS momentum kill — used for user-initiated actions
   // (send message, click jump button, composer focus, initial scroll).
@@ -1347,14 +1358,14 @@ export function AgentChatPage({
     // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
     container.style.overflowY = 'hidden'
     if (sentinel) {
-      sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
+      sentinel.scrollIntoView({ block: 'end', behavior: simplifiedChatUiEnabled ? 'smooth' : 'auto' })
     } else {
       container.scrollTop = container.scrollHeight + 10000
     }
     requestAnimationFrame(() => { container.style.overflowY = '' })
     isNearBottomRef.current = true
     setIsNearBottom(true)
-  }, [])
+  }, [simplifiedChatUiEnabled])
 
   // rAF-coalesced auto-follow (for ResizeObserver / content change paths)
   const scrollToBottom = useCallback(() => {
@@ -1450,7 +1461,7 @@ export function AgentChatPage({
       setAutoScrollPinned(true)
       return
     }
-    if (!initialLoading && timelineEvents.length && !didInitialScrollRef.current) {
+    if (!initialLoading && displayedTimelineEvents.length && !didInitialScrollRef.current) {
       didInitialScrollRef.current = true
       setAutoScrollPinned(true)
       // Immediate scroll attempt
@@ -1459,7 +1470,7 @@ export function AgentChatPage({
       const timeout = setTimeout(() => jumpToBottom(), 50)
       return () => clearTimeout(timeout)
     }
-  }, [timelineEvents.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
+  }, [displayedTimelineEvents.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
 
   useLayoutEffect(() => {
     if (forceScrollOnNextUpdateRef.current) {
@@ -2760,11 +2771,11 @@ export function AgentChatPage({
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
         composerError={createAgentError?.message ?? null}
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
-        events={timelineEvents}
+        events={displayedTimelineEvents}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
-        oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
-        newestCursor={timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : null}
+        oldestCursor={displayedTimelineEvents.length ? displayedTimelineEvents[0].cursor : null}
+        newestCursor={displayedTimelineEvents.length ? displayedTimelineEvents[displayedTimelineEvents.length - 1].cursor : null}
         processingActive={timelineProcessingActive}
         processingStartedAt={timelineProcessingStartedAt}
         awaitingResponse={timelineAwaitingResponse}
@@ -2795,6 +2806,7 @@ export function AgentChatPage({
         allowLockedIntelligenceSelection={isNewAgent}
         llmTierSaving={intelligenceBusy}
         llmTierError={intelligenceError}
+        simplifiedChatUiEnabled={simplifiedChatUiEnabled}
         spawnIntentLoading={showSpawnIntentLoader}
       />
     </div>

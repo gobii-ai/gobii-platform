@@ -7231,3 +7231,82 @@
   font-weight: 600;
   color: #0f172a;
 }
+
+#timeline-shell[data-simplified-chat-ui='true'] {
+  scroll-behavior: smooth;
+}
+
+.typing-status-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.2rem 0.25rem 0.55rem;
+}
+
+.typing-status-card__bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  padding: 0.55rem 0.8rem;
+  background: linear-gradient(145deg, rgba(79, 70, 229, 0.16), rgba(59, 130, 246, 0.14));
+}
+
+.typing-status-card__dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: #4f46e5;
+  animation: typing-status-dot 1.1s ease-in-out infinite;
+}
+
+.typing-status-card__dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-status-card__dot:nth-child(3) { animation-delay: 0.3s; }
+
+.typing-status-card__label {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #3730a3;
+  text-transform: lowercase;
+  background: linear-gradient(90deg, rgba(55, 48, 163, 0.65), #4f46e5, rgba(55, 48, 163, 0.65));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: typing-status-glow 1.8s linear infinite;
+}
+
+@keyframes typing-status-dot {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+  40% { transform: translateY(-3px); opacity: 1; }
+}
+
+@keyframes typing-status-glow {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.simplified-system-event {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  max-width: 20rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 1rem;
+  background: linear-gradient(130deg, rgba(79, 70, 229, 0.1), rgba(37, 99, 235, 0.09));
+}
+
+.simplified-system-event__label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: lowercase;
+  color: #3730a3;
+}
+
+.simplified-system-event__time {
+  font-size: 0.76rem;
+  color: #4338ca;
+}

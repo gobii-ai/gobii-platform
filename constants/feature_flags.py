@@ -13,6 +13,9 @@ AGENT_CRON_THROTTLE = "agent_cron_throttle"
 # Controls favicon/logo collateral assets across templates and app shell
 FISH_COLLATERAL = "fish_collateral"
 
+# Simplified iMessage-inspired chat timeline presentation
+SIMPLIFIED_AGENT_CHAT_UI = "simplified_agent_chat_ui"
+
 
 
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
