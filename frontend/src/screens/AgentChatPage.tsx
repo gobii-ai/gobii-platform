@@ -2767,6 +2767,7 @@ export function AgentChatPage({
         composerError={createAgentError?.message ?? null}
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
         events={timelineEvents}
+        displayEvents={displayEvents}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}

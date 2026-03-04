@@ -5,7 +5,6 @@ import type { Virtualizer } from '@tanstack/react-virtual'
 import '../../styles/agentChatLegacy.css'
 import '../../styles/simplifiedChat.css'
 import { useSimplifiedChat } from '../../contexts/SimplifiedChatContext'
-import { useSimplifiedTimeline } from '../../hooks/useSimplifiedTimeline'
 import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -37,6 +36,7 @@ import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
+import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 
 type TaskQuotaInfo = {
   available: number
@@ -48,6 +48,7 @@ type TaskQuotaInfo = {
 const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 
 type AgentChatLayoutProps = AgentTimelineProps & {
+  displayEvents?: SimplifiedTimelineItem[]
   agentId?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
@@ -151,6 +152,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
 export function AgentChatLayout({
   agentFirstName,
   events,
+  displayEvents,
   agentId,
   agentColorHex,
   agentAvatarUrl,
@@ -251,7 +253,7 @@ export function AgentChatLayout({
   composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
   const simplifiedChat = useSimplifiedChat()
-  const displayEvents = useSimplifiedTimeline(events, simplifiedChat)
+  const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
@@ -544,7 +546,7 @@ export function AgentChatLayout({
     onSendMessage,
     promptCount: typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3,
   })
-  const hasTimelineEvents = events.length > 0
+  const hasTimelineEvents = timelineRenderEvents.length > 0
   const showJumpButton = !initialLoading
     && hasTimelineEvents
     && (
@@ -843,9 +845,9 @@ export function AgentChatLayout({
                     style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}
                   >
                     {virtualizer.getVirtualItems().map((virtualItem) => {
-                      const event = displayEvents[virtualItem.index]
+                      const event = timelineRenderEvents[virtualItem.index]
                       if (!event) return null
-                      const isLatestEvent = virtualItem.index === displayEvents.length - 1
+                      const isLatestEvent = virtualItem.index === timelineRenderEvents.length - 1
                       return (
                         <div
                           key={virtualItem.key}

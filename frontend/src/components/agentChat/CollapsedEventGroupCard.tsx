@@ -16,10 +16,10 @@ export const CollapsedEventGroupCard = memo(function CollapsedEventGroupCard({
 
   return (
     <>
-      <div className="collapsed-event-group" role="button" tabIndex={0} onClick={handleOpen} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleOpen() }}>
+      <button type="button" className="collapsed-event-group" onClick={handleOpen}>
         <span className="collapsed-event-group__label">{group.summary.label}</span>
         <ChevronRight className="collapsed-event-group__chevron" size={14} strokeWidth={2} />
-      </div>
+      </button>
       <CollapsedEventGroupOverlay open={overlayOpen} group={group} onClose={handleClose} />
     </>
   )
