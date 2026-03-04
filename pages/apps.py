@@ -13,3 +13,12 @@ class PagesConfig(AppConfig):
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to import signals: {e}")
+
+        try:
+            from billing.lifecycle_handlers import register_billing_lifecycle_handlers
+
+            register_billing_lifecycle_handlers()
+        except ImportError as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to register billing lifecycle handlers: {e}")
