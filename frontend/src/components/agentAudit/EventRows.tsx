@@ -134,6 +134,11 @@ export function MessageRow({
   const textBody = message.body_text || (htmlBody ? null : message.body_html)
   const hasBody = Boolean(htmlBody || (textBody && textBody.trim().length > 0))
   const attachments = message.attachments || []
+  const selfAgentName = message.self_agent_name?.trim() || 'Agent'
+  const peerAgentName = message.peer_agent?.name?.trim() || 'Linked agent'
+  const directionLabel = message.peer_agent
+    ? (message.is_outbound ? `${selfAgentName} → ${peerAgentName}` : `${peerAgentName} → ${selfAgentName}`)
+    : (message.is_outbound ? 'Agent → User' : 'User → Agent')
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
@@ -143,7 +148,7 @@ export function MessageRow({
             <IconCircle icon={MessageCircle} bgClass="bg-emerald-50" textClass="text-emerald-700" />
             <div>
               <div className="text-sm font-semibold text-slate-900">
-                {message.is_outbound ? 'Agent → User' : 'User → Agent'}{' '}
+                {directionLabel}{' '}
                 <span className="text-xs font-normal text-slate-500">({message.channel || 'web'})</span>
               </div>
               <div className="text-xs text-slate-600">{message.timestamp ? new Date(message.timestamp).toLocaleString() : '—'}</div>
