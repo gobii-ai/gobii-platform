@@ -419,24 +419,17 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
         if request.user.is_authenticated:
             return False
 
+        # Support requests are often anonymous, so treat an authenticated
+        # rollout as active for public support intake as well.
         flag_model = get_waffle_flag_model()
-        support_intercom_flag = flag_model.get(SUPPORT_INTERCOM)
-        if support_intercom_flag.authenticated and support_intercom_flag.everyone is not False:
-            return True
-
         try:
-            support_intercom_flag = flag_model.get_from_db(SUPPORT_INTERCOM)
+            support_intercom_flag = flag_model.objects.get(name=SUPPORT_INTERCOM)
         except flag_model.DoesNotExist:
             return False
 
-        if support_intercom_flag.everyone is True:
-            return True
+        if support_intercom_flag.everyone is not None:
+            return support_intercom_flag.everyone
 
-        if support_intercom_flag.everyone is False:
-            return False
-
-        # Support requests are often anonymous, so an authenticated rollout flag
-        # should still route public support intake to the same Intercom inbox.
         return bool(support_intercom_flag.authenticated)
 
     def get_recipient_email(self, *, intercom_mode: bool) -> str:
