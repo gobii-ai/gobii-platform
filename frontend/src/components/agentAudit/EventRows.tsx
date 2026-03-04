@@ -136,9 +136,10 @@ export function MessageRow({
   const attachments = message.attachments || []
   const selfAgentName = message.self_agent_name?.trim() || 'Agent'
   const peerAgentName = message.peer_agent?.name?.trim() || 'Linked agent'
-  const directionLabel = message.peer_agent
-    ? (message.is_outbound ? `${selfAgentName} → ${peerAgentName}` : `${peerAgentName} → ${selfAgentName}`)
-    : (message.is_outbound ? 'Agent → User' : 'User → Agent')
+  const [from, to] = message.peer_agent
+    ? [selfAgentName, peerAgentName]
+    : ['Agent', 'User']
+  const directionLabel = message.is_outbound ? `${from} → ${to}` : `${to} → ${from}`
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
