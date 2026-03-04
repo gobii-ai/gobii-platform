@@ -34,7 +34,8 @@ def _base_properties(payload) -> dict:
     if payload.final_attempt is not None:
         properties["final_attempt"] = payload.final_attempt
     if payload.metadata:
-        properties.update(payload.metadata)
+        for key, value in payload.metadata.items():
+            properties.setdefault(key, value)
     return properties
 
 
