@@ -1,0 +1,328 @@
+/* ============================================================
+   Simplified Chat UI — iMessage-style collapsed events,
+   typing indicator, and entry animations.
+   Scoped under .simplified-chat parent where applicable.
+   ============================================================ */
+
+/* ---- Timeline Inner — less margin on large screens ---- */
+
+@media (min-width: 1024px) {
+  .simplified-chat #timeline-inner {
+    max-width: min(64rem, 100%);
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+
+  .simplified-chat ~ .composer-shell {
+    padding-left: 2rem;
+    padding-right: 2rem;
+  }
+
+  .simplified-chat ~ .composer-shell .composer-surface {
+    width: min(64rem, 100%);
+  }
+}
+
+/* ---- Collapsed Event Group Pill ---- */
+
+.collapsed-event-group {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 4px auto;
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background: var(--color-slate-100, #f1f5f9);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  width: fit-content;
+}
+
+.collapsed-event-group:hover {
+  background: var(--color-slate-200, #e2e8f0);
+}
+
+.collapsed-event-group:focus-visible {
+  outline: 2px solid var(--color-blue-500, #3b82f6);
+  outline-offset: 2px;
+}
+
+.collapsed-event-group__label {
+  font-size: 0.75rem;
+  line-height: 1rem;
+  color: var(--color-slate-500, #64748b);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.collapsed-event-group__chevron {
+  color: var(--color-slate-400, #94a3b8);
+  flex-shrink: 0;
+}
+
+/* ---- Inline Status Cards (charter, schedule, compact kanban) ---- */
+
+.inline-status-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 2px auto;
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--color-slate-50, #f8fafc);
+  border: 1px solid var(--color-slate-150, #e9edf2);
+  max-width: 480px;
+  width: fit-content;
+}
+
+.inline-status-card__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  margin-top: 1px;
+}
+
+.inline-status-card__icon--charter {
+  background: var(--color-indigo-50, #eef2ff);
+  color: var(--color-indigo-600, #4f46e5);
+}
+
+.inline-status-card__icon--schedule {
+  background: var(--color-sky-50, #f0f9ff);
+  color: var(--color-sky-600, #0284c7);
+}
+
+.inline-status-card__icon--kanban {
+  background: var(--color-amber-50, #fffbeb);
+  color: var(--color-amber-600, #d97706);
+}
+
+.inline-status-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.inline-status-card__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  color: var(--color-slate-700, #334155);
+}
+
+.inline-status-card__detail {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  color: var(--color-slate-500, #64748b);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 400px;
+}
+
+/* ---- Typing Indicator ---- */
+
+.typing-indicator-container {
+  padding: 8px 0;
+}
+
+.typing-indicator-container[hidden] {
+  display: none;
+}
+
+.typing-indicator {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 200px;
+}
+
+.typing-indicator__avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.typing-indicator__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.typing-indicator__avatar-fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.typing-indicator__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.typing-indicator__bubble {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  border-top-left-radius: 4px;
+  background: var(--color-slate-100, #f1f5f9);
+}
+
+.typing-indicator__dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--dot-color, #8b5cf6);
+  opacity: 0.4;
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-indicator__dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-indicator__dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes typingBounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+/* Glowing status text with left-to-right shimmer */
+.typing-indicator__status {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 500;
+  padding-left: 2px;
+  background: linear-gradient(
+    90deg,
+    var(--glow-color, #8b5cf6) 0%,
+    color-mix(in srgb, var(--glow-color, #8b5cf6) 50%, #fff) 50%,
+    var(--glow-color, #8b5cf6) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: statusGlow 2s linear infinite;
+}
+
+@keyframes statusGlow {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+/* ---- iMessage-style Bubble Arrows & Spacing ---- */
+
+/* Constrain widths so messages don't span full width */
+.simplified-chat .chat-bubble--agent {
+  max-width: 85%;
+}
+
+.simplified-chat .chat-bubble--user {
+  max-width: 80%;
+}
+
+/* Add horizontal padding so bubbles don't touch container edges */
+.simplified-chat .chat-event.is-agent {
+  padding-right: 48px;
+}
+
+.simplified-chat .chat-event.is-user {
+  padding-left: 48px;
+}
+
+/* Position bubbles relative for the arrow pseudo-elements */
+.simplified-chat .chat-bubble {
+  position: relative;
+}
+
+
+/* Responsive: tighter padding on small screens */
+@media (max-width: 640px) {
+  .simplified-chat .chat-event.is-agent {
+    padding-right: 24px;
+  }
+
+  .simplified-chat .chat-event.is-user {
+    padding-left: 24px;
+  }
+}
+
+/* ---- Smooth Position Transitions ---- */
+
+/* Existing virtualizer items glide up when new content arrives */
+.simplified-chat-vitem {
+  transition: transform 0.25s ease-out;
+}
+
+/* ---- New Item Entry Animation ---- */
+
+/* The latest item slides in from below */
+.simplified-chat [data-animate-entry="true"] > * {
+  animation: messageSlideIn 0.3s ease-out both;
+}
+
+@keyframes messageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---- Reduced Motion ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  .typing-indicator__dot {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .typing-indicator__status {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--glow-color, #8b5cf6);
+  }
+
+  .simplified-chat [data-animate-entry="true"] > * {
+    animation: none;
+  }
+
+  .simplified-chat-vitem {
+    transition: none;
+  }
+}

@@ -33,6 +33,8 @@ import {
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
 } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
+import { useSimplifiedTimeline } from '../hooks/useSimplifiedTimeline'
+import { useSimplifiedChat } from '../contexts/SimplifiedChatContext'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
@@ -773,10 +775,14 @@ export function AgentChatPage({
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
 
+  // Simplified-chat mode collapses non-message events for the virtualizer
+  const simplifiedChat = useSimplifiedChat()
+  const displayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
+
   // Set up virtualizer
   const scrollContainerRef = useRef<HTMLElement | null>(null)
   const virtualizer = useTimelineVirtualizer({
-    events: timelineEvents,
+    events: displayEvents,
     scrollContainerRef,
   })
 

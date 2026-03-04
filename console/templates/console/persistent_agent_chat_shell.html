@@ -30,7 +30,8 @@
        data-viewer-email="{{ request.user.email|default_if_none:'' }}"
        data-collaborator-invite-url="{% url 'agent_detail' pk=agent.id %}"
        data-can-manage-collaborators="{% if can_manage_collaborators %}true{% else %}false{% endif %}"
-       data-is-collaborator="{% if is_collaborator %}true{% else %}false{% endif %}">
+       data-is-collaborator="{% if is_collaborator %}true{% else %}false{% endif %}"
+       data-simplified-chat-ui="{% if simplified_chat_ui %}true{% else %}false{% endif %}">
   </div>
 </div>
 {% endblock %}
