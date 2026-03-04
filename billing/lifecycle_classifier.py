@@ -62,6 +62,7 @@ def is_trial_ended_non_renewal(
     now_dt: datetime,
 ) -> bool:
     normalized_status = _normalize_status(current_status)
+    # Treat either explicit deletion events or canceled status updates as terminal cancellation signals.
     if event_type != "customer.subscription.deleted" and normalized_status != "canceled":
         return False
 
