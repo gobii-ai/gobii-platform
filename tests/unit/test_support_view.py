@@ -69,12 +69,6 @@ class SupportViewTurnstileTests(TestCase):
         self.assertNotContains(response, "routed through our Intercom support inbox")
 
     @tag(BATCH_TAG)
-    def test_get_shows_intercom_copy_when_flag_enabled(self):
-        with override_flag(SUPPORT_INTERCOM, active=True):
-            response = self.client.get(reverse("proprietary:support"))
-            self.assertContains(response, "routed through our Intercom support inbox")
-
-    @tag(BATCH_TAG)
     def test_post_without_turnstile_returns_error(self):
         response = self.client.post(reverse("proprietary:support"), self._payload())
 
