@@ -19,3 +19,6 @@ FISH_COLLATERAL = "fish_collateral"
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
 # switch not flag
 MULTISEND_ENABLED = "multisend_enabled"
+
+# iMessage-style simplified chat UI — collapses non-message events into compact pills
+SIMPLIFIED_CHAT_UI = "simplified_chat_ui"

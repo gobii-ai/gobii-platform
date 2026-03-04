@@ -29,6 +29,8 @@ import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse } from '../hooks/useAgentTimeline'
 import { refreshTimelineLatestInCache } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
+import { useSimplifiedTimeline } from '../hooks/useSimplifiedTimeline'
+import { useSimplifiedChat } from '../contexts/SimplifiedChatContext'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../types/agentRoster'
@@ -720,10 +722,14 @@ export function AgentChatPage({
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
 
+  // Simplified-chat mode collapses non-message events for the virtualizer
+  const simplifiedChat = useSimplifiedChat()
+  const displayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
+
   // Set up virtualizer
   const scrollContainerRef = useRef<HTMLElement | null>(null)
   const virtualizer = useTimelineVirtualizer({
-    events: timelineEvents,
+    events: displayEvents,
     scrollContainerRef,
   })
 

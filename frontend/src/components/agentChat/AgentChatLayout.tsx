@@ -3,6 +3,10 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import '../../styles/agentChatLegacy.css'
+import '../../styles/simplifiedChat.css'
+import { useSimplifiedChat } from '../../contexts/SimplifiedChatContext'
+import { useSimplifiedTimeline } from '../../hooks/useSimplifiedTimeline'
+import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
@@ -246,6 +250,9 @@ export function AgentChatLayout({
   composerError = null,
   composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
+  const simplifiedChat = useSimplifiedChat()
+  const displayEvents = useSimplifiedTimeline(events, simplifiedChat)
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
       return true
@@ -494,7 +501,8 @@ export function AgentChatLayout({
   const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
   const showStreamingSlot = hasStreamingContent && isStreaming
   // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
-  const showStreamingThinking = isStreaming && Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
+  // In simplified mode, the typing indicator covers this state instead
+  const showStreamingThinking = !simplifiedChat && isStreaming && Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -806,7 +814,7 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          <div ref={timelineRef} id="timeline-shell" className={simplifiedChat ? 'simplified-chat' : undefined} data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
@@ -835,13 +843,15 @@ export function AgentChatLayout({
                     style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}
                   >
                     {virtualizer.getVirtualItems().map((virtualItem) => {
-                      const event = events[virtualItem.index]
+                      const event = displayEvents[virtualItem.index]
                       if (!event) return null
-                      const isLatestEvent = virtualItem.index === events.length - 1
+                      const isLatestEvent = virtualItem.index === displayEvents.length - 1
                       return (
                         <div
                           key={virtualItem.key}
                           data-index={virtualItem.index}
+                          data-animate-entry={simplifiedChat && isLatestEvent ? 'true' : undefined}
+                          className={simplifiedChat ? 'simplified-chat-vitem' : undefined}
                           ref={virtualizer.measureElement}
                           style={{
                             position: 'absolute',
@@ -930,7 +940,17 @@ export function AgentChatLayout({
                 ) : null}
 
                 {shouldRenderResponseSkeleton ? (
-                  <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
+                  simplifiedChat ? (
+                    <TypingIndicator
+                      statusText={deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })}
+                      agentColorHex={agentColorHex || undefined}
+                      agentAvatarUrl={agentAvatarUrl}
+                      agentFirstName={agentFirstName}
+                      hidden={hideResponseSkeleton}
+                    />
+                  ) : (
+                    <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
+                  )
                 ) : null}
 
                 {showBottomSentinel ? (

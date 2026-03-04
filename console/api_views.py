@@ -171,6 +171,7 @@ from api.services.system_settings import (
     serialize_setting,
     set_setting_value,
 )
+from constants.feature_flags import SIMPLIFIED_CHAT_UI
 from constants.plans import PlanNamesChoices
 from util.integrations import stripe_status
 from util.subscription_helper import get_active_subscription, get_organization_plan, get_user_plan
@@ -257,6 +258,7 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
             {
                 "user_id": str(request.user.id),
                 "email": request.user.email,
+                "simplified_chat_ui": flag_is_active(request, SIMPLIFIED_CHAT_UI),
             }
         )
 
