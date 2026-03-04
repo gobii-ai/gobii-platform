@@ -494,6 +494,9 @@ def _resolve_actor_user_id(owner: Any, owner_type: str) -> int | None:
     if owner_type == "user":
         return getattr(owner, "id", None)
     if owner_type == "organization":
+        # Lifecycle events for organization-owned subscriptions currently attribute
+        # to the org creator as a stable analytics actor fallback; this is not
+        # guaranteed to match the user who initiated the billing action.
         return getattr(owner, "created_by_id", None)
     return None
 
