@@ -1399,6 +1399,8 @@ def handle_invoice_payment_failed(event, **kwargs):
                     ),
                 )
         except Exception:
+            # Intentionally broad: lifecycle emission is best-effort and must never
+            # interrupt the core Stripe webhook path for invoice payment failures.
             logger.exception(
                 "Failed to emit trial conversion failure lifecycle event for invoice %s",
                 payload.get("id"),
@@ -1865,6 +1867,8 @@ def handle_subscription_event(event, **kwargs):
                     ),
                 )
         except Exception:
+            # Intentionally broad: lifecycle emission is best-effort and must never
+            # interrupt the core Stripe webhook path for subscription updates.
             logger.exception(
                 "Failed to emit billing lifecycle transition event for subscription %s",
                 subscription_id,
@@ -1963,6 +1967,8 @@ def handle_subscription_event(event, **kwargs):
                         ),
                     )
             except Exception:
+                # Intentionally broad: lifecycle emission is best-effort and must
+                # never interrupt cancellation handling for Stripe subscriptions.
                 logger.exception(
                     "Failed to emit trial ended lifecycle event for subscription %s",
                     subscription_id,
