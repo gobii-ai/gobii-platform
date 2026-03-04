@@ -1078,6 +1078,10 @@ SUPPORT_EMAIL = env(
     "SUPPORT_EMAIL",
     default=_proprietary_default("support", "SUPPORT_EMAIL"),
 )
+INTERCOM_SUPPORT_EMAIL = env(
+    "INTERCOM_SUPPORT_EMAIL",
+    default=_proprietary_default("support", "INTERCOM_SUPPORT_EMAIL"),
+)
 
 # OpenTelemetry Tracing
 OTEL_EXPORTER_OTLP_PROTOCOL = env("OTEL_EXPORTER_OTLP_PROTOCOL", default="http/protobuf")

@@ -1,7 +1,9 @@
 import logging
 import json
 from smtplib import SMTPException
+from email.utils import formataddr
 
+from anymail.exceptions import AnymailAPIError
 from django.conf import settings
 from django.contrib import sitemaps
 from django.http import HttpResponse, Http404, JsonResponse
@@ -20,9 +22,11 @@ from util.subscription_helper import (
     get_user_plan,
 )
 from util.fish_collateral import is_fish_collateral_enabled
+from constants.feature_flags import SUPPORT_INTERCOM
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings
+from waffle import flag_is_active, get_waffle_flag_model
 
 logger = logging.getLogger(__name__)
 
@@ -404,11 +408,79 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["support_form"] = SupportForm()
+        context["support_intercom_enabled"] = self.is_intercom_mode(self.request)
 
         return context
 
-    def get_recipient_email(self) -> str:
+    def is_intercom_mode(self, request) -> bool:
+        if flag_is_active(request, SUPPORT_INTERCOM):
+            return True
+
+        if request.user.is_authenticated:
+            return False
+
+        flag_model = get_waffle_flag_model()
+        support_intercom_flag = flag_model.get(SUPPORT_INTERCOM)
+        if support_intercom_flag.authenticated and support_intercom_flag.everyone is not False:
+            return True
+
+        try:
+            support_intercom_flag = flag_model.get_from_db(SUPPORT_INTERCOM)
+        except flag_model.DoesNotExist:
+            return False
+
+        if support_intercom_flag.everyone is True:
+            return True
+
+        if support_intercom_flag.everyone is False:
+            return False
+
+        # Support requests are often anonymous, so an authenticated rollout flag
+        # should still route public support intake to the same Intercom inbox.
+        return bool(support_intercom_flag.authenticated)
+
+    def get_recipient_email(self, *, intercom_mode: bool) -> str:
+        if intercom_mode:
+            return settings.INTERCOM_SUPPORT_EMAIL
         return settings.SUPPORT_EMAIL
+
+    def _send_intercom_email_with_fallback(
+        self,
+        *,
+        subject: str,
+        message_body: str,
+        recipient_email: str,
+        sender_name: str,
+        user_email: str,
+    ) -> None:
+        sender_address = formataddr((sender_name, user_email))
+        reply_to_address = formataddr((sender_name, user_email))
+
+        try:
+            email = EmailMultiAlternatives(
+                subject,
+                message_body,
+                sender_address,
+                [recipient_email],
+                reply_to=[reply_to_address],
+            )
+            email.send(fail_silently=False)
+            return
+        except (SMTPException, AnymailAPIError):
+            logger.warning(
+                "Support intercom send rejected user from address %s; retrying with default sender.",
+                user_email,
+                exc_info=True,
+            )
+
+        fallback_email = EmailMultiAlternatives(
+            subject,
+            message_body,
+            settings.DEFAULT_FROM_EMAIL,
+            [recipient_email],
+            reply_to=[reply_to_address],
+        )
+        fallback_email.send(fail_silently=False)
 
     def post(self, request, *args, **kwargs):
         form = SupportForm(request.POST)
@@ -438,7 +510,8 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
             'message': cleaned['message'],
         }
 
-        recipient_email = self.get_recipient_email()
+        intercom_mode = self.is_intercom_mode(request)
+        recipient_email = self.get_recipient_email(intercom_mode=intercom_mode)
         if not recipient_email:
             return HttpResponse(
                 '<div class="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg" role="alert">'
@@ -447,19 +520,33 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
                 status=500,
             )
 
-        html_message = render_to_string(self.email_template_name, context)
-        plain_message = strip_tags(html_message)
+        if intercom_mode:
+            subject = cleaned["subject"]
+            message_body = cleaned["message"]
+        else:
+            html_message = render_to_string(self.email_template_name, context)
+            message_body = strip_tags(html_message)
+            subject = f"{self.email_subject_prefix}: {cleaned['subject']}"
 
         # Send email
         try:
-            send_mail(
-                subject=f"{self.email_subject_prefix}: {cleaned['subject']}",
-                message=plain_message,
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[recipient_email],
-                html_message=html_message,
-                fail_silently=False,
-            )
+            if intercom_mode:
+                self._send_intercom_email_with_fallback(
+                    subject=subject,
+                    message_body=message_body,
+                    recipient_email=recipient_email,
+                    sender_name=cleaned["name"],
+                    user_email=cleaned["email"],
+                )
+            else:
+                send_mail(
+                    subject=subject,
+                    message=message_body,
+                    from_email=settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[recipient_email],
+                    html_message=html_message,
+                    fail_silently=False,
+                )
 
             # Return success message (for HTMX response)
             return HttpResponse(
@@ -468,7 +555,7 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
                 '</div>'
             )
 
-        except (BadHeaderError, SMTPException):
+        except (BadHeaderError, SMTPException, AnymailAPIError):
             logger.exception("Error sending %s email.", self.email_subject_prefix.lower())
 
             # Return error message (for HTMX response)
@@ -488,7 +575,10 @@ class ContactView(SupportView):
     email_subject_prefix = "Contact Request"
     missing_recipient_message = "Contact email is not configured."
 
-    def get_recipient_email(self) -> str:
+    def is_intercom_mode(self, request) -> bool:
+        return False
+
+    def get_recipient_email(self, *, intercom_mode: bool) -> str:
         return settings.PUBLIC_CONTACT_EMAIL
 
 

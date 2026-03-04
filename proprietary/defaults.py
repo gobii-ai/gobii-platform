@@ -22,6 +22,7 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "DEFAULT_FROM_EMAIL": "Gobii <noreply@mg.getgobii.com>",
         "MAILGUN_SENDER_DOMAIN": "mg.getgobii.com",
         "SUPPORT_EMAIL": "support@gobii.ai",
+        "INTERCOM_SUPPORT_EMAIL": "help@gobii.ai",
     },
     "analytics": {
         # Real keys are injected via environment in production deployments.
