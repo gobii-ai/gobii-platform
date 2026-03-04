@@ -75,6 +75,10 @@ def emit_billing_lifecycle_event(
         raise ValueError(f"Unknown billing lifecycle event: {event_name}")
 
     sender_obj = sender or emit_billing_lifecycle_event
+    # Keep both the typed payload and flattened kwargs:
+    # current handlers primarily use `payload`, while future receivers can bind
+    # directly to stable scalar kwargs (e.g. subscription_id) without depending
+    # on dataclass shape or object unpacking.
     results = signal.send_robust(
         sender=sender_obj,
         event_name=event_name,
