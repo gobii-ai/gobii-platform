@@ -344,7 +344,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             return {
                 "status": "ok" if ok else "error",
                 "reason": reason,
-                "message": "Discovery pod skipped for non-stdio user server.",
+                "message": "Discovery pod skipped for non-sandboxed MCP server.",
             }
 
         proxy_url: Optional[str] = None
@@ -732,7 +732,9 @@ def _requires_discovery_pod(server_payload: Dict[str, Any]) -> bool:
     scope = str(server_payload.get("scope") or "").strip()
     command = str(server_payload.get("command") or "").strip()
     url = str(server_payload.get("url") or "").strip()
-    return scope == MCPServerConfig.Scope.USER and bool(command) and not bool(url)
+    if scope == MCPServerConfig.Scope.PLATFORM:
+        return False
+    return bool(command) and not bool(url)
 
 
 def _pvc_name(agent_id: Any) -> str:

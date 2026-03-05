@@ -385,6 +385,48 @@ class MCPToolManagerTests(TestCase):
         self.assertNotIn(runtime.config_id, self.manager._clients)
         self.assertNotIn(runtime.config_id, self.manager._tools_cache)
 
+    @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=False)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=True)
+    @patch("api.agent.tools.mcp_manager.schedule_mcp_tool_discovery")
+    def test_register_http_server_skips_sandbox_discovery(
+        self,
+        mock_schedule,
+        _mock_sandbox_enabled,
+    ):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="http-only-server",
+            display_name="HTTP Server",
+            description="",
+            command="",
+            args=[],
+            url="https://example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        async def _fake_fetch(*args, **kwargs):
+            return []
+
+        with patch.object(self.manager, "_ensure_event_loop", return_value=loop), patch.object(
+            self.manager,
+            "_select_discovery_proxy_url",
+            return_value=None,
+        ), patch.object(self.manager, "_fetch_server_tools", new=_fake_fetch):
+            self.manager._register_server(runtime)
+
+        mock_schedule.assert_not_called()
+        self.assertIn(runtime.config_id, self.manager._clients)
+        self.assertIn(runtime.config_id, self.manager._tools_cache)
+
     @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=False)
     def test_get_tools_for_agent_passes_agent_to_runtime_registration(self, _mock_sandbox_enabled):
         runtime = MCPServerRuntime(
@@ -483,6 +525,82 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(result.get("status"), "ok")
         self.assertEqual(result.get("result"), {"pong": True})
         mock_service.mcp_request.assert_called_once()
+
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_execute_http_mcp_tool_skips_sandbox_routing(self, _mock_sandbox_enabled_for_agent):
+        agent = SimpleNamespace(id=uuid.uuid4(), organization=None, user=None)
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="http-exec-server",
+            display_name="HTTP Exec Server",
+            description="",
+            command="",
+            args=[],
+            url="https://example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        tool = MCPToolInfo(
+            config_id=runtime.config_id,
+            full_name=f"mcp_{runtime.name}_ping",
+            server_name=runtime.name,
+            tool_name="ping",
+            description="Ping",
+            parameters={"type": "object", "properties": {}},
+        )
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+        self.manager._clients = {runtime.config_id: MagicMock()}
+
+        enabled_qs = MagicMock()
+        enabled_qs.exists.return_value = True
+        usage_row = SimpleNamespace(last_used_at=None, usage_count=0, save=MagicMock())
+        local_result = SimpleNamespace(data={"http": True}, content=[], is_error=False)
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        with patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.filter",
+            return_value=enabled_qs,
+        ), patch(
+            "api.agent.tools.mcp_manager.PersistentAgentEnabledTool.objects.get_or_create",
+            return_value=(usage_row, False),
+        ), patch.object(
+            self.manager,
+            "_ensure_runtime_registered",
+            return_value=True,
+        ), patch.object(
+            self.manager,
+            "_select_agent_proxy_url",
+            return_value=(None, None),
+        ), patch.object(
+            self.manager,
+            "_dispatch_sandbox_mcp_request",
+            side_effect=AssertionError("HTTP MCP should not route through sandbox"),
+        ), patch.object(
+            self.manager,
+            "_ensure_event_loop",
+            return_value=loop,
+        ), patch.object(
+            self.manager,
+            "_execute_async",
+            new=AsyncMock(return_value=local_result),
+        ), patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            return_value=local_result,
+        ):
+            result = self.manager.execute_mcp_tool(agent, tool.full_name, {})
+
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(result.get("result"), {"http": True})
 
     @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=True)
     @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
