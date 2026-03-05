@@ -1,4 +1,5 @@
 import base64
+import socket
 import sys
 from unittest.mock import patch, MagicMock
 
@@ -9,7 +10,7 @@ from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.agent_variables import clear_variables, set_agent_variable
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_file import execute_create_file
-from api.agent.tools.create_image import execute_create_image
+from api.agent.tools.create_image import _download_image, execute_create_image
 from api.agent.tools.create_pdf import execute_create_pdf
 from api.models import (
     AgentFsNode,
@@ -315,6 +316,34 @@ class FileExportToolTests(TestCase):
         self.assertEqual(message_content[0]["type"], "text")
         self.assertEqual(message_content[1]["type"], "image_url")
         self.assertTrue(message_content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+
+    @patch("api.agent.tools.create_image.httpx.get")
+    @patch("api.agent.tools.create_image.socket.getaddrinfo")
+    def test_download_image_blocks_private_ip_targets(self, mock_getaddrinfo, mock_http_get):
+        mock_getaddrinfo.return_value = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("169.254.169.254", 443)),
+        ]
+
+        result = _download_image("https://example.com/generated.png")
+
+        self.assertIsNone(result)
+        mock_http_get.assert_not_called()
+
+    @patch("api.agent.tools.create_image.httpx.get")
+    @patch("api.agent.tools.create_image.socket.getaddrinfo")
+    def test_download_image_allows_public_ip_targets(self, mock_getaddrinfo, mock_http_get):
+        mock_getaddrinfo.return_value = [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+        ]
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "image/png"}
+        mock_response.content = b"png-bytes"
+        mock_http_get.return_value = mock_response
+
+        result = _download_image("https://example.com/generated.png")
+
+        self.assertEqual(result, (b"png-bytes", "image/png"))
+        mock_http_get.assert_called_once()
 
     def test_create_pdf_blocks_external_assets(self):
         result = execute_create_pdf(

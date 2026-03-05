@@ -1,7 +1,9 @@
 import base64
 from dataclasses import dataclass
+import ipaddress
 import logging
 import mimetypes
+import socket
 from typing import Any, Dict, Optional
 from urllib.parse import unquote_to_bytes
 from urllib.parse import urlparse
@@ -153,6 +155,35 @@ def _decode_data_uri(url: str) -> tuple[bytes, str] | None:
 def _download_image(url: str) -> tuple[bytes, str] | None:
     if not (url.startswith("http://") or url.startswith("https://")):
         return None
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return None
+    try:
+        resolved = socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        logger.warning("Failed resolving generated image URL host: %s", hostname, exc_info=True)
+        return None
+
+    resolved_ips: set[str] = set()
+    for _family, _socktype, _proto, _canonname, sockaddr in resolved:
+        try:
+            resolved_ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        resolved_ips.add(str(resolved_ip))
+
+    if not resolved_ips:
+        logger.warning("Generated image URL host resolved to no IPs: %s", hostname)
+        return None
+    if any(not ipaddress.ip_address(ip).is_global for ip in resolved_ips):
+        logger.warning(
+            "Blocked generated image URL host %s resolving to non-public IPs: %s",
+            hostname,
+            ", ".join(sorted(resolved_ips)),
+        )
+        return None
+
     try:
         response = httpx.get(url, timeout=30.0)
         response.raise_for_status()

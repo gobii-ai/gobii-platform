@@ -36,11 +36,10 @@ def _acquire_avatar_enqueue_slot(
     charter_hash: str,
     cooldown_cutoff,
 ) -> bool:
-    """Atomically claim avatar enqueue slot if no pending request and cooldown permits."""
+    """Atomically claim avatar enqueue slot if cooldown permits and request is not already current."""
     update_query = PersistentAgent.objects.filter(
         id=agent_id,
-        avatar_requested_hash="",
-    )
+    ).exclude(avatar_requested_hash=charter_hash)
     if cooldown_cutoff is not None:
         update_query = update_query.filter(
             Q(avatar_last_generation_attempt_at__isnull=True)

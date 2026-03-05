@@ -187,9 +187,9 @@ class AgentAvatarGenerationTests(TestCase):
         expected_hash = compute_charter_hash(agent.charter)
         mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
 
-    def test_maybe_schedule_agent_avatar_skips_when_any_avatar_request_is_pending(self):
+    def test_maybe_schedule_agent_avatar_skips_when_current_hash_is_already_pending(self):
         agent = self._prepare_visual_ready_agent()
-        agent.avatar_requested_hash = "pending-other-hash"
+        agent.avatar_requested_hash = compute_charter_hash(agent.charter)
         agent.save(update_fields=["avatar_requested_hash"])
 
         with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
@@ -199,6 +199,22 @@ class AgentAvatarGenerationTests(TestCase):
 
         self.assertFalse(scheduled)
         mocked_delay.assert_not_called()
+
+    def test_maybe_schedule_agent_avatar_replaces_outdated_pending_hash(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar_requested_hash = compute_charter_hash("old charter")
+        agent.save(update_fields=["avatar_requested_hash"])
+
+        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertTrue(scheduled)
+        expected_hash = compute_charter_hash(agent.charter)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar_requested_hash, expected_hash)
 
     def test_generate_agent_avatar_task_records_attempt_and_logs_each_endpoint_attempt(self):
         agent = self._create_agent()
