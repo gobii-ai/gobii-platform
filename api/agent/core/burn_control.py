@@ -110,15 +110,19 @@ def schedule_burn_follow_up(
     """Schedule a delayed follow-up run to resume after a burn-rate pause."""
 
     now = dj_timezone.now()
+    cooldown_ends_at = now + timedelta(seconds=max(1, int(cooldown_seconds)))
     next_run = _next_scheduled_run(agent, now=now)
     if next_run is not None:
         horizon = now + timedelta(seconds=BURN_FOLLOW_UP_SKIP_WINDOW_SECONDS)
-        if next_run <= horizon:
+        # Keep the optimization only when cron is expected shortly *after*
+        # cooldown ends. If cron lands during cooldown, we still need follow-up.
+        if cooldown_ends_at <= next_run <= horizon:
             logger.info(
-                "Skipping burn-rate follow-up for agent %s: cron/interval run at %s within %s seconds.",
+                "Skipping burn-rate follow-up for agent %s: next cron/interval run at %s is after cooldown end %s and within skip window horizon %s.",
                 agent.id,
                 next_run,
-                BURN_FOLLOW_UP_SKIP_WINDOW_SECONDS,
+                cooldown_ends_at,
+                horizon,
             )
             return None
 
