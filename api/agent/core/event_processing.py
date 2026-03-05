@@ -1189,18 +1189,15 @@ def _gate_send_chat_tool_for_session(
     if has_active_web_session_now:
         return tools
 
-    filtered: List[dict] = []
-    removed = False
-    for tool in tools:
-        if not isinstance(tool, dict):
-            filtered.append(tool)
-            continue
-        function_block = tool.get("function")
-        if isinstance(function_block, dict) and function_block.get("name") == "send_chat_message":
-            removed = True
-            continue
-        filtered.append(tool)
-    return filtered if removed else tools
+    filtered = [
+        tool for tool in tools
+        if not (
+            isinstance(tool, dict)
+            and isinstance(tool.get("function"), dict)
+            and tool.get("function", {}).get("name") == "send_chat_message"
+        )
+    ]
+    return filtered if len(filtered) < len(tools) else tools
 
 
 def _track_post_completion_web_session_activation(
