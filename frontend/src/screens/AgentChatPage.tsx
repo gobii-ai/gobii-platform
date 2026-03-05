@@ -1394,6 +1394,14 @@ export function AgentChatPage({
     })
   }, [queryClient])
 
+  const repinAndJumpToBottom = useCallback(() => {
+    autoScrollPinnedRef.current = true
+    forceScrollOnNextUpdateRef.current = true
+    setAutoScrollPinned(true)
+    jumpToBottom()
+    scrollToBottom()
+  }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
+
   const syncLatestTimeline = useCallback(async (
     agentIdToRefresh: string,
     { repinToLatest }: { repinToLatest: boolean },
@@ -1405,13 +1413,8 @@ export function AgentChatPage({
     if (!repinToLatest) {
       return
     }
-
-    autoScrollPinnedRef.current = true
-    setAutoScrollPinned(true)
-    forceScrollOnNextUpdateRef.current = true
-    jumpToBottom()
-    scrollToBottom()
-  }, [jumpToBottom, runContiguousTimelineBackfill, scrollToBottom, setAutoScrollPinned])
+    repinAndJumpToBottom()
+  }, [repinAndJumpToBottom, runContiguousTimelineBackfill])
 
   const triggerResumeTimelineBackfill = useCallback(() => {
     const currentAgentId = activeAgentIdRef.current
@@ -2137,13 +2140,9 @@ export function AgentChatPage({
         await syncLatestTimeline(currentAgentId, { repinToLatest: true })
         return
       }
-      autoScrollPinnedRef.current = true
-      forceScrollOnNextUpdateRef.current = true
-      setAutoScrollPinned(true)
-      jumpToBottom()
-      scrollToBottom()
+      repinAndJumpToBottom()
     })()
-  }, [jumpToBottom, scrollToBottom, setAutoScrollPinned, syncLatestTimeline, timelineHasMoreNewer])
+  }, [repinAndJumpToBottom, syncLatestTimeline, timelineHasMoreNewer])
 
   const handleComposerFocus = useCallback(() => {
     if (typeof window === 'undefined') return
