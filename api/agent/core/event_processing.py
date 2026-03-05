@@ -3263,11 +3263,11 @@ def _run_agent_loop(
                 logger.exception("LLM call failed for agent %s with all providers", agent.id)
                 break
 
-            retry_switch_active = False
-            if (
-                not had_active_web_session_at_start
-                and not web_session_activation_retry_used
-            ):
+            web_session_activated_post_completion = (
+                not had_active_web_session_at_start and has_active_web_session(agent)
+            )
+            if web_session_activated_post_completion:
+                retry_switch_active = False
                 try:
                     retry_switch_active = switch_is_active(
                         AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
@@ -3280,54 +3280,65 @@ def _run_agent_loop(
                     )
                     retry_switch_active = False
 
-            if retry_switch_active and has_active_web_session(agent):
-                if i + 1 < max_remaining:
+                has_iterations_remaining = i + 1 < max_remaining
+                retry_performed = (
+                    retry_switch_active
+                    and not web_session_activation_retry_used
+                    and has_iterations_remaining
+                )
+
+                try:
+                    analytics_props: dict[str, Any] = {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "run_sequence_number": run_sequence_number,
+                        "iteration": i + 1,
+                        "retry_reason": "web_session_activated_mid_completion",
+                        "retry_strategy": "discard_and_rerun_once" if retry_performed else "none",
+                        "retry_switch_active": retry_switch_active,
+                        "retry_performed": retry_performed,
+                        "had_active_web_session_at_start": False,
+                    }
+                    props_with_org = Analytics.with_org_properties(
+                        analytics_props,
+                        organization=getattr(agent, "organization", None),
+                    )
+                    if agent.user_id:
+                        Analytics.track_event(
+                            user_id=agent.user_id,
+                            event=AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+                            source=AnalyticsSource.AGENT,
+                            properties=props_with_org,
+                        )
+                    else:
+                        Analytics.track_event_anonymous(
+                            anonymous_id=str(agent.id),
+                            event=AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+                            source=AnalyticsSource.AGENT,
+                            properties=props_with_org,
+                        )
+                except Exception:
+                    logger.exception(
+                        "Failed to emit analytics for post-completion web-session activation (agent=%s)",
+                        agent.id,
+                    )
+
+                if retry_performed:
                     web_session_activation_retry_used = True
                     continuation_notice = (
                         "Web chat became active mid-run; rerunning once with updated tool availability."
                     )
-                    try:
-                        analytics_props: dict[str, Any] = {
-                            "agent_id": str(agent.id),
-                            "agent_name": agent.name,
-                            "run_sequence_number": run_sequence_number,
-                            "iteration": i + 1,
-                            "retry_reason": "web_session_activated_mid_completion",
-                            "retry_strategy": "discard_and_rerun_once",
-                            "had_active_web_session_at_start": False,
-                        }
-                        props_with_org = Analytics.with_org_properties(
-                            analytics_props,
-                            organization=getattr(agent, "organization", None),
-                        )
-                        if agent.user_id:
-                            Analytics.track_event(
-                                user_id=agent.user_id,
-                                event=AnalyticsEvent.PERSISTENT_AGENT_COMPLETION_RETRIED_FOR_WEB_SESSION,
-                                source=AnalyticsSource.AGENT,
-                                properties=props_with_org,
-                            )
-                        else:
-                            Analytics.track_event_anonymous(
-                                anonymous_id=str(agent.id),
-                                event=AnalyticsEvent.PERSISTENT_AGENT_COMPLETION_RETRIED_FOR_WEB_SESSION,
-                                source=AnalyticsSource.AGENT,
-                                properties=props_with_org,
-                            )
-                    except Exception:
-                        logger.exception(
-                            "Failed to emit analytics for mid-completion web-session retry (agent=%s)",
-                            agent.id,
-                        )
                     logger.info(
                         "Agent %s: web session activated mid-completion; discarding completion output and retrying next iteration.",
                         agent.id,
                     )
                     continue
-                logger.info(
-                    "Agent %s: web session activated mid-completion but no iterations remain; processing current completion.",
-                    agent.id,
-                )
+
+                if retry_switch_active and not has_iterations_remaining:
+                    logger.info(
+                        "Agent %s: web session activated mid-completion but no iterations remain; processing current completion.",
+                        agent.id,
+                    )
 
             thinking_content = extract_reasoning_content(response)
             msg = response.choices[0].message

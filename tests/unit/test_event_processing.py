@@ -955,11 +955,13 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(mock_track_event.call_count, 1)
         self.assertEqual(
             mock_track_event.call_args.kwargs["event"],
-            ep.AnalyticsEvent.PERSISTENT_AGENT_COMPLETION_RETRIED_FOR_WEB_SESSION,
+            ep.AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
         )
         retry_props = mock_track_event.call_args.kwargs["properties"]
         self.assertEqual(retry_props.get("retry_reason"), "web_session_activated_mid_completion")
         self.assertEqual(retry_props.get("retry_strategy"), "discard_and_rerun_once")
+        self.assertEqual(retry_props.get("retry_switch_active"), True)
+        self.assertEqual(retry_props.get("retry_performed"), True)
         self.assertEqual(retry_props.get("had_active_web_session_at_start"), False)
 
     def test_web_session_activation_retry_does_not_run_when_switch_off(self):
@@ -988,13 +990,23 @@ class PromptContextBuilderTests(TestCase):
                  patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
                  patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect) as mock_completion, \
                  patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"}) as mock_execute_tool, \
-                 patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}):
+                 patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
+                 patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event:
                 from api.agent.core import event_processing as ep
                 with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
                     _run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 1)
         self.assertEqual(mock_execute_tool.call_count, 1)
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["event"],
+            ep.AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+        )
+        retry_props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(retry_props.get("retry_strategy"), "none")
+        self.assertEqual(retry_props.get("retry_switch_active"), False)
+        self.assertEqual(retry_props.get("retry_performed"), False)
 
     def test_web_session_activation_retry_emits_expected_analytics_event(self):
         """Retry path should emit the dedicated analytics event with expected properties."""
@@ -1039,7 +1051,7 @@ class PromptContextBuilderTests(TestCase):
         kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(
             kwargs["event"],
-            ep.AnalyticsEvent.PERSISTENT_AGENT_COMPLETION_RETRIED_FOR_WEB_SESSION,
+            ep.AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
         )
         self.assertEqual(kwargs["source"], ep.AnalyticsSource.AGENT)
         props = kwargs["properties"]
@@ -1049,6 +1061,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(props.get("iteration"), 1)
         self.assertEqual(props.get("retry_reason"), "web_session_activated_mid_completion")
         self.assertEqual(props.get("retry_strategy"), "discard_and_rerun_once")
+        self.assertEqual(props.get("retry_switch_active"), True)
+        self.assertEqual(props.get("retry_performed"), True)
         self.assertEqual(props.get("had_active_web_session_at_start"), False)
 
     def test_web_session_activation_retry_skips_when_no_iterations_remaining(self):
