@@ -3361,23 +3361,6 @@ def _run_agent_loop(
                 logger.exception("LLM call failed for agent %s with all providers", agent.id)
                 break
 
-            web_session_activated_post_completion = (
-                not had_active_web_session_at_start and has_active_web_session(agent)
-            )
-            if web_session_activated_post_completion:
-                if _should_retry_after_post_completion_web_session_activation(
-                    agent,
-                    run_sequence_number=run_sequence_number,
-                    iteration_index=i + 1,
-                    max_remaining=max_remaining,
-                    retry_used=web_session_activation_retry_used,
-                ):
-                    web_session_activation_retry_used = True
-                    continuation_notice = (
-                        "Web chat became active mid-run; rerunning once with updated tool availability."
-                    )
-                    continue
-
             thinking_content = extract_reasoning_content(response)
             msg = response.choices[0].message
             token_usage_fields = _token_usage_fields(token_usage, response)
@@ -3396,6 +3379,23 @@ def _run_agent_loop(
 
             # Persist completion immediately so token usage isn't lost if execution exits early
             _ensure_completion()
+
+            web_session_activated_post_completion = (
+                not had_active_web_session_at_start and has_active_web_session(agent)
+            )
+            if web_session_activated_post_completion:
+                if _should_retry_after_post_completion_web_session_activation(
+                    agent,
+                    run_sequence_number=run_sequence_number,
+                    iteration_index=i + 1,
+                    max_remaining=max_remaining,
+                    retry_used=web_session_activation_retry_used,
+                ):
+                    web_session_activation_retry_used = True
+                    continuation_notice = (
+                        "Web chat became active mid-run; rerunning once with updated tool availability."
+                    )
+                    continue
 
             def _attach_completion(step_kwargs: dict) -> None:
                 completion_obj = _ensure_completion()
