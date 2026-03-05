@@ -41,7 +41,7 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
         return normalized in {"1", "true", "yes"}
     return bool(raw)
 
-def _has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
+def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
     if has_verified_email(recipient_user):
         if PersistentAgentCommsEndpoint.objects.filter(
             owner_agent=agent,
@@ -139,7 +139,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
                 to_address = latest_conversation.address
             else:
                 owner_user = getattr(agent, "user", None)
-                if owner_user and not _has_other_contact_channel(agent, owner_user):
+                if owner_user and not has_other_contact_channel(agent, owner_user):
                     # When web chat is the only channel, default to the owner's web address.
                     to_address = build_web_user_address(owner_user.id, agent.id)
 
@@ -177,7 +177,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
 
         # If the user has other communication channels, we want to ensure we're sending to an active chat session
         # If the user does not have other communication channels, pass through to web because it's our only choice
-        if get_active_web_session(agent, recipient_user) is None and _has_other_contact_channel(agent, recipient_user):
+        if get_active_web_session(agent, recipient_user) is None and has_other_contact_channel(agent, recipient_user):
             return {
                 "status": "error",
                 "message": (

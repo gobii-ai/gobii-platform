@@ -119,7 +119,7 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
 from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, should_skip_auto_substitution
-from ..tools.web_chat_sender import execute_send_chat_message
+from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact_channel
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import clear_variables, substitute_variables
@@ -1183,10 +1183,13 @@ def _gate_send_chat_tool_for_session(
     *,
     has_active_web_session_now: Optional[bool] = None,
 ) -> List[dict]:
-    """Hide send_chat_message from the completion tool list when no web session is active."""
+    """Hide send_chat_message only when web is inactive and non-web fallback channels are available."""
     if has_active_web_session_now is None:
         has_active_web_session_now = has_active_web_session(agent)
     if has_active_web_session_now:
+        return tools
+    owner_user = getattr(agent, "user", None)
+    if owner_user and not has_other_contact_channel(agent, owner_user):
         return tools
 
     filtered = [

@@ -15,6 +15,7 @@ from unittest.mock import patch, MagicMock, ANY
 from waffle.testutils import override_switch
 
 import zstandard as zstd
+from allauth.account.models import EmailAddress
 
 from api.agent.core.event_processing import (
     _gate_send_chat_tool_for_session,
@@ -481,7 +482,13 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("<implied_send_status>", combined)
         self.assertNotIn("implied_send_status", combined)
 
-    def test_session_tool_gating_excludes_send_chat_message_without_active_web_session(self):
+    def test_session_tool_gating_excludes_send_chat_message_without_active_web_session_when_verified_fallback_exists(self):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
         tools = get_agent_tools(self.agent)
         gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
         tool_names = [
@@ -490,6 +497,16 @@ class PromptContextBuilderTests(TestCase):
             if isinstance(entry, dict)
         ]
         self.assertNotIn("send_chat_message", tool_names)
+
+    def test_session_tool_gating_includes_send_chat_message_without_active_web_session_when_no_verified_fallback(self):
+        tools = get_agent_tools(self.agent)
+        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        tool_names = [
+            entry.get("function", {}).get("name")
+            for entry in gated_tools
+            if isinstance(entry, dict)
+        ]
+        self.assertIn("send_chat_message", tool_names)
 
     def test_session_tool_gating_includes_send_chat_message_with_active_web_session(self):
         start_web_session(self.agent, self.user)
@@ -901,6 +918,12 @@ class PromptContextBuilderTests(TestCase):
 
     def test_web_session_activation_retry_discards_completion_and_retries_once(self):
         """When switch is on and web session appears mid-iteration, discard and rerun once."""
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
         tool_call = MagicMock()
         tool_call.function = MagicMock()
         tool_call.function.name = "sqlite_batch"
