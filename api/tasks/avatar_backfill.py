@@ -58,6 +58,7 @@ def _base_candidate_queryset():
             "charter",
             "avatar_charter_hash",
             "avatar_requested_hash",
+            "avatar_last_generation_attempt_at",
             "visual_description",
             "visual_description_requested_hash",
         )

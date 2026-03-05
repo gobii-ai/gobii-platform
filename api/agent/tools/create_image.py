@@ -15,6 +15,7 @@ from api.agent.core.image_generation_config import (
     is_image_generation_configured,
 )
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.files.attachment_helpers import (
     build_signed_filespace_download_url,
@@ -43,14 +44,6 @@ class ImageGenerationResponseError(ValueError):
         self.response = response
 
 
-def _provider_hint_from_model(model_name: str | None) -> str | None:
-    if not isinstance(model_name, str):
-        return None
-    if "/" not in model_name:
-        return None
-    return model_name.split("/", 1)[0]
-
-
 def _log_image_generation_completion(
     *,
     agent: PersistentAgent,
@@ -64,7 +57,7 @@ def _log_image_generation_completion(
         completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
         response=response,
         model=model_name,
-        provider=_provider_hint_from_model(model_name),
+        provider=provider_hint_from_model(model_name),
     )
 
 

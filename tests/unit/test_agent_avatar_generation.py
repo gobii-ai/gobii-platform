@@ -1,7 +1,10 @@
+from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
+from django.utils import timezone
 
 from api.agent.avatar import maybe_schedule_agent_avatar
 from api.agent.short_description import compute_charter_hash
@@ -10,7 +13,7 @@ from api.agent.tasks.agent_avatar import (
     generate_agent_avatar_task,
     generate_agent_visual_description_task,
 )
-from api.models import BrowserUseAgent, PersistentAgent, SystemSetting
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentCompletion, SystemSetting
 from api.tasks.avatar_backfill import schedule_agent_avatar_backfill_task
 
 
@@ -36,6 +39,16 @@ class AgentAvatarGenerationTests(TestCase):
             charter=charter,
             browser_use_agent=browser_agent,
         )
+
+    def _prepare_visual_ready_agent(self, charter: str = "Run technical recruiting workflows") -> PersistentAgent:
+        agent = self._create_agent(charter=charter)
+        agent.visual_description = "A composed professional with warm expression."
+        agent.save(update_fields=["visual_description"])
+        return agent
+
+    def _set_avatar_attempt_time(self, agent: PersistentAgent, *, hours_ago: int) -> None:
+        agent.avatar_last_generation_attempt_at = timezone.now() - timedelta(hours=hours_ago)
+        agent.save(update_fields=["avatar_last_generation_attempt_at"])
 
     def test_maybe_schedule_agent_avatar_enqueues_visual_description(self):
         agent = self._create_agent()
@@ -146,6 +159,84 @@ class AgentAvatarGenerationTests(TestCase):
 
         self.assertFalse(scheduled)
         mocked_delay.assert_not_called()
+
+    @override_settings(AGENT_AVATAR_GENERATION_COOLDOWN_HOURS=24)
+    def test_maybe_schedule_agent_avatar_respects_cooldown(self):
+        agent = self._prepare_visual_ready_agent()
+        self._set_avatar_attempt_time(agent, hours_ago=3)
+
+        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+
+    @override_settings(AGENT_AVATAR_GENERATION_COOLDOWN_HOURS=24)
+    def test_maybe_schedule_agent_avatar_allows_enqueue_after_cooldown(self):
+        agent = self._prepare_visual_ready_agent()
+        self._set_avatar_attempt_time(agent, hours_ago=25)
+
+        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertTrue(scheduled)
+        expected_hash = compute_charter_hash(agent.charter)
+        mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
+
+    def test_maybe_schedule_agent_avatar_skips_when_any_avatar_request_is_pending(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar_requested_hash = "pending-other-hash"
+        agent.save(update_fields=["avatar_requested_hash"])
+
+        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+
+    def test_generate_agent_avatar_task_records_attempt_and_logs_each_endpoint_attempt(self):
+        agent = self._create_agent()
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.visual_description = "A confident operator with sharp features and a tailored charcoal shirt."
+        agent.avatar_requested_hash = charter_hash
+        agent.save(update_fields=["visual_description", "avatar_requested_hash"])
+
+        first_error = ValueError("endpoint one failed")
+        first_error.response = {"id": "resp-fail"}
+        generated = SimpleNamespace(
+            image_bytes=b"fake-image-bytes",
+            mime_type="image/png",
+            response={"id": "resp-success"},
+        )
+        configs = [
+            SimpleNamespace(endpoint_key="first", model="openai/gpt-image-1"),
+            SimpleNamespace(endpoint_key="second", model="anthropic/image-foo"),
+        ]
+
+        with patch("api.agent.tasks.agent_avatar.get_image_generation_llm_configs", return_value=configs), patch(
+            "api.agent.tasks.agent_avatar._generate_image_bytes",
+            side_effect=[first_error, generated],
+        ):
+            generate_agent_avatar_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertIsNotNone(agent.avatar_last_generation_attempt_at)
+        self.assertTrue(agent.avatar)
+        self.assertEqual(agent.avatar_requested_hash, "")
+        completions = list(
+            PersistentAgentCompletion.objects.filter(
+                agent=agent,
+                completion_type=PersistentAgentCompletion.CompletionType.AVATAR_IMAGE_GENERATION,
+            ).order_by("created_at")
+        )
+        self.assertEqual(len(completions), 2)
+        self.assertEqual([completion.llm_model for completion in completions], [configs[0].model, configs[1].model])
 
     @patch("api.tasks.avatar_backfill.is_image_generation_configured", return_value=True)
     def test_schedule_agent_avatar_backfill_task_limits_and_advances_cursor(self, _mock_image_ready):

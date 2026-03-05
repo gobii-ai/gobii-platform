@@ -1,6 +1,11 @@
 """Utilities for persistent-agent visual identity and avatar generation."""
 
 import logging
+from datetime import timedelta
+
+from django.conf import settings
+from django.db.models import Q
+from django.utils import timezone
 
 from api.agent.core.image_generation_config import is_image_generation_configured
 from api.agent.short_description import compute_charter_hash
@@ -15,6 +20,33 @@ def _normalize_visual_description(text: str) -> str:
     if not text:
         return ""
     return " ".join(text.split()).strip()
+
+
+def _avatar_cooldown_cutoff(now=None):
+    cooldown_hours = max(0, int(settings.AGENT_AVATAR_GENERATION_COOLDOWN_HOURS))
+    if cooldown_hours <= 0:
+        return None
+    reference_time = now or timezone.now()
+    return reference_time - timedelta(hours=cooldown_hours)
+
+
+def _acquire_avatar_enqueue_slot(
+    *,
+    agent_id,
+    charter_hash: str,
+    cooldown_cutoff,
+) -> bool:
+    """Atomically claim avatar enqueue slot if no pending request and cooldown permits."""
+    update_query = PersistentAgent.objects.filter(
+        id=agent_id,
+        avatar_requested_hash="",
+    )
+    if cooldown_cutoff is not None:
+        update_query = update_query.filter(
+            Q(avatar_last_generation_attempt_at__isnull=True)
+            | Q(avatar_last_generation_attempt_at__lte=cooldown_cutoff)
+        )
+    return bool(update_query.update(avatar_requested_hash=charter_hash))
 
 
 def prepare_visual_description(text: str, max_length: int = MAX_VISUAL_DESCRIPTION_LENGTH) -> str:
@@ -113,9 +145,6 @@ def maybe_schedule_agent_avatar(
     if (agent.avatar_charter_hash or "") == charter_hash:
         return False
 
-    if agent.avatar_requested_hash == charter_hash:
-        return False
-
     try:
         image_generation_ready = is_image_generation_configured()
     except Exception:
@@ -125,12 +154,11 @@ def maybe_schedule_agent_avatar(
     if not image_generation_ready:
         return False
 
-    updated = PersistentAgent.objects.filter(id=agent.id).exclude(
-        avatar_requested_hash=charter_hash,
-    ).update(
-        avatar_requested_hash=charter_hash,
-    )
-    if not updated:
+    if not _acquire_avatar_enqueue_slot(
+        agent_id=agent.id,
+        charter_hash=charter_hash,
+        cooldown_cutoff=_avatar_cooldown_cutoff(),
+    ):
         return False
 
     try:
