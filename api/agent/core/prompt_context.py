@@ -286,7 +286,7 @@ have(small_result) → read it directly → insight                         # RI
 have(small_result) → sqlite_batch(SELECT...)                            # WASTEFUL
 ```
 
-**__tool_results is a snapshot, not a live feed.** Rows only change when you make a NEW tool call. If a tool says "try again in 30s", call the tool again—don't re-query the same result_id expecting it to update.
+**__tool_results is a snapshot, not a live feed.** Rows only change when you make a NEW tool call. Browser task completions are pushed into unified history, so don't poll __tool_results/__files waiting for them. If a tool says "try again in 30s", call the tool again—don't re-query the same result_id expecting it to update.
 
 ---
 
@@ -2188,6 +2188,7 @@ def build_prompt_context(
         "All are per-cycle snapshots dropped before persistence. "
         "Query __tool_results and __files with sqlite_batch (not read_file). "
         "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
+        "Do not poll __tool_results/__files waiting for browser task completion: those completions wake you with new unified history events. "
         "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
         "CREATE TABLE AS SELECT is a fast way to persist tool results. "
@@ -4201,7 +4202,7 @@ def _get_system_instruction(
         "interactive | auth_required  → spawn_web_task\n"
         "extractor(X) ∈ tools         → extractor\n"
         "# Active task cap (spawn_web_task max active tasks)\n"
-        "active_browser_tasks >= 3    → do NOT spawn_web_task; wait for results or sleep_until_next_trigger\n"
+        "active_browser_tasks >= 3    → do NOT spawn_web_task; sleep_until_next_trigger (completion wakes you)\n"
         "\n"
         "# Flow (cyclical, no terminal)\n"
         "discover → use → have → [need → discover]∞\n"
@@ -5285,7 +5286,7 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
     if active_tasks:
         tasks_group.section_text(
             "browser_tasks_note",
-            "These are your current web automation tasks. Completed tasks appear in your unified history.",
+            "These are your current web automation tasks. Completed tasks appear in your unified history and wake you automatically. If blocked waiting on them, sleep_until_next_trigger; do not poll.",
             weight=1,
             non_shrinkable=True
         )
