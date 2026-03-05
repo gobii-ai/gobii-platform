@@ -25,6 +25,7 @@ from django.apps import apps
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
+from waffle import switch_is_active
 from tenacity import (
     before_sleep_log,
     retry,
@@ -118,7 +119,7 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
 from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, should_skip_auto_substitution
-from ..tools.web_chat_sender import execute_send_chat_message
+from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact_channel
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import clear_variables, substitute_variables
@@ -135,6 +136,7 @@ from ...models import (
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.web_sessions import get_active_web_sessions, has_active_web_session
+from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -1173,6 +1175,130 @@ def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
     if isinstance(params, list):
         return [_normalize_tool_params_unicode_escapes(item) for item in params]
     return params
+
+
+def _gate_send_chat_tool_for_session(
+    tools: List[dict],
+    agent: PersistentAgent,
+    *,
+    has_active_web_session_now: Optional[bool] = None,
+) -> List[dict]:
+    """Hide send_chat_message only when web is inactive and non-web fallback channels are available."""
+    if has_active_web_session_now is None:
+        has_active_web_session_now = has_active_web_session(agent)
+    if has_active_web_session_now:
+        return tools
+    owner_user = getattr(agent, "user", None)
+    if owner_user and not has_other_contact_channel(agent, owner_user):
+        return tools
+
+    filtered = [
+        tool for tool in tools
+        if not (
+            isinstance(tool, dict)
+            and isinstance(tool.get("function"), dict)
+            and tool.get("function", {}).get("name") == "send_chat_message"
+        )
+    ]
+    return filtered if len(filtered) < len(tools) else tools
+
+
+def _track_post_completion_web_session_activation(
+    agent: PersistentAgent,
+    *,
+    run_sequence_number: Optional[int],
+    iteration_index: int,
+    retry_switch_active: bool,
+    retry_performed: bool,
+) -> None:
+    """Emit analytics when a web session becomes active after completion returns."""
+    if not agent.user_id:
+        return
+
+    analytics_props: dict[str, Any] = {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name,
+        "run_sequence_number": run_sequence_number,
+        "iteration": iteration_index,
+        "retry_reason": "web_session_activated_mid_completion",
+        "retry_strategy": "discard_and_rerun_once" if retry_performed else "none",
+        "retry_switch_active": retry_switch_active,
+        "retry_performed": retry_performed,
+        "had_active_web_session_at_start": False,
+    }
+    props_with_org = Analytics.with_org_properties(
+        analytics_props,
+        organization=getattr(agent, "organization", None),
+    )
+    Analytics.track_event(
+        user_id=agent.user_id,
+        event=AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+        source=AnalyticsSource.AGENT,
+        properties=props_with_org,
+    )
+
+
+def _should_retry_after_post_completion_web_session_activation(
+    agent: PersistentAgent,
+    *,
+    run_sequence_number: Optional[int],
+    iteration_index: int,
+    max_remaining: int,
+    retry_used: bool,
+) -> bool:
+    """
+    Decide whether to retry once after web-session activation and emit analytics.
+
+    Returns True when the caller should discard current completion output and retry
+    on the next loop iteration.
+    """
+    retry_switch_active = False
+    try:
+        retry_switch_active = switch_is_active(
+            AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
+        )
+    except Exception:
+        logger.warning(
+            "Failed to evaluate switch %s; skipping mid-completion retry.",
+            AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION,
+            exc_info=True,
+        )
+        retry_switch_active = False
+
+    has_iterations_remaining = iteration_index < max_remaining
+    retry_performed = (
+        retry_switch_active
+        and not retry_used
+        and has_iterations_remaining
+    )
+
+    try:
+        _track_post_completion_web_session_activation(
+            agent,
+            run_sequence_number=run_sequence_number,
+            iteration_index=iteration_index,
+            retry_switch_active=retry_switch_active,
+            retry_performed=retry_performed,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to emit analytics for post-completion web-session activation (agent=%s)",
+            agent.id,
+        )
+
+    if retry_performed:
+        logger.info(
+            "Agent %s: web session activated mid-completion; discarding completion output and retrying next iteration.",
+            agent.id,
+        )
+        return True
+
+    if retry_switch_active and not has_iterations_remaining:
+        logger.info(
+            "Agent %s: web session activated mid-completion but no iterations remain; processing current completion.",
+            agent.id,
+        )
+    return False
 
 
 def _get_latest_active_web_session(agent: PersistentAgent):
@@ -2982,7 +3108,6 @@ def _run_agent_loop(
         "provider": None
     }
 
-    span.set_attribute("persistent_agent.tools.count", len(tools))
     span.set_attribute("MAX_AGENT_LOOP_ITERATIONS", MAX_AGENT_LOOP_ITERATIONS)
 
     # Determine remaining steps from the shared budget (if any)
@@ -3009,8 +3134,15 @@ def _run_agent_loop(
     reasoning_only_streak = 0
     inferred_message_continue_streak = 0
     continuation_notice: Optional[str] = None
+    web_session_activation_retry_used = False
 
     for i in range(max_remaining):
+        had_active_web_session_at_start = has_active_web_session(agent)
+        iteration_tools = _gate_send_chat_tool_for_session(
+            tools,
+            agent,
+            has_active_web_session_now=had_active_web_session_at_start,
+        )
         if _should_abort_for_deleted_agent(
             agent,
             budget_ctx=budget_ctx,
@@ -3058,6 +3190,7 @@ def _run_agent_loop(
             return cumulative_token_usage
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
+            iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
             if heartbeat:
                 heartbeat.touch("iteration_start")
             if lock_extender:
@@ -3158,7 +3291,7 @@ def _run_agent_loop(
             )
 
             # Select provider tiers based on the fitted token count
-            prefer_low_latency = has_active_web_session(agent)
+            prefer_low_latency = had_active_web_session_at_start
             try:
                 failover_configs = get_llm_config_with_failover(
                     agent_id=str(agent.id),
@@ -3194,7 +3327,7 @@ def _run_agent_loop(
             try:
                 response, token_usage = _completion_with_failover(
                     messages=history,
-                    tools=tools,
+                    tools=iteration_tools,
                     failover_configs=failover_configs,
                     agent_id=str(agent.id),
                     safety_identifier=agent.user.id if agent.user else None,
@@ -3246,6 +3379,23 @@ def _run_agent_loop(
 
             # Persist completion immediately so token usage isn't lost if execution exits early
             _ensure_completion()
+
+            web_session_activated_post_completion = (
+                not had_active_web_session_at_start and has_active_web_session(agent)
+            )
+            if web_session_activated_post_completion:
+                if _should_retry_after_post_completion_web_session_activation(
+                    agent,
+                    run_sequence_number=run_sequence_number,
+                    iteration_index=i + 1,
+                    max_remaining=max_remaining,
+                    retry_used=web_session_activation_retry_used,
+                ):
+                    web_session_activation_retry_used = True
+                    continuation_notice = (
+                        "Web chat became active mid-run; rerunning once with updated tool availability."
+                    )
+                    continue
 
             def _attach_completion(step_kwargs: dict) -> None:
                 completion_obj = _ensure_completion()
@@ -3427,7 +3577,8 @@ def _run_agent_loop(
                             "agent": agent,
                             "description": (
                                 "Message delivery requires explicit send tools when no active web chat session. "
-                                "Please call send_chat_message for web chat, or send_email/send_sms with explicit parameters."
+                                "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
+                                "recently active non-web communication channel from unified history/recent contacts."
                             ),
                         }
                         _attach_completion(step_kwargs)

@@ -3582,6 +3582,7 @@ def _get_system_instruction(
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
             "Use send_chat_message for web chat - it broadcasts to all active web chat users for this agent (owners and collaborators) regardless of send address, "
             "and send_email/send_sms/send_agent_message for other channels. "
+            "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most recently active non-web channel from unified history/recent contacts. "
             "To attach files, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms; "
             "do not paste file paths into message text unless you want them shown. "
             "Focus on tool calls—text alone is not delivered.\n\n"

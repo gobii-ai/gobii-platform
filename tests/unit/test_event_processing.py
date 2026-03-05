@@ -12,16 +12,20 @@ from django.core.files.storage import FileSystemStorage
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from unittest.mock import patch, MagicMock, ANY
+from waffle.testutils import override_switch
 
 import zstandard as zstd
+from allauth.account.models import EmailAddress
 
 from api.agent.core.event_processing import (
+    _gate_send_chat_tool_for_session,
     build_prompt_context,
     _get_completed_process_run_count,
     _run_agent_loop,
 )
 from api.agent.core.processing_flags import PendingDrainSettings
 from api.agent.core.prompt_context import (
+    get_agent_tools,
     get_prompt_token_budget,
     message_history_limit,
     tool_call_history_limit,
@@ -478,6 +482,60 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("<implied_send_status>", combined)
         self.assertNotIn("implied_send_status", combined)
 
+    def test_session_tool_gating_excludes_send_chat_message_without_active_web_session_when_verified_fallback_exists(self):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        tools = get_agent_tools(self.agent)
+        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        tool_names = [
+            entry.get("function", {}).get("name")
+            for entry in gated_tools
+            if isinstance(entry, dict)
+        ]
+        self.assertNotIn("send_chat_message", tool_names)
+
+    def test_session_tool_gating_includes_send_chat_message_without_active_web_session_when_no_verified_fallback(self):
+        tools = get_agent_tools(self.agent)
+        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        tool_names = [
+            entry.get("function", {}).get("name")
+            for entry in gated_tools
+            if isinstance(entry, dict)
+        ]
+        self.assertIn("send_chat_message", tool_names)
+
+    def test_session_tool_gating_includes_send_chat_message_with_active_web_session(self):
+        start_web_session(self.agent, self.user)
+        tools = get_agent_tools(self.agent)
+        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        tool_names = [
+            entry.get("function", {}).get("name")
+            for entry in gated_tools
+            if isinstance(entry, dict)
+        ]
+        self.assertIn("send_chat_message", tool_names)
+
+    def test_prompt_adds_retry_hint_when_send_chat_message_unavailable(self):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        self.assertIsNotNone(system_message)
+        content = system_message["content"]
+        self.assertIn(
+            "If send_chat_message is unavailable, retry with send_email/send_sms",
+            content,
+        )
+        self.assertIn(
+            "most recently active non-web channel from unified history/recent contacts",
+            content,
+        )
+
     def test_prompt_includes_implied_send_with_active_web_session(self):
         start_web_session(self.agent, self.user)
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
@@ -857,6 +915,210 @@ class PromptContextBuilderTests(TestCase):
                 _run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 2, "Warning status should force a follow-up iteration.")
+
+    def test_web_session_activation_retry_discards_completion_and_retries_once(self):
+        """When switch is on and web session appears mid-iteration, discard and rerun once."""
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql":"SELECT 1","will_continue_work":false}'
+
+        message_first = MagicMock()
+        message_first.tool_calls = [tool_call]
+        message_first.function_call = None
+        message_first.content = None
+        response_first = MagicMock()
+        response_first.choices = [MagicMock(message=message_first)]
+        response_first.model_extra = {}
+
+        message_second = MagicMock()
+        message_second.tool_calls = None
+        message_second.function_call = None
+        message_second.content = None
+        response_second = MagicMock()
+        response_second.choices = [MagicMock(message=message_second)]
+        response_second.model_extra = {}
+
+        token_usage = {"model": "mock-model", "provider": "mock-provider"}
+        seen_tool_names = []
+
+        def completion_side_effect(*args, **kwargs):
+            names = [
+                entry.get("function", {}).get("name")
+                for entry in kwargs.get("tools", [])
+                if isinstance(entry, dict)
+            ]
+            seen_tool_names.append(names)
+            if len(seen_tool_names) == 1:
+                start_web_session(self.agent, self.user)
+                return response_first, token_usage
+            return response_second, token_usage
+
+        with override_switch("agent_retry_completion_on_web_session_activation", active=True):
+            with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+                 patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+                 patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect) as mock_completion, \
+                 patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"}) as mock_execute_tool, \
+                 patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
+                 patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event:
+                from api.agent.core import event_processing as ep
+                with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+                    _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        self.assertEqual(mock_execute_tool.call_count, 0)
+        self.assertNotIn("send_chat_message", seen_tool_names[0])
+        self.assertIn("send_chat_message", seen_tool_names[1])
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["event"],
+            ep.AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+        )
+        retry_props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(retry_props.get("retry_reason"), "web_session_activated_mid_completion")
+        self.assertEqual(retry_props.get("retry_strategy"), "discard_and_rerun_once")
+        self.assertEqual(retry_props.get("retry_switch_active"), True)
+        self.assertEqual(retry_props.get("retry_performed"), True)
+        self.assertEqual(retry_props.get("had_active_web_session_at_start"), False)
+
+    def test_web_session_activation_retry_does_not_run_when_switch_off(self):
+        """When switch is off, completion output is processed normally."""
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql":"SELECT 1","will_continue_work":false}'
+
+        message_first = MagicMock()
+        message_first.tool_calls = [tool_call]
+        message_first.function_call = None
+        message_first.content = None
+        response_first = MagicMock()
+        response_first.choices = [MagicMock(message=message_first)]
+        response_first.model_extra = {}
+
+        token_usage = {"model": "mock-model", "provider": "mock-provider"}
+
+        def completion_side_effect(*args, **kwargs):
+            start_web_session(self.agent, self.user)
+            return response_first, token_usage
+
+        with override_switch("agent_retry_completion_on_web_session_activation", active=False):
+            with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+                 patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+                 patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect) as mock_completion, \
+                 patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"}) as mock_execute_tool, \
+                 patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
+                 patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event:
+                from api.agent.core import event_processing as ep
+                with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+                    _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 1)
+        self.assertEqual(mock_execute_tool.call_count, 1)
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["event"],
+            ep.AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+        )
+        retry_props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(retry_props.get("retry_strategy"), "none")
+        self.assertEqual(retry_props.get("retry_switch_active"), False)
+        self.assertEqual(retry_props.get("retry_performed"), False)
+
+    def test_web_session_activation_retry_emits_expected_analytics_event(self):
+        """Retry path should emit the dedicated analytics event with expected properties."""
+        message_first = MagicMock()
+        message_first.tool_calls = None
+        message_first.function_call = None
+        message_first.content = ""
+        response_first = MagicMock()
+        response_first.choices = [MagicMock(message=message_first)]
+        response_first.model_extra = {}
+
+        message_second = MagicMock()
+        message_second.tool_calls = None
+        message_second.function_call = None
+        message_second.content = None
+        response_second = MagicMock()
+        response_second.choices = [MagicMock(message=message_second)]
+        response_second.model_extra = {}
+
+        token_usage = {"model": "mock-model", "provider": "mock-provider"}
+
+        def completion_side_effect(*args, **kwargs):
+            if not hasattr(completion_side_effect, "called"):
+                completion_side_effect.called = True
+                start_web_session(self.agent, self.user)
+                return response_first, token_usage
+            return response_second, token_usage
+
+        with override_switch("agent_retry_completion_on_web_session_activation", active=True):
+            with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+                 patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+                 patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect), \
+                 patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
+                 patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event:
+                from api.agent.core import event_processing as ep
+                with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+                    _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=7)
+
+        self.assertEqual(mock_track_event.call_count, 1)
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(
+            kwargs["event"],
+            ep.AnalyticsEvent.PERSISTENT_AGENT_WEB_SESSION_ACTIVATED_POST_COMPLETION,
+        )
+        self.assertEqual(kwargs["source"], ep.AnalyticsSource.AGENT)
+        props = kwargs["properties"]
+        self.assertEqual(props.get("agent_id"), str(self.agent.id))
+        self.assertEqual(props.get("agent_name"), self.agent.name)
+        self.assertEqual(props.get("run_sequence_number"), 7)
+        self.assertEqual(props.get("iteration"), 1)
+        self.assertEqual(props.get("retry_reason"), "web_session_activated_mid_completion")
+        self.assertEqual(props.get("retry_strategy"), "discard_and_rerun_once")
+        self.assertEqual(props.get("retry_switch_active"), True)
+        self.assertEqual(props.get("retry_performed"), True)
+        self.assertEqual(props.get("had_active_web_session_at_start"), False)
+
+    def test_web_session_activation_retry_skips_when_no_iterations_remaining(self):
+        """If no loop iteration remains, process current completion instead of dropping it."""
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql":"SELECT 1","will_continue_work":false}'
+
+        message_first = MagicMock()
+        message_first.tool_calls = [tool_call]
+        message_first.function_call = None
+        message_first.content = None
+        response_first = MagicMock()
+        response_first.choices = [MagicMock(message=message_first)]
+        response_first.model_extra = {}
+
+        token_usage = {"model": "mock-model", "provider": "mock-provider"}
+
+        def completion_side_effect(*args, **kwargs):
+            start_web_session(self.agent, self.user)
+            return response_first, token_usage
+
+        with override_switch("agent_retry_completion_on_web_session_activation", active=True):
+            with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+                 patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+                 patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect) as mock_completion, \
+                 patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"}) as mock_execute_tool, \
+                 patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}):
+                from api.agent.core import event_processing as ep
+                with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                    _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 1)
+        self.assertEqual(mock_execute_tool.call_count, 1)
 
 
 @tag("batch_event_processing")
