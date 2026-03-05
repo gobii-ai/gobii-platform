@@ -46,9 +46,14 @@ class CreateChartToolTests(TestCase):
             result = execute_create_chart(self.agent, params)
 
         self.assertEqual(result["status"], "error")
-        self.assertIn(f"missing: {expected_missing}", result["message"].lower())
-        self.assertIn(f"available: {', '.join(expected_available)}", result["message"].lower())
-        self.assertIn("aliases exactly match", result["message"].lower())
+        message = result["message"].lower()
+        self.assertIn(f"available: {', '.join(expected_available)}", message)
+        self.assertIn("aliases exactly match", message)
+
+        missing_part = message.split("missing: ", 1)[1].split(".", 1)[0]
+        found_missing_set = {column.strip() for column in missing_part.split(",")}
+        expected_missing_set = {column.strip() for column in expected_missing.split(",")}
+        self.assertSetEqual(found_missing_set, expected_missing_set)
         mock_write.assert_not_called()
         mock_signed_url.assert_not_called()
 
@@ -187,6 +192,27 @@ class CreateChartToolTests(TestCase):
         self.assertIn("available: month, revenue, costs", result["message"].lower())
         mock_write.assert_not_called()
         mock_signed_url.assert_not_called()
+
+    def test_malformed_multi_series_y_returns_structured_error(self):
+        with mock_query_data(
+            [
+                {"month": "Jan", "revenue": 100},
+                {"month": "Feb", "revenue": 120},
+            ],
+            cols=["month", "revenue"],
+        ):
+            result = execute_create_chart(
+                self.agent,
+                {
+                    "type": "line",
+                    "query": "SELECT month, revenue FROM t",
+                    "x": "month",
+                    "y": ["revenue", ["bad"]],
+                },
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("failed to generate chart", result["message"].lower())
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")

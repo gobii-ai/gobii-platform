@@ -401,11 +401,13 @@ def _validate_requested_chart_columns(
         else:
             requested.append(y_param)
 
-    requested_columns = [
-        column
-        for column in dict.fromkeys(requested)
-        if isinstance(column, str) and column
-    ]
+    requested_columns: List[str] = []
+    seen_columns: set[str] = set()
+    for column in requested:
+        if not isinstance(column, str) or not column or column in seen_columns:
+            continue
+        requested_columns.append(column)
+        seen_columns.add(column)
     missing_columns = [column for column in requested_columns if column not in available_columns]
     if not missing_columns:
         return None
