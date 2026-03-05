@@ -278,6 +278,42 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(payload.get("startup_trial_days"), 14)
         self.assertEqual(payload.get("scale_trial_days"), 30)
         self.assertTrue(payload.get("trial_eligible"))
+        self.assertTrue(payload.get("pricing_modal_almost_full_screen"))
+        mock_customer_has_any_individual_subscription.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription")
+    @patch("console.views.get_stripe_customer")
+    @patch("console.views.get_stripe_settings")
+    def test_user_plan_api_includes_pricing_modal_flag_state(
+        self,
+        mock_get_stripe_settings,
+        mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="pricing_modal_almost_full_screen",
+            defaults={
+                "everyone": False,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=14,
+            scale_trial_days=30,
+        )
+        mock_get_stripe_customer.return_value = None
+
+        response = self.client.get(reverse("get_user_plan"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload.get("pricing_modal_almost_full_screen"))
         mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
@@ -337,7 +373,55 @@ class ConsoleViewsTest(TestCase):
         self.assertContains(response, 'data-startup-trial-days="9"')
         self.assertContains(response, 'data-scale-trial-days="18"')
         self.assertContains(response, 'data-trial-eligible="true"')
+        self.assertContains(response, 'data-pricing-modal-almost-full-screen="true"')
         self.assertContains(response, 'data-is-staff="false"')
+        mock_customer_has_any_individual_subscription.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription")
+    @patch("console.views.get_stripe_customer")
+    @patch("console.views.get_stripe_settings")
+    def test_agent_chat_shell_exposes_pricing_modal_flag_data_attribute_state(
+        self,
+        mock_get_stripe_settings,
+        mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="pricing_modal_almost_full_screen",
+            defaults={
+                "everyone": False,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=9,
+            scale_trial_days=18,
+        )
+        mock_get_stripe_customer.return_value = None
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Pricing Modal Flag Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Pricing Modal Flag Agent",
+            charter="Pricing modal flag charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-pricing-modal-almost-full-screen="false"')
         mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")

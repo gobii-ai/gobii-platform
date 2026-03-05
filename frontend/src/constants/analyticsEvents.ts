@@ -89,6 +89,12 @@ export const AnalyticsEvent = {
   UPSELL_MESSAGE_SHOWN: 'Upsell Message Shown',
   /** User dismissed an upsell message */
   UPSELL_MESSAGE_DISMISSED: 'Upsell Message Dismissed',
+
+
+  // ============================================
+  // CTA Click - for tracking clicks of CTAs; for our funnel/flow analytics
+  // ============================================
+  CTA_CLICKED: 'CTA Clicked',
 } as const
 
 export type AnalyticsEventType = typeof AnalyticsEvent[keyof typeof AnalyticsEvent]
