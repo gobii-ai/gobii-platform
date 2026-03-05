@@ -9,6 +9,9 @@ AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 # Exponential backoff for cron-triggered runs on free-plan agents
 AGENT_CRON_THROTTLE = "agent_cron_throttle"
 
+# Route /support form submissions to Intercom-style email intake.
+SUPPORT_INTERCOM = "support_intercom"
+
 
 # Controls favicon/logo collateral assets across templates and app shell
 FISH_COLLATERAL = "fish_collateral"
