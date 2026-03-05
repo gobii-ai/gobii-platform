@@ -109,7 +109,7 @@ Owner: Platform
 ## Sandbox Tool Supervisor (in Pod)
 - Launches stdio MCP servers defined by the agent.
 - Executes non-MCP sandboxed tools (e.g., create_file) inside the pod.
-- Provides a python_exec tool for running arbitrary Python code within the sandbox.
+- Provides a python_exec tool for running a Python script from a workspace file path within the sandbox.
 - Exposes MCP and tool execution over HTTP or WebSocket to the control plane.
 - Restarts MCP servers on failure.
 - Records tool execution logs to a local audit log file.

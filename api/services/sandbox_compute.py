@@ -7,6 +7,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict, Optional, Sequence
 
 import requests
@@ -102,6 +103,28 @@ def _python_default_timeout() -> int:
 
 def _python_max_timeout() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_PYTHON_MAX_TIMEOUT_SECONDS", 120))
+
+
+def _python_workspace_root() -> Path:
+    raw = str(getattr(settings, "SANDBOX_COMPUTE_WORKSPACE_ROOT", "/workspace") or "").strip() or "/workspace"
+    return Path(raw)
+
+
+def _normalize_python_exec_path(workspace_root: Path, file_path: str) -> Optional[Path]:
+    if not isinstance(file_path, str):
+        return None
+    cleaned = file_path.strip()
+    if not cleaned:
+        return None
+    rel = cleaned.lstrip("/")
+    rel_path = Path(rel)
+    if rel_path.is_absolute() or ".." in rel_path.parts:
+        return None
+    root_resolved = workspace_root.resolve()
+    full_path = (root_resolved / rel_path).resolve()
+    if root_resolved not in full_path.parents and full_path != root_resolved:
+        return None
+    return full_path
 
 
 def _sync_on_tool_call() -> bool:
@@ -675,9 +698,15 @@ def _parse_sync_timestamp(value: Any) -> Optional[timezone.datetime]:
 
 
 def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
-    code = params.get("code")
-    if not isinstance(code, str) or not code.strip():
-        return {"status": "error", "message": "Missing required parameter: code"}
+    file_path = params.get("file_path")
+    if not isinstance(file_path, str) or not file_path.strip():
+        return {"status": "error", "message": "Missing required parameter: file_path"}
+    workspace_root = _python_workspace_root()
+    script_path = _normalize_python_exec_path(workspace_root, file_path)
+    if script_path is None:
+        return {"status": "error", "message": "Invalid file_path."}
+    if not script_path.exists() or not script_path.is_file():
+        return {"status": "error", "message": "Python script file not found."}
 
     timeout_value = _normalize_timeout(
         params.get("timeout_seconds"),
@@ -694,7 +723,8 @@ def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         result = subprocess.run(
-            [sys.executable, "-c", code],
+            [sys.executable, str(script_path)],
+            cwd=str(workspace_root),
             env=_sanitize_env(extra_env, trusted_env_keys=trusted_env_keys),
             capture_output=True,
             text=True,

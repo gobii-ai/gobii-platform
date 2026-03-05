@@ -1,10 +1,13 @@
+import sys
 from datetime import timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db.models import Max
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
@@ -20,6 +23,7 @@ from api.services.sandbox_compute import (
     SandboxComputeService,
     SandboxSessionUpdate,
     _build_nonzero_exit_error_payload,
+    _execute_python_exec,
     _post_sync_queue_key,
 )
 from api.services.sandbox_filespace_sync import build_filespace_pull_manifest
@@ -367,7 +371,7 @@ class SandboxComputeSyncTests(TestCase):
                 self.agent,
                 "python_exec",
                 {
-                    "code": "print('ok')",
+                    "file_path": "/scripts/main.py",
                     "env": {"OPENAI_API_KEY": "from-caller", "KEEP_ME": "yes"},
                 },
             )
@@ -381,6 +385,61 @@ class SandboxComputeSyncTests(TestCase):
             backend.tool_calls[0]["params"]["trusted_env_keys"],
             ["OPENAI_API_KEY"],
         )
+        self.assertEqual(
+            backend.tool_calls[0]["params"]["file_path"],
+            "/scripts/main.py",
+        )
+
+    def test_local_python_exec_requires_file_path(self):
+        result = _execute_python_exec({})
+        self.assertEqual(result, {"status": "error", "message": "Missing required parameter: file_path"})
+
+    @override_settings(SANDBOX_COMPUTE_WORKSPACE_ROOT="/workspace")
+    def test_local_python_exec_rejects_invalid_file_path(self):
+        result = _execute_python_exec({"file_path": "../../escape.py"})
+        self.assertEqual(result, {"status": "error", "message": "Invalid file_path."})
+
+    def test_local_python_exec_errors_when_script_missing(self):
+        with TemporaryDirectory() as tmpdir:
+            with override_settings(SANDBOX_COMPUTE_WORKSPACE_ROOT=tmpdir):
+                result = _execute_python_exec({"file_path": "/missing.py"})
+        self.assertEqual(result, {"status": "error", "message": "Python script file not found."})
+
+    def test_local_python_exec_runs_script_from_workspace_root(self):
+        completed = type(
+            "CompletedProcess",
+            (),
+            {"returncode": 0, "stdout": "hello\n", "stderr": ""},
+        )()
+        with TemporaryDirectory() as tmpdir:
+            workspace = Path(tmpdir).resolve()
+            script = workspace / "scripts" / "job.py"
+            script.parent.mkdir(parents=True, exist_ok=True)
+            script.write_text("print('hello')\n", encoding="utf-8")
+            with override_settings(SANDBOX_COMPUTE_WORKSPACE_ROOT=str(workspace)), patch(
+                "api.services.sandbox_compute._sanitize_env",
+                return_value={"PATH": "/usr/bin", "OPENAI_API_KEY": "sk-test"},
+            ) as sanitize_env_mock, patch(
+                "api.services.sandbox_compute.subprocess.run",
+                return_value=completed,
+            ) as run_mock:
+                result = _execute_python_exec(
+                    {
+                        "file_path": "/scripts/job.py",
+                        "timeout_seconds": 42,
+                        "env": {"OPENAI_API_KEY": "sk-test"},
+                        "trusted_env_keys": ["OPENAI_API_KEY"],
+                    }
+                )
+
+        self.assertEqual(result["status"], "ok")
+        sanitize_env_mock.assert_called_once_with(
+            {"OPENAI_API_KEY": "sk-test"},
+            trusted_env_keys=["OPENAI_API_KEY"],
+        )
+        self.assertEqual(run_mock.call_args.args[0], [sys.executable, str(script)])
+        self.assertEqual(run_mock.call_args.kwargs["cwd"], str(workspace))
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 42)
 
     def test_mcp_request_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()
