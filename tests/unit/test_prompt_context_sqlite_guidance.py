@@ -34,3 +34,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("# __files (special table; metadata only)", examples)
         self.assertIn("recent_files", examples)
         self.assertIn("metadata only", examples)
+
+    def test_examples_discourage_browser_task_completion_polling(self):
+        examples = prompt_context._get_sqlite_examples()
+        self.assertIn("Browser task completions are pushed into unified history", examples)
+        self.assertIn("don't poll __tool_results/__files waiting for them", examples)
