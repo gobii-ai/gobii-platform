@@ -11,6 +11,20 @@ import {
   type TimelinePage,
 } from './useAgentTimeline'
 
+export const DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES = 20
+
+export type RefreshTimelineMode = 'fast' | 'contiguous'
+
+export type RefreshTimelineOptions = {
+  mode?: RefreshTimelineMode
+  maxNewerPages?: number
+}
+
+export type RefreshTimelineResult = {
+  newerPagesFetched: number
+  remainingNewerGap: boolean
+}
+
 /**
  * Inject a single real-time event into the last page of the react-query timeline cache.
  * Uses mergeTimelineEvents for dedup and ordering.
@@ -125,6 +139,118 @@ export function updateOptimisticEventInCache(
   return found
 }
 
+function hasCursorAdvanced(previous: string | null, next: string | null): boolean {
+  if (!next) {
+    return false
+  }
+  if (!previous) {
+    return true
+  }
+  return compareTimelineCursors(next, previous) > 0
+}
+
+function mergeLatestPageIntoTailAndDetectGap(
+  queryClient: QueryClient,
+  key: ReturnType<typeof timelineQueryKey>,
+  latestPage: TimelinePage,
+): { hasNewerGap: boolean; newestCursor: string | null } {
+  let hasNewerGap = false
+  let newestCursor: string | null = latestPage.newestCursor
+
+  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+    if (!old?.pages?.length) {
+      return {
+        pages: [{ ...latestPage, hasMoreNewer: false }],
+        pageParams: [undefined],
+      }
+    }
+
+    const pages = [...old.pages]
+    const lastIndex = pages.length - 1
+    const lastPage = pages[lastIndex]
+    const merged = mergeTimelineEvents(lastPage.events, latestPage.events)
+
+    hasNewerGap = Boolean(
+      lastPage.newestCursor
+      && latestPage.oldestCursor
+      && compareTimelineCursors(lastPage.newestCursor, latestPage.oldestCursor) < 0,
+    )
+
+    const nextNewestCursor = merged.length
+      ? merged[merged.length - 1].cursor
+      : latestPage.newestCursor ?? lastPage.newestCursor
+    const nextOldestCursor = merged.length
+      ? merged[0].cursor
+      : latestPage.oldestCursor ?? lastPage.oldestCursor
+    newestCursor = nextNewestCursor
+
+    pages[lastIndex] = {
+      ...lastPage,
+      events: merged,
+      newestCursor: nextNewestCursor,
+      oldestCursor: nextOldestCursor,
+      hasMoreNewer: hasNewerGap,
+      raw: latestPage.raw,
+    }
+
+    return {
+      ...old,
+      pages,
+    }
+  })
+
+  return { hasNewerGap, newestCursor }
+}
+
+function mergeNewerPageIntoTail(
+  queryClient: QueryClient,
+  key: ReturnType<typeof timelineQueryKey>,
+  newerPage: TimelinePage,
+): { newestCursor: string | null; advanced: boolean } {
+  let newestCursor: string | null = newerPage.newestCursor
+  let advanced = false
+
+  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+    if (!old?.pages?.length) {
+      return {
+        pages: [{ ...newerPage, hasMoreNewer: newerPage.hasMoreNewer }],
+        pageParams: [undefined],
+      }
+    }
+
+    const pages = [...old.pages]
+    const lastIndex = pages.length - 1
+    const lastPage = pages[lastIndex]
+    const previousNewestCursor = lastPage.newestCursor
+    const merged = mergeTimelineEvents(lastPage.events, newerPage.events)
+    const nextNewestCursor = merged.length
+      ? merged[merged.length - 1].cursor
+      : newerPage.newestCursor ?? lastPage.newestCursor
+    const nextOldestCursor = merged.length
+      ? merged[0].cursor
+      : newerPage.oldestCursor ?? lastPage.oldestCursor
+
+    newestCursor = nextNewestCursor
+    advanced = hasCursorAdvanced(previousNewestCursor, nextNewestCursor)
+
+    pages[lastIndex] = {
+      ...lastPage,
+      events: merged,
+      newestCursor: nextNewestCursor,
+      oldestCursor: nextOldestCursor,
+      hasMoreNewer: newerPage.hasMoreNewer,
+      raw: newerPage.raw,
+    }
+
+    return {
+      ...old,
+      pages,
+    }
+  })
+
+  return { newestCursor, advanced }
+}
+
 /**
  * Refresh the latest timeline slice from the server and merge it into the cache tail.
  * This avoids infinite-query refetch drift when older pages are currently loaded.
@@ -132,52 +258,54 @@ export function updateOptimisticEventInCache(
 export async function refreshTimelineLatestInCache(
   queryClient: QueryClient,
   agentId: string,
-) {
+  options?: RefreshTimelineOptions,
+): Promise<RefreshTimelineResult> {
+  const mode = options?.mode ?? 'fast'
+  const maxNewerPages = Math.max(1, options?.maxNewerPages ?? DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES)
+  const key = timelineQueryKey(agentId)
+  let newerPagesFetched = 0
+  let remainingNewerGap = false
+
   try {
     const response = await fetchAgentTimeline(agentId, {
       direction: 'initial',
       limit: TIMELINE_PAGE_SIZE,
     })
     const latestPage = timelineResponseToPage(response)
-    const key = timelineQueryKey(agentId)
+    const latestMerge = mergeLatestPageIntoTailAndDetectGap(queryClient, key, latestPage)
+    remainingNewerGap = latestMerge.hasNewerGap
+    let cursor: string | null = latestMerge.newestCursor
 
-    queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
-      if (!old?.pages?.length) {
-        return {
-          pages: [latestPage],
-          pageParams: [undefined],
+    if (mode === 'contiguous' && remainingNewerGap && cursor) {
+      while (remainingNewerGap && cursor && newerPagesFetched < maxNewerPages) {
+        const previousCursor: string = cursor
+        const newerResponse = await fetchAgentTimeline(agentId, {
+          direction: 'newer',
+          cursor,
+          limit: TIMELINE_PAGE_SIZE,
+        })
+        const newerPage = timelineResponseToPage(newerResponse)
+        const newerMerge = mergeNewerPageIntoTail(queryClient, key, newerPage)
+
+        newerPagesFetched += 1
+        cursor = newerMerge.newestCursor
+        remainingNewerGap = newerPage.hasMoreNewer
+
+        if (!newerMerge.advanced || !cursor || cursor === previousCursor) {
+          break
         }
       }
+    }
 
-      const pages = [...old.pages]
-      const lastIndex = pages.length - 1
-      const lastPage = pages[lastIndex]
-      const merged = mergeTimelineEvents(lastPage.events, latestPage.events)
-      const hasNewerGap = Boolean(
-        lastPage.newestCursor
-        && latestPage.oldestCursor
-        && compareTimelineCursors(lastPage.newestCursor, latestPage.oldestCursor) < 0
-      )
-
-      pages[lastIndex] = {
-        ...lastPage,
-        events: merged,
-        newestCursor: merged.length
-          ? merged[merged.length - 1].cursor
-          : latestPage.newestCursor ?? lastPage.newestCursor,
-        oldestCursor: merged.length
-          ? merged[0].cursor
-          : latestPage.oldestCursor ?? lastPage.oldestCursor,
-        hasMoreNewer: hasNewerGap,
-        raw: latestPage.raw,
-      }
-
-      return {
-        ...old,
-        pages,
-      }
-    })
+    return {
+      newerPagesFetched,
+      remainingNewerGap,
+    }
   } catch (error) {
     console.error('Failed to refresh latest timeline cache:', error)
+    return {
+      newerPagesFetched,
+      remainingNewerGap: true,
+    }
   }
 }
