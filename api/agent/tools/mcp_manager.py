@@ -481,6 +481,26 @@ class MCPToolManager:
             return sandbox_compute_enabled()
         return sandbox_compute_enabled_for_agent(agent)
 
+    @staticmethod
+    def _is_stdio_runtime(runtime: Optional[MCPServerRuntime]) -> bool:
+        if runtime is None:
+            return False
+        return bool(runtime.command) and not bool(runtime.url)
+
+    def _should_route_runtime_via_sandbox(
+        self,
+        runtime: Optional[MCPServerRuntime],
+        *,
+        agent: Optional[PersistentAgent],
+    ) -> bool:
+        if runtime is None:
+            return False
+        if runtime.scope == MCPServerConfig.Scope.PLATFORM:
+            return False
+        if not self._is_stdio_runtime(runtime):
+            return False
+        return self._sandbox_mcp_enabled(agent)
+
     def _ensure_runtime_registered(
         self,
         runtime: MCPServerRuntime,
@@ -1005,11 +1025,7 @@ class MCPToolManager:
     ):
         """Register an MCP server and cache its tools."""
 
-        sandbox_mode = (
-            server.scope != MCPServerConfig.Scope.PLATFORM
-            and self._sandbox_mcp_enabled(agent)
-            and not force_local
-        )
+        sandbox_mode = self._should_route_runtime_via_sandbox(server, agent=agent) and not force_local
         cache_fingerprint = self._build_tool_cache_fingerprint(server)
         if prefer_cache and self._load_cached_tools(server, cache_fingerprint, sandbox_mode=sandbox_mode):
             if not force_local:
@@ -1544,12 +1560,7 @@ class MCPToolManager:
             return param_error
 
         sandbox_fallback = False
-        sandbox_routed = bool(
-            runtime
-            and runtime.scope != MCPServerConfig.Scope.PLATFORM
-            and self._sandbox_mcp_enabled(agent)
-            and not force_local
-        )
+        sandbox_routed = self._should_route_runtime_via_sandbox(runtime, agent=agent) and not force_local
         if sandbox_routed:
             sandbox_result, sandbox_fallback = self._dispatch_sandbox_mcp_request(
                 agent=agent,
