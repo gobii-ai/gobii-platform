@@ -1175,6 +1175,25 @@ def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
     return params
 
 
+def _gate_send_chat_tool_for_session(tools: List[dict], agent: PersistentAgent) -> List[dict]:
+    """Hide send_chat_message from the completion tool list when no web session is active."""
+    if has_active_web_session(agent):
+        return tools
+
+    filtered: List[dict] = []
+    removed = False
+    for tool in tools:
+        if not isinstance(tool, dict):
+            filtered.append(tool)
+            continue
+        function_block = tool.get("function")
+        if isinstance(function_block, dict) and function_block.get("name") == "send_chat_message":
+            removed = True
+            continue
+        filtered.append(tool)
+    return filtered if removed else tools
+
+
 def _get_latest_active_web_session(agent: PersistentAgent):
     for session in get_active_web_sessions(agent):
         if session.user_id is not None:
@@ -2982,7 +3001,6 @@ def _run_agent_loop(
         "provider": None
     }
 
-    span.set_attribute("persistent_agent.tools.count", len(tools))
     span.set_attribute("MAX_AGENT_LOOP_ITERATIONS", MAX_AGENT_LOOP_ITERATIONS)
 
     # Determine remaining steps from the shared budget (if any)
@@ -3011,6 +3029,7 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
 
     for i in range(max_remaining):
+        iteration_tools = _gate_send_chat_tool_for_session(tools, agent)
         if _should_abort_for_deleted_agent(
             agent,
             budget_ctx=budget_ctx,
@@ -3058,6 +3077,7 @@ def _run_agent_loop(
             return cumulative_token_usage
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
+            iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
             if heartbeat:
                 heartbeat.touch("iteration_start")
             if lock_extender:
@@ -3194,7 +3214,7 @@ def _run_agent_loop(
             try:
                 response, token_usage = _completion_with_failover(
                     messages=history,
-                    tools=tools,
+                    tools=iteration_tools,
                     failover_configs=failover_configs,
                     agent_id=str(agent.id),
                     safety_identifier=agent.user.id if agent.user else None,
@@ -3427,7 +3447,8 @@ def _run_agent_loop(
                             "agent": agent,
                             "description": (
                                 "Message delivery requires explicit send tools when no active web chat session. "
-                                "Please call send_chat_message for web chat, or send_email/send_sms with explicit parameters."
+                                "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
+                                "recently active non-web communication channel from unified history/recent contacts."
                             ),
                         }
                         _attach_completion(step_kwargs)

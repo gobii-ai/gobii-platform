@@ -112,6 +112,10 @@ class ImpliedSendTests(TestCase):
             description__startswith="Message delivery requires explicit send tools",
         ).first()
         self.assertIsNotNone(correction_step)
+        self.assertIn(
+            "most recently active non-web communication channel",
+            correction_step.description,
+        )
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})

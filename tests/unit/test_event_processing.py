@@ -16,12 +16,14 @@ from unittest.mock import patch, MagicMock, ANY
 import zstandard as zstd
 
 from api.agent.core.event_processing import (
+    _gate_send_chat_tool_for_session,
     build_prompt_context,
     _get_completed_process_run_count,
     _run_agent_loop,
 )
 from api.agent.core.processing_flags import PendingDrainSettings
 from api.agent.core.prompt_context import (
+    get_agent_tools,
     get_prompt_token_budget,
     message_history_limit,
     tool_call_history_limit,
@@ -477,6 +479,44 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("Implied Send", combined)
         self.assertNotIn("<implied_send_status>", combined)
         self.assertNotIn("implied_send_status", combined)
+
+    def test_session_tool_gating_excludes_send_chat_message_without_active_web_session(self):
+        tools = get_agent_tools(self.agent)
+        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        tool_names = [
+            entry.get("function", {}).get("name")
+            for entry in gated_tools
+            if isinstance(entry, dict)
+        ]
+        self.assertNotIn("send_chat_message", tool_names)
+
+    def test_session_tool_gating_includes_send_chat_message_with_active_web_session(self):
+        start_web_session(self.agent, self.user)
+        tools = get_agent_tools(self.agent)
+        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        tool_names = [
+            entry.get("function", {}).get("name")
+            for entry in gated_tools
+            if isinstance(entry, dict)
+        ]
+        self.assertIn("send_chat_message", tool_names)
+
+    def test_prompt_adds_retry_hint_when_send_chat_message_unavailable(self):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        self.assertIsNotNone(system_message)
+        content = system_message["content"]
+        self.assertIn(
+            "If send_chat_message is unavailable, retry with send_email/send_sms",
+            content,
+        )
+        self.assertIn(
+            "most recently active non-web channel from unified history/recent contacts",
+            content,
+        )
 
     def test_prompt_includes_implied_send_with_active_web_session(self):
         start_web_session(self.agent, self.user)
