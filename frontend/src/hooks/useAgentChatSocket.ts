@@ -241,7 +241,7 @@ export function useAgentChatSocket(
       return
     }
     lastSyncAtRef.current = now
-    void refreshTimelineLatestInCache(queryClient, agentIdRef.current)
+    void refreshTimelineLatestInCache(queryClient, agentIdRef.current, { mode: 'fast' })
     void refreshProcessingRef.current()
   }, [queryClient])
 

@@ -27,8 +27,12 @@ import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse } from '../hooks/useAgentTimeline'
-import { refreshTimelineLatestInCache } from '../hooks/useTimelineCacheInjector'
+import {
+  refreshTimelineLatestInCache,
+  DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
+} from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
+import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../types/agentRoster'
@@ -546,6 +550,7 @@ const BOTTOM_REPIN_THRESHOLD_PX = 50
 const NEAR_BOTTOM_THRESHOLD_PX = 100
 const UNPIN_DISTANCE_FROM_BOTTOM_PX = 12
 const PROGRAMMATIC_SCROLL_GUARD_MS = 150
+const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES
 
 function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
@@ -580,6 +585,7 @@ export function AgentChatPage({
   const fishFaviconSvgPromiseRef = useRef<Promise<string> | null>(null)
 
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
+  const activeAgentIdRef = useRef<string | null>(activeAgentId)
   const routeAgentId = typeof agentId === 'string' ? agentId : null
   const queryClient = useQueryClient()
   const {
@@ -634,6 +640,10 @@ export function AgentChatPage({
   useEffect(() => {
     setActiveAgentId(agentId ?? null)
   }, [agentId])
+
+  useEffect(() => {
+    activeAgentIdRef.current = activeAgentId
+  }, [activeAgentId])
 
   // Set up queryClient bridge for the Zustand store
   useEffect(() => { setTimelineQueryClient(queryClient) }, [queryClient])
@@ -1066,6 +1076,10 @@ export function AgentChatPage({
   const composerFocusNudgeTimeoutRef = useRef<number | null>(null)
   const userTouchActiveRef = useRef(false)
   const touchEndTimerRef = useRef<number | null>(null)
+  const pinnedAtSuspendRef = useRef(autoScrollPinned)
+  const resumeBackfillInFlightRef = useRef<Promise<void> | null>(null)
+  const resumeBackfillRunIdRef = useRef(0)
+  const allowAgentRefreshRef = useRef(false)
 
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
@@ -1124,6 +1138,12 @@ export function AgentChatPage({
 
   useEffect(() => {
     didInitialScrollRef.current = false
+  }, [activeAgentId])
+
+  useEffect(() => {
+    resumeBackfillRunIdRef.current += 1
+    resumeBackfillInFlightRef.current = null
+    pinnedAtSuspendRef.current = autoScrollPinnedRef.current
   }, [activeAgentId])
 
   useEffect(() => {
@@ -1367,6 +1387,78 @@ export function AgentChatPage({
     })
   }, [snapToBottom])
 
+  const runContiguousTimelineBackfill = useCallback(async (agentIdToRefresh: string) => {
+    return refreshTimelineLatestInCache(queryClient, agentIdToRefresh, {
+      mode: 'contiguous',
+      maxNewerPages: RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES,
+    })
+  }, [queryClient])
+
+  const syncLatestTimeline = useCallback(async (
+    agentIdToRefresh: string,
+    { repinToLatest }: { repinToLatest: boolean },
+  ) => {
+    await runContiguousTimelineBackfill(agentIdToRefresh)
+    if (activeAgentIdRef.current !== agentIdToRefresh) {
+      return
+    }
+    if (!repinToLatest) {
+      return
+    }
+
+    autoScrollPinnedRef.current = true
+    setAutoScrollPinned(true)
+    forceScrollOnNextUpdateRef.current = true
+    jumpToBottom()
+    scrollToBottom()
+  }, [jumpToBottom, runContiguousTimelineBackfill, scrollToBottom, setAutoScrollPinned])
+
+  const triggerResumeTimelineBackfill = useCallback(() => {
+    const currentAgentId = activeAgentIdRef.current
+    if (!currentAgentId || !allowAgentRefreshRef.current) {
+      return
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return
+    }
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      return
+    }
+    if (resumeBackfillInFlightRef.current) {
+      return
+    }
+
+    const runId = resumeBackfillRunIdRef.current + 1
+    resumeBackfillRunIdRef.current = runId
+    const shouldRepin = pinnedAtSuspendRef.current
+
+    let inFlight: Promise<void> | null = null
+    inFlight = syncLatestTimeline(currentAgentId, { repinToLatest: shouldRepin }).catch((error) => {
+      console.error('Failed to backfill timeline after resume:', error)
+    }).finally(() => {
+      if (resumeBackfillRunIdRef.current !== runId) {
+        return
+      }
+      if (resumeBackfillInFlightRef.current === inFlight) {
+        resumeBackfillInFlightRef.current = null
+      }
+    })
+
+    resumeBackfillInFlightRef.current = inFlight
+  }, [syncLatestTimeline])
+
+  usePageLifecycle(
+    {
+      onSuspend: () => {
+        pinnedAtSuspendRef.current = autoScrollPinnedRef.current
+      },
+      onResume: () => {
+        triggerResumeTimelineBackfill()
+      },
+    },
+    { resumeThrottleMs: 4000 },
+  )
+
   // Keep track of composer height to adjust scroll when it changes
   const prevComposerHeight = useRef<number | null>(null)
 
@@ -1584,6 +1676,9 @@ export function AgentChatPage({
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(timelineEvents), [timelineEvents])
   const hasSelectedAgent = Boolean(activeAgentId)
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
+  useEffect(() => {
+    allowAgentRefreshRef.current = allowAgentRefresh
+  }, [allowAgentRefresh])
   const rosterLoading = rosterQuery.isLoading || !agentContextReady || rosterContextMismatch
   const { allowAgentPanelRequests } = useAgentPanelRequestsEnabled({
     activeAgentId,
@@ -2036,10 +2131,19 @@ export function AgentChatPage({
   }, [onCreateAgent])
 
   const handleJumpToLatest = useCallback(() => {
-    forceScrollOnNextUpdateRef.current = true
-    setAutoScrollPinned(true)
-    scrollToBottom()
-  }, [scrollToBottom, setAutoScrollPinned])
+    const currentAgentId = activeAgentIdRef.current
+    void (async () => {
+      if (timelineHasMoreNewer && currentAgentId) {
+        await syncLatestTimeline(currentAgentId, { repinToLatest: true })
+        return
+      }
+      autoScrollPinnedRef.current = true
+      forceScrollOnNextUpdateRef.current = true
+      setAutoScrollPinned(true)
+      jumpToBottom()
+      scrollToBottom()
+    })()
+  }, [jumpToBottom, scrollToBottom, setAutoScrollPinned, syncLatestTimeline, timelineHasMoreNewer])
 
   const handleComposerFocus = useCallback(() => {
     if (typeof window === 'undefined') return
