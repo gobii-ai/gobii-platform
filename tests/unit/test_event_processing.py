@@ -1040,14 +1040,12 @@ class PromptContextBuilderTests(TestCase):
                  patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
                  patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect), \
                  patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
-                 patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event, \
-                 patch('api.agent.core.event_processing.Analytics.track_event_anonymous') as mock_track_event_anon:
+                 patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event:
                 from api.agent.core import event_processing as ep
                 with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
                     _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=7)
 
         self.assertEqual(mock_track_event.call_count, 1)
-        self.assertEqual(mock_track_event_anon.call_count, 0)
         kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(
             kwargs["event"],
