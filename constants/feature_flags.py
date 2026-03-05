@@ -22,3 +22,8 @@ FISH_COLLATERAL = "fish_collateral"
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
 # switch not flag
 MULTISEND_ENABLED = "multisend_enabled"
+
+# Retry one completion when web chat session becomes active mid-iteration.
+AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION = (
+    "agent_retry_completion_on_web_session_activation"
+)

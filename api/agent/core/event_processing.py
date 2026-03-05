@@ -25,6 +25,7 @@ from django.apps import apps
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
+from waffle import switch_is_active
 from tenacity import (
     before_sleep_log,
     retry,
@@ -135,6 +136,7 @@ from ...models import (
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.web_sessions import get_active_web_sessions, has_active_web_session
+from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -1175,9 +1177,16 @@ def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
     return params
 
 
-def _gate_send_chat_tool_for_session(tools: List[dict], agent: PersistentAgent) -> List[dict]:
+def _gate_send_chat_tool_for_session(
+    tools: List[dict],
+    agent: PersistentAgent,
+    *,
+    has_active_web_session_now: Optional[bool] = None,
+) -> List[dict]:
     """Hide send_chat_message from the completion tool list when no web session is active."""
-    if has_active_web_session(agent):
+    if has_active_web_session_now is None:
+        has_active_web_session_now = has_active_web_session(agent)
+    if has_active_web_session_now:
         return tools
 
     filtered: List[dict] = []
@@ -3027,9 +3036,15 @@ def _run_agent_loop(
     reasoning_only_streak = 0
     inferred_message_continue_streak = 0
     continuation_notice: Optional[str] = None
+    web_session_activation_retry_used = False
 
     for i in range(max_remaining):
-        iteration_tools = _gate_send_chat_tool_for_session(tools, agent)
+        had_active_web_session_at_start = has_active_web_session(agent)
+        iteration_tools = _gate_send_chat_tool_for_session(
+            tools,
+            agent,
+            has_active_web_session_now=had_active_web_session_at_start,
+        )
         if _should_abort_for_deleted_agent(
             agent,
             budget_ctx=budget_ctx,
@@ -3178,7 +3193,7 @@ def _run_agent_loop(
             )
 
             # Select provider tiers based on the fitted token count
-            prefer_low_latency = has_active_web_session(agent)
+            prefer_low_latency = had_active_web_session_at_start
             try:
                 failover_configs = get_llm_config_with_failover(
                     agent_id=str(agent.id),
@@ -3247,6 +3262,72 @@ def _run_agent_loop(
                 mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
                 logger.exception("LLM call failed for agent %s with all providers", agent.id)
                 break
+
+            retry_switch_active = False
+            if (
+                not had_active_web_session_at_start
+                and not web_session_activation_retry_used
+            ):
+                try:
+                    retry_switch_active = switch_is_active(
+                        AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to evaluate switch %s; skipping mid-completion retry.",
+                        AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION,
+                        exc_info=True,
+                    )
+                    retry_switch_active = False
+
+            if retry_switch_active and has_active_web_session(agent):
+                if i + 1 < max_remaining:
+                    web_session_activation_retry_used = True
+                    continuation_notice = (
+                        "Web chat became active mid-run; rerunning once with updated tool availability."
+                    )
+                    try:
+                        analytics_props: dict[str, Any] = {
+                            "agent_id": str(agent.id),
+                            "agent_name": agent.name,
+                            "run_sequence_number": run_sequence_number,
+                            "iteration": i + 1,
+                            "retry_reason": "web_session_activated_mid_completion",
+                            "retry_strategy": "discard_and_rerun_once",
+                            "had_active_web_session_at_start": False,
+                        }
+                        props_with_org = Analytics.with_org_properties(
+                            analytics_props,
+                            organization=getattr(agent, "organization", None),
+                        )
+                        if agent.user_id:
+                            Analytics.track_event(
+                                user_id=agent.user_id,
+                                event=AnalyticsEvent.PERSISTENT_AGENT_COMPLETION_RETRIED_FOR_WEB_SESSION,
+                                source=AnalyticsSource.AGENT,
+                                properties=props_with_org,
+                            )
+                        else:
+                            Analytics.track_event_anonymous(
+                                anonymous_id=str(agent.id),
+                                event=AnalyticsEvent.PERSISTENT_AGENT_COMPLETION_RETRIED_FOR_WEB_SESSION,
+                                source=AnalyticsSource.AGENT,
+                                properties=props_with_org,
+                            )
+                    except Exception:
+                        logger.exception(
+                            "Failed to emit analytics for mid-completion web-session retry (agent=%s)",
+                            agent.id,
+                        )
+                    logger.info(
+                        "Agent %s: web session activated mid-completion; discarding completion output and retrying next iteration.",
+                        agent.id,
+                    )
+                    continue
+                logger.info(
+                    "Agent %s: web session activated mid-completion but no iterations remain; processing current completion.",
+                    agent.id,
+                )
 
             thinking_content = extract_reasoning_content(response)
             msg = response.choices[0].message
