@@ -25,6 +25,7 @@ from util.subscription_helper import (
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_active_subscription,
+    get_user_plan,
     get_subscription_base_price,
 )
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
@@ -535,6 +536,45 @@ class GetActiveSubscriptionTests(TestCase):
         self.assertIs(subscription, active_subscription)
         mock_sync_customer.assert_called_once_with(customer)
         self.assertEqual(customer.subscriptions.filter.call_count, 2)
+
+    @patch("util.subscription_helper.get_plan_by_product_id", return_value={"id": PlanNames.STARTUP, "name": "Pro"})
+    @patch("util.subscription_helper.get_plan_version_by_product_id", return_value=None)
+    @patch("util.subscription_helper.get_plan_version_by_price_id", return_value=None)
+    @patch("util.subscription_helper.get_active_subscription")
+    def test_get_user_plan_can_reconcile_free_billing_from_active_stripe_subscription(
+        self,
+        mock_get_active_subscription,
+        _mock_plan_version_by_price,
+        _mock_plan_version_by_product,
+        _mock_get_plan_by_product_id,
+    ):
+        billing = UserBilling.objects.get(user=self.user)
+        billing.subscription = PlanNames.FREE
+        billing.save(update_fields=["subscription"])
+
+        active_subscription = MagicMock()
+        active_subscription.stripe_data = {
+            "items": {
+                "data": [
+                    {
+                        "price": {
+                            "id": "price_startup",
+                            "product": "prod_startup",
+                            "recurring": {"usage_type": "licensed"},
+                        }
+                    }
+                ]
+            }
+        }
+        mock_get_active_subscription.return_value = active_subscription
+
+        plan = get_user_plan(self.user, sync_with_stripe=True)
+
+        self.assertEqual(plan["id"], PlanNames.STARTUP)
+        mock_get_active_subscription.assert_called_once_with(self.user, sync_with_stripe=True)
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.subscription, PlanNames.STARTUP)
 
     @patch("util.subscription_helper._ensure_stripe_ready")
     @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})

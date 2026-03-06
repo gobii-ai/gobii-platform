@@ -1685,8 +1685,12 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 return render(request, self.template_name, context)
 
         # Personal billing fallback
-        subscription_plan = get_user_plan(self.request.user)
-        sub = get_active_subscription(self.request.user)
+        subscription_plan = get_user_plan(self.request.user, sync_with_stripe=True)
+        sub = get_active_subscription(
+            self.request.user,
+            preferred_plan_id=(subscription_plan or {}).get("id"),
+            sync_with_stripe=True,
+        )
         actual_price, actual_currency = get_subscription_base_price(sub)
 
         if subscription_plan is None:
@@ -2100,7 +2104,7 @@ def get_user_plan_api(request):
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
 
     try:
-        plan = get_user_plan(request.user)
+        plan = get_user_plan(request.user, sync_with_stripe=True)
         plan_id = str(plan.get("id", "")).lower() if plan else ""
         # Map internal plan IDs to frontend-friendly values
         plan_map = {

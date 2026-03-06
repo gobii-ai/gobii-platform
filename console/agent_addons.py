@@ -404,7 +404,7 @@ def build_agent_addons_payload(
     if agent.organization_id:
         plan_payload = get_organization_plan(agent.organization)
     else:
-        plan_payload = get_user_plan(agent.user)
+        plan_payload = get_user_plan(agent.user, sync_with_stripe=True)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
     plan_name = plan_payload.get("name") if plan_payload else ""
     plan_price = None
@@ -452,7 +452,11 @@ def build_agent_addons_payload(
         else []
     )
 
-    subscription = get_active_subscription(owner, preferred_plan_id=plan_payload.get("id") if plan_payload else None)
+    subscription = get_active_subscription(
+        owner,
+        preferred_plan_id=plan_payload.get("id") if plan_payload else None,
+        sync_with_stripe=not agent.organization_id,
+    )
     trial_end = getattr(subscription, "trial_end", None) if subscription is not None else None
     is_trialing = bool(subscription is not None and getattr(subscription, "status", "") == "trialing")
 
