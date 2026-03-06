@@ -1,6 +1,6 @@
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -9,26 +9,13 @@ from api.agent.tools.create_chart import _build_chart_save_path, execute_create_
 from api.models import BrowserUseAgent, PersistentAgent
 
 
-def mock_query_data(data):
-    """Helper to create a mock for _execute_query_for_data that returns given data."""
+def mock_query_data(data, cols=None, error=None):
+    """Helper to mock _execute_query_for_data with optional explicit columns."""
+    if cols is None and data and isinstance(data[0], dict):
+        cols = list(data[0].keys())
     return patch(
         "api.agent.tools.create_chart._execute_query_for_data",
-        return_value=(data, None),
-    )
-
-
-def mock_filespace():
-    """Helper to mock filespace operations."""
-    return patch.multiple(
-        "api.agent.tools.create_chart",
-        write_bytes_to_dir=MagicMock(return_value={
-            "status": "ok",
-            "path": "/charts/test.svg",
-            "node_id": "test-node-id",
-        }),
-        build_signed_filespace_download_url=MagicMock(
-            return_value="https://example.com/signed/test.svg"
-        ),
+        return_value=(data, cols, error),
     )
 
 
@@ -49,6 +36,26 @@ class CreateChartToolTests(TestCase):
             charter="create charts",
             browser_use_agent=cls.browser_agent,
         )
+
+    def _assert_missing_columns_error(self, params, data, expected_missing, expected_available):
+        with (
+            patch("api.agent.files.filespace_service.write_bytes_to_dir") as mock_write,
+            patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url") as mock_signed_url,
+            mock_query_data(data, cols=expected_available),
+        ):
+            result = execute_create_chart(self.agent, params)
+
+        self.assertEqual(result["status"], "error")
+        message = result["message"].lower()
+        self.assertIn(f"available: {', '.join(expected_available)}", message)
+        self.assertIn("aliases exactly match", message)
+
+        missing_part = message.split("missing: ", 1)[1].split(".", 1)[0]
+        found_missing_set = {column.strip() for column in missing_part.split(",")}
+        expected_missing_set = {column.strip() for column in expected_missing.split(",")}
+        self.assertSetEqual(found_missing_set, expected_missing_set)
+        mock_write.assert_not_called()
+        mock_signed_url.assert_not_called()
 
     def test_tool_definition_has_required_fields(self):
         tool = get_create_chart_tool()
@@ -78,7 +85,7 @@ class CreateChartToolTests(TestCase):
     def test_empty_query_result_returns_error(self):
         with patch(
             "api.agent.tools.create_chart._execute_query_for_data",
-            return_value=([], None),
+            return_value=([], None, None),
         ):
             result = execute_create_chart(
                 self.agent,
@@ -90,7 +97,7 @@ class CreateChartToolTests(TestCase):
     def test_query_error_returns_error(self):
         with patch(
             "api.agent.tools.create_chart._execute_query_for_data",
-            return_value=([], "Query failed: no such table"),
+            return_value=([], None, "Query failed: no such table"),
         ):
             result = execute_create_chart(
                 self.agent,
@@ -124,6 +131,111 @@ class CreateChartToolTests(TestCase):
             )
             self.assertEqual(result["status"], "error")
             self.assertIn("values", result["message"].lower())
+
+    def test_non_pie_chart_missing_columns_returns_error(self):
+        self._assert_missing_columns_error(
+            params={
+                "type": "line",
+                "query": "SELECT period, amount FROM t",
+                "x": "month",
+                "y": "revenue",
+            },
+            data=[
+                {"period": "Jan", "amount": 100},
+                {"period": "Feb", "amount": 120},
+            ],
+            expected_missing="month, revenue",
+            expected_available=["period", "amount"],
+        )
+
+    def test_pie_chart_missing_columns_returns_error(self):
+        self._assert_missing_columns_error(
+            params={
+                "type": "pie",
+                "query": "SELECT category_name, total_amount FROM t",
+                "labels": "category",
+                "values": "amount",
+            },
+            data=[
+                {"category_name": "Sales", "total_amount": 300},
+                {"category_name": "Marketing", "total_amount": 200},
+            ],
+            expected_missing="amount, category",
+            expected_available=["category_name", "total_amount"],
+        )
+
+    def test_multi_series_chart_reports_only_missing_series(self):
+        with (
+            patch("api.agent.files.filespace_service.write_bytes_to_dir") as mock_write,
+            patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url") as mock_signed_url,
+            mock_query_data(
+                [
+                    {"month": "Jan", "revenue": 100, "costs": 80},
+                    {"month": "Feb", "revenue": 150, "costs": 90},
+                ],
+                cols=["month", "revenue", "costs"],
+            ),
+        ):
+            result = execute_create_chart(
+                self.agent,
+                {
+                    "type": "line",
+                    "query": "SELECT month, revenue, costs FROM t",
+                    "x": "month",
+                    "y": ["revenue", "profit"],
+                },
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("missing: profit", result["message"].lower())
+        self.assertNotIn("missing: revenue", result["message"].lower())
+        self.assertIn("available: month, revenue, costs", result["message"].lower())
+        mock_write.assert_not_called()
+        mock_signed_url.assert_not_called()
+
+    def test_malformed_multi_series_y_returns_structured_error(self):
+        with mock_query_data(
+            [
+                {"month": "Jan", "revenue": 100},
+                {"month": "Feb", "revenue": 120},
+            ],
+            cols=["month", "revenue"],
+        ):
+            result = execute_create_chart(
+                self.agent,
+                {
+                    "type": "line",
+                    "query": "SELECT month, revenue FROM t",
+                    "x": "month",
+                    "y": ["revenue", ["bad"]],
+                },
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("failed to generate chart", result["message"].lower())
+
+    @patch("api.agent.files.filespace_service.write_bytes_to_dir")
+    @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
+    def test_chart_succeeds_when_aliases_match_requested_columns(self, mock_signed_url, mock_write):
+        mock_write.return_value = {"status": "ok", "path": "/charts/alias.svg", "node_id": "id1"}
+        mock_signed_url.return_value = "https://example.com/alias.svg"
+        with mock_query_data([
+            {"month": "Jan", "revenue": 100},
+            {"month": "Feb", "revenue": 120},
+        ]):
+            result = execute_create_chart(
+                self.agent,
+                {
+                    "type": "line",
+                    "query": "SELECT period AS month, amount AS revenue FROM t",
+                    "x": "month",
+                    "y": "revenue",
+                },
+            )
+        self.assertEqual(result["status"], "ok")
+        self.assertIn("inline", result)
+        mock_write.assert_called_once()
+        mock_signed_url.assert_called_once()
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")

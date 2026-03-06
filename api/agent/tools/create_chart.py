@@ -40,11 +40,11 @@ CHART_TYPES = {
 }
 
 
-def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[str]]:
+def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[List[str]], Optional[str]]:
     """Execute a SQL query and return results as a list of dicts."""
 
-    data, _cols, error = run_sqlite_select(query)
-    return data, error
+    data, cols, error = run_sqlite_select(query)
+    return data, cols, error
 
 
 def _extract_values(data: List[Dict], key: str) -> List[Any]:
@@ -381,6 +381,45 @@ def _build_chart_save_path(chart_type: str) -> str:
     return f"/charts/{chart_type}_{timestamp}_{unique_suffix}.svg"
 
 
+def _validate_requested_chart_columns(
+    chart_type: str,
+    params: Dict[str, Any],
+    available_columns: Optional[List[str]],
+) -> Optional[str]:
+    """Validate requested chart columns against SQL result columns."""
+    if not available_columns:
+        return None
+
+    requested: List[str] = []
+    if chart_type in ("pie", "donut"):
+        requested.extend([params.get("values"), params.get("labels")])
+    else:
+        requested.append(params.get("x"))
+        y_param = params.get("y")
+        if isinstance(y_param, list):
+            requested.extend(y_param)
+        else:
+            requested.append(y_param)
+
+    requested_columns: List[str] = []
+    seen_columns: set[str] = set()
+    for column in requested:
+        if not isinstance(column, str) or not column or column in seen_columns:
+            continue
+        requested_columns.append(column)
+        seen_columns.add(column)
+    missing_columns = [column for column in requested_columns if column not in available_columns]
+    if not missing_columns:
+        return None
+
+    return (
+        "Requested chart columns are missing from query results. "
+        f"Missing: {', '.join(missing_columns)}. "
+        f"Available: {', '.join(str(col) for col in available_columns)}. "
+        "Ensure your SELECT aliases exactly match x/y/values/labels."
+    )
+
+
 def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the create_chart tool."""
     chart_type = params.get("type")
@@ -395,7 +434,7 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         return {"status": "error", "message": "Missing required parameter: query"}
 
     # Execute query to get data
-    data, error = _execute_query_for_data(query)
+    data, result_columns, error = _execute_query_for_data(query)
     if error:
         return {"status": "error", "message": error}
     if not data:
@@ -412,6 +451,10 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             return {"status": "error", "message": f"Chart type '{chart_type}' requires 'x' parameter"}
         if not params.get("y"):
             return {"status": "error", "message": f"Chart type '{chart_type}' requires 'y' parameter"}
+
+    column_validation_error = _validate_requested_chart_columns(chart_type, params, result_columns)
+    if column_validation_error:
+        return {"status": "error", "message": column_validation_error}
 
     try:
         svg_bytes = _generate_chart(
