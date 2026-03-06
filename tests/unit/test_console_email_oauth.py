@@ -301,6 +301,51 @@ class AgentEmailOAuthApiTests(TestCase):
         )
         self.assertEqual(created_endpoint.address, "second-agent@example.com")
 
+    def test_email_settings_ensure_account_rebinds_oauth_usernames_when_switching_endpoints(self):
+        self.account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
+        self.account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+        self.account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+        self.account.smtp_username = self.endpoint.address
+        self.account.imap_username = self.endpoint.address
+        self.account.save()
+
+        credential = AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="gmail",
+        )
+
+        new_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="david.weigelt@c12forums.com",
+            is_primary=False,
+        )
+
+        ensure_url = reverse("console_agent_email_settings_ensure_account", args=[self.agent.pk])
+        response = self.client.post(
+            ensure_url,
+            data=json.dumps({"endpointAddress": new_endpoint.address}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        payload = response.json()
+        self.assertEqual(payload["settings"]["endpoint"]["address"], new_endpoint.address)
+        self.assertEqual(payload["settings"]["account"]["smtpUsername"], new_endpoint.address)
+        self.assertEqual(payload["settings"]["account"]["imapUsername"], new_endpoint.address)
+
+        new_endpoint.refresh_from_db()
+        self.assertEqual(new_endpoint.owner_agent_id, self.agent.id)
+        self.assertTrue(new_endpoint.is_primary)
+
+        moved_account = AgentEmailAccount.objects.get(endpoint=new_endpoint)
+        self.assertEqual(moved_account.smtp_username, new_endpoint.address)
+        self.assertEqual(moved_account.imap_username, new_endpoint.address)
+        self.assertFalse(AgentEmailAccount.objects.filter(endpoint=self.endpoint).exists())
+
+        credential.refresh_from_db()
+        self.assertEqual(credential.account_id, new_endpoint.id)
+
     def test_email_settings_ensure_account_rejects_invalid_endpoint(self):
         ensure_url = reverse("console_agent_email_settings_ensure_account", args=[self.agent.pk])
         response = self.client.post(
@@ -414,6 +459,85 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertTrue(self.account.is_outbound_enabled)
         self.assertTrue(self.account.is_inbound_enabled)
         self.assertIn("SMTP test failed: mock-smtp-error", self.account.connection_error)
+
+    @patch("console.email_settings.views._validate_agent_imap_connection")
+    @patch("console.email_settings.views._validate_agent_smtp_connection")
+    def test_email_settings_test_endpoint_rebinds_oauth_usernames_on_address_change(
+        self,
+        mock_validate_smtp,
+        mock_validate_imap,
+    ):
+        self.account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
+        self.account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+        self.account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+        self.account.smtp_username = self.endpoint.address
+        self.account.imap_username = self.endpoint.address
+        self.account.save()
+
+        AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="gmail",
+        )
+
+        url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
+        new_address = "renamed-agent@example.com"
+
+        def smtp_side_effect(account):
+            self.assertEqual(account.endpoint.address, new_address)
+            self.assertEqual(account.smtp_username, new_address)
+            return True, ""
+
+        def imap_side_effect(account):
+            self.assertEqual(account.endpoint.address, new_address)
+            self.assertEqual(account.imap_username, new_address)
+            return True, ""
+
+        mock_validate_smtp.side_effect = smtp_side_effect
+        mock_validate_imap.side_effect = imap_side_effect
+
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "endpointAddress": new_address,
+                    "connectionMode": "oauth2",
+                    "oauthProvider": "gmail",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": True,
+                    "testOutbound": True,
+                    "testInbound": True,
+                    "smtpHost": "",
+                    "smtpPort": None,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "oauth2",
+                    "smtpUsername": self.endpoint.address,
+                    "smtpPassword": "",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "oauth2",
+                    "imapUsername": self.endpoint.address,
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["settings"]["endpoint"]["address"], new_address)
+        self.assertEqual(mock_validate_smtp.call_count, 1)
+        self.assertEqual(mock_validate_imap.call_count, 1)
+
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.endpoint.address, new_address)
+        self.assertEqual(self.account.smtp_username, "agent@example.com")
+        self.assertEqual(self.account.imap_username, "agent@example.com")
 
     def test_normalize_email_error_text_flattens_tuple_and_bytes(self):
         normalized = _normalize_email_error_text(

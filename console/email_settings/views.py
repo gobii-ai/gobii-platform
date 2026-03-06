@@ -79,6 +79,25 @@ def _copy_agent_email_account_data(source: AgentEmailAccount, target: AgentEmail
         setattr(target, field, getattr(source, field))
 
 
+def _sync_oauth_usernames_to_endpoint(
+    account: AgentEmailAccount,
+    endpoint_address: str,
+    previous_endpoint_address: str = "",
+) -> None:
+    if account.connection_mode != AgentEmailAccount.ConnectionMode.OAUTH2:
+        return
+
+    current_address = (endpoint_address or "").strip()
+    previous_address = (previous_endpoint_address or "").strip()
+    if not current_address:
+        return
+
+    for field in ("smtp_username", "imap_username"):
+        username = (getattr(account, field) or "").strip()
+        if not username or (previous_address and username.casefold() == previous_address.casefold()):
+            setattr(account, field, current_address)
+
+
 def _validate_and_normalize_email_endpoint_address(endpoint_address: str) -> str:
     raw_address = (endpoint_address or "").strip()
     if not raw_address:
@@ -153,6 +172,7 @@ def _resolve_or_create_agent_email_endpoint(
 
 def _move_agent_email_account_data(source: AgentEmailAccount, target: AgentEmailAccount) -> None:
     _copy_agent_email_account_data(source, target)
+    _sync_oauth_usernames_to_endpoint(target, target.endpoint.address, source.endpoint.address)
     target.save()
     try:
         credential = source.oauth_credential
@@ -195,6 +215,7 @@ def _apply_email_account_settings(
     endpoint: PersistentAgentCommsEndpoint,
     cleaned_data: dict[str, Any],
     provider: str = "",
+    previous_endpoint_address: str = "",
 ) -> None:
     for field, value in cleaned_data.items():
         if field in AGENT_EMAIL_ACCOUNT_PASSWORD_INPUT_FIELDS:
@@ -212,10 +233,7 @@ def _apply_email_account_settings(
     if account.connection_mode == AgentEmailAccount.ConnectionMode.OAUTH2:
         account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
         account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
-        if not account.smtp_username:
-            account.smtp_username = endpoint.address
-        if not account.imap_username:
-            account.imap_username = endpoint.address
+        _sync_oauth_usernames_to_endpoint(account, endpoint.address, previous_endpoint_address)
 
         provider_key = (provider or "").lower()
         if not provider_key:
@@ -562,10 +580,11 @@ class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
+        current_endpoint = _get_agent_email_endpoint(agent)
+        previous_endpoint_address = current_endpoint.address if current_endpoint else ""
         endpoint_address = (_email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or "").strip()
         if not endpoint_address:
-            existing_endpoint = _get_agent_email_endpoint(agent)
-            endpoint_address = existing_endpoint.address if existing_endpoint else ""
+            endpoint_address = previous_endpoint_address
         if not endpoint_address:
             return JsonResponse({"error": "Agent email address is required."}, status=400)
 
@@ -585,6 +604,7 @@ class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
             endpoint,
             form.cleaned_data,
             provider=provider,
+            previous_endpoint_address=previous_endpoint_address,
         )
 
         try:
@@ -648,10 +668,11 @@ class AgentEmailSettingsTestAPIView(ApiLoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
+        current_endpoint = _get_agent_email_endpoint(agent)
+        previous_endpoint_address = current_endpoint.address if current_endpoint else ""
         endpoint_address = (_email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or "").strip()
         if not endpoint_address:
-            existing_endpoint = _get_agent_email_endpoint(agent)
-            endpoint_address = existing_endpoint.address if existing_endpoint else ""
+            endpoint_address = previous_endpoint_address
         if not endpoint_address:
             return JsonResponse({"error": "Agent email address is required."}, status=400)
 
@@ -674,7 +695,13 @@ class AgentEmailSettingsTestAPIView(ApiLoginRequiredMixin, View):
 
         provider = str(_email_settings_payload_value(payload, "oauthProvider", "oauth_provider", "") or "").strip().lower()
         test_account = AgentEmailAccount.objects.get(pk=account.pk)
-        _apply_email_account_settings(test_account, endpoint, form.cleaned_data, provider=provider)
+        _apply_email_account_settings(
+            test_account,
+            endpoint,
+            form.cleaned_data,
+            provider=provider,
+            previous_endpoint_address=previous_endpoint_address,
+        )
 
         smtp_result: dict[str, Any] | None = None
         imap_result: dict[str, Any] | None = None
