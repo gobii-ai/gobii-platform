@@ -115,6 +115,8 @@ def _generate_via_llm(agent: PersistentAgent, charter: str, routing_profile: Any
         agent,
         completion_type=PersistentAgentCompletion.CompletionType.TAG,
         response=response,
+        model=model,
+        provider=provider,
     )
 
     try:
