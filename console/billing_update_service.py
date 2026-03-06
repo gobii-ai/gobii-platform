@@ -744,6 +744,9 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                 "idempotency_key": f"console-plan-{customer.id}-{plan_target}-{request.user.id}",
                 "create_if_missing": False,
             }
+            current_plan_id = _get_owner_plan_id(owner_obj, owner_type_str)
+            if current_plan_id == PlanNamesChoices.STARTUP.value and plan_target == "scale":
+                ensure_kwargs["end_trial_now"] = True
 
             if _user_auto_purchase_enabled(owner_obj):
                 if not metered_price_id:
