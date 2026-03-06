@@ -163,14 +163,27 @@ class MailgunEmailWebhookTest(TestCase):
             address=f"mg-agent@{self.default_domain}",
         )
 
-    def _create_mailgun_request(self, from_email, to_email, subject="Mailgun Subject", body="Mailgun Body"):
+    def _create_mailgun_request(
+        self,
+        from_email,
+        to_email,
+        subject="Mailgun Subject",
+        body="Mailgun Body",
+        cc_email=None,
+        bcc_email=None,
+        recipient_email=None,
+    ):
         data = {
             "from": from_email,
             "To": to_email,
-            "recipient": to_email,
+            "recipient": recipient_email or to_email,
             "subject": subject,
             "body-plain": body,
         }
+        if cc_email:
+            data["Cc"] = cc_email
+        if bcc_email:
+            data["Bcc"] = bcc_email
         request = self.factory.post(
             "/api/webhooks/inbound/email/mg/",
             data=data,
@@ -208,6 +221,20 @@ class MailgunEmailWebhookTest(TestCase):
         mock_logger.assert_any_call(
             f"Discarding email from non-whitelisted sender '{self.non_owner.email}' to agent 'Mailgun Agent' (endpoint: {self.agent_endpoint.address})."
         )
+
+    @tag("batch_email")
+    @patch("api.webhooks.ingest_inbound_message")
+    def test_mailgun_duplicate_recipient_across_fields_ingests_once(self, mock_ingest):
+        request = self._create_mailgun_request(
+            from_email=self.owner.email,
+            to_email="external@example.com",
+            cc_email=self.agent_endpoint.address,
+            recipient_email=self.agent_endpoint.address,
+        )
+        response: HttpResponse = email_webhook_mailgun(request)
+
+        self.assertEqual(response.status_code, 200)
+        mock_ingest.assert_called_once()
 
 @tag("batch_sms")
 class SmsStatusWebhookTest(TestCase):

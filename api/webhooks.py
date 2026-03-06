@@ -257,6 +257,15 @@ def _handle_inbound_email(
     all_recipient_addresses.extend(cc_emails)
     all_recipient_addresses.extend(bcc_emails)
 
+    unique_recipient_addresses: list[str] = []
+    seen_recipients: set[str] = set()
+    for raw_address in all_recipient_addresses:
+        normalized = (raw_address or "").strip().lower()
+        if not normalized or normalized in seen_recipients:
+            continue
+        seen_recipients.add(normalized)
+        unique_recipient_addresses.append(normalized)
+
     logger.info(
         "Received %s email from %s to %s, CC: %s, BCC: %s: %s",
         provider_label,
@@ -268,8 +277,9 @@ def _handle_inbound_email(
     )
 
     matching_endpoints = []
+    seen_endpoint_ids: set[str] = set()
     with tracer.start_as_current_span("COMM email endpoint lookup") as span:
-        for address in all_recipient_addresses:
+        for address in unique_recipient_addresses:
             try:
                 endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent__user').get(
                     channel=CommsChannel.EMAIL,
@@ -277,6 +287,10 @@ def _handle_inbound_email(
                     owner_agent__is_active=True
                 )
                 if endpoint.owner_agent and endpoint.owner_agent.user:
+                    endpoint_key = str(endpoint.id)
+                    if endpoint_key in seen_endpoint_ids:
+                        continue
+                    seen_endpoint_ids.add(endpoint_key)
                     matching_endpoints.append(endpoint)
                     logger.info(f"Found agent endpoint for address: {address}")
                 else:
@@ -286,6 +300,7 @@ def _handle_inbound_email(
                 continue
 
         span.set_attribute("total_recipients", len(all_recipient_addresses))
+        span.set_attribute("unique_recipients", len(unique_recipient_addresses))
         span.set_attribute("matching_endpoints", len(matching_endpoints))
 
     if not matching_endpoints:
