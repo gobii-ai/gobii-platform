@@ -98,6 +98,59 @@ def _normalize_stripe_object(obj):
     return obj
 
 
+def _sync_active_subscriptions_from_stripe_customer(customer: Customer | None) -> bool:
+    """Refresh locally cached active personal subscriptions from Stripe."""
+    if customer is None or Subscription is None:
+        return False
+
+    _ensure_stripe_ready()
+
+    try:
+        iterator = stripe.Subscription.list(  # type: ignore[attr-defined]
+            customer=customer.id,
+            status="all",
+            limit=100,
+        ).auto_paging_iter()
+    except Exception:
+        logger.warning(
+            "Failed to list Stripe subscriptions while reconciling customer %s",
+            getattr(customer, "id", None),
+            exc_info=True,
+        )
+        return False
+
+    now_ts = int(timezone.now().timestamp())
+    synced_any = False
+
+    for stripe_sub in iterator:
+        sub_data = _normalize_stripe_object(stripe_sub) or {}
+        status = str(sub_data.get("status") or "").strip().lower()
+        if status not in {"active", "trialing"}:
+            continue
+
+        current_period_end = sub_data.get("current_period_end")
+        try:
+            current_period_end_ts = int(current_period_end) if current_period_end is not None else None
+        except (TypeError, ValueError):
+            current_period_end_ts = None
+
+        if current_period_end_ts is not None and current_period_end_ts < now_ts:
+            continue
+
+        try:
+            Subscription.sync_from_stripe_data(stripe_sub)
+            synced_any = True
+        except Exception:
+            logger.warning(
+                "Failed to sync active Stripe subscription %s for customer %s during reconcile",
+                sub_data.get("id"),
+                getattr(customer, "id", None),
+                exc_info=True,
+            )
+
+    return synced_any
+
+
 def sync_subscription_after_direct_update(subscription_payload: Any) -> None:
     """Best-effort sync so local billing state follows successful Stripe writes."""
     if Subscription is None:
@@ -531,7 +584,12 @@ def _subscription_products(sub) -> set[str]:
     return products
 
 
-def get_active_subscription(owner, *, preferred_plan_id: str | None = None) -> Subscription | None:
+def get_active_subscription(
+    owner,
+    *,
+    preferred_plan_id: str | None = None,
+    sync_with_stripe: bool = False,
+) -> Subscription | None:
     """Fetch an active licensed subscription, preferring one that carries the base plan product."""
     with traced("SUBSCRIPTION - Get Active Subscription") as span:
         owner_type = _resolve_owner_type(owner)
@@ -559,6 +617,13 @@ def get_active_subscription(owner, *, preferred_plan_id: str | None = None) -> S
 
         # If you want the one that ends soonest, prefer ordering in Python (simplest & portable):
         subs = list(qs)
+        if not subs and sync_with_stripe and _sync_active_subscriptions_from_stripe_customer(customer):
+            qs = customer.subscriptions.filter(
+                stripe_data__status__in=ACTIVE_STATUSES,
+                stripe_data__current_period_end__gte=now_ts,
+            )
+            subs = list(qs)
+
         subs.sort(key=lambda s: s.stripe_data.get("cancel_at_period_end") or 0)
 
         span.set_attribute("owner.customer.id", str(customer.id))

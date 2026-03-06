@@ -73,6 +73,10 @@ def can_user_use_personal_agents_and_api(user) -> bool:
     allowed = False
     try:
         allowed = get_active_subscription(user) is not None
+        if not allowed:
+            billing = getattr(user, "billing", None)
+            if billing and getattr(billing, "subscription", None) != PlanNames.FREE:
+                allowed = get_active_subscription(user, sync_with_stripe=True) is not None
     except Exception:
         logger.exception(
             "Failed to resolve active personal subscription for user %s while enforcing free-trial access",

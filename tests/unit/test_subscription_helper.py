@@ -24,6 +24,7 @@ from util.subscription_helper import (
     get_users_due_for_monthly_grant,
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
+    get_active_subscription,
     get_subscription_base_price,
 )
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
@@ -500,6 +501,40 @@ class EnsureSingleIndividualSubscriptionTests(TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].get("id"), "sub_match_price")
+
+
+@tag("batch_subscription")
+class GetActiveSubscriptionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="active-subscription@example.com",
+            email="active-subscription@example.com",
+            password="testpass123",
+        )
+
+    @patch("util.subscription_helper._sync_active_subscriptions_from_stripe_customer", return_value=True)
+    @patch("util.subscription_helper.get_stripe_customer")
+    def test_sync_with_stripe_refreshes_missing_local_active_subscription(
+        self,
+        mock_get_customer,
+        mock_sync_customer,
+    ):
+        active_subscription = MagicMock()
+        active_subscription.stripe_data = {"cancel_at_period_end": False}
+
+        customer = MagicMock()
+        customer.id = "cus_live"
+        customer.subscriptions.filter.side_effect = [
+            [],
+            [active_subscription],
+        ]
+        mock_get_customer.return_value = customer
+
+        subscription = get_active_subscription(self.user, sync_with_stripe=True)
+
+        self.assertIs(subscription, active_subscription)
+        mock_sync_customer.assert_called_once_with(customer)
+        self.assertEqual(customer.subscriptions.filter.call_count, 2)
 
     @patch("util.subscription_helper._ensure_stripe_ready")
     @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})

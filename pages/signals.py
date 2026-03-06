@@ -335,6 +335,39 @@ def _coerce_subscription_payload(payload: Mapping[str, Any]) -> Mapping[str, Any
     return payload
 
 
+def _refresh_subscription_when_payload_mismatches_local(sub, payload: Mapping[str, Any]):
+    """Refresh from Stripe when the webhook payload and local row disagree."""
+    payload_id = str(payload.get("id") or "").strip()
+    payload_status = str(payload.get("status") or "").strip().lower()
+    local_status = str(getattr(sub, "status", "") or "").strip().lower()
+
+    if not payload_id or not payload_status or payload_status == local_status:
+        return sub, None
+
+    try:
+        live_subscription = stripe.Subscription.retrieve(
+            payload_id,
+            expand=["items.data.price"],
+        )
+        refreshed_sub = Subscription.sync_from_stripe_data(live_subscription)
+        logger.info(
+            "Refreshed subscription %s from Stripe after local status mismatch (%s -> %s)",
+            payload_id,
+            local_status,
+            payload_status,
+        )
+        return refreshed_sub, live_subscription
+    except Exception:
+        logger.warning(
+            "Failed to refresh subscription %s after local status mismatch (%s -> %s)",
+            payload_id,
+            local_status,
+            payload_status,
+            exc_info=True,
+        )
+        return sub, None
+
+
 def _extract_plan_from_lines(lines: list[Mapping[str, Any]]) -> str | None:
     for line in lines:
         price_info = line.get("price") or {}
@@ -1741,6 +1774,10 @@ def handle_subscription_event(event, **kwargs):
                 # TODO: Consider a more robust fallback or retry mechanism here if needed
                 # For now, re-raising the exception might be acceptable if sync is critical
                 raise
+
+        sub, refreshed_subscription = _refresh_subscription_when_payload_mismatches_local(sub, payload)
+        if refreshed_subscription is not None:
+            stripe_sub = refreshed_subscription
 
         customer: Customer | None = sub.customer
         if not customer:
