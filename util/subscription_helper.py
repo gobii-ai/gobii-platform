@@ -15,7 +15,7 @@ from decimal import Decimal
 from django.utils import timezone
 import logging
 import os
-from typing import Literal, Tuple, Any
+from typing import Literal, Tuple, Any, Mapping
 import uuid
 
 from django.conf import settings
@@ -788,26 +788,25 @@ def user_has_active_subscription(user) -> bool:
     """
     return get_active_subscription(user) is not None
 
-def _resolve_plan_from_subscription(
-    subscription,
+def resolve_plan_from_subscription_data(
+    subscription_data: Mapping[str, Any] | None,
     *,
     owner_type: BillingOwnerType,
-) -> tuple[dict[str, Any] | None, Any | None]:
-    """Resolve plan metadata from a synced active Stripe subscription."""
-    if subscription is None:
-        return None, None
-
-    subscription_data = getattr(subscription, "stripe_data", {}) or {}
-    if not isinstance(subscription_data, dict):
-        return None, None
+) -> tuple[dict[str, Any] | None, Any | None, Mapping[str, Any] | None]:
+    """Resolve plan metadata and the primary licensed item from Stripe subscription data."""
+    if not isinstance(subscription_data, Mapping):
+        return None, None, None
 
     items = ((subscription_data.get("items") or {}).get("data") or [])
-    fallback_product_id = None
+    fallback_item: Mapping[str, Any] | None = None
     plan_kind = "seat" if owner_type == "organization" else "base"
 
     for item in items:
+        if not isinstance(item, Mapping):
+            continue
+
         price = item.get("price") or {}
-        if not isinstance(price, dict):
+        if not isinstance(price, Mapping):
             continue
 
         recurring = price.get("recurring") or {}
@@ -815,12 +814,13 @@ def _resolve_plan_from_subscription(
         if usage_type == "metered":
             continue
 
+        if fallback_item is None:
+            fallback_item = item
+
         price_id = price.get("id") or price.get("price")
         product_id = price.get("product")
-        if isinstance(product_id, dict):
+        if isinstance(product_id, Mapping):
             product_id = product_id.get("id")
-        if fallback_product_id is None and product_id:
-            fallback_product_id = str(product_id)
 
         plan_version = None
         if price_id:
@@ -829,49 +829,55 @@ def _resolve_plan_from_subscription(
             plan_version = get_plan_version_by_product_id(str(product_id), kind=plan_kind)
 
         if plan_version is not None:
-            return get_plan_context_for_version(plan_version), plan_version
+            return get_plan_context_for_version(plan_version), plan_version, item
 
         if product_id:
             plan = get_plan_by_product_id(str(product_id))
             if plan and plan.get("id"):
-                return dict(plan), None
+                return dict(plan), None, item
 
-    if fallback_product_id:
-        plan = get_plan_by_product_id(fallback_product_id)
-        if plan and plan.get("id"):
-            return dict(plan), None
-
-    return None, None
+    return None, None, fallback_item
 
 
-def _maybe_sync_owner_plan_from_active_subscription(owner) -> dict[str, Any] | None:
-    """Repair a stale local plan from Stripe when checkout returns before webhooks settle."""
-    owner_type = _resolve_owner_type(owner)
-    active_subscription = get_active_subscription(owner, sync_with_stripe=True)
+def reconcile_user_plan_from_stripe(user) -> dict[str, int | str]:
+    """Refresh local user billing from Stripe when an active subscription disagrees."""
+    plan = get_user_plan(user)
+    current_plan_id = str((plan or {}).get("id") or "").strip().lower()
+
+    active_subscription = get_active_subscription(user)
+
+    def _resolved_plan_from_subscription(subscription_obj) -> tuple[dict[str, Any] | None, Any | None, str]:
+        subscription_data = getattr(subscription_obj, "stripe_data", {}) or {}
+        plan_payload, plan_version, _licensed_item = resolve_plan_from_subscription_data(
+            subscription_data,
+            owner_type="user",
+        )
+        resolved_plan_id = str((plan_payload or {}).get("id") or "").strip().lower()
+        return plan_payload, plan_version, resolved_plan_id
+
+    if active_subscription is not None:
+        plan_payload, _plan_version, resolved_plan_id = _resolved_plan_from_subscription(active_subscription)
+        if plan_payload and resolved_plan_id == current_plan_id:
+            return plan
+
+    active_subscription = get_active_subscription(user, sync_with_stripe=True)
     if active_subscription is None:
-        return None
+        return plan
 
-    plan_payload, plan_version = _resolve_plan_from_subscription(
-        active_subscription,
-        owner_type=owner_type,
-    )
-    if not plan_payload:
-        return None
+    plan_payload, plan_version, resolved_plan_id = _resolved_plan_from_subscription(active_subscription)
+    if not plan_payload or not resolved_plan_id or resolved_plan_id == current_plan_id:
+        return plan
 
-    plan_id = str(plan_payload.get("id") or "").strip().lower()
-    if not plan_id or plan_id == PlanNames.FREE:
-        return None
-
-    mark_owner_billing_with_plan(
-        owner,
-        plan_id,
+    mark_user_billing_with_plan(
+        user,
+        resolved_plan_id,
         update_anchor=False,
         plan_version=plan_version,
     )
-    return get_owner_plan_context(owner)
+    return get_user_plan(user)
 
 
-def get_owner_plan(owner, *, sync_with_stripe: bool = False) -> dict[str, int | str]:
+def get_owner_plan(owner) -> dict[str, int | str]:
     """Return plan configuration for a user or organization owner."""
     with traced("SUBSCRIPTION Get Owner Plan"):
         owner_type = _resolve_owner_type(owner)
@@ -881,11 +887,6 @@ def get_owner_plan(owner, *, sync_with_stripe: bool = False) -> dict[str, int | 
         try:
             plan_context = get_owner_plan_context(owner)
             if plan_context:
-                plan_id = str(plan_context.get("id") or "").lower()
-                if sync_with_stripe and owner_type == "user" and plan_id == PlanNames.FREE:
-                    synced_plan = _maybe_sync_owner_plan_from_active_subscription(owner)
-                    if synced_plan:
-                        return synced_plan
                 return plan_context
         except Exception:
             logger.warning(
@@ -897,17 +898,10 @@ def get_owner_plan(owner, *, sync_with_stripe: bool = False) -> dict[str, int | 
         billing_record = _get_billing_record(owner)
         sub_name = getattr(billing_record, "subscription", None) if billing_record else None
         sub_key = str(sub_name).lower() if sub_name else PlanNames.FREE
-        plan = PLAN_CONFIG.get(sub_key, PLAN_CONFIG[PlanNames.FREE])
+        return PLAN_CONFIG.get(sub_key, PLAN_CONFIG[PlanNames.FREE])
 
-        if sync_with_stripe and owner_type == "user" and sub_key == PlanNames.FREE:
-            synced_plan = _maybe_sync_owner_plan_from_active_subscription(owner)
-            if synced_plan:
-                return synced_plan
-
-        return plan
-
-def get_user_plan(user, *, sync_with_stripe: bool = False) -> dict[str, int | str]:
-    return get_owner_plan(user, sync_with_stripe=sync_with_stripe)
+def get_user_plan(user) -> dict[str, int | str]:
+    return get_owner_plan(user)
 
 
 def get_user_task_credit_limit(user) -> int:

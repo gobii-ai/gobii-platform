@@ -144,7 +144,7 @@ from util.onboarding import (
 )
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import (
-    get_user_plan,
+    reconcile_user_plan_from_stripe,
     get_active_subscription,
     allow_user_extra_tasks,
     calculate_extra_tasks_used_during_subscription_period,
@@ -324,7 +324,7 @@ def build_llm_intelligence_props(
         if owner_type == 'organization':
             plan = get_organization_plan(organization) if organization is not None else None
         else:
-            plan = get_user_plan(owner)
+            plan = reconcile_user_plan_from_stripe(owner)
 
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
     allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
@@ -507,7 +507,7 @@ def _additional_tasks_metered_price_id_for_owner(owner, owner_type: str) -> str:
     if owner_type == "organization":
         return getattr(stripe_settings, "org_team_additional_task_price_id", "") or ""
 
-    plan_id = str((get_user_plan(owner) or {}).get("id") or "").strip().lower()
+    plan_id = str((reconcile_user_plan_from_stripe(owner) or {}).get("id") or "").strip().lower()
     if plan_id in {PlanNames.STARTUP, "startup"}:
         return getattr(stripe_settings, "startup_additional_task_price_id", "") or ""
     if plan_id in {PlanNames.SCALE, "scale"}:
@@ -968,7 +968,7 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
         )
 
         # Get the user's subscription plan (defaults to 'free' if not set)
-        context['subscription_plan'] = get_user_plan(self.request.user)
+        context['subscription_plan'] = reconcile_user_plan_from_stripe(self.request.user)
 
         # Get number of available tasks
         context['available_tasks'] = TaskCreditService.calculate_available_tasks(self.request.user)
@@ -1685,7 +1685,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 return render(request, self.template_name, context)
 
         # Personal billing fallback
-        subscription_plan = get_user_plan(self.request.user, sync_with_stripe=True)
+        subscription_plan = reconcile_user_plan_from_stripe(self.request.user)
         sub = get_active_subscription(
             self.request.user,
             preferred_plan_id=(subscription_plan or {}).get("id"),
@@ -2096,7 +2096,7 @@ def get_billing_settings(request):
 @tracer.start_as_current_span("Get User Plan")
 def get_user_plan_api(request):
     """Return the user's current subscription plan for frontend use."""
-    from util.subscription_helper import get_user_plan
+    from util.subscription_helper import reconcile_user_plan_from_stripe
     from constants.plans import PlanNames
 
     startup_trial_days, scale_trial_days = _get_checkout_trial_days()
@@ -2104,7 +2104,7 @@ def get_user_plan_api(request):
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
 
     try:
-        plan = get_user_plan(request.user, sync_with_stripe=True)
+        plan = reconcile_user_plan_from_stripe(request.user)
         plan_id = str(plan.get("id", "")).lower() if plan else ""
         # Map internal plan IDs to frontend-friendly values
         plan_map = {
@@ -4886,7 +4886,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if owner_type == 'organization' and organization is not None:
                     plan = get_organization_plan(organization)
                 else:
-                    plan = get_user_plan(owner)
+                    plan = reconcile_user_plan_from_stripe(owner)
             except Exception:
                 plan = None
 
@@ -7171,7 +7171,7 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
                 preferred_channel = 'email'
         context['preferred_channel'] = preferred_channel
 
-        owner_plan = get_user_plan(self.request.user)
+        owner_plan = reconcile_user_plan_from_stripe(self.request.user)
         organization_name = None
         org_has_paid_seats = False
 
@@ -9823,7 +9823,7 @@ def _get_owner_plan_id(owner, owner_type: str) -> str | None:
     if owner_type == "organization":
         plan = get_organization_plan(owner)
     else:
-        plan = get_user_plan(owner)
+        plan = reconcile_user_plan_from_stripe(owner)
     return (plan or {}).get("id")
 
 
@@ -10125,7 +10125,7 @@ def update_addons(request, owner, owner_type):
         )
         if action_url:
             return redirect(action_url)
-        plan_id = (get_user_plan(owner) or {}).get("id") if owner_type == "user" else (get_organization_plan(owner) or {}).get("id")
+        plan_id = (reconcile_user_plan_from_stripe(owner) or {}).get("id") if owner_type == "user" else (get_organization_plan(owner) or {}).get("id")
         task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "task_pack")
         task_price_ids = {opt.price_id for opt in (task_options or []) if getattr(opt, "price_id", None)}
         if task_price_ids & set(desired_quantities.keys()):
@@ -10159,7 +10159,7 @@ def add_dedicated_ip_quantity(request, owner, owner_type):
 
     owner_plan_id = None
     if owner_type == "user":
-        plan = get_user_plan(owner)
+        plan = reconcile_user_plan_from_stripe(owner)
         owner_plan_id = (plan or {}).get("id")
     else:
         billing = getattr(owner, "billing", None)

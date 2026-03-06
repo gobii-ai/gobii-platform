@@ -72,6 +72,7 @@ from util.subscription_helper import (
     _individual_plan_price_ids,
     ensure_single_individual_subscription,
     get_active_subscription,
+    resolve_plan_from_subscription_data,
     mark_owner_billing_with_plan,
     mark_user_billing_with_plan,
     downgrade_owner_to_free_plan,
@@ -2149,50 +2150,16 @@ def handle_subscription_event(event, **kwargs):
                     exc,
                 )
 
-        # Locate the licensed (base plan) item among subscription items (prefer price.usage_type)
-        def _item_usage_type(item: dict) -> str:
-            price = item.get("price") or {}
-            recurring = price.get("recurring") or {}
-            return (
-                price.get("usage_type")
-                or recurring.get("usage_type")
-                or (item.get("plan") or {}).get("usage_type")
-                or ""
-            )
-
-        plan_price_ids, plan_product_ids = _plan_version_primary_ids()
-        plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
-        plan_products |= plan_product_ids
-
+        plan = None
+        plan_version = None
         licensed_item = None
-        fallback_item = None
         try:
-            for item in source_data.get("items", {}).get("data", []) or []:
-                usage_type = _item_usage_type(item).lower()
-                price = item.get("price") or {}
-                price_id = price.get("id") or price.get("price")
-                product = price.get("product")
-                if isinstance(product, Mapping):
-                    product = product.get("id")
-
-                if price_id and str(price_id) in plan_price_ids:
-                    licensed_item = item
-                    break
-
-                if product and str(product) in plan_products:
-                    licensed_item = item
-                    break
-
-                if usage_type == "metered":
-                    continue
-
-                if fallback_item is None:
-                    fallback_item = item
+            plan, plan_version, licensed_item = resolve_plan_from_subscription_data(
+                source_data if isinstance(source_data, Mapping) else None,
+                owner_type=owner_type,
+            )
         except Exception as e:
             logger.warning("Webhook: failed to inspect subscription items for %s: %s", sub.id, e)
-
-        if licensed_item is None and fallback_item is not None:
-            licensed_item = fallback_item
 
         # Proceed when the subscription is active or trialing and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))
@@ -2206,12 +2173,6 @@ def handle_subscription_event(event, **kwargs):
             if isinstance(product_id, Mapping):
                 product_id = product_id.get("id")
 
-            plan_kind = "seat" if owner_type == "organization" else "base"
-            plan_version = get_plan_version_by_price_id(str(price_id), kind=plan_kind) if price_id else None
-            if not plan_version and product_id:
-                plan_version = get_plan_version_by_product_id(str(product_id), kind=plan_kind)
-
-            plan = get_plan_context_for_version(plan_version) if plan_version else None
             if not plan and product_id:
                 plan = get_plan_by_product_id(product_id)
 

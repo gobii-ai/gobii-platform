@@ -38,7 +38,7 @@ from util.subscription_helper import (
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_or_create_stripe_customer,
-    get_user_plan,
+    reconcile_user_plan_from_stripe,
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from util.onboarding import (
@@ -1318,7 +1318,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = return_to
             request.session.modified = True
 
-        plan = get_user_plan(user) or {}
+        plan = reconcile_user_plan_from_stripe(user) or {}
         plan_id = str(plan.get("id") or "").lower()
         if plan_id and plan_id != PlanNames.FREE:
             redirect_path = _pop_post_checkout_redirect(request) or reverse("billing")

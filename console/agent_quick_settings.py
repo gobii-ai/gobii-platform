@@ -2,7 +2,7 @@ from django.conf import settings
 from django.urls import NoReverseMatch, reverse
 
 from constants.plans import PlanNamesChoices
-from util.subscription_helper import get_organization_plan, get_user_plan
+from util.subscription_helper import get_organization_plan, reconcile_user_plan_from_stripe
 
 from console.daily_credit import (
     build_agent_daily_credit_context,
@@ -18,7 +18,7 @@ def build_agent_quick_settings_payload(agent, owner=None) -> dict:
     if agent.organization_id:
         plan_payload = get_organization_plan(agent.organization)
     else:
-        plan_payload = get_user_plan(agent.user)
+        plan_payload = reconcile_user_plan_from_stripe(agent.user)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
     plan_name = plan_payload.get("name") if plan_payload else ""
     is_free_plan = plan_id == PlanNamesChoices.FREE.value

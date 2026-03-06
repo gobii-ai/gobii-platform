@@ -9,7 +9,7 @@ from api.models import OrganizationMembership
 from .context_helpers import build_console_context
 from config import settings
 from util.integrations import stripe_status
-from util.subscription_helper import get_user_plan
+from util.subscription_helper import reconcile_user_plan_from_stripe
 from constants.plans import PlanNames
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,7 @@ class ConsoleContextMixin:
             # Add user's subscription plan for frontend
             # Normalize plan IDs to frontend-friendly values: free, startup, scale
             try:
-                plan = get_user_plan(self.request.user)
+                plan = reconcile_user_plan_from_stripe(self.request.user)
                 plan_id = str(plan.get("id", "")).lower() if plan else ""
                 # Map internal plan IDs to frontend values
                 plan_map = {

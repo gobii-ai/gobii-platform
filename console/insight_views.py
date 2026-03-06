@@ -39,7 +39,7 @@ from config import settings
 from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
 from djstripe.models import Price
-from util.subscription_helper import get_organization_plan, get_user_plan
+from util.subscription_helper import get_organization_plan, reconcile_user_plan_from_stripe
 from api.services.email_verification import has_verified_email
 
 logger = logging.getLogger(__name__)
@@ -166,7 +166,7 @@ def _build_agent_setup_metadata(
             "name": agent.organization.name,
         }
 
-    owner_plan = get_user_plan(request.user)
+    owner_plan = reconcile_user_plan_from_stripe(request.user)
     if agent.organization_id and organization is not None:
         owner_plan = get_organization_plan(organization)
     plan_id = str(owner_plan.get("id", "")).lower() if owner_plan else ""

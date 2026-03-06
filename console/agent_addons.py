@@ -16,7 +16,7 @@ from util.subscription_helper import (
     get_organization_plan,
     get_stripe_customer,
     get_user_max_contacts_per_agent,
-    get_user_plan,
+    reconcile_user_plan_from_stripe,
 )
 
 try:
@@ -404,7 +404,7 @@ def build_agent_addons_payload(
     if agent.organization_id:
         plan_payload = get_organization_plan(agent.organization)
     else:
-        plan_payload = get_user_plan(agent.user, sync_with_stripe=True)
+        plan_payload = reconcile_user_plan_from_stripe(agent.user)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
     plan_name = plan_payload.get("name") if plan_payload else ""
     plan_price = None

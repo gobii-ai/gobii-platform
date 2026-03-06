@@ -20,7 +20,7 @@ from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
 from util.fish_collateral import is_fish_collateral_enabled
 from util.subscription_helper import (
-    get_user_plan,
+    reconcile_user_plan_from_stripe,
     get_user_api_rate_limit,
     get_user_agent_limit,
     get_user_task_credit_limit,
@@ -57,7 +57,7 @@ def sha256_hex(value: str | None) -> str:
 
 def _build_account_info(user):
     # Get the user's plan and subscription details
-    plan = get_user_plan(user)
+    plan = reconcile_user_plan_from_stripe(user)
     agents_unlimited = has_unlimited_agents(user) or ()
 
     paid_plan = plan["id"] != PlanNames.FREE

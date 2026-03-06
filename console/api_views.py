@@ -173,7 +173,11 @@ from api.services.system_settings import (
 )
 from constants.plans import PlanNamesChoices
 from util.integrations import stripe_status
-from util.subscription_helper import get_active_subscription, get_organization_plan, get_user_plan
+from util.subscription_helper import (
+    get_active_subscription,
+    get_organization_plan,
+    reconcile_user_plan_from_stripe,
+)
 from console.role_constants import BILLING_MANAGE_ROLES
 
 
@@ -4997,7 +5001,11 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
     def _resolve_agent_addons_context(request: HttpRequest, agent_id: str):
         agent = resolve_agent_for_request(request, agent_id)
         owner = agent.organization or agent.user
-        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
+        plan_payload = (
+            get_organization_plan(agent.organization)
+            if agent.organization_id
+            else reconcile_user_plan_from_stripe(agent.user)
+        )
         can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
         can_open_billing = _can_open_agent_billing(request, agent)
         return agent, owner, plan_payload, can_manage_billing, can_open_billing
