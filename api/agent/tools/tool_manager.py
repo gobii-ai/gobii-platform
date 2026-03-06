@@ -153,7 +153,7 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_FILE_TOOL_NAME: {
         "definition": get_create_file_tool,
         "executor": execute_create_file,
-        "sandboxed": True,
+        "sandboxed": False,
     },
     CREATE_CSV_TOOL_NAME: {
         "definition": get_create_csv_tool,
@@ -163,12 +163,12 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_create_pdf_tool,
         "executor": execute_create_pdf,
         "skip_auto_substitution": True,  # PDF does its own substitution (data URIs for embedded assets)
-        "sandboxed": True,
+        "sandboxed": False,
     },
     CREATE_CHART_TOOL_NAME: {
         "definition": get_create_chart_tool,
         "executor": execute_create_chart,
-        "sandboxed": True,
+        "sandboxed": False,
     },
     CREATE_IMAGE_TOOL_NAME: {
         "definition": get_create_image_tool,
