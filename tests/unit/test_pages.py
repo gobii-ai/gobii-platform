@@ -955,7 +955,7 @@ class AgentSpawnIntentApiTests(TestCase):
 @tag("batch_pages")
 class CheckoutRedirectTests(TestCase):
     @tag("batch_pages")
-    @patch("pages.views.get_user_plan")
+    @patch("pages.views.reconcile_user_plan_from_stripe")
     @patch("pages.views._prepare_stripe_or_404")
     def test_startup_checkout_skips_paid_users(
         self,
@@ -986,7 +986,7 @@ class CheckoutRedirectTests(TestCase):
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
 
     @tag("batch_pages")
-    @patch("pages.views.get_user_plan")
+    @patch("pages.views.reconcile_user_plan_from_stripe")
     def test_startup_checkout_sets_return_to_param(self, mock_get_user_plan):
         user = get_user_model().objects.create_user(
             email="returnto@test.com",

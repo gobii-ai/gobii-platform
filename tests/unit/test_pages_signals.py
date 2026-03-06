@@ -701,6 +701,38 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
+    def test_subscription_event_refreshes_live_subscription_when_local_status_is_stale(self):
+        payload = _build_event_payload(status="active", billing_reason="subscription_create")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        stale_sub = self._mock_subscription(current_period_day=12, subscriber=fresh_user)
+        stale_sub.status = "incomplete"
+        stale_sub.stripe_data["status"] = "incomplete"
+        stale_sub.stripe_data["billing_reason"] = "subscription_create"
+        stale_sub.billing_reason = "subscription_create"
+
+        refreshed_sub = self._mock_subscription(current_period_day=12, subscriber=fresh_user)
+        refreshed_sub.status = "active"
+        refreshed_sub.stripe_data["status"] = "active"
+        refreshed_sub.stripe_data["billing_reason"] = "subscription_create"
+        refreshed_sub.billing_reason = "subscription_create"
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", side_effect=[stale_sub, refreshed_sub]) as mock_sync, \
+            patch("pages.signals.stripe.Subscription.retrieve", return_value={"id": "sub_123", "status": "active", "items": {"data": payload["items"]["data"]}}) as mock_retrieve, \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.assertEqual(mock_sync.call_count, 2)
+        mock_retrieve.assert_called_once_with("sub_123", expand=["items.data.price"])
+
+    @tag("batch_pages")
     def test_subscription_cycle_emits_renewed_event(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_cycle")

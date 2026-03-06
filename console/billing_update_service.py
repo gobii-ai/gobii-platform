@@ -23,7 +23,7 @@ from util.subscription_helper import (
     get_active_subscription,
     get_or_create_stripe_customer,
     get_organization_plan,
-    get_user_plan,
+    reconcile_user_plan_from_stripe,
     sync_subscription_after_direct_update as _sync_subscription_after_direct_update,
 )
 
@@ -84,7 +84,7 @@ def _get_owner_plan_id(owner, owner_type: str) -> str | None:
     if owner_type == "organization":
         plan = get_organization_plan(owner)
     else:
-        plan = get_user_plan(owner)
+        plan = reconcile_user_plan_from_stripe(owner)
     return (plan or {}).get("id")
 
 

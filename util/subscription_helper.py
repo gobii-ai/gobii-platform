@@ -7,7 +7,7 @@ from django.db.utils import IntegrityError
 from djstripe.models import Customer
 
 from constants.grant_types import GrantTypeChoices
-from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
+from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED, get_plan_by_product_id
 from config.stripe_config import get_stripe_settings
 from constants.plans import LEGACY_PLAN_BY_SLUG, PlanNames
 from datetime import datetime, timedelta, date, time
@@ -15,7 +15,7 @@ from decimal import Decimal
 from django.utils import timezone
 import logging
 import os
-from typing import Literal, Tuple, Any
+from typing import Literal, Tuple, Any, Mapping
 import uuid
 
 from django.conf import settings
@@ -28,8 +28,11 @@ from django.apps import apps
 from dateutil.relativedelta import relativedelta
 from billing.addons import AddonEntitlementService
 from billing.plan_resolver import (
+    get_plan_context_for_version,
     get_owner_plan_context,
     get_plan_version_by_legacy_code,
+    get_plan_version_by_price_id,
+    get_plan_version_by_product_id,
 )
 from billing.services import BillingService
 
@@ -96,6 +99,59 @@ def _normalize_stripe_object(obj):
         except Exception:
             logger.debug("Failed to normalize Stripe object; returning raw", exc_info=True)
     return obj
+
+
+def _sync_active_subscriptions_from_stripe_customer(customer: Customer | None) -> bool:
+    """Refresh locally cached active personal subscriptions from Stripe."""
+    if customer is None or Subscription is None:
+        return False
+
+    _ensure_stripe_ready()
+
+    try:
+        iterator = stripe.Subscription.list(  # type: ignore[attr-defined]
+            customer=customer.id,
+            status="all",
+            limit=100,
+        ).auto_paging_iter()
+    except Exception:
+        logger.warning(
+            "Failed to list Stripe subscriptions while reconciling customer %s",
+            getattr(customer, "id", None),
+            exc_info=True,
+        )
+        return False
+
+    now_ts = int(timezone.now().timestamp())
+    synced_any = False
+
+    for stripe_sub in iterator:
+        sub_data = _normalize_stripe_object(stripe_sub) or {}
+        status = str(sub_data.get("status") or "").strip().lower()
+        if status not in {"active", "trialing"}:
+            continue
+
+        current_period_end = sub_data.get("current_period_end")
+        try:
+            current_period_end_ts = int(current_period_end) if current_period_end is not None else None
+        except (TypeError, ValueError):
+            current_period_end_ts = None
+
+        if current_period_end_ts is not None and current_period_end_ts < now_ts:
+            continue
+
+        try:
+            Subscription.sync_from_stripe_data(stripe_sub)
+            synced_any = True
+        except Exception:
+            logger.warning(
+                "Failed to sync active Stripe subscription %s for customer %s during reconcile",
+                sub_data.get("id"),
+                getattr(customer, "id", None),
+                exc_info=True,
+            )
+
+    return synced_any
 
 
 def sync_subscription_after_direct_update(subscription_payload: Any) -> None:
@@ -531,7 +587,12 @@ def _subscription_products(sub) -> set[str]:
     return products
 
 
-def get_active_subscription(owner, *, preferred_plan_id: str | None = None) -> Subscription | None:
+def get_active_subscription(
+    owner,
+    *,
+    preferred_plan_id: str | None = None,
+    sync_with_stripe: bool = False,
+) -> Subscription | None:
     """Fetch an active licensed subscription, preferring one that carries the base plan product."""
     with traced("SUBSCRIPTION - Get Active Subscription") as span:
         owner_type = _resolve_owner_type(owner)
@@ -559,6 +620,13 @@ def get_active_subscription(owner, *, preferred_plan_id: str | None = None) -> S
 
         # If you want the one that ends soonest, prefer ordering in Python (simplest & portable):
         subs = list(qs)
+        if not subs and sync_with_stripe and _sync_active_subscriptions_from_stripe_customer(customer):
+            qs = customer.subscriptions.filter(
+                stripe_data__status__in=ACTIVE_STATUSES,
+                stripe_data__current_period_end__gte=now_ts,
+            )
+            subs = list(qs)
+
         subs.sort(key=lambda s: s.stripe_data.get("cancel_at_period_end") or 0)
 
         span.set_attribute("owner.customer.id", str(customer.id))
@@ -719,6 +787,95 @@ def user_has_active_subscription(user) -> bool:
         bool: True if the user has an active subscription, otherwise False.
     """
     return get_active_subscription(user) is not None
+
+def resolve_plan_from_subscription_data(
+    subscription_data: Mapping[str, Any] | None,
+    *,
+    owner_type: BillingOwnerType,
+) -> tuple[dict[str, Any] | None, Any | None, Mapping[str, Any] | None]:
+    """Resolve plan metadata and the primary licensed item from Stripe subscription data."""
+    if not isinstance(subscription_data, Mapping):
+        return None, None, None
+
+    items = ((subscription_data.get("items") or {}).get("data") or [])
+    fallback_item: Mapping[str, Any] | None = None
+    plan_kind = "seat" if owner_type == "organization" else "base"
+
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+
+        price = item.get("price") or {}
+        if not isinstance(price, Mapping):
+            continue
+
+        recurring = price.get("recurring") or {}
+        usage_type = str(price.get("usage_type") or recurring.get("usage_type") or "").strip().lower()
+        if usage_type == "metered":
+            continue
+
+        if fallback_item is None:
+            fallback_item = item
+
+        price_id = price.get("id") or price.get("price")
+        product_id = price.get("product")
+        if isinstance(product_id, Mapping):
+            product_id = product_id.get("id")
+
+        plan_version = None
+        if price_id:
+            plan_version = get_plan_version_by_price_id(str(price_id), kind=plan_kind)
+        if plan_version is None and product_id:
+            plan_version = get_plan_version_by_product_id(str(product_id), kind=plan_kind)
+
+        if plan_version is not None:
+            return get_plan_context_for_version(plan_version), plan_version, item
+
+        if product_id:
+            plan = get_plan_by_product_id(str(product_id))
+            if plan and plan.get("id"):
+                return dict(plan), None, item
+
+    return None, None, fallback_item
+
+
+def reconcile_user_plan_from_stripe(user) -> dict[str, int | str]:
+    """Refresh local user billing from Stripe when an active subscription disagrees."""
+    plan = get_user_plan(user)
+    current_plan_id = str((plan or {}).get("id") or "").strip().lower()
+
+    active_subscription = get_active_subscription(user)
+
+    def _resolved_plan_from_subscription(subscription_obj) -> tuple[dict[str, Any] | None, Any | None, str]:
+        subscription_data = getattr(subscription_obj, "stripe_data", {}) or {}
+        plan_payload, plan_version, _licensed_item = resolve_plan_from_subscription_data(
+            subscription_data,
+            owner_type="user",
+        )
+        resolved_plan_id = str((plan_payload or {}).get("id") or "").strip().lower()
+        return plan_payload, plan_version, resolved_plan_id
+
+    if active_subscription is not None:
+        plan_payload, _plan_version, resolved_plan_id = _resolved_plan_from_subscription(active_subscription)
+        if plan_payload and resolved_plan_id == current_plan_id:
+            return plan
+
+    active_subscription = get_active_subscription(user, sync_with_stripe=True)
+    if active_subscription is None:
+        return plan
+
+    plan_payload, plan_version, resolved_plan_id = _resolved_plan_from_subscription(active_subscription)
+    if not plan_payload or not resolved_plan_id or resolved_plan_id == current_plan_id:
+        return plan
+
+    mark_user_billing_with_plan(
+        user,
+        resolved_plan_id,
+        update_anchor=False,
+        plan_version=plan_version,
+    )
+    return get_user_plan(user)
+
 
 def get_owner_plan(owner) -> dict[str, int | str]:
     """Return plan configuration for a user or organization owner."""
