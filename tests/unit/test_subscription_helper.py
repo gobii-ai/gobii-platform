@@ -378,6 +378,52 @@ class EnsureSingleIndividualSubscriptionTests(TestCase):
     @patch("util.subscription_helper.stripe.Subscription.delete")
     @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
     @patch("util.subscription_helper.get_existing_individual_subscriptions")
+    def test_updates_existing_trialing_subscription_can_end_trial_immediately(
+        self,
+        mock_existing,
+        _mock_plan_products,
+        mock_delete,
+        mock_modify,
+        _mock_ready,
+    ):
+        mock_existing.return_value = [
+            {
+                "id": "sub_trialing",
+                "status": "trialing",
+                "items": {
+                    "data": [
+                        {
+                            "id": "si_base",
+                            "quantity": 1,
+                            "price": {
+                                "id": "price_old",
+                                "product": "prod_plan",
+                                "usage_type": "licensed",
+                            },
+                        },
+                    ]
+                },
+            }
+        ]
+
+        mock_modify.return_value = {"id": "sub_trialing"}
+
+        ensure_single_individual_subscription(
+            "cus_trialing",
+            licensed_price_id="price_scale",
+            idempotency_key="idem-end-trial",
+            end_trial_now=True,
+        )
+
+        mock_delete.assert_not_called()
+        mock_modify.assert_called_once()
+        self.assertEqual(mock_modify.call_args.kwargs.get("trial_end"), "now")
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper.stripe.Subscription.modify")
+    @patch("util.subscription_helper.stripe.Subscription.delete")
+    @patch("util.subscription_helper._individual_plan_product_ids", return_value={"prod_plan"})
+    @patch("util.subscription_helper.get_existing_individual_subscriptions")
     def test_cancels_duplicates_and_updates_newest(
         self,
         mock_existing,

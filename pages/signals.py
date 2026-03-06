@@ -203,6 +203,60 @@ def _trial_paid_period_end(trial_end_dt: datetime | None, current_period_end_dt:
         return base + timedelta(days=30)
 
 
+def _active_plan_credit_queryset(
+    *,
+    owner,
+    as_of: datetime,
+    plan_id: str | None = None,
+    free_trial_start: bool | None = None,
+):
+    TaskCredit = apps.get_model("api", "TaskCredit")
+    UserModel = get_user_model()
+    filters = {
+        "grant_type": GrantTypeChoices.PLAN,
+        "additional_task": False,
+        "voided": False,
+        "granted_date__lte": as_of,
+        "expiration_date__gte": as_of,
+    }
+    if plan_id:
+        filters["plan"] = plan_id
+    if free_trial_start is not None:
+        filters["free_trial_start"] = free_trial_start
+    if isinstance(owner, UserModel):
+        filters["user"] = owner
+    else:
+        filters["organization"] = owner
+    return TaskCredit.objects.filter(**filters)
+
+
+def _owner_has_active_trial_start_credit(*, owner, as_of: datetime) -> bool:
+    return _active_plan_credit_queryset(
+        owner=owner,
+        as_of=as_of,
+        free_trial_start=True,
+    ).exists()
+
+
+def _owner_remaining_plan_credits(
+    *,
+    owner,
+    as_of: datetime,
+    plan_id: str | None = None,
+    free_trial_start: bool | None = None,
+) -> Decimal:
+    remaining = Decimal(0)
+    credits = _active_plan_credit_queryset(
+        owner=owner,
+        as_of=as_of,
+        plan_id=plan_id,
+        free_trial_start=free_trial_start,
+    )
+    for credit in credits:
+        remaining += (credit.credits or 0) - (credit.credits_used or 0)
+    return remaining
+
+
 def _trial_topoff_amount(
     *,
     owner,
@@ -210,6 +264,17 @@ def _trial_topoff_amount(
     monthly_credits: int,
     as_of: datetime,
 ) -> Decimal:
+    # Trial-start grants remain active into the first paid period. When a user
+    # upgrades during trial, conversion should top them up to the paid plan
+    # total instead of stacking a second full block on top of trial leftovers.
+    if _owner_has_active_trial_start_credit(owner=owner, as_of=as_of):
+        remaining_trial_credits = _owner_remaining_plan_credits(
+            owner=owner,
+            as_of=as_of,
+            free_trial_start=True,
+        )
+        return Decimal(monthly_credits) - remaining_trial_credits
+
     return _owner_plan_topoff_amount(
         owner=owner,
         monthly_credits=monthly_credits,
@@ -225,25 +290,11 @@ def _owner_plan_topoff_amount(
     as_of: datetime,
     plan_id: str | None = None,
 ) -> Decimal:
-    TaskCredit = apps.get_model("api", "TaskCredit")
-    UserModel = get_user_model()
-    remaining = Decimal(0)
-    filters = {
-        "grant_type": GrantTypeChoices.PLAN,
-        "additional_task": False,
-        "voided": False,
-        "granted_date__lte": as_of,
-        "expiration_date__gte": as_of,
-    }
-    if plan_id:
-        filters["plan"] = plan_id
-    if isinstance(owner, UserModel):
-        filters["user"] = owner
-    else:
-        filters["organization"] = owner
-    credits = TaskCredit.objects.filter(**filters)
-    for credit in credits:
-        remaining += (credit.credits or 0) - (credit.credits_used or 0)
+    remaining = _owner_remaining_plan_credits(
+        owner=owner,
+        as_of=as_of,
+        plan_id=plan_id,
+    )
     return Decimal(monthly_credits) - remaining
 
 
@@ -2221,10 +2272,11 @@ def handle_subscription_event(event, **kwargs):
                     and bool(prior_plan_value)
                     and prior_plan_value != plan_value
                 )
+                paid_plan_change_for_user = plan_changed_for_user and sub.status != "trialing"
                 should_grant = billing_reason in {"subscription_create", "subscription_cycle"}
                 if billing_reason is None and event_type == "customer.subscription.created":
                     should_grant = True
-                if plan_changed_for_user:
+                if paid_plan_change_for_user:
                     should_grant = True
                 trial_conversion = False
                 if sub.status == "active" and trial_end_dt and current_period_start_dt:
@@ -2276,7 +2328,7 @@ def handle_subscription_event(event, **kwargs):
                                     )
                                     grant_invoice_id = f"trial-topoff:{subscription_id}:{anchor}"
                                 expiration_override = current_period_end_dt
-                    elif plan_changed_for_user:
+                    elif paid_plan_change_for_user:
                         monthly_credits = None
                         if isinstance(plan, Mapping):
                             try:

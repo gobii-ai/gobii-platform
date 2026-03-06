@@ -1417,6 +1417,7 @@ class MarketingMetaTests(TestCase):
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
         ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertTrue(ensure_kwargs.get("end_trial_now"))
         self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()
 
@@ -1509,5 +1510,6 @@ class SubscriptionPriceParsingTests(TestCase):
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
         ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("end_trial_now", ensure_kwargs)
         self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()

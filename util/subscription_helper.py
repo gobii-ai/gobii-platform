@@ -278,6 +278,7 @@ def ensure_single_individual_subscription(
     *,
     licensed_price_id: str,
     metered_price_id: str | None = None,
+    end_trial_now: bool = False,
     metadata: dict[str, Any] | None = None,
     idempotency_key: str | None = None,
     create_if_missing: bool = True,
@@ -426,13 +427,19 @@ def ensure_single_individual_subscription(
     sub_id = newest.get("id")
     if not sub_id:
         raise ValueError(f"Subscription missing ID: {newest}")
+    modify_kwargs: dict[str, Any] = {
+        "items": updated_items,
+        "idempotency_key": idempotency_token,
+        "expand": ["items.data.price"],
+        "proration_behavior": "always_invoice",
+        "payment_behavior": "pending_if_incomplete",
+    }
+    if end_trial_now and str(newest.get("status") or "").strip().lower() == "trialing":
+        modify_kwargs["trial_end"] = "now"
+
     updated_sub = stripe.Subscription.modify(  # type: ignore[attr-defined]
         sub_id,
-        items=updated_items,
-        idempotency_key=idempotency_token,
-        expand=["items.data.price"],
-        proration_behavior="always_invoice",
-        payment_behavior="pending_if_incomplete",
+        **modify_kwargs,
     )
 
     if metadata and merged_metadata != existing_metadata:

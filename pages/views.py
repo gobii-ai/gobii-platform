@@ -1542,7 +1542,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
-        _, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
+        has_target_price, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
 
         if existing_subs:
             try:
@@ -1553,6 +1553,8 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                     "idempotency_key": f"scale-individual-upgrade-{customer.id}-{event_id}",
                     "create_if_missing": False,
                 }
+                if not has_target_price:
+                    ensure_kwargs["end_trial_now"] = True
                 if additional_price_id:
                     ensure_kwargs["metered_price_id"] = additional_price_id
                 subscription, action = ensure_single_individual_subscription(**ensure_kwargs)
