@@ -257,6 +257,15 @@ def _handle_inbound_email(
     all_recipient_addresses.extend(cc_emails)
     all_recipient_addresses.extend(bcc_emails)
 
+    unique_recipient_addresses: list[str] = []
+    seen_recipients: set[str] = set()
+    for raw_address in all_recipient_addresses:
+        normalized = (raw_address or "").strip().lower()
+        if not normalized or normalized in seen_recipients:
+            continue
+        seen_recipients.add(normalized)
+        unique_recipient_addresses.append(normalized)
+
     logger.info(
         "Received %s email from %s to %s, CC: %s, BCC: %s: %s",
         provider_label,
@@ -269,23 +278,27 @@ def _handle_inbound_email(
 
     matching_endpoints = []
     with tracer.start_as_current_span("COMM email endpoint lookup") as span:
-        for address in all_recipient_addresses:
-            try:
-                endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent__user').get(
-                    channel=CommsChannel.EMAIL,
-                    address__iexact=address,
-                    owner_agent__is_active=True
-                )
-                if endpoint.owner_agent and endpoint.owner_agent.user:
-                    matching_endpoints.append(endpoint)
-                    logger.info(f"Found agent endpoint for address: {address}")
-                else:
-                    logger.warning(f"Endpoint {address} is not associated with a usable agent/user.")
-            except PersistentAgentCommsEndpoint.DoesNotExist:
+        endpoints_by_address = {
+            endpoint.address: endpoint
+            for endpoint in PersistentAgentCommsEndpoint.objects.select_related("owner_agent__user").filter(
+                channel=CommsChannel.EMAIL,
+                address__in=unique_recipient_addresses,
+                owner_agent__is_active=True,
+            )
+        }
+        for address in unique_recipient_addresses:
+            endpoint = endpoints_by_address.get(address)
+            if endpoint is None:
                 logger.debug(f"No agent endpoint found for address: {address}")
                 continue
+            if endpoint.owner_agent and endpoint.owner_agent.user:
+                matching_endpoints.append(endpoint)
+                logger.info(f"Found agent endpoint for address: {address}")
+            else:
+                logger.warning(f"Endpoint {address} is not associated with a usable agent/user.")
 
         span.set_attribute("total_recipients", len(all_recipient_addresses))
+        span.set_attribute("unique_recipients", len(unique_recipient_addresses))
         span.set_attribute("matching_endpoints", len(matching_endpoints))
 
     if not matching_endpoints:
