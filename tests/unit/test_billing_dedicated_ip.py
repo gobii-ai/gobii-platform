@@ -36,7 +36,7 @@ class DedicatedIpBillingTests(TestCase):
             patch("console.views.DedicatedProxyService.release_for_owner"),
             patch("console.views.DedicatedProxyService.release_specific", return_value=True),
             patch("console.views.DedicatedProxyService.allocated_count", return_value=allocated_count),
-            patch("console.views.get_user_plan", return_value={"id": PlanNamesChoices.STARTUP.value}),
+            patch("console.views.reconcile_user_plan_from_stripe", return_value={"id": PlanNamesChoices.STARTUP.value}),
             # Views import this function inside the handler; patch the source module so
             # the imported reference is our stub.
             patch("console.billing_update_service.apply_dedicated_ip_changes", return_value=None),

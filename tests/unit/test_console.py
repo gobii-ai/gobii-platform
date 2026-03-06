@@ -1155,7 +1155,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         with patch("console.api_views._can_manage_contact_packs", return_value=True), \
-             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
              patch("console.agent_addons.get_active_subscription", return_value=None), \
              patch("console.agent_addons.get_stripe_customer", return_value=customer), \
              patch(
@@ -1228,7 +1228,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         with patch("console.api_views._can_manage_contact_packs", return_value=True), \
-             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
              patch("console.agent_addons.get_active_subscription", return_value=None), \
              patch("console.agent_addons.get_stripe_customer", return_value=customer), \
              patch(
@@ -1299,7 +1299,7 @@ class ConsoleViewsTest(TestCase):
         )
 
         with patch("console.api_views._can_manage_contact_packs", return_value=True), \
-             patch("console.agent_addons.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
              patch("console.agent_addons.get_active_subscription", return_value=None), \
              patch("console.agent_addons.get_stripe_customer", return_value=customer), \
              patch(
@@ -1472,9 +1472,9 @@ class ConsoleViewsTest(TestCase):
         # Make this deterministic in CI: force proprietary mode + free plan + max tier == STANDARD.
         import console.views as console_views
         with patch.object(console_views.settings, "GOBII_PROPRIETARY_MODE", True), \
-             patch("console.views.get_user_plan", return_value=PLAN_CONFIG["free"]), \
+             patch("console.views.reconcile_user_plan_from_stripe", return_value=PLAN_CONFIG["free"]), \
              patch("console.views.max_allowed_tier_for_plan", return_value=AgentLLMTier.STANDARD), \
-             patch("util.subscription_helper.get_user_plan", return_value=PLAN_CONFIG["free"]):
+             patch("util.subscription_helper.reconcile_user_plan_from_stripe", return_value=PLAN_CONFIG["free"]):
             response = self.client.post(
                 url,
                 {

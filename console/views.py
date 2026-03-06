@@ -2096,7 +2096,6 @@ def get_billing_settings(request):
 @tracer.start_as_current_span("Get User Plan")
 def get_user_plan_api(request):
     """Return the user's current subscription plan for frontend use."""
-    from util.subscription_helper import reconcile_user_plan_from_stripe
     from constants.plans import PlanNames
 
     startup_trial_days, scale_trial_days = _get_checkout_trial_days()
