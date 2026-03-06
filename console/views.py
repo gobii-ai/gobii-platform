@@ -458,6 +458,7 @@ from constants.feature_flags import (
 from constants.grant_types import GrantTypeChoices
 from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
 from constants.stripe import (
+    CHECKOUT_PAYMENT_METHOD_TYPES,
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
@@ -8657,6 +8658,7 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 mode="subscription",
                 success_url=success_url,
                 cancel_url=cancel_url,
+                payment_method_types=CHECKOUT_PAYMENT_METHOD_TYPES,
                 allow_promotion_codes=True,
                 line_items=line_items,
                 metadata={
@@ -9931,6 +9933,7 @@ def _start_addon_checkout_session(customer_id: str, price_id: str, quantity: int
         success_url=success_url,
         cancel_url=cancel_url,
         mode="subscription",
+        payment_method_types=CHECKOUT_PAYMENT_METHOD_TYPES,
         allow_promotion_codes=True,
         line_items=[
             {

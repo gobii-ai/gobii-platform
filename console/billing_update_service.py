@@ -14,6 +14,7 @@ from billing.addons import AddonEntitlementService
 from billing.services import BillingService
 from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
+from constants.stripe import CHECKOUT_PAYMENT_METHOD_TYPES
 from console.context_helpers import build_console_context
 from console.role_constants import BILLING_MANAGE_ROLES
 from util.integrations import stripe_status
@@ -524,6 +525,7 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                         mode="subscription",
                         success_url=success_url,
                         cancel_url=cancel_url,
+                        payment_method_types=CHECKOUT_PAYMENT_METHOD_TYPES,
                         allow_promotion_codes=True,
                         line_items=[{"price": seat_price_id, "quantity": seats_target_int}],
                         metadata={
