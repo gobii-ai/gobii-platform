@@ -99,6 +99,20 @@ def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     return price_id, usage_type.lower()
 
 
+def _get_product_id_from_item(item: dict) -> str | None:
+    """Extract product ID from a subscription item price payload."""
+    price_data = item.get("price")
+    if not isinstance(price_data, dict):
+        return None
+
+    product = price_data.get("product")
+    if isinstance(product, dict):
+        return product.get("id")
+    if isinstance(product, str):
+        return product
+    return None
+
+
 def _subscription_contains_price(sub: dict, target_price_id: str) -> bool:
     """Return True when a subscription dict includes the target licensed price."""
     items = (sub.get("items") or {}).get("data") or []
@@ -107,6 +121,17 @@ def _subscription_contains_price(sub: dict, target_price_id: str) -> bool:
 
         # Only treat licensed/base items as a match; metered add-ons share the product.
         if price_id == target_price_id and usage_type != "metered":
+            return True
+    return False
+
+
+def _subscription_contains_product(sub: dict, target_product_id: str) -> bool:
+    """Return True when a subscription dict includes the target licensed product."""
+    items = (sub.get("items") or {}).get("data") or []
+    for item in items:
+        _, usage_type = _get_price_info_from_item(item)
+        product_id = _get_product_id_from_item(item)
+        if product_id == target_product_id and usage_type != "metered":
             return True
     return False
 
@@ -1543,6 +1568,16 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         )
 
         has_target_price, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
+        scale_product_id = getattr(stripe_settings, "scale_product_id", "") or ""
+        startup_product_id = getattr(stripe_settings, "startup_product_id", "") or ""
+        has_scale_plan = has_target_price or (
+            bool(scale_product_id)
+            and any(_subscription_contains_product(sub, scale_product_id) for sub in existing_subs)
+        )
+        has_startup_plan = bool(startup_product_id) and any(
+            _subscription_contains_product(sub, startup_product_id)
+            for sub in existing_subs
+        )
 
         if existing_subs:
             try:
@@ -1553,7 +1588,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                     "idempotency_key": f"scale-individual-upgrade-{customer.id}-{event_id}",
                     "create_if_missing": False,
                 }
-                if not has_target_price:
+                if has_startup_plan and not has_scale_plan:
                     ensure_kwargs["end_trial_now"] = True
                 if additional_price_id:
                     ensure_kwargs["metered_price_id"] = additional_price_id

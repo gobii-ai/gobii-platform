@@ -1391,6 +1391,8 @@ class MarketingMetaTests(TestCase):
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",
             scale_additional_task_price_id="price_scale_meter",
+            scale_product_id="prod_scale",
+            startup_product_id="prod_startup",
         )
         mock_customer.return_value = SimpleNamespace(id="cus_scale")
         mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
@@ -1400,7 +1402,7 @@ class MarketingMetaTests(TestCase):
         mock_existing_subs.return_value = [
             {
                 "id": "sub_startup",
-                "items": {"data": [{"price": {"id": "price_startup", "usage_type": "licensed"}}]},
+                "items": {"data": [{"price": {"id": "price_startup", "product": "prod_startup", "usage_type": "licensed"}}]},
             }
         ]
 
@@ -1484,6 +1486,8 @@ class SubscriptionPriceParsingTests(TestCase):
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",
             scale_additional_task_price_id=None,
+            scale_product_id="prod_scale",
+            startup_product_id="prod_startup",
         )
         mock_customer.return_value = SimpleNamespace(id="cus_scale")
         mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
@@ -1493,7 +1497,7 @@ class SubscriptionPriceParsingTests(TestCase):
         mock_existing_subs.return_value = [
             {
                 "id": "sub_scale",
-                "items": {"data": [{"price": {"id": "price_scale", "usage_type": "licensed"}}]},
+                "items": {"data": [{"price": {"id": "price_scale_legacy", "product": "prod_scale", "usage_type": "licensed"}}]},
             }
         ]
 
