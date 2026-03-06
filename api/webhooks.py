@@ -277,27 +277,25 @@ def _handle_inbound_email(
     )
 
     matching_endpoints = []
-    seen_endpoint_ids: set[str] = set()
     with tracer.start_as_current_span("COMM email endpoint lookup") as span:
+        endpoints_by_address = {
+            endpoint.address: endpoint
+            for endpoint in PersistentAgentCommsEndpoint.objects.select_related("owner_agent__user").filter(
+                channel=CommsChannel.EMAIL,
+                address__in=unique_recipient_addresses,
+                owner_agent__is_active=True,
+            )
+        }
         for address in unique_recipient_addresses:
-            try:
-                endpoint = PersistentAgentCommsEndpoint.objects.select_related('owner_agent__user').get(
-                    channel=CommsChannel.EMAIL,
-                    address__iexact=address,
-                    owner_agent__is_active=True
-                )
-                if endpoint.owner_agent and endpoint.owner_agent.user:
-                    endpoint_key = str(endpoint.id)
-                    if endpoint_key in seen_endpoint_ids:
-                        continue
-                    seen_endpoint_ids.add(endpoint_key)
-                    matching_endpoints.append(endpoint)
-                    logger.info(f"Found agent endpoint for address: {address}")
-                else:
-                    logger.warning(f"Endpoint {address} is not associated with a usable agent/user.")
-            except PersistentAgentCommsEndpoint.DoesNotExist:
+            endpoint = endpoints_by_address.get(address)
+            if endpoint is None:
                 logger.debug(f"No agent endpoint found for address: {address}")
                 continue
+            if endpoint.owner_agent and endpoint.owner_agent.user:
+                matching_endpoints.append(endpoint)
+                logger.info(f"Found agent endpoint for address: {address}")
+            else:
+                logger.warning(f"Endpoint {address} is not associated with a usable agent/user.")
 
         span.set_attribute("total_recipients", len(all_recipient_addresses))
         span.set_attribute("unique_recipients", len(unique_recipient_addresses))
