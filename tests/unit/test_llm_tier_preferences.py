@@ -111,11 +111,10 @@ class SystemDefaultTierTests(TestCase):
         resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
         self.assertEqual(resolved, AgentLLMTier.MAX)
 
-    def test_startup_name_only_plan_is_treated_as_paid(self):
-        self.assertTrue(_plan_supports_paid_tiers({"name": PlanNames.STARTUP}))
-
-    def test_org_team_name_only_plan_is_treated_as_paid(self):
-        self.assertTrue(_plan_supports_paid_tiers({"name": PlanNames.ORG_TEAM}))
+    def test_name_only_plans_are_treated_as_paid(self):
+        for plan_name in (PlanNames.STARTUP, PlanNames.ORG_TEAM):
+            with self.subTest(plan_name=plan_name):
+                self.assertTrue(_plan_supports_paid_tiers({"name": plan_name}))
 
     def test_name_only_paid_plans_do_not_clamp_requested_tier_to_standard(self):
         for plan_name in (PlanNames.STARTUP, PlanNames.ORG_TEAM):
