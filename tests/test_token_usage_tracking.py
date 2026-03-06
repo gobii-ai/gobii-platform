@@ -17,6 +17,7 @@ from api.agent.core.budget import BudgetContext, set_current_context
 from api.agent.core.event_processing import _completion_with_failover
 from api.agent.core.compaction import llm_summarise_comms
 from api.agent.core.token_usage import log_agent_completion
+from api.agent.tasks.agent_avatar import _generate_visual_description_via_llm as generate_visual_desc_via_llm
 from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_llm
 from api.agent.tasks.short_description import _generate_via_llm as generate_short_desc_via_llm
 from api.agent.tasks.mini_description import _generate_via_llm as generate_mini_desc_via_llm
@@ -424,6 +425,81 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(completion.prompt_tokens, 4)
         self.assertEqual(completion.completion_tokens, 2)
+
+    @patch("api.agent.core.token_usage.litellm.get_model_info")
+    def test_profile_completion_logs_cost_with_provider_hint(self, mock_get_model_info):
+        def _pricing_for_provider_hint(model, custom_llm_provider=None):
+            if custom_llm_provider != "provider-key":
+                return None
+            return {
+                "input_cost_per_token": 0.000002,
+                "cache_read_input_token_cost": 0.000001,
+                "output_cost_per_token": 0.000004,
+            }
+
+        mock_get_model_info.side_effect = _pricing_for_provider_hint
+        test_cases = [
+            {
+                "name": "tag",
+                "completion_type": PersistentAgentCompletion.CompletionType.TAG,
+                "config_patch_path": "api.agent.tasks.agent_tags.get_summarization_llm_config",
+                "run_patch_path": "api.agent.tasks.agent_tags.run_completion",
+                "generator": generate_tags_via_llm,
+                "content": '["Alpha","Beta"]',
+                "expected_result": ["Alpha", "Beta"],
+            },
+            {
+                "name": "short_description",
+                "completion_type": PersistentAgentCompletion.CompletionType.SHORT_DESCRIPTION,
+                "config_patch_path": "api.agent.tasks.short_description.get_summarization_llm_config",
+                "run_patch_path": "api.agent.tasks.short_description.run_completion",
+                "generator": generate_short_desc_via_llm,
+                "content": "Short summary",
+                "expected_result": "Short summary",
+            },
+            {
+                "name": "mini_description",
+                "completion_type": PersistentAgentCompletion.CompletionType.MINI_DESCRIPTION,
+                "config_patch_path": "api.agent.tasks.mini_description.get_summarization_llm_config",
+                "run_patch_path": "api.agent.tasks.mini_description.run_completion",
+                "generator": generate_mini_desc_via_llm,
+                "content": "Mini label",
+                "expected_result": "Mini label",
+            },
+            {
+                "name": "visual_description",
+                "completion_type": PersistentAgentCompletion.CompletionType.AVATAR_VISUAL_DESCRIPTION,
+                "config_patch_path": "api.agent.tasks.agent_avatar.get_summarization_llm_config",
+                "run_patch_path": "api.agent.tasks.agent_avatar.run_completion",
+                "generator": generate_visual_desc_via_llm,
+                "content": "A thoughtful person with steady eye contact.",
+                "expected_result": "A thoughtful person with steady eye contact.",
+            },
+        ]
+
+        for case in test_cases:
+            with self.subTest(case=case["name"]):
+                with patch(case["config_patch_path"]) as mock_config, patch(
+                    case["run_patch_path"]
+                ) as mock_run_completion:
+                    mock_config.return_value = ("provider-key", "gpt-4o-mini", {})
+                    mock_run_completion.return_value = make_completion_response(
+                        content=case["content"],
+                        prompt_tokens=10,
+                        completion_tokens=5,
+                        cached_tokens=2,
+                        model="gpt-4o-mini",
+                    )
+
+                    result = case["generator"](self.agent, self.agent.charter)
+
+                self.assertEqual(result, case["expected_result"])
+                completion = PersistentAgentCompletion.objects.filter(
+                    agent=self.agent,
+                    completion_type=case["completion_type"],
+                ).latest("created_at")
+                self.assertEqual(completion.llm_provider, "provider-key")
+                self.assertEqual(completion.total_cost, Decimal("0.000038"))
 
     def test_log_agent_completion_uses_eval_run_from_budget_context(self):
         ctx = BudgetContext(

@@ -89,7 +89,7 @@ def _generate_visual_description_via_llm(
     routing_profile: Any = None,
 ) -> str:
     try:
-        _provider, model, params = get_summarization_llm_config(
+        provider, model, params = get_summarization_llm_config(
             agent=agent,
             routing_profile=routing_profile,
         )
@@ -150,6 +150,8 @@ def _generate_visual_description_via_llm(
         agent,
         completion_type=PersistentAgentCompletion.CompletionType.AVATAR_VISUAL_DESCRIPTION,
         response=response,
+        model=model,
+        provider=provider,
     )
 
     try:
