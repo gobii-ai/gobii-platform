@@ -85,7 +85,9 @@ _PAID_PLAN_IDS = {
 _PAID_PLAN_NAMES = {
     "pro",
     "org",
+    PlanNames.STARTUP,
     PlanNames.SCALE,
+    PlanNames.ORG_TEAM,
     PlanSlugs.SCALE,
 }
 _NEW_ACCOUNT_PREMIUM_GRACE_DAYS = getattr(settings, "NEW_ACCOUNT_PREMIUM_GRACE_DAYS", 30)

@@ -9,6 +9,7 @@ from django.core.cache import cache
 
 from api.agent.core.llm_config import (
     AgentLLMTier,
+    _plan_supports_paid_tiers,
     apply_tier_credit_multiplier,
     get_agent_llm_tier,
     get_system_default_tier,
@@ -109,6 +110,19 @@ class SystemDefaultTierTests(TestCase):
         self.user.quota.save(update_fields=["max_intelligence_tier"])
         resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
         self.assertEqual(resolved, AgentLLMTier.MAX)
+
+    def test_startup_name_only_plan_is_treated_as_paid(self):
+        self.assertTrue(_plan_supports_paid_tiers({"name": PlanNames.STARTUP}))
+
+    def test_org_team_name_only_plan_is_treated_as_paid(self):
+        self.assertTrue(_plan_supports_paid_tiers({"name": PlanNames.ORG_TEAM}))
+
+    def test_name_only_paid_plans_do_not_clamp_requested_tier_to_standard(self):
+        for plan_name in (PlanNames.STARTUP, PlanNames.ORG_TEAM):
+            with self.subTest(plan_name=plan_name):
+                with patch("api.agent.core.llm_config.get_owner_plan", return_value={"name": plan_name}):
+                    resolved = resolve_preferred_tier_for_owner(self.user, AgentLLMTier.ULTRA_MAX.value)
+                self.assertEqual(resolved, AgentLLMTier.ULTRA_MAX)
 
 
 @tag("batch_llm_intelligence")
