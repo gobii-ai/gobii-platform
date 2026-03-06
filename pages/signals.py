@@ -238,6 +238,38 @@ def _owner_has_active_trial_start_credit(*, owner, as_of: datetime) -> bool:
     ).exists()
 
 
+def _clamp_active_trial_start_credit_expirations(
+    *,
+    owner,
+    as_of: datetime,
+    expiration_date: datetime | None,
+) -> int:
+    # Trial-start credits are intentionally usable through the first paid
+    # period. If a trial ends early, align those credits to Stripe's new
+    # current_period_end so leftover trial credits cannot spill into the next
+    # paid cycle.
+    if expiration_date is None:
+        return 0
+
+    updated = (
+        _active_plan_credit_queryset(
+            owner=owner,
+            as_of=as_of,
+            free_trial_start=True,
+        )
+        .filter(expiration_date__gt=expiration_date)
+        .update(expiration_date=expiration_date)
+    )
+    if updated:
+        logger.info(
+            "Aligned %s trial-start TaskCredit expiration(s) for owner %s to %s",
+            updated,
+            getattr(owner, "id", None) or owner,
+            expiration_date,
+        )
+    return updated
+
+
 def _owner_remaining_plan_credits(
     *,
     owner,
@@ -2368,6 +2400,12 @@ def handle_subscription_event(event, **kwargs):
                             credit_override=credit_override,
                             expiration_date=expiration_override,
                             free_trial_start=free_trial_start_grant,
+                        )
+                    if trial_conversion and current_period_end_dt:
+                        _clamp_active_trial_start_credit_expirations(
+                            owner=owner,
+                            as_of=current_period_start_dt or timezone.now(),
+                            expiration_date=current_period_end_dt,
                         )
 
                 try:

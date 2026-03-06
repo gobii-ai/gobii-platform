@@ -1005,6 +1005,7 @@ class SubscriptionSignalTests(TestCase):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
         period_start = trial_end
         period_end = timezone.make_aware(datetime(2025, 10, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        original_trial_paid_end = timezone.make_aware(datetime(2025, 10, 15, 8, 0, 0), timezone=dt_timezone.utc)
 
         sub.stripe_data["trial_end"] = str(trial_end)
         sub.stripe_data["current_period_start"] = str(period_start)
@@ -1014,11 +1015,11 @@ class SubscriptionSignalTests(TestCase):
         sub.billing_reason = "subscription_cycle"
 
         TaskCredit = apps.get_model("api", "TaskCredit")
-        TaskCredit.objects.create(
+        trial_credit = TaskCredit.objects.create(
             user=fresh_user,
             credits=500,
             credits_used=100,
-            expiration_date=period_end,
+            expiration_date=original_trial_paid_end,
             stripe_invoice_id="trial:sub_123:2025-09-01",
             granted_date=period_start,
             plan=PlanNamesChoices.STARTUP,
@@ -1046,6 +1047,67 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(grant_kwargs["invoice_id"], "in_paid_scale")
         self.assertEqual(grant_kwargs["expiration_date"], period_end)
         self.assertFalse(grant_kwargs["free_trial_start"])
+        trial_credit.refresh_from_db()
+        self.assertEqual(trial_credit.expiration_date, period_end)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.billing.subscription, PlanNamesChoices.SCALE.value)
+
+    @tag("batch_pages")
+    def test_trial_conversion_without_topoff_still_aligns_trial_credit_expiration(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(status="active", billing_reason="subscription_cycle", invoice_id="in_paid_scale")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        self.billing.subscription = PlanNamesChoices.STARTUP.value
+        self.billing.save(update_fields=["subscription"])
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=8, subscriber=fresh_user)
+        sub.status = "active"
+        sub.stripe_data["items"]["data"][0]["price"]["product"] = "prod_scale"
+
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        period_start = trial_end
+        period_end = timezone.make_aware(datetime(2025, 10, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        original_trial_paid_end = timezone.make_aware(datetime(2025, 10, 15, 8, 0, 0), timezone=dt_timezone.utc)
+
+        sub.stripe_data["trial_end"] = str(trial_end)
+        sub.stripe_data["current_period_start"] = str(period_start)
+        sub.stripe_data["current_period_end"] = str(period_end)
+        sub.stripe_data["latest_invoice"] = "in_paid_scale"
+        sub.stripe_data["billing_reason"] = "subscription_cycle"
+        sub.billing_reason = "subscription_cycle"
+
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        trial_credit = TaskCredit.objects.create(
+            user=fresh_user,
+            credits=10000,
+            credits_used=0,
+            expiration_date=original_trial_paid_end,
+            stripe_invoice_id="trial:sub_123:2025-09-01",
+            granted_date=period_start,
+            plan=PlanNamesChoices.STARTUP,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            free_trial_start=True,
+        )
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch(
+                "pages.signals.get_plan_by_product_id",
+                return_value={"id": PlanNamesChoices.SCALE.value, "monthly_task_credits": 10000},
+            ), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        mock_grant.assert_not_called()
+        trial_credit.refresh_from_db()
+        self.assertEqual(trial_credit.expiration_date, period_end)
         self.user.refresh_from_db()
         self.assertEqual(self.user.billing.subscription, PlanNamesChoices.SCALE.value)
 
