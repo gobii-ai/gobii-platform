@@ -745,6 +745,10 @@ AGENT_AVATAR_BACKFILL_SCAN_LIMIT = env.int(
     "AGENT_AVATAR_BACKFILL_SCAN_LIMIT",
     default=120,
 )
+AGENT_AVATAR_GENERATION_COOLDOWN_HOURS = env.int(
+    "AGENT_AVATAR_GENERATION_COOLDOWN_HOURS",
+    default=24,
+)
 
 # ────────── Misc ──────────
 LANGUAGE_CODE = "en-us"

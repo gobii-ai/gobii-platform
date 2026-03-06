@@ -8,6 +8,7 @@ from typing import Any
 from celery import shared_task
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.utils import timezone
 
 from api.agent.avatar import (
     build_avatar_prompt,
@@ -17,9 +18,14 @@ from api.agent.avatar import (
 from api.agent.core.image_generation_config import get_image_generation_llm_configs
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.short_description import compute_charter_hash
-from api.agent.tools.create_image import _extension_for_mime, _generate_image_bytes
+from api.agent.tools.create_image import (
+    ImageGenerationResponseError,
+    _extension_for_mime,
+    _generate_image_bytes,
+)
 from api.models import PersistentAgent, PersistentAgentCompletion
 
 logger = logging.getLogger(__name__)
@@ -34,6 +40,21 @@ class AvatarGenerationResult:
     endpoint_key: str | None
     model: str | None
     error_detail: str | None
+
+
+def _log_avatar_image_generation_completion(
+    *,
+    agent: PersistentAgent,
+    model_name: str | None,
+    response: Any,
+) -> None:
+    log_agent_completion(
+        agent,
+        completion_type=PersistentAgentCompletion.CompletionType.AVATAR_IMAGE_GENERATION,
+        response=response,
+        model=model_name,
+        provider=provider_hint_from_model(model_name),
+    )
 
 
 def _clear_visual_requested_hash(agent_id: str, expected_hash: str) -> None:
@@ -140,7 +161,7 @@ def _generate_visual_description_via_llm(
         return ""
 
 
-def _generate_avatar_image(prompt: str) -> AvatarGenerationResult:
+def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerationResult:
     configs = get_image_generation_llm_configs()
     if not configs:
         return AvatarGenerationResult(
@@ -151,14 +172,26 @@ def _generate_avatar_image(prompt: str) -> AvatarGenerationResult:
             error_detail="No image generation model is configured.",
         )
 
+    attempted_at = timezone.now()
+    PersistentAgent.objects.filter(id=agent.id).update(
+        avatar_last_generation_attempt_at=attempted_at
+    )
+    agent.avatar_last_generation_attempt_at = attempted_at
+
     errors: list[str] = []
     for config in configs:
+        model_name = getattr(config, "model", None)
         try:
             generated = _generate_image_bytes(
                 config,
                 prompt=prompt,
                 aspect_ratio=AVATAR_ASPECT_RATIO,
                 source_image_data_uris=None,
+            )
+            _log_avatar_image_generation_completion(
+                agent=agent,
+                model_name=model_name,
+                response=generated.response,
             )
             image_bytes = generated.image_bytes
             mime_type = generated.mime_type
@@ -169,10 +202,28 @@ def _generate_avatar_image(prompt: str) -> AvatarGenerationResult:
                 model=config.model,
                 error_detail=None,
             )
+        except ImageGenerationResponseError as exc:
+            _log_avatar_image_generation_completion(
+                agent=agent,
+                model_name=model_name,
+                response=getattr(exc, "response", None),
+            )
+            errors.append(f"{config.endpoint_key or config.model}: {exc}")
+            logger.info("Avatar generation attempt failed: %s", errors[-1])
         except ValueError as exc:
+            _log_avatar_image_generation_completion(
+                agent=agent,
+                model_name=model_name,
+                response=None,
+            )
             errors.append(f"{config.endpoint_key or config.model}: {exc}")
             logger.info("Avatar generation attempt failed: %s", errors[-1])
         except Exception as exc:
+            _log_avatar_image_generation_completion(
+                agent=agent,
+                model_name=model_name,
+                response=None,
+            )
             errors.append(f"{config.endpoint_key or config.model}: {type(exc).__name__}: {exc}")
             logger.warning("Avatar generation attempt failed", exc_info=True)
 
@@ -354,7 +405,7 @@ def generate_agent_avatar_task(
         charter=charter,
     )
 
-    result = _generate_avatar_image(prompt)
+    result = _generate_avatar_image(agent, prompt)
     if not result.image_bytes or not result.mime_type:
         _clear_avatar_requested_hash(agent.id, charter_hash)
         logger.warning(

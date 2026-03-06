@@ -5298,6 +5298,11 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="SHA256 of the charter currently pending avatar generation.",
     )
+    avatar_last_generation_attempt_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent avatar image generation attempt.",
+    )
     visual_description = models.TextField(
         blank=True,
         help_text="Generated detailed visual identity description used to render authentic avatar portraits.",
@@ -9099,6 +9104,7 @@ class PersistentAgentCompletion(models.Model):
         SHORT_DESCRIPTION = ("short_description", "Short Description")
         MINI_DESCRIPTION = ("mini_description", "Mini Description")
         AVATAR_VISUAL_DESCRIPTION = ("avatar_visual_description", "Avatar Visual Description")
+        AVATAR_IMAGE_GENERATION = ("avatar_image_generation", "Avatar Image Generation")
         IMAGE_GENERATION = ("image_generation", "Image Generation")
         TOOL_SEARCH = ("tool_search", "Tool Search")
         TEMPLATE_CLONE = ("template_clone", "Template Clone")

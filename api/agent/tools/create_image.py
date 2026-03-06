@@ -1,7 +1,9 @@
 import base64
 from dataclasses import dataclass
+import ipaddress
 import logging
 import mimetypes
+import socket
 from typing import Any, Dict, Optional
 from urllib.parse import unquote_to_bytes
 from urllib.parse import urlparse
@@ -15,6 +17,7 @@ from api.agent.core.image_generation_config import (
     is_image_generation_configured,
 )
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.files.attachment_helpers import (
     build_signed_filespace_download_url,
@@ -43,14 +46,6 @@ class ImageGenerationResponseError(ValueError):
         self.response = response
 
 
-def _provider_hint_from_model(model_name: str | None) -> str | None:
-    if not isinstance(model_name, str):
-        return None
-    if "/" not in model_name:
-        return None
-    return model_name.split("/", 1)[0]
-
-
 def _log_image_generation_completion(
     *,
     agent: PersistentAgent,
@@ -64,7 +59,7 @@ def _log_image_generation_completion(
         completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
         response=response,
         model=model_name,
-        provider=_provider_hint_from_model(model_name),
+        provider=provider_hint_from_model(model_name),
     )
 
 
@@ -160,6 +155,35 @@ def _decode_data_uri(url: str) -> tuple[bytes, str] | None:
 def _download_image(url: str) -> tuple[bytes, str] | None:
     if not (url.startswith("http://") or url.startswith("https://")):
         return None
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        return None
+    try:
+        resolved = socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        logger.warning("Failed resolving generated image URL host: %s", hostname, exc_info=True)
+        return None
+
+    resolved_ips: set[str] = set()
+    for _family, _socktype, _proto, _canonname, sockaddr in resolved:
+        try:
+            resolved_ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            continue
+        resolved_ips.add(str(resolved_ip))
+
+    if not resolved_ips:
+        logger.warning("Generated image URL host resolved to no IPs: %s", hostname)
+        return None
+    if any(not ipaddress.ip_address(ip).is_global for ip in resolved_ips):
+        logger.warning(
+            "Blocked generated image URL host %s resolving to non-public IPs: %s",
+            hostname,
+            ", ".join(sorted(resolved_ips)),
+        )
+        return None
+
     try:
         response = httpx.get(url, timeout=30.0)
         response.raise_for_status()

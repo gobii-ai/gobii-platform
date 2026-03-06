@@ -2417,7 +2417,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         'browser_use_agent_link', 'agent_actions', 'messages_summary_link', 'audit_link',
         'last_expired_at', 'sleep_email_sent_at', 'deleted_at',
         'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
-        'avatar_charter_hash', 'avatar_requested_hash',
+        'avatar_charter_hash', 'avatar_requested_hash', 'avatar_last_generation_attempt_at',
         'visual_description', 'visual_description_charter_hash', 'visual_description_requested_hash',
     )
     actions = ("soft_delete_selected_agents", "undelete_selected_agents")
@@ -2442,7 +2442,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 'id', 'name', 'user', 'organization', 'ownership_scope',
                 'charter', 'short_description', 'short_description_charter_hash',
                 'short_description_requested_hash', 'avatar',
-                'avatar_charter_hash', 'avatar_requested_hash',
+                'avatar_charter_hash', 'avatar_requested_hash', 'avatar_last_generation_attempt_at',
                 'visual_description', 'visual_description_charter_hash',
                 'visual_description_requested_hash', 'created_at', 'updated_at',
             )
