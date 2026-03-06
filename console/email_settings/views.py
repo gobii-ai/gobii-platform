@@ -581,10 +581,14 @@ class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         current_endpoint = _get_agent_email_endpoint(agent)
-        previous_endpoint_address = current_endpoint.address if current_endpoint else ""
+        current_endpoint_address = current_endpoint.address if current_endpoint else ""
+        payload_previous_endpoint_address = (
+            _email_settings_payload_value(payload, "previousEndpointAddress", "previous_endpoint_address", "") or ""
+        ).strip()
+        previous_endpoint_address = payload_previous_endpoint_address or current_endpoint_address
         endpoint_address = (_email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or "").strip()
         if not endpoint_address:
-            endpoint_address = previous_endpoint_address
+            endpoint_address = current_endpoint_address
         if not endpoint_address:
             return JsonResponse({"error": "Agent email address is required."}, status=400)
 
@@ -669,10 +673,14 @@ class AgentEmailSettingsTestAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         current_endpoint = _get_agent_email_endpoint(agent)
-        previous_endpoint_address = current_endpoint.address if current_endpoint else ""
+        current_endpoint_address = current_endpoint.address if current_endpoint else ""
+        payload_previous_endpoint_address = (
+            _email_settings_payload_value(payload, "previousEndpointAddress", "previous_endpoint_address", "") or ""
+        ).strip()
+        previous_endpoint_address = payload_previous_endpoint_address or current_endpoint_address
         endpoint_address = (_email_settings_payload_value(payload, "endpointAddress", "endpoint_address", "") or "").strip()
         if not endpoint_address:
-            endpoint_address = previous_endpoint_address
+            endpoint_address = current_endpoint_address
         if not endpoint_address:
             return JsonResponse({"error": "Agent email address is required."}, status=400)
 

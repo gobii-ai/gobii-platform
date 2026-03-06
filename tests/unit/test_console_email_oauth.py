@@ -462,7 +462,7 @@ class AgentEmailOAuthApiTests(TestCase):
 
     @patch("console.email_settings.views._validate_agent_imap_connection")
     @patch("console.email_settings.views._validate_agent_smtp_connection")
-    def test_email_settings_test_endpoint_rebinds_oauth_usernames_on_address_change(
+    def test_email_settings_test_endpoint_rebinds_oauth_usernames_for_connection_checks(
         self,
         mock_validate_smtp,
         mock_validate_imap,
@@ -536,8 +536,108 @@ class AgentEmailOAuthApiTests(TestCase):
 
         self.account.refresh_from_db()
         self.assertEqual(self.account.endpoint.address, new_address)
-        self.assertEqual(self.account.smtp_username, "agent@example.com")
-        self.assertEqual(self.account.imap_username, "agent@example.com")
+
+    @patch("console.email_settings.views._validate_agent_imap_connection")
+    @patch("console.email_settings.views._validate_agent_smtp_connection")
+    def test_email_settings_save_rebinds_oauth_usernames_after_test_address_change(
+        self,
+        mock_validate_smtp,
+        mock_validate_imap,
+    ):
+        old_address = self.endpoint.address
+        self.account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
+        self.account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+        self.account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+        self.account.smtp_username = old_address
+        self.account.imap_username = old_address
+        self.account.save()
+
+        AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="gmail",
+        )
+
+        mock_validate_smtp.return_value = True, ""
+        mock_validate_imap.return_value = True, ""
+
+        new_address = "renamed-agent-save@example.com"
+        test_url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
+        save_url = reverse("console_agent_email_settings", args=[self.agent.pk])
+
+        test_response = self.client.post(
+            test_url,
+            data=json.dumps(
+                {
+                    "endpointAddress": new_address,
+                    "previousEndpointAddress": old_address,
+                    "connectionMode": "oauth2",
+                    "oauthProvider": "gmail",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": True,
+                    "testOutbound": True,
+                    "testInbound": True,
+                    "smtpHost": "",
+                    "smtpPort": None,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "oauth2",
+                    "smtpUsername": old_address,
+                    "smtpPassword": "",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "oauth2",
+                    "imapUsername": old_address,
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(test_response.status_code, 200, test_response.content)
+
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.endpoint.address, new_address)
+        self.assertEqual(self.account.smtp_username, old_address)
+        self.assertEqual(self.account.imap_username, old_address)
+
+        save_response = self.client.post(
+            save_url,
+            data=json.dumps(
+                {
+                    "endpointAddress": new_address,
+                    "previousEndpointAddress": old_address,
+                    "connectionMode": "oauth2",
+                    "oauthProvider": "gmail",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": True,
+                    "smtpHost": "",
+                    "smtpPort": None,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "oauth2",
+                    "smtpUsername": old_address,
+                    "smtpPassword": "",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "oauth2",
+                    "imapUsername": old_address,
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(save_response.status_code, 200, save_response.content)
+
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.endpoint.address, new_address)
+        self.assertEqual(self.account.smtp_username, new_address)
+        self.assertEqual(self.account.imap_username, new_address)
 
     def test_normalize_email_error_text_flattens_tuple_and_bytes(self):
         normalized = _normalize_email_error_text(

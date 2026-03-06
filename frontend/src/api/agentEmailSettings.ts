@@ -59,6 +59,7 @@ export type AgentEmailSettingsPayload = {
 
 export type EmailSettingsSaveRequest = {
   endpointAddress: string
+  previousEndpointAddress?: string
   connectionMode: 'custom' | 'oauth2'
   oauthProvider?: string
   smtpHost: string

@@ -196,10 +196,11 @@ function syncUsernamesWithEndpoint(current: DraftState, endpointAddress: string)
   }
 }
 
-function buildSavePayload(draft: DraftState): EmailSettingsSaveRequest {
+function buildSavePayload(draft: DraftState, previousEndpointAddress: string): EmailSettingsSaveRequest {
   const oauthMode = draft.provider === 'gmail' && draft.connectionType === 'oauth'
   return {
     endpointAddress: draft.endpointAddress.trim(),
+    previousEndpointAddress: previousEndpointAddress.trim(),
     connectionMode: oauthMode ? 'oauth2' : 'custom',
     oauthProvider: oauthMode ? 'gmail' : '',
     smtpHost: draft.smtpHost.trim(),
@@ -436,10 +437,10 @@ export function AgentEmailSettingsScreen({
   }, [queryClient, queryKey, settings?.oauth.revokeUrl])
 
   const handleSave = useCallback(async () => {
-    if (!draft) {
+    if (!draft || !settings) {
       return
     }
-    const payload = buildSavePayload(draft)
+    const payload = buildSavePayload(draft, settings.endpoint.address)
     setBanner(null)
     setErrorBanner(null)
     try {
@@ -459,7 +460,7 @@ export function AgentEmailSettingsScreen({
     } catch (error) {
       setErrorBanner(describeHttpError(error))
     }
-  }, [draft, saveMutation, settings?.agent.backUrl, testMutation])
+  }, [draft, saveMutation, settings, testMutation])
 
   if (settingsQuery.error && !settings) {
     return (
