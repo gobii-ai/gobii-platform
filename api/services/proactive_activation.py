@@ -12,6 +12,10 @@ from waffle import get_waffle_flag_model
 
 from config.redis_client import get_redis_client
 from api.models import Organization, PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
+from api.services.owner_execution_pause import (
+    is_owner_execution_paused,
+    resolve_agent_owner,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
@@ -67,6 +71,8 @@ class ProactiveActivationService:
                 total_scanned += 1
 
                 if agent.user_id in seen_users:
+                    continue
+                if not cls._is_owner_active(agent):
                     continue
                 if not cls._is_rollout_enabled_for_agent(agent):
                     logger.debug(
@@ -128,7 +134,13 @@ class ProactiveActivationService:
                 is_active=True,
                 life_state=PersistentAgent.LifeState.ACTIVE,
             )
-            .select_related("user", "browser_use_agent", "organization")
+            .select_related(
+                "user",
+                "user__billing",
+                "browser_use_agent",
+                "organization",
+                "organization__billing",
+            )
             .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")
         )
 
@@ -331,7 +343,8 @@ class ProactiveActivationService:
 
         org_id = getattr(agent, "organization_id", None)
         if not org_id:
-            return user_active
+            owner = resolve_agent_owner(agent)
+            return bool(user_active and not is_owner_execution_paused(owner))
 
         try:
             org_active = Organization.objects.filter(pk=org_id, is_active=True).exists()
@@ -339,7 +352,8 @@ class ProactiveActivationService:
             logger.exception("Failed to evaluate organization active state for agent %s", agent.id)
             return False
 
-        return bool(user_active and org_active)
+        owner = resolve_agent_owner(agent)
+        return bool(user_active and org_active and not is_owner_execution_paused(owner))
 
     @classmethod
     def _is_rollout_enabled_for_agent(cls, agent: PersistentAgent) -> bool:

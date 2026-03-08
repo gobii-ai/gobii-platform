@@ -2264,6 +2264,11 @@ class BrowserUseAgentTask(models.Model):
 
     def clean(self):
         super().clean()
+        from api.services.owner_execution_pause import (
+            EXECUTION_PAUSE_MESSAGE,
+            is_owner_execution_paused,
+        )
+
         if self._state.adding:
             with traced("CHECK Clean BrowserUseAgentTask User Credit") as span:
                 # For health check tasks (user=None), skip user validation
@@ -2295,6 +2300,10 @@ class BrowserUseAgentTask(models.Model):
 
         if self.organization_id is None and owner_org is not None:
             self.organization = owner_org
+
+        owner = owner_org or self.user
+        if self._state.adding and owner is not None and is_owner_execution_paused(owner):
+            raise ValidationError(EXECUTION_PAUSE_MESSAGE)
 
         if self._state.adding:
             if owner_org:
@@ -3869,6 +3878,22 @@ class UserBilling(models.Model):
         blank=True,
         help_text="Timestamp when user was downgraded to free (for soft-expiration grace)."
     )
+    execution_paused = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="When true, the owner cannot start new agent or browser-task execution.",
+    )
+    execution_pause_reason = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Machine-readable reason for the current execution pause.",
+    )
+    execution_paused_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when execution was paused for this owner.",
+    )
 
     def __str__(self):
         return f"Billing for {self.user.email}"
@@ -4172,6 +4197,22 @@ class OrganizationBilling(models.Model):
         null=True,
         blank=True,
         help_text="Timestamp when the organization was downgraded to free",
+    )
+    execution_paused = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="When true, the owner cannot start new agent or browser-task execution.",
+    )
+    execution_pause_reason = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Machine-readable reason for the current execution pause.",
+    )
+    execution_paused_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when execution was paused for this owner.",
     )
     purchased_seats = models.PositiveIntegerField(
         default=0,

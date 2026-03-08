@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from billing.services import BillingService
 from api.models import Organization, UserBilling
+from api.services.owner_execution_pause import resume_owner_execution
 
 
 @tag("batch_billing")
@@ -183,3 +184,24 @@ class BillingServiceOwnerTests(TestCase):
         start, end = BillingService.get_current_billing_period_for_owner(self.user)
 
         self.assertEqual((start, end), expected)
+
+    def test_resume_owner_execution_clears_pause_state(self):
+        billing = UserBilling.objects.get(user=self.user)
+        billing.execution_paused = True
+        billing.execution_pause_reason = "billing_delinquency"
+        billing.execution_paused_at = timezone.now()
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+
+        resumed = resume_owner_execution(self.user, source="test")
+
+        self.assertTrue(resumed)
+        billing.refresh_from_db()
+        self.assertFalse(billing.execution_paused)
+        self.assertEqual(billing.execution_pause_reason, "")
+        self.assertIsNone(billing.execution_paused_at)

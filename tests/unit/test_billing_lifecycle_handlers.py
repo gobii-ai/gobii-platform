@@ -56,8 +56,9 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_TRIAL_ENDED)
         self.assertEqual(kwargs["user_id"], 24)
 
+    @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")
     @patch("billing.lifecycle_handlers.Analytics.track_event")
-    def test_trial_conversion_failed_tracks_event(self, mock_track_event):
+    def test_trial_conversion_failed_tracks_event(self, mock_track_event, mock_pause_owner):
         emit_billing_lifecycle_event(
             TRIAL_CONVERSION_FAILED,
             payload=BillingLifecyclePayload(
@@ -76,9 +77,11 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         self.assertEqual(kwargs["user_id"], 7)
         self.assertEqual(kwargs["properties"]["stripe.invoice_id"], "in_fail")
         self.assertEqual(kwargs["properties"]["attempt_number"], 1)
+        mock_pause_owner.assert_called_once()
 
+    @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")
     @patch("billing.lifecycle_handlers.Analytics.track_event")
-    def test_subscription_delinquency_entered_tracks_event(self, mock_track_event):
+    def test_subscription_delinquency_entered_tracks_event(self, mock_track_event, mock_pause_owner):
         emit_billing_lifecycle_event(
             SUBSCRIPTION_DELINQUENCY_ENTERED,
             payload=BillingLifecyclePayload(
@@ -95,3 +98,4 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_DELINQUENCY_ENTERED)
         self.assertEqual(kwargs["user_id"], 8)
         self.assertEqual(kwargs["properties"]["subscription_status"], "past_due")
+        mock_pause_owner.assert_called_once()

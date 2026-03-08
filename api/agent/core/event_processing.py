@@ -135,6 +135,12 @@ from ...models import (
     build_web_user_address,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
+from api.services.owner_execution_pause import (
+    EXECUTION_PAUSE_MESSAGE,
+    EXECUTION_PAUSE_NOTE,
+    get_owner_execution_pause_state,
+    resolve_agent_owner,
+)
 from api.services.web_sessions import get_active_web_sessions, has_active_web_session
 from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
 from config import settings
@@ -2784,7 +2790,10 @@ def _process_agent_events_locked(
     try:
         agent = (
             PersistentAgent.objects.alive().select_related(
+                "organization",
+                "organization__billing",
                 "user",
+                "user__billing",
                 "preferred_contact_endpoint",
                 "browser_use_agent",
             )
@@ -2802,6 +2811,32 @@ def _process_agent_events_locked(
         _broadcast_processing(agent)
     except Exception as e:
         logger.debug("Failed to broadcast processing state at start for agent %s: %s", persistent_agent_id, e)
+
+    owner = resolve_agent_owner(agent)
+    pause_state = get_owner_execution_pause_state(owner)
+    if pause_state["paused"]:
+        pause_reason = pause_state["reason"] or "unknown"
+        msg = f"Skipped processing because {EXECUTION_PAUSE_MESSAGE.lower()}"
+        logger.warning(
+            "Persistent agent %s skipped because owner execution is paused (reason=%s).",
+            persistent_agent_id,
+            pause_reason,
+        )
+
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description=msg,
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes=f"{EXECUTION_PAUSE_NOTE}:{pause_reason}",
+        )
+
+        span.add_event("Agent processing skipped - owner execution paused")
+        span.set_attribute("owner.execution_paused", True)
+        span.set_attribute("owner.execution_pause_reason", pause_reason)
+        return agent
 
     # Exit early in proprietary mode if the agent's owner has no credits
     credit_snapshot: Optional[Dict[str, Any]] = None
@@ -2867,7 +2902,6 @@ def _process_agent_events_locked(
             )
 
         if settings.GOBII_PROPRIETARY_MODE:
-            owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
             owner_user = getattr(agent, "user", None)
             owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
             if owner is not None:

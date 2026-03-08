@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from unittest.mock import patch
+from django.core.exceptions import ValidationError
 from django.db.utils import OperationalError
 
 from django.contrib.auth import get_user_model
@@ -46,6 +47,56 @@ class BrowserTaskDbConnectionTests(TestCase):
             username="dbconn@example.com", email="dbconn@example.com", password="password123"
         )
         self.agent = BrowserUseAgent.objects.create(user=self.user, name="DBConn Agent")
+        self.persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="DBConn Persistent Agent",
+            charter="Test browser task pause handling",
+            browser_use_agent=self.agent,
+        )
+
+    def test_task_creation_rejected_when_owner_execution_paused(self):
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+            },
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            BrowserUseAgentTask.objects.create(
+                agent=self.agent,
+                user=self.user,
+                prompt="simple",
+            )
+
+        self.assertIn("execution is paused", str(ctx.exception).lower())
+
+    def test_task_is_cancelled_before_start_when_owner_execution_paused(self):
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            prompt="simple",
+        )
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+            },
+        )
+
+        with patch("api.tasks.browser_agent_tasks._schedule_agent_follow_up") as mock_follow_up, \
+             patch("api.tasks.browser_agent_tasks.trigger_task_webhook") as mock_webhook:
+            from api.tasks.browser_agent_tasks import _process_browser_use_task_core
+
+            _process_browser_use_task_core(str(task.id))
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, BrowserUseAgentTask.StatusChoices.CANCELLED)
+        self.assertIn("execution is paused", (task.error_message or "").lower())
+        mock_follow_up.assert_not_called()
+        mock_webhook.assert_called_once()
 
     def test_close_old_connections_called_around_final_writes_success_path(self):
         # Create a task without output_schema to avoid dynamic model creation
