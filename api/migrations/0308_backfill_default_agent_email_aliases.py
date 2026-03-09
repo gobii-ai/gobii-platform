@@ -2,7 +2,6 @@
 
 import re
 
-from django.conf import settings
 from django.db import IntegrityError, migrations
 from django.utils.crypto import get_random_string
 
@@ -37,8 +36,7 @@ def _generate_unique_email_address(Endpoint, display_name: str, domain: str) -> 
 
 
 def backfill_default_agent_email_aliases(apps, schema_editor):
-    if not settings.ENABLE_DEFAULT_AGENT_EMAIL:
-        return
+    from django.conf import settings
 
     domain = (settings.DEFAULT_AGENT_EMAIL_DOMAIN or "").strip().lower()
     if not domain:
