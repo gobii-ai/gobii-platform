@@ -179,6 +179,12 @@ class RedisBudgetCleanupTests(TestCase):
         mock_task.prompt = "Test"
         mock_task.output_schema = None
         mock_task.encrypted_secrets = None  # No secrets
+        mock_task.organization = None
+        mock_task.organization_id = None
+        mock_task.user = None
+        mock_task.user_id = None
+        mock_task.eval_run_id = None
+        mock_task.requires_vision = False
         mock_task.agent.persistent_agent.id = agent_id
         mock_task.agent.id = str(uuid.uuid4())
         mock_task_class.objects.get.return_value = mock_task

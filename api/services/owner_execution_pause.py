@@ -20,12 +20,20 @@ EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED = "trial_conversion_failed"
 
 
 def resolve_agent_owner(agent) -> Any:
-    return getattr(agent, "organization", None) or getattr(agent, "user", None)
+    organization = getattr(agent, "organization", None)
+    if _is_supported_owner_instance(organization):
+        return organization
+
+    user = getattr(agent, "user", None)
+    if _is_supported_owner_instance(user):
+        return user
+
+    return None
 
 
 def resolve_browser_task_owner(task_obj, *, agent_context=None) -> Any:
     owner = getattr(task_obj, "organization", None)
-    if owner is not None:
+    if _is_supported_owner_instance(owner):
         return owner
 
     if agent_context is None:
@@ -42,7 +50,11 @@ def resolve_browser_task_owner(task_obj, *, agent_context=None) -> Any:
         if owner is not None:
             return owner
 
-    return getattr(task_obj, "user", None)
+    user = getattr(task_obj, "user", None)
+    if _is_supported_owner_instance(user):
+        return user
+
+    return None
 
 
 def resolve_owner_by_ref(owner_type: str, owner_id) -> Any:
@@ -236,6 +248,15 @@ def _owner_type_label(owner) -> str:
     if isinstance(owner, Organization):
         return "organization"
     return owner.__class__.__name__.lower()
+
+
+def _is_supported_owner_instance(owner) -> bool:
+    if owner is None:
+        return False
+
+    UserModel = get_user_model()
+    Organization = apps.get_model("api", "Organization")
+    return isinstance(owner, (UserModel, Organization))
 
 
 def _get_billing_record(owner, *, create: bool = False):

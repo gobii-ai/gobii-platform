@@ -1873,7 +1873,7 @@ def _process_browser_use_task_core(
                 agent_tier = get_agent_llm_tier(agent_context)
                 agent_span.set_attribute("browser_tier.intelligence_tier", agent_tier.value)
 
-                owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
+                owner = resolve_browser_task_owner(task_obj, agent_context=agent_context)
                 captcha_enabled = _has_advanced_captcha_resolution(owner)
                 agent_span.set_attribute("captcha.addon_enabled", captcha_enabled)
                 actions = ['mcp_brightdata_search_engine']
