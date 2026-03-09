@@ -6,6 +6,7 @@ import {
   ensureAgentEmailAccount,
   fetchAgentEmailSettings,
   fetchEmailOAuthStatus,
+  resetAgentEmailSettingsToDefault,
   revokeEmailOAuth,
   saveAgentEmailSettings,
   startEmailOAuth,
@@ -261,6 +262,13 @@ export function AgentEmailSettingsScreen({
       setErrorBanner(null)
     },
   })
+  const resetMutation = useMutation({
+    mutationFn: (url: string) => resetAgentEmailSettingsToDefault(url),
+    onSuccess: (response) => {
+      queryClient.setQueryData(queryKey, response.settings)
+      setErrorBanner(null)
+    },
+  })
 
   const testMutation = useMutation({
     mutationFn: (payload: EmailSettingsSaveRequest & { testOutbound: boolean; testInbound: boolean }) =>
@@ -291,8 +299,18 @@ export function AgentEmailSettingsScreen({
       if (!current) {
         return nextDraft
       }
+      const serverHasDirectionSelection = nextDraft.isInboundEnabled || nextDraft.isOutboundEnabled
+      const keepLocalDirectionSelection =
+        !serverHasDirectionSelection && (current.isInboundEnabled || current.isOutboundEnabled)
       return {
         ...nextDraft,
+        isInboundEnabled: keepLocalDirectionSelection ? current.isInboundEnabled : nextDraft.isInboundEnabled,
+        isOutboundEnabled: keepLocalDirectionSelection ? current.isOutboundEnabled : nextDraft.isOutboundEnabled,
+        provider: keepLocalDirectionSelection && !nextDraft.provider ? current.provider : nextDraft.provider,
+        connectionType:
+          keepLocalDirectionSelection && !nextDraft.connectionType
+            ? current.connectionType
+            : nextDraft.connectionType,
         smtpPassword: current.smtpPassword,
         imapPassword: current.imapPassword,
       }
@@ -462,6 +480,33 @@ export function AgentEmailSettingsScreen({
       setErrorBanner(describeHttpError(error))
     }
   }, [draft, saveMutation, settings, testMutation])
+
+  const handleResetToDefault = useCallback(async () => {
+    const confirmed = window.confirm(
+      'Revert to default Gobii email settings? This removes custom SMTP/IMAP settings and switches the agent back to its default email address.',
+    )
+    if (!confirmed) {
+      return
+    }
+    setBanner(null)
+    setErrorBanner(null)
+    try {
+      const response = await resetMutation.mutateAsync(emailSettingsUrl)
+      setPendingOAuthSettings(null)
+      setShowGuidance(false)
+      setGuidanceAck(false)
+      setGuidanceError(null)
+      setTestResults({})
+      const restoredAddress = response.settings.endpoint.address || response.settings.defaultEndpoint.address
+      setBanner(
+        restoredAddress
+          ? `Reverted to default email settings (${restoredAddress}).`
+          : 'Reverted to default email settings.',
+      )
+    } catch (error) {
+      setErrorBanner(describeHttpError(error))
+    }
+  }, [emailSettingsUrl, resetMutation])
 
   if (settingsQuery.error && !settings) {
     return (
@@ -965,10 +1010,18 @@ export function AgentEmailSettingsScreen({
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={testMutation.isPending || saveMutation.isPending || !canSubmit}
+                disabled={testMutation.isPending || saveMutation.isPending || resetMutation.isPending || !canSubmit}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 {testMutation.isPending || saveMutation.isPending ? 'Saving...' : 'Save Settings'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleResetToDefault()}
+                disabled={testMutation.isPending || saveMutation.isPending || resetMutation.isPending}
+                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-60"
+              >
+                {resetMutation.isPending ? 'Reverting...' : 'Revert to Default Email'}
               </button>
             </div>
             {((testResults.smtp && !testResults.smtp.ok) || (testResults.imap && !testResults.imap.ok)) && (

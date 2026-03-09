@@ -604,6 +604,61 @@ def _build_email_form_error_payload(form: AgentEmailAccountConsoleForm) -> dict[
     return error_payload
 
 
+def _reset_agent_email_settings_to_default(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
+    with transaction.atomic():
+        default_endpoint = ensure_default_agent_email_endpoint(agent, is_primary=True)
+        if default_endpoint is None:
+            raise ValidationError(
+                {"default_endpoint": ["Default agent email is not enabled for this workspace."]}
+            )
+
+        try:
+            default_account = default_endpoint.agentemailaccount
+        except AgentEmailAccount.DoesNotExist:
+            default_account = None
+        if default_account is not None:
+            default_account.delete()
+
+        other_agent_email_endpoints = (
+            agent.comms_endpoints
+            .filter(channel=CommsChannel.EMAIL)
+            .exclude(id=default_endpoint.id)
+        )
+        for endpoint in other_agent_email_endpoints:
+            try:
+                endpoint_account = endpoint.agentemailaccount
+            except AgentEmailAccount.DoesNotExist:
+                endpoint_account = None
+            if endpoint_account is not None:
+                endpoint_account.delete()
+
+            endpoint_updates: list[str] = []
+            if endpoint.is_primary:
+                endpoint.is_primary = False
+                endpoint_updates.append("is_primary")
+            if endpoint.owner_agent_id is not None:
+                endpoint.owner_agent = None
+                endpoint_updates.append("owner_agent")
+            if endpoint_updates:
+                endpoint.save(update_fields=endpoint_updates)
+
+        default_updates: list[str] = []
+        if default_endpoint.owner_agent_id != agent.id:
+            default_endpoint.owner_agent = agent
+            default_updates.append("owner_agent")
+        if not default_endpoint.is_primary:
+            default_endpoint.is_primary = True
+            default_updates.append("is_primary")
+        if default_updates:
+            default_endpoint.save(update_fields=default_updates)
+
+        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).exclude(
+            id=default_endpoint.id
+        ).update(is_primary=False)
+
+        return default_endpoint
+
+
 class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "post"]
 
@@ -619,6 +674,18 @@ class AgentEmailSettingsAPIView(ApiLoginRequiredMixin, View):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
+        action = str(_email_settings_payload_value(payload, "action", "action", "") or "").strip().lower()
+        if action in {"reset_to_default", "resettodefault"}:
+            try:
+                endpoint = _reset_agent_email_settings_to_default(agent)
+            except ValidationError as exc:
+                return JsonResponse({"errors": exc.message_dict}, status=400)
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "settings": _serialize_agent_email_settings(request, agent, endpoint, None),
+                }
+            )
 
         current_endpoint = _get_agent_email_endpoint(agent)
         current_endpoint_address = current_endpoint.address if current_endpoint else ""

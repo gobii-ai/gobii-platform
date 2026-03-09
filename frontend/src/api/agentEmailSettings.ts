@@ -127,6 +127,16 @@ export async function saveAgentEmailSettings(
   })
 }
 
+export async function resetAgentEmailSettingsToDefault(
+  url: string,
+): Promise<{ ok: boolean; settings: AgentEmailSettingsPayload }> {
+  return jsonRequest<{ ok: boolean; settings: AgentEmailSettingsPayload }>(url, {
+    method: 'POST',
+    includeCsrf: true,
+    json: { action: 'reset_to_default' },
+  })
+}
+
 export async function testAgentEmailSettings(
   url: string,
   payload: EmailSettingsTestRequest,
