@@ -44,10 +44,6 @@ from api.services.system_settings import get_max_file_size
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
 from .outbound_delivery import deliver_agent_email, deliver_agent_sms
-from .email_endpoint_routing import (
-    get_agent_primary_endpoint,
-    resolve_agent_email_sender_endpoint_for_message,
-)
 from observability import traced
 from opentelemetry import baggage
 from config import settings
@@ -306,7 +302,11 @@ def _build_agent_detail_url(agent) -> str:
 @tracer.start_as_current_span("_find_agent_endpoint")
 def _find_agent_endpoint(agent, channel: str) -> PersistentAgentCommsEndpoint | None:
     """Find the agent-owned endpoint to send from for the given channel."""
-    return get_agent_primary_endpoint(agent, channel)
+
+    return (
+        agent.comms_endpoints.filter(channel=channel, is_primary=True).first()
+        or agent.comms_endpoints.filter(channel=channel).first()
+    )
 
 @tracer.start_as_current_span("_ensure_agent_web_endpoint")
 def _ensure_agent_web_endpoint(agent) -> PersistentAgentCommsEndpoint:
@@ -595,13 +595,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
         }.get(channel_value, AnalyticsSource.AGENT)
 
         if channel_value == CommsChannel.EMAIL:
-            from_endpoint = resolve_agent_email_sender_endpoint_for_message(
-                agent,
-                to_endpoint=endpoint,
-                cc_endpoints=None,
-                has_bcc=False,
-                log_context="owner_daily_credit_notice",
-            )
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.EMAIL)
             if not from_endpoint:
                 logging.info("Agent %s has no email endpoint for hard limit notice.", agent.id)
                 return False

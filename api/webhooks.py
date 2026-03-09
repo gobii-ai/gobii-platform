@@ -265,10 +265,6 @@ def _handle_inbound_email(
             continue
         seen_recipients.add(normalized)
         unique_recipient_addresses.append(normalized)
-    normalized_to_emails = {(address or "").strip().lower() for address in to_emails if (address or "").strip()}
-    normalized_cc_emails = {(address or "").strip().lower() for address in cc_emails if (address or "").strip()}
-    normalized_bcc_emails = {(address or "").strip().lower() for address in bcc_emails if (address or "").strip()}
-    recipient_position = {address: index for index, address in enumerate(unique_recipient_addresses)}
 
     logger.info(
         "Received %s email from %s to %s, CC: %s, BCC: %s: %s",
@@ -281,83 +277,29 @@ def _handle_inbound_email(
     )
 
     matching_endpoints = []
-    matched_agent_ids: set[str] = set()
     with tracer.start_as_current_span("COMM email endpoint lookup") as span:
-        candidate_endpoints = list(
-            PersistentAgentCommsEndpoint.objects.select_related("owner_agent__user").filter(
+        endpoints_by_address = {
+            endpoint.address: endpoint
+            for endpoint in PersistentAgentCommsEndpoint.objects.select_related("owner_agent__user").filter(
                 channel=CommsChannel.EMAIL,
                 address__in=unique_recipient_addresses,
                 owner_agent__is_active=True,
             )
-        )
-        endpoints_by_address = {
-            (endpoint.address or "").strip().lower(): endpoint
-            for endpoint in candidate_endpoints
         }
         for address in unique_recipient_addresses:
-            if address not in endpoints_by_address:
-                logger.debug("No agent endpoint found for address: %s", address)
-
-        def _recipient_rank(address: str) -> int:
-            if address in normalized_to_emails:
-                return 0
-            if address in normalized_cc_emails:
-                return 1
-            if address in normalized_bcc_emails:
-                return 2
-            return 3
-
-        def _selection_key(endpoint: PersistentAgentCommsEndpoint) -> tuple[int, int, int, str]:
-            normalized_address = (endpoint.address or "").strip().lower()
-            return (
-                _recipient_rank(normalized_address),
-                0 if endpoint.is_primary else 1,
-                recipient_position.get(normalized_address, len(unique_recipient_addresses)),
-                normalized_address,
-            )
-
-        selected_endpoint_by_agent: dict[str, PersistentAgentCommsEndpoint] = {}
-        for endpoint in candidate_endpoints:
-            normalized_address = (endpoint.address or "").strip().lower()
-            if not endpoint.owner_agent or not endpoint.owner_agent.user:
-                logger.warning("Endpoint %s is not associated with a usable agent/user.", normalized_address)
+            endpoint = endpoints_by_address.get(address)
+            if endpoint is None:
+                logger.debug(f"No agent endpoint found for address: {address}")
                 continue
-
-            agent_id = str(endpoint.owner_agent_id)
-            existing_endpoint = selected_endpoint_by_agent.get(agent_id)
-            if existing_endpoint is None:
-                selected_endpoint_by_agent[agent_id] = endpoint
-                logger.info("Found agent endpoint for address: %s", normalized_address)
-                continue
-
-            if _selection_key(endpoint) < _selection_key(existing_endpoint):
-                logger.info(
-                    "Selecting preferred inbound recipient for agent %s: %s (replacing %s)",
-                    agent_id,
-                    normalized_address,
-                    (existing_endpoint.address or "").strip().lower(),
-                )
-                selected_endpoint_by_agent[agent_id] = endpoint
+            if endpoint.owner_agent and endpoint.owner_agent.user:
+                matching_endpoints.append(endpoint)
+                logger.info(f"Found agent endpoint for address: {address}")
             else:
-                logger.info(
-                    "Skipping duplicate inbound recipient for agent %s at address %s",
-                    agent_id,
-                    normalized_address,
-                )
-
-        matching_endpoints = sorted(
-            selected_endpoint_by_agent.values(),
-            key=lambda endpoint: (
-                _selection_key(endpoint),
-                str(endpoint.owner_agent_id),
-            ),
-        )
-        matched_agent_ids = set(selected_endpoint_by_agent.keys())
+                logger.warning(f"Endpoint {address} is not associated with a usable agent/user.")
 
         span.set_attribute("total_recipients", len(all_recipient_addresses))
         span.set_attribute("unique_recipients", len(unique_recipient_addresses))
         span.set_attribute("matching_endpoints", len(matching_endpoints))
-        span.set_attribute("matched_agents", len(matched_agent_ids))
 
     if not matching_endpoints:
         logger.info("Discarding email - no routable agent addresses found in To/CC/BCC")
@@ -412,15 +354,6 @@ def _handle_inbound_email(
             msg_info = ingest_inbound_message(CommsChannel.EMAIL, parsed_message)
 
             processed_agents.append(agent)
-            normalized_endpoint_address = (endpoint.address or "").strip().lower()
-            if normalized_endpoint_address in normalized_to_emails:
-                recipient_type = "to"
-            elif normalized_endpoint_address in normalized_cc_emails:
-                recipient_type = "cc"
-            elif normalized_endpoint_address in normalized_bcc_emails:
-                recipient_type = "bcc"
-            else:
-                recipient_type = "to"
 
             email_props = Analytics.with_org_properties(
                 {
@@ -429,7 +362,8 @@ def _handle_inbound_email(
                     'from_email': from_email_raw,
                     'message_id': str(msg_info.message.id),
                     'endpoint_address': endpoint.address,
-                    'recipient_type': recipient_type,
+                    'recipient_type': 'to' if endpoint.address in to_emails else
+                                     'cc' if endpoint.address in cc_emails else 'bcc'
                 },
                 organization=getattr(agent, "organization", None),
             )

@@ -13,7 +13,6 @@ from api.models import (
     BrowserUseAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
-    CommsChannel,
     DeliveryStatus,
 )
 from api.agent.tools.email_sender import execute_send_email
@@ -150,68 +149,3 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             list(message.cc_endpoints.values_list("address", flat=True)),
             params["cc_addresses"],
         )
-
-    def test_execute_send_email_self_send_uses_default_alias_sender(self):
-        self.from_ep.is_primary = False
-        self.from_ep.save(update_fields=["is_primary"])
-        custom_primary = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.EMAIL,
-            address=self.user.email,
-            is_primary=True,
-        )
-
-        params = {
-            "to_address": self.user.email,
-            "subject": "Self send test",
-            "mobile_first_html": "<p>Hello</p>",
-        }
-
-        with patch(
-            "api.agent.tools.email_sender.deliver_agent_email",
-            side_effect=self._mark_message_delivered,
-        ):
-            result = execute_send_email(self.agent, params)
-
-        self.assertEqual(result.get("status"), "ok")
-        message = PersistentAgentMessage.objects.get(id=result["message_id"])
-        self.assertEqual(message.from_endpoint_id, self.from_ep.id)
-        self.assertEqual(message.to_endpoint_id, custom_primary.id)
-
-    def test_execute_send_email_self_send_with_cc_keeps_custom_sender(self):
-        self.from_ep.is_primary = False
-        self.from_ep.save(update_fields=["is_primary"])
-        custom_primary = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.EMAIL,
-            address=self.user.email,
-            is_primary=True,
-        )
-
-        params = {
-            "to_address": self.user.email,
-            "cc_addresses": ["another@example.com"],
-            "subject": "Self send with cc",
-            "mobile_first_html": "<p>Hello with cc</p>",
-        }
-
-        with patch(
-            "api.agent.tools.email_sender.deliver_agent_email",
-            side_effect=self._mark_message_delivered,
-        ):
-            result = execute_send_email(self.agent, params)
-
-        self.assertEqual(result.get("status"), "error")
-        self.assertIn("Recipient address 'another@example.com' not allowed", result.get("message", ""))
-
-        # Make CC allowed by using owner email and retry to confirm sender selection.
-        params["cc_addresses"] = [self.user.email]
-        with patch(
-            "api.agent.tools.email_sender.deliver_agent_email",
-            side_effect=self._mark_message_delivered,
-        ):
-            result = execute_send_email(self.agent, params)
-
-        self.assertEqual(result.get("status"), "ok")
-        message = PersistentAgentMessage.objects.get(id=result["message_id"])
-        self.assertEqual(message.from_endpoint_id, custom_primary.id)

@@ -134,28 +134,6 @@ class PostmarkEmailWebhookTest(TestCase):
             "Discarding email - no routable agent addresses found in To/CC/BCC"
         )
 
-    @tag("batch_email")
-    @patch("api.webhooks.ingest_inbound_message")
-    def test_postmark_dual_agent_aliases_ingest_once_per_agent(self, mock_ingest):
-        self.agent_endpoint.is_primary = False
-        self.agent_endpoint.save(update_fields=["is_primary"])
-        custom_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.EMAIL,
-            address="agent-custom@example.com",
-            is_primary=True,
-        )
-        request = self._create_postmark_request(
-            from_email=self.owner.email,
-            to_email=f"{self.agent_endpoint.address}, {custom_endpoint.address}",
-        )
-        response: HttpResponse = email_webhook_postmark(request)
-
-        self.assertEqual(response.status_code, 200)
-        mock_ingest.assert_called_once()
-        parsed = mock_ingest.call_args[0][1]
-        self.assertEqual(parsed.recipient, custom_endpoint.address)
-
 
 @tag("batch_email")
 class MailgunEmailWebhookTest(TestCase):
@@ -257,29 +235,6 @@ class MailgunEmailWebhookTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_ingest.assert_called_once()
-
-    @tag("batch_email")
-    @patch("api.webhooks.ingest_inbound_message")
-    def test_mailgun_dual_agent_aliases_ingest_once_per_agent(self, mock_ingest):
-        self.agent_endpoint.is_primary = False
-        self.agent_endpoint.save(update_fields=["is_primary"])
-        custom_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.EMAIL,
-            address="mg-agent-custom@example.com",
-            is_primary=True,
-        )
-        request = self._create_mailgun_request(
-            from_email=self.owner.email,
-            to_email=f"{self.agent_endpoint.address}, {custom_endpoint.address}",
-            recipient_email=self.agent_endpoint.address,
-        )
-        response: HttpResponse = email_webhook_mailgun(request)
-
-        self.assertEqual(response.status_code, 200)
-        mock_ingest.assert_called_once()
-        parsed = mock_ingest.call_args[0][1]
-        self.assertEqual(parsed.recipient, custom_endpoint.address)
 
 @tag("batch_sms")
 class SmsStatusWebhookTest(TestCase):

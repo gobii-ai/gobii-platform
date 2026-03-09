@@ -6,7 +6,6 @@ from typing import Any
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
-from django.conf import settings
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import reverse
@@ -21,12 +20,6 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
 )
-from api.services.agent_email_aliases import (
-    get_default_agent_email_domain,
-    get_default_agent_email_endpoint,
-    is_default_agent_email_address,
-)
-from api.services.persistent_agents import ensure_default_agent_email_endpoint
 from console.api_views import (
     ApiLoginRequiredMixin,
     _coerce_bool,
@@ -75,14 +68,6 @@ def _get_agent_email_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEnd
     ).first()
     if endpoint:
         return endpoint
-    endpoint_with_account = (
-        agent.comms_endpoints
-        .filter(channel=CommsChannel.EMAIL, owner_agent=agent, agentemailaccount__isnull=False)
-        .order_by("-is_primary", "address")
-        .first()
-    )
-    if endpoint_with_account:
-        return endpoint_with_account
     return agent.comms_endpoints.filter(
         channel=CommsChannel.EMAIL,
         owner_agent=agent,
@@ -181,20 +166,6 @@ def _resolve_or_create_agent_email_endpoint(
         _save_agent_email_endpoint_updates(existing_endpoint, agent, normalized_address)
         return existing_endpoint
 
-    if (
-        current_endpoint.address != normalized_address
-        and is_default_agent_email_address(current_endpoint.address)
-    ):
-        if current_endpoint.is_primary:
-            current_endpoint.is_primary = False
-            current_endpoint.save(update_fields=["is_primary"])
-        return PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=agent,
-            channel=CommsChannel.EMAIL,
-            address=normalized_address,
-            is_primary=True,
-        )
-
     _save_agent_email_endpoint_updates(current_endpoint, agent, normalized_address)
     return current_endpoint
 
@@ -219,13 +190,10 @@ def _ensure_agent_email_endpoint_and_account(
 ) -> tuple[PersistentAgentCommsEndpoint, AgentEmailAccount, bool]:
     normalized_address = _validate_and_normalize_email_endpoint_address(endpoint_address)
 
+    current_endpoint = _get_agent_email_endpoint(agent)
+    existing_account = getattr(current_endpoint, "agentemailaccount", None) if current_endpoint else None
+
     with transaction.atomic():
-        if settings.ENABLE_DEFAULT_AGENT_EMAIL:
-            ensure_default_agent_email_endpoint(agent, is_primary=False)
-
-        current_endpoint = _get_agent_email_endpoint(agent)
-        existing_account = getattr(current_endpoint, "agentemailaccount", None) if current_endpoint else None
-
         endpoint = _resolve_or_create_agent_email_endpoint(
             agent,
             current_endpoint,
@@ -477,12 +445,6 @@ def _serialize_agent_email_settings(
         "address": endpoint.address if endpoint else "",
         "exists": endpoint is not None,
     }
-    default_endpoint = get_default_agent_email_endpoint(agent)
-    default_endpoint_payload = {
-        "address": default_endpoint.address if default_endpoint else "",
-        "exists": default_endpoint is not None,
-        "isInboundAliasActive": default_endpoint is not None,
-    }
     account_payload = {
         "id": str(account.pk) if account else None,
         "exists": account is not None,
@@ -527,9 +489,7 @@ def _serialize_agent_email_settings(
             "helpUrl": "https://docs.gobii.ai/advanced-usage/custom-email-settings",
         },
         "providerDefaults": EMAIL_OAUTH_PROVIDER_DEFAULTS,
-        "defaultEmailDomain": get_default_agent_email_domain(),
         "endpoint": endpoint_payload,
-        "defaultEndpoint": default_endpoint_payload,
         "account": account_payload,
         "oauth": oauth_payload,
     }

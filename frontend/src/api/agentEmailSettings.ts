@@ -17,15 +17,9 @@ export type AgentEmailSettingsPayload = {
       imap_security: string
     }
   }
-  defaultEmailDomain: string
   endpoint: {
     address: string
     exists: boolean
-  }
-  defaultEndpoint: {
-    address: string
-    exists: boolean
-    isInboundAliasActive: boolean
   }
   account: {
     id: string | null

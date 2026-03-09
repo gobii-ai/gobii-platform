@@ -26,7 +26,6 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
 )
-from api.services.agent_email_aliases import get_default_agent_email_endpoint
 from api.services.daily_credit_limits import (
     calculate_daily_credit_slider_bounds,
     get_tier_credit_multiplier,
@@ -322,7 +321,11 @@ def ensure_default_agent_email_endpoint(
 
     Returns the existing or created endpoint, or None when default agent email is disabled.
     """
-    existing_endpoint = get_default_agent_email_endpoint(agent)
+    existing_endpoint = (
+        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL)
+        .order_by("-is_primary", "address")
+        .first()
+    )
     if existing_endpoint:
         endpoint_updates: list[str] = []
         if existing_endpoint.owner_agent_id != agent.id:
@@ -363,11 +366,6 @@ def ensure_default_agent_email_endpoint(
             # Address races are rare; retry with a fresh generated value.
             continue
 
-        if is_primary:
-            agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).exclude(
-                id=endpoint.id
-            ).update(is_primary=False)
-
         PersistentAgentEmailEndpoint.objects.create(
             endpoint=endpoint,
             display_name=display_name,
@@ -386,7 +384,7 @@ def maybe_sync_agent_email_display_name(agent: PersistentAgent, previous_name: s
     if not desired_name:
         return False
 
-    endpoint = get_default_agent_email_endpoint(agent) or (
+    endpoint = (
         agent.comms_endpoints.filter(channel=CommsChannel.EMAIL)
         .order_by("-is_primary")
         .first()
