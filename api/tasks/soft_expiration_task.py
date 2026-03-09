@@ -11,6 +11,10 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.sites.models import Site
 from api.models import PersistentAgent, PersistentAgentMessage, CommsChannel
+from api.agent.comms.email_endpoint_routing import (
+    get_agent_primary_endpoint,
+    resolve_agent_email_sender_endpoint_for_message,
+)
 
 from constants.feature_flags import AGENT_SOFT_EXPIRATION
 from constants.plans import PlanNames
@@ -55,17 +59,26 @@ def _within_downgrade_grace(agent) -> bool:
         return timezone.now() < (downgraded_at + timedelta(hours=48))
 
 
-def _get_agent_sending_endpoint(agent, channel: CommsChannel) -> str | None:
+def _get_agent_sending_endpoint(
+    agent,
+    channel: CommsChannel,
+    *,
+    to_endpoint=None,
+):
     """Return the agent-owned endpoint to send from for a given channel.
 
     Preference order: primary endpoint for channel, then any endpoint for channel.
     Returns None if the agent has no endpoint for that channel.
     """
-    from_ep = agent.comms_endpoints.filter(channel=channel, is_primary=True).first()
-    if not from_ep:
-        from_ep = agent.comms_endpoints.filter(channel=channel).first()
-
-    return from_ep
+    if channel == CommsChannel.EMAIL:
+        return resolve_agent_email_sender_endpoint_for_message(
+            agent,
+            to_endpoint=to_endpoint,
+            cc_endpoints=None,
+            has_bcc=False,
+            log_context="soft_expiration_notice",
+        )
+    return get_agent_primary_endpoint(agent, channel)
 
 def _send_sleep_notification(agent) -> None:
     """Send the friendly sleep notification via the user's preferred channel."""
@@ -109,9 +122,10 @@ def _send_sleep_notification(agent) -> None:
 
     if ep.channel == CommsChannel.EMAIL:
         # From agent's primary email endpoint to user email endpoint
-        from_ep = _get_agent_sending_endpoint(agent, CommsChannel.EMAIL)
+        from_ep = _get_agent_sending_endpoint(agent, CommsChannel.EMAIL, to_endpoint=ep)
         if not from_ep:
             logger.info(f"Agent {agent.id} has no email endpoint; cannot send sleep notification.")
+            return
         msg = PersistentAgentMessage.objects.create(
             owner_agent=agent,
             from_endpoint=from_ep,
@@ -126,6 +140,7 @@ def _send_sleep_notification(agent) -> None:
         from_ep = _get_agent_sending_endpoint(agent, CommsChannel.SMS)
         if not from_ep:
             logger.info(f"Agent {agent.id} has no SMS endpoint; cannot send sleep notification.")
+            return
         msg = PersistentAgentMessage.objects.create(
             owner_agent=agent,
             from_endpoint=from_ep,

@@ -280,6 +280,7 @@ export function AgentEmailSettingsScreen({
   })
 
   const settings = settingsQuery.data
+  const defaultEmailDomainLabel = settings?.defaultEmailDomain ? `@${settings.defaultEmailDomain}` : 'default Gobii'
 
   useEffect(() => {
     if (!settings) {
@@ -505,8 +506,17 @@ export function AgentEmailSettingsScreen({
 
       <div className="rounded-xl bg-white p-5 shadow-sm">
         <div className="space-y-4">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">Regular Gobii Address</p>
+              <p className="mt-1 text-sm text-slate-900">
+                {settings.defaultEndpoint.exists ? settings.defaultEndpoint.address : 'Not configured'}
+              </p>
+              <p className="mt-1 text-xs text-slate-700">
+                This `{defaultEmailDomainLabel}` address stays active for inbound messages.
+              </p>
+            </div>
             <div>
-              <label className="text-sm font-semibold text-slate-700">Agent Email Address</label>
+              <label className="text-sm font-semibold text-slate-700">Custom Transport Address</label>
                 <input
                   type="email"
                   value={draft.endpointAddress}
@@ -517,7 +527,7 @@ export function AgentEmailSettingsScreen({
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               <p className="mt-1 text-xs text-slate-600">
-                This is the email address your agent uses to send and receive emails.
+                This address is used for custom SMTP/IMAP send and receive behavior.
               </p>
             </div>
 
