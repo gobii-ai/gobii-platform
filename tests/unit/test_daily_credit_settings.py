@@ -10,6 +10,7 @@ import uuid
 from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.services.daily_credit_settings import (
     get_daily_credit_settings_for_plan,
+    get_daily_credit_settings_for_plan_version,
     invalidate_daily_credit_settings_cache,
 )
 from constants.plans import PlanNames
@@ -96,6 +97,41 @@ class DailyCreditSettingsTests(TestCase):
         )
         hard_limit = agent.get_daily_credit_hard_limit()
         self.assertEqual(hard_limit, Decimal("6.00"))
+
+    def test_offpeak_burn_rate_threshold_can_be_configured(self):
+        DailyCreditConfig.objects.update_or_create(
+            plan_name=PlanNames.FREE,
+            defaults={
+                "slider_min": Decimal("0"),
+                "slider_max": Decimal("50"),
+                "slider_step": Decimal("1"),
+                "burn_rate_threshold_per_hour": Decimal("4"),
+                "offpeak_burn_rate_threshold_per_hour": Decimal("2.5"),
+                "burn_rate_window_minutes": 60,
+                "hard_limit_multiplier": Decimal("2"),
+            },
+        )
+
+        settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
+        self.assertEqual(settings.burn_rate_threshold_per_hour, Decimal("4"))
+        self.assertEqual(settings.offpeak_burn_rate_threshold_per_hour, Decimal("2.5"))
+
+    def test_offpeak_threshold_falls_back_to_burn_threshold_when_missing(self):
+        with patch(
+            "api.services.daily_credit_settings._load_settings",
+            return_value={
+                "by_plan_version": {},
+                "by_plan_name": {
+                    PlanNames.FREE: {
+                        "burn_rate_threshold_per_hour": "7.5",
+                    }
+                },
+            },
+        ):
+            settings = get_daily_credit_settings_for_plan_version(None, PlanNames.FREE)
+
+        self.assertEqual(settings.burn_rate_threshold_per_hour, Decimal("7.5"))
+        self.assertEqual(settings.offpeak_burn_rate_threshold_per_hour, Decimal("7.5"))
 
     def test_default_daily_credit_limit_scales_with_intelligence_tier(self):
         with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(

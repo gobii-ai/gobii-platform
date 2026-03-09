@@ -14,6 +14,7 @@ DEFAULT_SLIDER_MIN = Decimal("0")
 DEFAULT_SLIDER_MAX = Decimal("50")
 DEFAULT_SLIDER_STEP = Decimal("1")
 DEFAULT_BURN_RATE_THRESHOLD = Decimal("3")
+DEFAULT_OFFPEAK_BURN_RATE_THRESHOLD = DEFAULT_BURN_RATE_THRESHOLD
 DEFAULT_BURN_RATE_WINDOW_MINUTES = 60
 DEFAULT_HARD_LIMIT_MULTIPLIER = Decimal("2")
 
@@ -29,6 +30,7 @@ class DailyCreditSettings:
     slider_max: Decimal
     slider_step: Decimal
     burn_rate_threshold_per_hour: Decimal
+    offpeak_burn_rate_threshold_per_hour: Decimal
     burn_rate_window_minutes: int
     hard_limit_multiplier: Decimal
 
@@ -53,13 +55,18 @@ def _serialise(configs) -> dict[str, dict[str, dict]]:
     by_plan_version: dict[str, dict] = {}
     by_plan_name: dict[str, dict] = {}
     for config in configs:
+        burn_rate_threshold = _coalesce_decimal(
+            config.burn_rate_threshold_per_hour,
+            DEFAULT_BURN_RATE_THRESHOLD,
+        )
         payload = {
             "slider_min": _coalesce_decimal(config.slider_min, DEFAULT_SLIDER_MIN),
             "slider_max": _coalesce_decimal(config.slider_max, DEFAULT_SLIDER_MAX),
             "slider_step": _coalesce_decimal(config.slider_step, DEFAULT_SLIDER_STEP),
-            "burn_rate_threshold_per_hour": _coalesce_decimal(
-                config.burn_rate_threshold_per_hour,
-                DEFAULT_BURN_RATE_THRESHOLD,
+            "burn_rate_threshold_per_hour": burn_rate_threshold,
+            "offpeak_burn_rate_threshold_per_hour": _coalesce_decimal(
+                config.offpeak_burn_rate_threshold_per_hour,
+                burn_rate_threshold,
             ),
             "burn_rate_window_minutes": _coalesce_int(
                 config.burn_rate_window_minutes,
@@ -86,6 +93,7 @@ def _ensure_defaults_exist() -> None:
                 "slider_max": DEFAULT_SLIDER_MAX,
                 "slider_step": DEFAULT_SLIDER_STEP,
                 "burn_rate_threshold_per_hour": DEFAULT_BURN_RATE_THRESHOLD,
+                "offpeak_burn_rate_threshold_per_hour": DEFAULT_OFFPEAK_BURN_RATE_THRESHOLD,
                 "burn_rate_window_minutes": DEFAULT_BURN_RATE_WINDOW_MINUTES,
                 "hard_limit_multiplier": DEFAULT_HARD_LIMIT_MULTIPLIER,
             },
@@ -104,6 +112,7 @@ def _ensure_defaults_exist() -> None:
                 "slider_max": DEFAULT_SLIDER_MAX,
                 "slider_step": DEFAULT_SLIDER_STEP,
                 "burn_rate_threshold_per_hour": DEFAULT_BURN_RATE_THRESHOLD,
+                "offpeak_burn_rate_threshold_per_hour": DEFAULT_OFFPEAK_BURN_RATE_THRESHOLD,
                 "burn_rate_window_minutes": DEFAULT_BURN_RATE_WINDOW_MINUTES,
                 "hard_limit_multiplier": DEFAULT_HARD_LIMIT_MULTIPLIER,
             },
@@ -128,13 +137,18 @@ def get_daily_credit_settings_for_plan_version(
 ) -> DailyCreditSettings:
     settings_map = _load_settings()
     config = select_plan_settings_payload(settings_map, plan_version_id, plan_name)
+    burn_rate_threshold = _coalesce_decimal(
+        config.get("burn_rate_threshold_per_hour"),
+        DEFAULT_BURN_RATE_THRESHOLD,
+    )
     return DailyCreditSettings(
         slider_min=_coalesce_decimal(config.get("slider_min"), DEFAULT_SLIDER_MIN),
         slider_max=_coalesce_decimal(config.get("slider_max"), DEFAULT_SLIDER_MAX),
         slider_step=_coalesce_decimal(config.get("slider_step"), DEFAULT_SLIDER_STEP),
-        burn_rate_threshold_per_hour=_coalesce_decimal(
-            config.get("burn_rate_threshold_per_hour"),
-            DEFAULT_BURN_RATE_THRESHOLD,
+        burn_rate_threshold_per_hour=burn_rate_threshold,
+        offpeak_burn_rate_threshold_per_hour=_coalesce_decimal(
+            config.get("offpeak_burn_rate_threshold_per_hour"),
+            burn_rate_threshold,
         ),
         burn_rate_window_minutes=_coalesce_int(
             config.get("burn_rate_window_minutes"),

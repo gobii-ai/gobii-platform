@@ -582,6 +582,7 @@ class UserPreference(models.Model):
 
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
+    KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
             "default": AgentRosterSortMode.RECENT,
@@ -591,6 +592,10 @@ class UserPreference(models.Model):
         KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: {
             "default": [],
             "type": "uuid_list",
+        },
+        KEY_USER_TIMEZONE: {
+            "default": "",
+            "type": "timezone",
         },
     }
 
@@ -651,6 +656,12 @@ class UserPreference(models.Model):
         return normalized
 
     @classmethod
+    def _normalize_timezone_preference_value(cls, key: str, value: object) -> str:
+        from api.services.user_timezone import normalize_timezone_value
+
+        return normalize_timezone_value(value, key=key)
+
+    @classmethod
     def _normalize_preference_value(
         cls,
         key: str,
@@ -668,7 +679,28 @@ class UserPreference(models.Model):
         if preference_type == "uuid_list":
             return cls._normalize_uuid_list_preference_value(key, value)
 
+        if preference_type == "timezone":
+            return cls._normalize_timezone_preference_value(key, value)
+
         raise ValueError(f"Unsupported preference type for '{key}'.")
+
+    @classmethod
+    def resolve_user_timezone(cls, user, *, fallback_to_utc: bool = True) -> str:
+        from api.services.user_timezone import resolve_user_timezone
+
+        return resolve_user_timezone(user, fallback_to_utc=fallback_to_utc)
+
+    @classmethod
+    def maybe_infer_user_timezone(cls, user, timezone_value: object) -> str:
+        from api.services.user_timezone import maybe_infer_user_timezone
+
+        return maybe_infer_user_timezone(user, timezone_value)
+
+    @classmethod
+    def normalize_user_timezone_value(cls, value: object) -> str:
+        from api.services.user_timezone import normalize_timezone_value
+
+        return normalize_timezone_value(value, key=cls.KEY_USER_TIMEZONE)
 
     @classmethod
     def get_for_user(cls, user):
@@ -1376,6 +1408,13 @@ class DailyCreditConfig(models.Model):
         default=Decimal("3"),
         validators=[MinValueValidator(Decimal("0"))],
         help_text="Preferred maximum credits consumed per hour before agents are asked to slow down.",
+    )
+    offpeak_burn_rate_threshold_per_hour = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=Decimal("3"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Burn-rate threshold used during off-peak local hours (22:00-06:00).",
     )
     burn_rate_window_minutes = models.PositiveIntegerField(
         default=60,

@@ -320,6 +320,7 @@ MIDDLEWARE = [
     "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "middleware.console_timezone.ConsoleApiTimezoneInferenceMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "waffle.middleware.WaffleMiddleware",

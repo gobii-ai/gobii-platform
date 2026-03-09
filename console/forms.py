@@ -1,6 +1,7 @@
 from django import forms
 from django.contrib.auth import get_user_model
 from django.db.utils import IntegrityError
+from functools import lru_cache
 
 from api.models import (
     ApiKey,
@@ -9,22 +10,44 @@ from api.models import (
     Organization,
     OrganizationMembership,
     OrganizationInvite,
+    UserPreference,
 )
 from api.models import UserPhoneNumber
 from django.core.validators import RegexValidator
 from django.utils import timezone
 from django.utils.text import slugify
-from django import forms
 from django.core.exceptions import ValidationError
 
 from constants.regex import E164_PHONE_REGEX
 from constants.phone_countries import SUPPORTED_REGION_CODES
 from util.phone import validate_and_format_e164
+from api.services.user_timezone import normalize_timezone_value, resolve_user_timezone
 from api.models import CommsChannel
 from util import sms
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=1)
+def _build_timezone_choices() -> tuple[tuple[str, str], ...]:
+    return (
+        ("", "Auto-detect (from browser)"),
+        ("UTC", "UTC"),
+        ("America/New_York", "Eastern Time (US & Canada)"),
+        ("America/Chicago", "Central Time (US & Canada)"),
+        ("America/Denver", "Mountain Time (US & Canada)"),
+        ("America/Los_Angeles", "Pacific Time (US & Canada)"),
+        ("America/Phoenix", "Arizona"),
+        ("America/Anchorage", "Alaska"),
+        ("Pacific/Honolulu", "Hawaii"),
+        ("Europe/London", "London"),
+        ("Europe/Paris", "Paris"),
+        ("Europe/Berlin", "Berlin"),
+        ("Asia/Tokyo", "Tokyo"),
+        ("Asia/Kolkata", "India"),
+        ("Australia/Sydney", "Sydney"),
+    )
 
 
 class DedicatedIpAddForm(forms.Form):
@@ -116,6 +139,17 @@ class ApiKeyForm(forms.ModelForm):
 
 
 class UserProfileForm(forms.ModelForm):
+    timezone = forms.ChoiceField(
+        required=False,
+        label="Timezone",
+        choices=(),
+        widget=forms.Select(
+            attrs={
+                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+            }
+        ),
+    )
+
     class Meta:
         model = get_user_model()
         fields = ["first_name", "last_name"]
@@ -131,6 +165,40 @@ class UserProfileForm(forms.ModelForm):
                 }
             ),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        timezone_choices = list(_build_timezone_choices())
+        known_values = {value for value, _label in timezone_choices}
+
+        initial_timezone = ""
+        if getattr(self.instance, "pk", None):
+            initial_timezone = resolve_user_timezone(
+                self.instance,
+                fallback_to_utc=False,
+            )
+        if initial_timezone and initial_timezone not in known_values:
+            timezone_choices.append((initial_timezone, f"{initial_timezone} (stored)"))
+
+        self.fields["timezone"].choices = timezone_choices
+        self.fields["timezone"].initial = initial_timezone
+
+    def clean_timezone(self):
+        timezone_value = self.cleaned_data.get("timezone", "")
+        return normalize_timezone_value(
+            timezone_value,
+            key=UserPreference.KEY_USER_TIMEZONE,
+        )
+
+    def save(self, commit=True):
+        user = super().save(commit=commit)
+        if commit and getattr(user, "pk", None):
+            timezone_value = self.cleaned_data.get("timezone", "")
+            UserPreference.update_known_preferences(
+                user,
+                {UserPreference.KEY_USER_TIMEZONE: timezone_value},
+            )
+        return user
 
 class UserPhoneNumberForm(forms.Form):
     def __init__(self, *args, **kwargs):

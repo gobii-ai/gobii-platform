@@ -15,6 +15,22 @@ export class HttpError extends Error {
 
 let loginRedirectScheduled = false
 
+function getBrowserTimeZone(): string | null {
+  try {
+    if (typeof Intl === 'undefined' || typeof Intl.DateTimeFormat !== 'function') {
+      return null
+    }
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
+    if (typeof tz !== 'string') {
+      return null
+    }
+    const normalized = tz.trim()
+    return normalized || null
+  } catch {
+    return null
+  }
+}
+
 function applyConsoleContextHeaders(headers: Headers): boolean {
   const context = readStoredConsoleContext()
   if (!context) {
@@ -87,6 +103,12 @@ async function jsonFetchInternal<T>(
 
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json')
+  }
+  if (!headers.has('X-Gobii-Timezone')) {
+    const browserTimeZone = getBrowserTimeZone()
+    if (browserTimeZone) {
+      headers.set('X-Gobii-Timezone', browserTimeZone)
+    }
   }
   const appliedContextHeaders = applyConsoleContextHeaders(headers)
 

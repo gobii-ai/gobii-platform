@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timezone as dt_timezone
 
 from django.test import TestCase, tag, override_settings
 from django.utils import timezone
@@ -13,6 +14,7 @@ from api.models import (
     PersistentAgentSystemStep,
     TaskCredit,
     CommsChannel,
+    UserPreference,
 )
 from django.contrib.auth import get_user_model
 
@@ -592,6 +594,47 @@ class PersistentAgentToolCreditTests(TestCase):
         ):
             return get_agent_daily_credit_state(self.agent)
 
+    def _build_daily_state_with_timezone(
+        self,
+        *,
+        timezone_name: str | None,
+        now_value,
+        standard_threshold: Decimal = Decimal("6"),
+        offpeak_threshold: Decimal = Decimal("2"),
+    ):
+        if timezone_name is not None:
+            UserPreference.update_known_preferences(
+                self.user,
+                {UserPreference.KEY_USER_TIMEZONE: timezone_name},
+            )
+        else:
+            UserPreference.update_known_preferences(
+                self.user,
+                {UserPreference.KEY_USER_TIMEZONE: ""},
+            )
+
+        with patch(
+            "api.agent.core.prompt_context.apply_tier_credit_multiplier",
+            side_effect=lambda _agent, threshold: threshold,
+        ), patch(
+            "api.agent.core.prompt_context.get_daily_credit_settings_for_owner",
+            return_value=MagicMock(
+                burn_rate_window_minutes=60,
+                burn_rate_threshold_per_hour=standard_threshold,
+                offpeak_burn_rate_threshold_per_hour=offpeak_threshold,
+            ),
+        ), patch(
+            "api.agent.core.prompt_context.compute_burn_rate",
+            return_value={
+                "burn_rate_per_hour": Decimal("1"),
+                "window_minutes": 60,
+            },
+        ), patch(
+            "api.agent.core.prompt_context.dj_timezone.now",
+            return_value=now_value,
+        ):
+            return get_agent_daily_credit_state(self.agent)
+
     def test_daily_credit_state_burn_threshold_no_inactivity_keeps_base(self):
         state = self._build_daily_state_with_inactivity(
             inactive_days=0,
@@ -637,6 +680,64 @@ class PersistentAgentToolCreditTests(TestCase):
 
         self.assertTrue(should_pause)
         pause_mock.assert_called_once()
+
+    def test_daily_credit_state_uses_offpeak_threshold_at_night(self):
+        now_value = datetime(2026, 3, 10, 3, 0, tzinfo=dt_timezone.utc)
+        state = self._build_daily_state_with_timezone(
+            timezone_name="America/New_York",
+            now_value=now_value,
+        )
+
+        self.assertTrue(state["burn_rate_offpeak_active"])
+        self.assertEqual(state["burn_rate_timezone"], "America/New_York")
+        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("2"))
+
+    def test_daily_credit_state_uses_standard_threshold_outside_offpeak(self):
+        now_value = datetime(2026, 3, 10, 16, 0, tzinfo=dt_timezone.utc)
+        state = self._build_daily_state_with_timezone(
+            timezone_name="America/New_York",
+            now_value=now_value,
+        )
+
+        self.assertFalse(state["burn_rate_offpeak_active"])
+        self.assertEqual(state["burn_rate_timezone"], "America/New_York")
+        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("6"))
+
+    def test_daily_credit_state_uses_utc_when_timezone_unset(self):
+        now_value = datetime(2026, 3, 10, 23, 0, tzinfo=dt_timezone.utc)
+        state = self._build_daily_state_with_timezone(
+            timezone_name=None,
+            now_value=now_value,
+        )
+
+        self.assertTrue(state["burn_rate_offpeak_active"])
+        self.assertEqual(state["burn_rate_timezone"], "UTC")
+        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("2"))
+
+    def test_daily_credit_state_offpeak_boundary_hours(self):
+        # America/New_York (EDT, UTC-4 on March 10, 2026)
+        # 21:59 -> 01:59 UTC, 22:00 -> 02:00 UTC, 05:59 -> 09:59 UTC, 06:00 -> 10:00 UTC
+        state_2159 = self._build_daily_state_with_timezone(
+            timezone_name="America/New_York",
+            now_value=datetime(2026, 3, 10, 1, 59, tzinfo=dt_timezone.utc),
+        )
+        state_2200 = self._build_daily_state_with_timezone(
+            timezone_name="America/New_York",
+            now_value=datetime(2026, 3, 10, 2, 0, tzinfo=dt_timezone.utc),
+        )
+        state_0559 = self._build_daily_state_with_timezone(
+            timezone_name="America/New_York",
+            now_value=datetime(2026, 3, 10, 9, 59, tzinfo=dt_timezone.utc),
+        )
+        state_0600 = self._build_daily_state_with_timezone(
+            timezone_name="America/New_York",
+            now_value=datetime(2026, 3, 10, 10, 0, tzinfo=dt_timezone.utc),
+        )
+
+        self.assertFalse(state_2159["burn_rate_offpeak_active"])
+        self.assertTrue(state_2200["burn_rate_offpeak_active"])
+        self.assertTrue(state_0559["burn_rate_offpeak_active"])
+        self.assertFalse(state_0600["burn_rate_offpeak_active"])
 
     @patch(
         "api.agent.core.prompt_context.get_tool_cost_overview",

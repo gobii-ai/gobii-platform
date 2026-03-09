@@ -54,6 +54,7 @@ from .models import (
     EvalRunTask,
     AgentComputeSession,
     ComputeSnapshot,
+    UserPreference,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -930,6 +931,7 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
         "slider_max",
         "slider_step",
         "burn_rate_threshold_per_hour",
+        "offpeak_burn_rate_threshold_per_hour",
         "burn_rate_window_minutes",
         "hard_limit_multiplier",
         "updated_at",
@@ -940,7 +942,13 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
         (None, {"fields": ("plan_name", "slider_min", "slider_max", "slider_step")}),
         (
             "Burn rate guidance",
-            {"fields": ("burn_rate_threshold_per_hour", "burn_rate_window_minutes")},
+            {
+                "fields": (
+                    "burn_rate_threshold_per_hour",
+                    "offpeak_burn_rate_threshold_per_hour",
+                    "burn_rate_window_minutes",
+                )
+            },
         ),
         (
             "Hard limit",
@@ -1676,6 +1684,54 @@ class UserReferralInlineForUser(admin.StackedInline):
     fields = ("referral_code", "created_at")
 
 
+class UserPreferenceAdminForm(forms.ModelForm):
+    timezone = forms.CharField(
+        required=False,
+        label="Timezone",
+        help_text="IANA timezone (for example: America/New_York). Leave blank to keep it unset.",
+    )
+
+    class Meta:
+        model = UserPreference
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and getattr(self.instance, "pk", None) and self.instance.user_id:
+            self.fields["timezone"].initial = UserPreference.resolve_user_timezone(
+                self.instance.user,
+                fallback_to_utc=False,
+            )
+
+    def clean_timezone(self):
+        timezone_value = self.cleaned_data.get("timezone", "")
+        return UserPreference.normalize_user_timezone_value(timezone_value)
+
+
+@admin.register(UserPreference)
+class UserPreferenceAdmin(admin.ModelAdmin):
+    form = UserPreferenceAdminForm
+    list_display = ("user", "timezone_display", "updated_at")
+    search_fields = ("user__email", "user__id")
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("user", "timezone", "preferences", "created_at", "updated_at")
+
+    @admin.display(description="Timezone")
+    def timezone_display(self, obj):
+        if not obj.user_id:
+            return ""
+        return UserPreference.resolve_user_timezone(obj.user, fallback_to_utc=False)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        timezone_value = form.cleaned_data.get("timezone", "")
+        UserPreference.update_known_preferences(
+            obj.user,
+            {UserPreference.KEY_USER_TIMEZONE: timezone_value},
+        )
+        obj.refresh_from_db(fields=["preferences", "updated_at"])
+
+
 User = get_user_model()
 
 if admin.site.is_registered(User):
@@ -1718,13 +1774,18 @@ class CustomUserAdmin(UserAdmin):
     def get_readonly_fields(self, request, obj=None):
         # Preserve any readonly fields defined by UserAdmin.
         base = super().get_readonly_fields(request, obj)
-        return base + ("taskcredit_summary_link",)
+        return base + ("taskcredit_summary_link", "timezone_display",)
 
     def get_fieldsets(self, request, obj=None):
         # Append a dedicated "Task Credits" fieldset to the default ones.
         fieldsets = list(super().get_fieldsets(request, obj))
+        fieldsets.append(("Preferences", {"fields": ("timezone_display",)}))
         fieldsets.append(("Task Credits", {"fields": ("taskcredit_summary_link",)}))
         return tuple(fieldsets)
+
+    @admin.display(description="Timezone")
+    def timezone_display(self, obj):
+        return UserPreference.resolve_user_timezone(obj, fallback_to_utc=False)
 
     @admin.display(description="Task Credits")
     def taskcredit_summary_link(self, obj):

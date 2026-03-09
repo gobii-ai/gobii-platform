@@ -33,6 +33,10 @@ class ConsoleUserPreferencesApiTests(TestCase):
             preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
             [],
         )
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_TIMEZONE),
+            "",
+        )
 
     def test_patch_updates_preference_and_get_returns_persisted_value(self):
         patch_response = self.client.patch(
@@ -156,3 +160,104 @@ class ConsoleUserPreferencesApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_patch_updates_timezone_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_USER_TIMEZONE: "America/New_York",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_TIMEZONE),
+            "America/New_York",
+        )
+
+    def test_patch_rejects_invalid_timezone_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_USER_TIMEZONE: "Not/A_Real_Zone",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_console_api_infers_timezone_when_preference_blank(self):
+        response = self.client.get(
+            self.url,
+            HTTP_X_GOBII_TIMEZONE="America/Los_Angeles",
+        )
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_TIMEZONE),
+            "America/Los_Angeles",
+        )
+
+    def test_console_api_inference_does_not_override_explicit_timezone(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_USER_TIMEZONE: "Europe/Berlin"},
+        )
+
+        response = self.client.get(
+            self.url,
+            HTTP_X_GOBII_TIMEZONE="America/Los_Angeles",
+        )
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_TIMEZONE),
+            "Europe/Berlin",
+        )
+
+    def test_console_api_inference_works_for_login_required_console_views(self):
+        response = self.client.get(
+            reverse("console_session"),
+            HTTP_X_GOBII_TIMEZONE="America/Denver",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        preferences = UserPreference.resolve_known_preferences(self.user)
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_TIMEZONE),
+            "America/Denver",
+        )
+
+    def test_console_api_ignores_invalid_timezone_header(self):
+        response = self.client.get(
+            reverse("console_session"),
+            HTTP_X_GOBII_TIMEZONE="Not/A_Real_Zone",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_profile_page_updates_timezone_preference(self):
+        response = self.client.post(
+            reverse("profile"),
+            {
+                "first_name": "Timezone",
+                "last_name": "Owner",
+                "timezone": "America/Chicago",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        preferences = UserPreference.resolve_known_preferences(self.user)
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_USER_TIMEZONE),
+            "America/Chicago",
+        )
