@@ -5,13 +5,12 @@ import re
 from typing import Any
 
 from django.core.cache import cache
+from django.db.models import Q
 
 from api.agent.core.llm_config import LLMNotConfiguredError, get_summarization_llm_configs
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
 from api.models import PersistentAgent, PersistentAgentCompletion, PersistentAgentMessage
-
-from .timeline import fetch_timeline_window
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +18,7 @@ SUGGESTION_CATEGORIES = ("capabilities", "deliverables", "integrations", "planni
 DEFAULT_PROMPT_COUNT = 3
 DEFAULT_CONTEXT_MESSAGE_LIMIT = 6
 SUGGESTIONS_CACHE_VERSION = "v1"
+HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
 
 STARTER_PROMPT_POOL: list[dict[str, str]] = [
     {"id": "capabilities-overview", "text": "Outline what you can help me with right now.", "category": "capabilities"},
@@ -105,7 +105,7 @@ def select_starter_prompts(
 
 
 def _has_completed_agent_loop(agent: PersistentAgent) -> bool:
-    messages = PersistentAgentMessage.objects.filter(owner_agent=agent)
+    messages = _visible_messages_queryset(agent)
     first_user_timestamp = (
         messages
         .filter(is_outbound=False)
@@ -116,6 +116,42 @@ def _has_completed_agent_loop(agent: PersistentAgent) -> bool:
     if not first_user_timestamp:
         return False
     return messages.filter(is_outbound=True, timestamp__gt=first_user_timestamp).exists()
+
+
+def _visible_messages_queryset(agent: PersistentAgent):
+    hidden_key = f"raw_payload__{HIDE_IN_CHAT_PAYLOAD_KEY}"
+    return PersistentAgentMessage.objects.filter(owner_agent=agent).filter(
+        Q(**{hidden_key: False}) | Q(**{f"{hidden_key}__isnull": True}),
+    )
+
+
+def _fetch_recent_message_events(
+    agent: PersistentAgent,
+    *,
+    limit: int = DEFAULT_CONTEXT_MESSAGE_LIMIT,
+) -> tuple[list[dict[str, Any]], str]:
+    recent_messages = list(
+        _visible_messages_queryset(agent)
+        .only("id", "timestamp", "body", "is_outbound")
+        .order_by("-timestamp", "-id")[: max(1, limit)]
+    )
+    if not recent_messages:
+        return [], "none"
+
+    newest_message = recent_messages[0]
+    newest_marker = f"{newest_message.timestamp.isoformat()}:{newest_message.id}"
+
+    events = [
+        {
+            "kind": "message",
+            "message": {
+                "bodyText": message.body,
+                "isOutbound": bool(message.is_outbound),
+            },
+        }
+        for message in reversed(recent_messages)
+    ]
+    return events, newest_marker
 
 
 def _context_from_timeline_events(events: list[dict[str, Any]]) -> str:
@@ -328,18 +364,20 @@ def build_agent_timeline_suggestions(
     prompt_count: int = DEFAULT_PROMPT_COUNT,
 ) -> dict[str, Any]:
     prompt_count = max(1, min(int(prompt_count), 5))
-    window = fetch_timeline_window(agent, direction="initial", limit=40)
-    newest_cursor = window.newest_cursor or "none"
+    message_events, newest_marker = _fetch_recent_message_events(
+        agent,
+        limit=DEFAULT_CONTEXT_MESSAGE_LIMIT,
+    )
 
     cache_key = (
         f"agent-chat:suggestions:{SUGGESTIONS_CACHE_VERSION}:"
-        f"{agent.id}:{newest_cursor}:{prompt_count}"
+        f"{agent.id}:{newest_marker}:{prompt_count}"
     )
     cached = cache.get(cache_key)
     if isinstance(cached, dict) and isinstance(cached.get("suggestions"), list):
         return cached
 
-    seed = f"{agent.id}:{newest_cursor}:{prompt_count}"
+    seed = f"{agent.id}:{newest_marker}:{prompt_count}"
     static_suggestions = select_starter_prompts(
         STARTER_PROMPT_POOL,
         prompt_count,
@@ -352,7 +390,7 @@ def build_agent_timeline_suggestions(
         cache.set(cache_key, payload, timeout=900)
         return payload
 
-    context = _context_from_timeline_events(window.events)
+    context = _context_from_timeline_events(message_events)
     dynamic_suggestions = _generate_dynamic_suggestions(
         agent,
         context=context,

@@ -916,7 +916,6 @@ export function AgentChatLayout({
                     loadingCount={starterPromptCount}
                     disabled={starterPromptSubmitting}
                     onSelect={handleStarterPromptSelect}
-                    variant="timeline-list"
                   />
                 ) : null}
 
