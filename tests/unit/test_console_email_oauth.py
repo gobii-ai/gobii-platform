@@ -8,6 +8,7 @@ from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
+from config import settings
 from api.models import (
     AgentEmailAccount,
     AgentEmailOAuthCredential,
@@ -18,6 +19,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
 )
 from console.email_settings.views import _format_email_connection_error, _normalize_email_error_text
+from api.services.persistent_agents import ensure_default_agent_email_endpoint
 
 
 @tag("batch_console_email_oauth")
@@ -246,6 +248,25 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertFalse(payload["account"]["hasSmtpPassword"])
         self.assertFalse(payload["account"]["hasImapPassword"])
         self.assertTrue(payload["account"]["imapIdleEnabled"])
+        self.assertIn("defaultEmailDomain", payload)
+        self.assertEqual(payload["defaultEmailDomain"], (settings.DEFAULT_AGENT_EMAIL_DOMAIN or "").lower())
+        self.assertIn("defaultEndpoint", payload)
+        self.assertIn("exists", payload["defaultEndpoint"])
+        self.assertIn("address", payload["defaultEndpoint"])
+        self.assertIn("isInboundAliasActive", payload["defaultEndpoint"])
+
+    def test_email_settings_api_get_includes_default_endpoint_payload(self):
+        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+            default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
+            self.assertIsNotNone(default_endpoint)
+
+        url = reverse("console_agent_email_settings", args=[self.agent.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["defaultEndpoint"]["exists"])
+        self.assertEqual(payload["defaultEndpoint"]["address"], default_endpoint.address)
+        self.assertTrue(payload["defaultEndpoint"]["isInboundAliasActive"])
 
     def test_email_settings_api_get_defaults_imap_idle_enabled_for_unconfigured_agent(self):
         with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
@@ -298,6 +319,7 @@ class AgentEmailOAuthApiTests(TestCase):
         created_endpoint = PersistentAgentCommsEndpoint.objects.get(
             owner_agent=second_agent,
             channel=CommsChannel.EMAIL,
+            address="second-agent@example.com",
         )
         self.assertEqual(created_endpoint.address, "second-agent@example.com")
 
@@ -345,6 +367,135 @@ class AgentEmailOAuthApiTests(TestCase):
 
         credential.refresh_from_db()
         self.assertEqual(credential.account_id, new_endpoint.id)
+
+    def test_email_settings_ensure_account_preserves_default_alias_when_switching_to_custom(self):
+        default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-default-switch")
+        alias_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Alias Switch Agent",
+            charter="c",
+            browser_use_agent=browser_agent,
+        )
+        default_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=alias_agent,
+            channel=CommsChannel.EMAIL,
+            address=f"alias.switch@{default_domain}",
+            is_primary=True,
+        )
+        account = AgentEmailAccount.objects.create(endpoint=default_endpoint, imap_idle_enabled=True)
+        account.smtp_host = "smtp.example.com"
+        account.smtp_port = 587
+        account.smtp_security = "starttls"
+        account.smtp_auth = "login"
+        account.smtp_username = default_endpoint.address
+        account.smtp_password_encrypted = b"encrypted"
+        account.is_outbound_enabled = True
+        account.save()
+
+        ensure_url = reverse("console_agent_email_settings_ensure_account", args=[alias_agent.pk])
+        response = self.client.post(
+            ensure_url,
+            data=json.dumps({"endpointAddress": "custom.switch@example.com"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertEqual(payload["settings"]["endpoint"]["address"], "custom.switch@example.com")
+
+        default_endpoint.refresh_from_db()
+        self.assertEqual(default_endpoint.address, f"alias.switch@{default_domain}")
+        self.assertFalse(default_endpoint.is_primary)
+
+        custom_endpoint = PersistentAgentCommsEndpoint.objects.get(
+            owner_agent=alias_agent,
+            channel=CommsChannel.EMAIL,
+            address="custom.switch@example.com",
+        )
+        self.assertTrue(custom_endpoint.is_primary)
+        self.assertFalse(AgentEmailAccount.objects.filter(endpoint=default_endpoint).exists())
+        self.assertTrue(AgentEmailAccount.objects.filter(endpoint=custom_endpoint).exists())
+
+    def test_ensure_default_agent_email_endpoint_creates_alias_for_custom_only_agent(self):
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-custom-only")
+        custom_only_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Custom Only Agent",
+            charter="c",
+            browser_use_agent=browser_agent,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=custom_only_agent,
+            channel=CommsChannel.EMAIL,
+            address="custom.only@example.com",
+            is_primary=True,
+        )
+
+        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+            default_endpoint = ensure_default_agent_email_endpoint(custom_only_agent, is_primary=False)
+            self.assertIsNotNone(default_endpoint)
+            self.assertTrue(default_endpoint.address.endswith(f"@{settings.DEFAULT_AGENT_EMAIL_DOMAIN}".lower()))
+            self.assertFalse(default_endpoint.is_primary)
+
+            second_call_endpoint = ensure_default_agent_email_endpoint(custom_only_agent, is_primary=False)
+            self.assertEqual(second_call_endpoint.id, default_endpoint.id)
+
+    def test_email_settings_reset_to_default_restores_default_alias_and_removes_custom_config(self):
+        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+            default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
+            self.assertIsNotNone(default_endpoint)
+
+        self.account.smtp_host = "smtp.gmail.com"
+        self.account.smtp_port = 587
+        self.account.smtp_security = "starttls"
+        self.account.smtp_auth = "login"
+        self.account.smtp_username = self.endpoint.address
+        self.account.is_outbound_enabled = True
+        self.account.save()
+        credential = AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="gmail",
+        )
+
+        save_url = reverse("console_agent_email_settings", args=[self.agent.pk])
+        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+            response = self.client.post(
+                save_url,
+                data=json.dumps({"action": "reset_to_default"}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["settings"]["endpoint"]["address"], default_endpoint.address)
+        self.assertFalse(payload["settings"]["account"]["exists"])
+
+        default_endpoint.refresh_from_db()
+        self.assertEqual(default_endpoint.owner_agent_id, self.agent.id)
+        self.assertTrue(default_endpoint.is_primary)
+
+        self.endpoint.refresh_from_db()
+        self.assertIsNone(self.endpoint.owner_agent_id)
+        self.assertFalse(self.endpoint.is_primary)
+        self.assertFalse(AgentEmailAccount.objects.filter(endpoint=self.endpoint).exists())
+        self.assertFalse(AgentEmailOAuthCredential.objects.filter(id=credential.id).exists())
+
+    def test_email_settings_reset_to_default_requires_default_alias_feature(self):
+        save_url = reverse("console_agent_email_settings", args=[self.agent.pk])
+        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", False):
+            response = self.client.post(
+                save_url,
+                data=json.dumps({"action": "reset_to_default"}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 400, response.content)
+        payload = response.json()
+        self.assertIn("errors", payload)
+        self.assertIn("default_endpoint", payload["errors"])
 
     def test_email_settings_ensure_account_rejects_invalid_endpoint(self):
         ensure_url = reverse("console_agent_email_settings_ensure_account", args=[self.agent.pk])

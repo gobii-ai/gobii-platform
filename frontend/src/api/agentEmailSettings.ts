@@ -17,9 +17,15 @@ export type AgentEmailSettingsPayload = {
       imap_security: string
     }
   }
+  defaultEmailDomain: string
   endpoint: {
     address: string
     exists: boolean
+  }
+  defaultEndpoint: {
+    address: string
+    exists: boolean
+    isInboundAliasActive: boolean
   }
   account: {
     id: string | null
@@ -118,6 +124,16 @@ export async function saveAgentEmailSettings(
     method: 'POST',
     includeCsrf: true,
     json: payload,
+  })
+}
+
+export async function resetAgentEmailSettingsToDefault(
+  url: string,
+): Promise<{ ok: boolean; settings: AgentEmailSettingsPayload }> {
+  return jsonRequest<{ ok: boolean; settings: AgentEmailSettingsPayload }>(url, {
+    method: 'POST',
+    includeCsrf: true,
+    json: { action: 'reset_to_default' },
   })
 }
 

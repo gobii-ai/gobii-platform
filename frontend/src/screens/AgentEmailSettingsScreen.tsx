@@ -6,6 +6,7 @@ import {
   ensureAgentEmailAccount,
   fetchAgentEmailSettings,
   fetchEmailOAuthStatus,
+  resetAgentEmailSettingsToDefault,
   revokeEmailOAuth,
   saveAgentEmailSettings,
   startEmailOAuth,
@@ -239,6 +240,7 @@ export function AgentEmailSettingsScreen({
   const [guidanceError, setGuidanceError] = useState<string | null>(null)
   const [pendingOAuthSettings, setPendingOAuthSettings] = useState<AgentEmailSettingsPayload | null>(null)
   const [testResults, setTestResults] = useState<{ smtp?: { ok: boolean; error: string }; imap?: { ok: boolean; error: string } }>({})
+  const [isResetPending, setIsResetPending] = useState(false)
 
   const settingsQuery = useQuery({
     queryKey,
@@ -261,6 +263,14 @@ export function AgentEmailSettingsScreen({
       setErrorBanner(null)
     },
   })
+  const resetMutation = useMutation({
+    mutationFn: (url: string) => resetAgentEmailSettingsToDefault(url),
+    onSuccess: (response) => {
+      queryClient.setQueryData(queryKey, response.settings)
+      setErrorBanner(null)
+      setIsResetPending(false)
+    },
+  })
 
   const testMutation = useMutation({
     mutationFn: (payload: EmailSettingsSaveRequest & { testOutbound: boolean; testInbound: boolean }) =>
@@ -280,18 +290,30 @@ export function AgentEmailSettingsScreen({
   })
 
   const settings = settingsQuery.data
+  const defaultEmailDomainLabel = settings?.defaultEmailDomain ? `@${settings.defaultEmailDomain}` : 'default Gobii'
 
   useEffect(() => {
     if (!settings) {
       return
     }
+    setIsResetPending(false)
     const nextDraft = draftFromSettings(settings)
     setDraft((current) => {
       if (!current) {
         return nextDraft
       }
+      const serverHasDirectionSelection = nextDraft.isInboundEnabled || nextDraft.isOutboundEnabled
+      const keepLocalDirectionSelection =
+        !serverHasDirectionSelection && (current.isInboundEnabled || current.isOutboundEnabled)
       return {
         ...nextDraft,
+        isInboundEnabled: keepLocalDirectionSelection ? current.isInboundEnabled : nextDraft.isInboundEnabled,
+        isOutboundEnabled: keepLocalDirectionSelection ? current.isOutboundEnabled : nextDraft.isOutboundEnabled,
+        provider: keepLocalDirectionSelection && !nextDraft.provider ? current.provider : nextDraft.provider,
+        connectionType:
+          keepLocalDirectionSelection && !nextDraft.connectionType
+            ? current.connectionType
+            : nextDraft.connectionType,
         smtpPassword: current.smtpPassword,
         imapPassword: current.imapPassword,
       }
@@ -323,11 +345,15 @@ export function AgentEmailSettingsScreen({
   const hasSavedSmtpPassword = Boolean(settings?.account.hasSmtpPassword)
   const hasSavedImapPassword = Boolean(settings?.account.hasImapPassword)
   const setupValid = hasAddress && hasMailDirection && hasProvider && hasConnectionType
-  const canSubmit = setupValid && (!oauthRequired || oauthConnected)
+  const canSubmit = isResetPending || (setupValid && (!oauthRequired || oauthConnected))
 
   const updateDraft = useCallback((updater: (current: DraftState) => DraftState) => {
+    if (isResetPending) {
+      setBanner(null)
+    }
+    setIsResetPending(false)
     setDraft((current) => (current ? updater(current) : current))
-  }, [])
+  }, [isResetPending])
 
   const launchOAuth = useCallback(async (resolvedSettings: AgentEmailSettingsPayload) => {
     if (!resolvedSettings.account.id) {
@@ -440,10 +466,30 @@ export function AgentEmailSettingsScreen({
     if (!draft || !settings) {
       return
     }
-    const payload = buildSavePayload(draft, settings.endpoint.address)
     setBanner(null)
     setErrorBanner(null)
     try {
+      if (isResetPending) {
+        const response = await resetMutation.mutateAsync(emailSettingsUrl)
+        setPendingOAuthSettings(null)
+        setShowGuidance(false)
+        setGuidanceAck(false)
+        setGuidanceError(null)
+        setTestResults({})
+        const restoredAddress = response.settings.endpoint.address || response.settings.defaultEndpoint.address
+        setBanner(
+          restoredAddress
+            ? `Reverted to default email settings (${restoredAddress}).`
+            : 'Reverted to default email settings.',
+        )
+        const nextUrl = response.settings.agent.backUrl || settings.agent.backUrl
+        if (nextUrl) {
+          window.location.assign(nextUrl)
+        }
+        return
+      }
+
+      const payload = buildSavePayload(draft, settings.endpoint.address)
       const testResponse = await testMutation.mutateAsync({
         ...payload,
         testOutbound: draft.isOutboundEnabled,
@@ -460,7 +506,48 @@ export function AgentEmailSettingsScreen({
     } catch (error) {
       setErrorBanner(describeHttpError(error))
     }
-  }, [draft, saveMutation, settings, testMutation])
+  }, [draft, emailSettingsUrl, isResetPending, resetMutation, saveMutation, settings, testMutation])
+
+  const handleResetToDefault = useCallback(() => {
+    if (!settings) {
+      return
+    }
+    const confirmed = window.confirm(
+      'Prepare revert to default Gobii email settings? This will uncheck inbound/outbound now. Click Save Settings to apply the revert.',
+    )
+    if (!confirmed) {
+      return
+    }
+    setBanner(null)
+    setErrorBanner(null)
+    const defaultEndpointAddress = settings.defaultEndpoint.address
+    if (!settings.defaultEndpoint.exists || !defaultEndpointAddress) {
+      setErrorBanner('Default Gobii email is not configured for this workspace.')
+      return
+    }
+    setPendingOAuthSettings(null)
+    setShowGuidance(false)
+    setGuidanceAck(false)
+    setGuidanceError(null)
+    setTestResults({})
+    setDraft((current) => {
+      if (!current) {
+        return current
+      }
+      return {
+        ...current,
+        endpointAddress: defaultEndpointAddress,
+        isOutboundEnabled: false,
+        isInboundEnabled: false,
+        provider: '',
+        connectionType: '',
+        smtpPassword: '',
+        imapPassword: '',
+      }
+    })
+    setIsResetPending(true)
+    setBanner(`Revert prepared. Click Save Settings to apply and switch to ${defaultEndpointAddress}.`)
+  }, [settings])
 
   if (settingsQuery.error && !settings) {
     return (
@@ -505,8 +592,17 @@ export function AgentEmailSettingsScreen({
 
       <div className="rounded-xl bg-white p-5 shadow-sm">
         <div className="space-y-4">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">Regular Gobii Address</p>
+              <p className="mt-1 text-sm text-slate-900">
+                {settings.defaultEndpoint.exists ? settings.defaultEndpoint.address : 'Not configured'}
+              </p>
+              <p className="mt-1 text-xs text-slate-700">
+                This `{defaultEmailDomainLabel}` address stays active for inbound messages.
+              </p>
+            </div>
             <div>
-              <label className="text-sm font-semibold text-slate-700">Agent Email Address</label>
+              <label className="text-sm font-semibold text-slate-700">Custom Transport Address</label>
                 <input
                   type="email"
                   value={draft.endpointAddress}
@@ -517,7 +613,7 @@ export function AgentEmailSettingsScreen({
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 />
               <p className="mt-1 text-xs text-slate-600">
-                This is the email address your agent uses to send and receive emails.
+                This address is used for custom SMTP/IMAP send and receive behavior.
               </p>
             </div>
 
@@ -955,10 +1051,22 @@ export function AgentEmailSettingsScreen({
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={testMutation.isPending || saveMutation.isPending || !canSubmit}
+                disabled={testMutation.isPending || saveMutation.isPending || resetMutation.isPending || !canSubmit}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {testMutation.isPending || saveMutation.isPending ? 'Saving...' : 'Save Settings'}
+                {testMutation.isPending || saveMutation.isPending || resetMutation.isPending
+                  ? 'Saving...'
+                  : isResetPending
+                    ? 'Apply Revert'
+                    : 'Save Settings'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleResetToDefault()}
+                disabled={testMutation.isPending || saveMutation.isPending || resetMutation.isPending}
+                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-60"
+              >
+                {resetMutation.isPending ? 'Reverting...' : 'Revert to Default Email'}
               </button>
             </div>
             {((testResults.smtp && !testResults.smtp.ok) || (testResults.imap && !testResults.imap.ok)) && (

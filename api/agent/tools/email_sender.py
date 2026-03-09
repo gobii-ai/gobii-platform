@@ -16,8 +16,8 @@ from ...models import (
     DeliveryStatus,
 )
 from django.conf import settings
-import os
 from ..comms.outbound_delivery import deliver_agent_email
+from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
@@ -31,6 +31,39 @@ from ..files.filespace_service import broadcast_message_attachment_update
 from api.services.email_verification import require_verified_email, EmailVerificationError
 
 logger = logging.getLogger(__name__)
+
+
+def _maybe_provision_simulated_from_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint | None:
+    """Provision a local sender endpoint for dev simulation when real transport is unavailable."""
+    simulation_flag = getattr(settings, "SIMULATE_EMAIL_DELIVERY", False)
+    postmark_state = postmark_status()
+    if not simulation_flag or postmark_state.enabled:
+        return None
+
+    from django.db import DatabaseError
+
+    sim_address = f"agent-{agent.id}@localhost"
+    try:
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address=sim_address,
+            is_primary=True,
+        )
+    except DatabaseError as exc:
+        logger.exception(
+            "Failed to provision simulated email endpoint for agent %s: %s",
+            agent.id,
+            exc,
+        )
+        return None
+
+    logger.info(
+        "Provisioned simulated from_endpoint %s for agent %s to enable local email simulation",
+        sim_address,
+        agent.id,
+    )
+    return endpoint
 
 
 def _should_continue_work(params: Dict[str, Any]) -> bool:
@@ -131,45 +164,6 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
         close_old_connections()
 
-        from_endpoint = (
-            PersistentAgentCommsEndpoint.objects.filter(
-                owner_agent=agent, channel=CommsChannel.EMAIL, is_primary=True
-            ).first()
-            or PersistentAgentCommsEndpoint.objects.filter(
-                owner_agent=agent, channel=CommsChannel.EMAIL
-            ).first()
-        )
-        if not from_endpoint:
-            # In local/dev, if simulation is enabled and no Postmark token is configured,
-            # auto-provision a temporary agent-owned email endpoint so we can simulate
-            # delivery and persist the outbound message for history/UX.
-            simulation_flag = getattr(settings, "SIMULATE_EMAIL_DELIVERY", False)
-            postmark_state = postmark_status()
-            if simulation_flag and not postmark_state.enabled:
-                try:
-                    # Create a simple local-from address for simulation purposes
-                    sim_address = f"agent-{agent.id}@localhost"
-                    from_endpoint = PersistentAgentCommsEndpoint.objects.create(
-                        owner_agent=agent,
-                        channel=CommsChannel.EMAIL,
-                        address=sim_address,
-                        is_primary=True,
-                    )
-                    logger.info(
-                        "Provisioned simulated from_endpoint %s for agent %s to enable local email simulation",
-                        sim_address,
-                        agent.id,
-                    )
-                except Exception as e:
-                    logger.exception(
-                        "Failed to provision simulated email endpoint for agent %s: %s",
-                        agent.id,
-                        e,
-                    )
-                    return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
-            else:
-                return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
-
         all_recipients = [to_address] + cc_addresses
         for recipient in all_recipients:
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, recipient):
@@ -207,6 +201,18 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                     channel=CommsChannel.EMAIL, address=cc_addr, defaults={"owner_agent": None}
                 )
                 cc_endpoint_objects.append(cc_endpoint)
+
+        from_endpoint = resolve_agent_email_sender_endpoint_for_message(
+            agent,
+            to_endpoint=to_endpoint,
+            cc_endpoints=cc_endpoint_objects,
+            has_bcc=False,
+            log_context="send_email_tool",
+        )
+        if not from_endpoint:
+            from_endpoint = _maybe_provision_simulated_from_endpoint(agent)
+            if not from_endpoint:
+                return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
 
         close_old_connections()
         try:
