@@ -4,7 +4,7 @@ from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag, override_settings
+from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
@@ -255,10 +255,10 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertIn("address", payload["defaultEndpoint"])
         self.assertIn("isInboundAliasActive", payload["defaultEndpoint"])
 
-    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True)
     def test_email_settings_api_get_includes_default_endpoint_payload(self):
-        default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
-        self.assertIsNotNone(default_endpoint)
+        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+            default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
+            self.assertIsNotNone(default_endpoint)
 
         url = reverse("console_agent_email_settings", args=[self.agent.pk])
         response = self.client.get(url)
@@ -417,7 +417,6 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertFalse(AgentEmailAccount.objects.filter(endpoint=default_endpoint).exists())
         self.assertTrue(AgentEmailAccount.objects.filter(endpoint=custom_endpoint).exists())
 
-    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True)
     def test_ensure_default_agent_email_endpoint_creates_alias_for_custom_only_agent(self):
         with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
             browser_agent = BrowserUseAgent.objects.create(user=self.user, name="BA-custom-only")
@@ -434,13 +433,14 @@ class AgentEmailOAuthApiTests(TestCase):
             is_primary=True,
         )
 
-        default_endpoint = ensure_default_agent_email_endpoint(custom_only_agent, is_primary=False)
-        self.assertIsNotNone(default_endpoint)
-        self.assertTrue(default_endpoint.address.endswith(f"@{settings.DEFAULT_AGENT_EMAIL_DOMAIN}".lower()))
-        self.assertFalse(default_endpoint.is_primary)
+        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+            default_endpoint = ensure_default_agent_email_endpoint(custom_only_agent, is_primary=False)
+            self.assertIsNotNone(default_endpoint)
+            self.assertTrue(default_endpoint.address.endswith(f"@{settings.DEFAULT_AGENT_EMAIL_DOMAIN}".lower()))
+            self.assertFalse(default_endpoint.is_primary)
 
-        second_call_endpoint = ensure_default_agent_email_endpoint(custom_only_agent, is_primary=False)
-        self.assertEqual(second_call_endpoint.id, default_endpoint.id)
+            second_call_endpoint = ensure_default_agent_email_endpoint(custom_only_agent, is_primary=False)
+            self.assertEqual(second_call_endpoint.id, default_endpoint.id)
 
     def test_email_settings_ensure_account_rejects_invalid_endpoint(self):
         ensure_url = reverse("console_agent_email_settings_ensure_account", args=[self.agent.pk])
