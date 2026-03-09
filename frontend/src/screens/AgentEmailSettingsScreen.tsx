@@ -240,6 +240,7 @@ export function AgentEmailSettingsScreen({
   const [guidanceError, setGuidanceError] = useState<string | null>(null)
   const [pendingOAuthSettings, setPendingOAuthSettings] = useState<AgentEmailSettingsPayload | null>(null)
   const [testResults, setTestResults] = useState<{ smtp?: { ok: boolean; error: string }; imap?: { ok: boolean; error: string } }>({})
+  const [isResetPending, setIsResetPending] = useState(false)
 
   const settingsQuery = useQuery({
     queryKey,
@@ -267,6 +268,7 @@ export function AgentEmailSettingsScreen({
     onSuccess: (response) => {
       queryClient.setQueryData(queryKey, response.settings)
       setErrorBanner(null)
+      setIsResetPending(false)
     },
   })
 
@@ -294,6 +296,7 @@ export function AgentEmailSettingsScreen({
     if (!settings) {
       return
     }
+    setIsResetPending(false)
     const nextDraft = draftFromSettings(settings)
     setDraft((current) => {
       if (!current) {
@@ -342,11 +345,15 @@ export function AgentEmailSettingsScreen({
   const hasSavedSmtpPassword = Boolean(settings?.account.hasSmtpPassword)
   const hasSavedImapPassword = Boolean(settings?.account.hasImapPassword)
   const setupValid = hasAddress && hasMailDirection && hasProvider && hasConnectionType
-  const canSubmit = setupValid && (!oauthRequired || oauthConnected)
+  const canSubmit = isResetPending || (setupValid && (!oauthRequired || oauthConnected))
 
   const updateDraft = useCallback((updater: (current: DraftState) => DraftState) => {
+    if (isResetPending) {
+      setBanner(null)
+    }
+    setIsResetPending(false)
     setDraft((current) => (current ? updater(current) : current))
-  }, [])
+  }, [isResetPending])
 
   const launchOAuth = useCallback(async (resolvedSettings: AgentEmailSettingsPayload) => {
     if (!resolvedSettings.account.id) {
@@ -459,10 +466,30 @@ export function AgentEmailSettingsScreen({
     if (!draft || !settings) {
       return
     }
-    const payload = buildSavePayload(draft, settings.endpoint.address)
     setBanner(null)
     setErrorBanner(null)
     try {
+      if (isResetPending) {
+        const response = await resetMutation.mutateAsync(emailSettingsUrl)
+        setPendingOAuthSettings(null)
+        setShowGuidance(false)
+        setGuidanceAck(false)
+        setGuidanceError(null)
+        setTestResults({})
+        const restoredAddress = response.settings.endpoint.address || response.settings.defaultEndpoint.address
+        setBanner(
+          restoredAddress
+            ? `Reverted to default email settings (${restoredAddress}).`
+            : 'Reverted to default email settings.',
+        )
+        const nextUrl = response.settings.agent.backUrl || settings.agent.backUrl
+        if (nextUrl) {
+          window.location.assign(nextUrl)
+        }
+        return
+      }
+
+      const payload = buildSavePayload(draft, settings.endpoint.address)
       const testResponse = await testMutation.mutateAsync({
         ...payload,
         testOutbound: draft.isOutboundEnabled,
@@ -479,34 +506,48 @@ export function AgentEmailSettingsScreen({
     } catch (error) {
       setErrorBanner(describeHttpError(error))
     }
-  }, [draft, saveMutation, settings, testMutation])
+  }, [draft, emailSettingsUrl, isResetPending, resetMutation, saveMutation, settings, testMutation])
 
-  const handleResetToDefault = useCallback(async () => {
+  const handleResetToDefault = useCallback(() => {
+    if (!settings) {
+      return
+    }
     const confirmed = window.confirm(
-      'Revert to default Gobii email settings? This removes custom SMTP/IMAP settings and switches the agent back to its default email address.',
+      'Prepare revert to default Gobii email settings? This will uncheck inbound/outbound now. Click Save Settings to apply the revert.',
     )
     if (!confirmed) {
       return
     }
     setBanner(null)
     setErrorBanner(null)
-    try {
-      const response = await resetMutation.mutateAsync(emailSettingsUrl)
-      setPendingOAuthSettings(null)
-      setShowGuidance(false)
-      setGuidanceAck(false)
-      setGuidanceError(null)
-      setTestResults({})
-      const restoredAddress = response.settings.endpoint.address || response.settings.defaultEndpoint.address
-      setBanner(
-        restoredAddress
-          ? `Reverted to default email settings (${restoredAddress}).`
-          : 'Reverted to default email settings.',
-      )
-    } catch (error) {
-      setErrorBanner(describeHttpError(error))
+    const defaultEndpointAddress = settings.defaultEndpoint.address
+    if (!settings.defaultEndpoint.exists || !defaultEndpointAddress) {
+      setErrorBanner('Default Gobii email is not configured for this workspace.')
+      return
     }
-  }, [emailSettingsUrl, resetMutation])
+    setPendingOAuthSettings(null)
+    setShowGuidance(false)
+    setGuidanceAck(false)
+    setGuidanceError(null)
+    setTestResults({})
+    setDraft((current) => {
+      if (!current) {
+        return current
+      }
+      return {
+        ...current,
+        endpointAddress: defaultEndpointAddress,
+        isOutboundEnabled: false,
+        isInboundEnabled: false,
+        provider: '',
+        connectionType: '',
+        smtpPassword: '',
+        imapPassword: '',
+      }
+    })
+    setIsResetPending(true)
+    setBanner(`Revert prepared. Click Save Settings to apply and switch to ${defaultEndpointAddress}.`)
+  }, [settings])
 
   if (settingsQuery.error && !settings) {
     return (
@@ -1013,7 +1054,11 @@ export function AgentEmailSettingsScreen({
                 disabled={testMutation.isPending || saveMutation.isPending || resetMutation.isPending || !canSubmit}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
-                {testMutation.isPending || saveMutation.isPending ? 'Saving...' : 'Save Settings'}
+                {testMutation.isPending || saveMutation.isPending || resetMutation.isPending
+                  ? 'Saving...'
+                  : isResetPending
+                    ? 'Apply Revert'
+                    : 'Save Settings'}
               </button>
               <button
                 type="button"
