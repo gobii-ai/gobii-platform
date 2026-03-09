@@ -70,16 +70,16 @@ type StarterPromptSuggestionsProps = {
 }
 
 function iconForPromptCategory(category: StarterPrompt['category']) {
-  if (category === 'deliverables') {
-    return FileText
+  switch (category) {
+    case 'deliverables':
+      return FileText
+    case 'integrations':
+      return Link2
+    case 'planning':
+      return ListChecks
+    default:
+      return Lightbulb
   }
-  if (category === 'integrations') {
-    return Link2
-  }
-  if (category === 'planning') {
-    return ListChecks
-  }
-  return Lightbulb
 }
 
 export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
