@@ -523,8 +523,10 @@ export function AgentChatLayout({
     ),
   )
   const showBottomSentinel = !initialLoading && !hasMoreNewer
+  const starterPromptCount = typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3
   const {
     starterPrompts,
+    starterPromptsLoading,
     starterPromptSubmitting,
     handleStarterPromptSelect,
   } = useStarterPrompts({
@@ -534,7 +536,7 @@ export function AgentChatLayout({
     spawnIntentLoading,
     isWorkingNow,
     onSendMessage,
-    promptCount: typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3,
+    promptCount: starterPromptCount,
   })
   const hasTimelineEvents = events.length > 0
   const showJumpButton = !initialLoading
@@ -907,9 +909,11 @@ export function AgentChatLayout({
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}
-                {starterPrompts.length > 0 ? (
+                {starterPromptsLoading || starterPrompts.length > 0 ? (
                   <StarterPromptSuggestions
                     prompts={starterPrompts}
+                    loading={starterPromptsLoading}
+                    loadingCount={starterPromptCount}
                     disabled={starterPromptSubmitting}
                     onSelect={handleStarterPromptSelect}
                     variant="timeline-list"

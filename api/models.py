@@ -3424,6 +3424,14 @@ class LLMRoutingProfile(models.Model):
         related_name="eval_judge_profiles",
         help_text="Endpoint used for eval judging/grading. If null, uses default from tier config.",
     )
+    summarization_endpoint = models.ForeignKey(
+        "PersistentModelEndpoint",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="summarization_profiles",
+        help_text="Optional endpoint override used for summarization and lightweight generation tasks.",
+    )
 
     class Meta:
         ordering = ["-is_active", "display_name"]

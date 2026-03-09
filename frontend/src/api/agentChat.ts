@@ -3,6 +3,16 @@ import type { InsightsResponse } from '../types/insight'
 import { jsonFetch } from './http'
 
 export type TimelineDirection = 'initial' | 'older' | 'newer'
+export type SuggestionCategory = 'capabilities' | 'deliverables' | 'integrations' | 'planning'
+export type AgentSuggestion = {
+  id: string
+  text: string
+  category: SuggestionCategory
+}
+export type AgentSuggestionsResponse = {
+  suggestions: AgentSuggestion[]
+  source?: 'none' | 'static' | 'dynamic'
+}
 
 export type TimelineResponse = {
   events: TimelineEvent[]
@@ -118,4 +128,16 @@ export function endAgentWebSession(
 export async function fetchAgentInsights(agentId: string): Promise<InsightsResponse> {
   const url = `/console/api/agents/${agentId}/insights/`
   return jsonFetch<InsightsResponse>(url)
+}
+
+export async function fetchAgentSuggestions(
+  agentId: string,
+  params: { promptCount?: number; signal?: AbortSignal } = {},
+): Promise<AgentSuggestionsResponse> {
+  const query = new URLSearchParams()
+  if (params.promptCount) {
+    query.set('prompt_count', String(params.promptCount))
+  }
+  const url = `/console/api/agents/${agentId}/suggestions/${query.toString() ? `?${query.toString()}` : ''}`
+  return jsonFetch<AgentSuggestionsResponse>(url, { signal: params.signal })
 }

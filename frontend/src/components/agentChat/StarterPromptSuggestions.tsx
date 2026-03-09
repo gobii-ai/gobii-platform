@@ -7,63 +7,10 @@ export type StarterPrompt = {
   category: 'capabilities' | 'deliverables' | 'integrations' | 'planning'
 }
 
-export const STARTER_PROMPT_POOL: StarterPrompt[] = [
-  { id: 'capabilities-overview', text: 'What cool things can you do?', category: 'capabilities' },
-  { id: 'daily-workflow', text: 'What tasks can you automate for me this week?', category: 'capabilities' },
-  { id: 'proactive-monitor', text: 'What should you monitor for me proactively?', category: 'capabilities' },
-  { id: 'send-pdf-csv', text: 'Can you send a PDF or CSV to my email?', category: 'deliverables' },
-  { id: 'meeting-brief', text: 'Draft a one-page brief for my next team meeting.', category: 'deliverables' },
-  { id: 'research-summary', text: 'Summarize the top trends in my industry this month.', category: 'deliverables' },
-  { id: 'email-digest', text: 'Can you prepare a concise daily email digest for me?', category: 'integrations' },
-  { id: 'chart-generation', text: 'Can you generate charts from my data and explain the trends?', category: 'deliverables' },
-  { id: 'file-upload-analysis', text: 'If I upload a file, can you analyze it and summarize key takeaways?', category: 'capabilities' },
-  { id: 'weekly-plan', text: 'Build me a focused weekly plan with priorities.', category: 'planning' },
-  { id: 'follow-up-plan', text: 'What follow-ups should I do today?', category: 'planning' },
-  { id: 'risk-scan', text: 'What risks should I pay attention to right now?', category: 'planning' },
-]
-
-function shuffle<T>(items: T[]): T[] {
-  const copy = items.slice()
-  for (let i = copy.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1))
-    const temp = copy[i]
-    copy[i] = copy[j]
-    copy[j] = temp
-  }
-  return copy
-}
-
-export function selectStarterPrompts(pool: StarterPrompt[], targetCount = 5): StarterPrompt[] {
-  if (targetCount <= 0 || pool.length === 0) {
-    return []
-  }
-
-  const categoryOrder: StarterPrompt['category'][] = ['capabilities', 'deliverables', 'integrations', 'planning']
-  const buckets = shuffle(categoryOrder).map((category) =>
-    shuffle(pool.filter((prompt) => prompt.category === category)),
-  )
-
-  const selected: StarterPrompt[] = []
-  for (const bucket of buckets) {
-    if (selected.length >= targetCount) {
-      break
-    }
-    const first = bucket.shift()
-    if (first) {
-      selected.push(first)
-    }
-  }
-
-  if (selected.length >= targetCount) {
-    return selected.slice(0, targetCount)
-  }
-
-  const remaining = shuffle(buckets.flat())
-  return [...selected, ...remaining.slice(0, targetCount - selected.length)]
-}
-
 type StarterPromptSuggestionsProps = {
   prompts: StarterPrompt[]
+  loading?: boolean
+  loadingCount?: number
   disabled?: boolean
   variant?: 'chips' | 'timeline-list'
   onSelect?: (prompt: StarterPrompt, position: number) => void | Promise<void>
@@ -84,41 +31,66 @@ function iconForPromptCategory(category: StarterPrompt['category']) {
 
 export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
   prompts,
+  loading = false,
+  loadingCount = 3,
   disabled = false,
   variant = 'chips',
   onSelect,
 }: StarterPromptSuggestionsProps) {
-  if (!prompts.length) {
+  if (!loading && !prompts.length) {
     return null
   }
 
   if (variant === 'timeline-list') {
     return (
-      <section className="timeline-event starter-prompts-card" aria-label="Suggested follow-ups">
+      <section
+        className="timeline-event starter-prompts-card"
+        aria-label="Suggested follow-ups"
+        aria-busy={loading}
+      >
         <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
         <div className="starter-prompts-card__rows" role="list">
-          {prompts.map((prompt, index) => {
-            const Icon = iconForPromptCategory(prompt.category)
-            return (
-              <button
-                key={prompt.id}
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  void onSelect?.(prompt, index)
-                }}
-                className="starter-prompts-card__row"
-                aria-label={`Suggested follow-up: ${prompt.text}`}
+          {loading
+            ? Array.from({ length: Math.max(1, loadingCount) }).map((_, index) => (
+              <div
+                key={`suggestion-loading-${index + 1}`}
+                className="starter-prompts-card__row starter-prompts-card__row--loading"
+                aria-hidden="true"
               >
-                <span className="starter-prompts-card__icon-wrap" aria-hidden="true">
-                  <Icon className="starter-prompts-card__icon" />
+                <span className="starter-prompts-card__icon-wrap starter-prompts-card__icon-wrap--loading">
+                  <span className="starter-prompts-card__pulse-dot" />
                 </span>
-                <span className="starter-prompts-card__text">{prompt.text}</span>
-                <ChevronRight className="starter-prompts-card__chevron" aria-hidden="true" />
-              </button>
-            )
-          })}
+                <span className="starter-prompts-card__text starter-prompts-card__text--loading">
+                  <span
+                    className={`starter-prompts-card__text-pulse starter-prompts-card__text-pulse--${index % 3}`}
+                  />
+                </span>
+                <span className="starter-prompts-card__chevron starter-prompts-card__chevron--loading" />
+              </div>
+            ))
+            : prompts.map((prompt, index) => {
+              const Icon = iconForPromptCategory(prompt.category)
+              return (
+                <button
+                  key={prompt.id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    void onSelect?.(prompt, index)
+                  }}
+                  className="starter-prompts-card__row"
+                  aria-label={`Suggested follow-up: ${prompt.text}`}
+                >
+                  <span className="starter-prompts-card__icon-wrap" aria-hidden="true">
+                    <Icon className="starter-prompts-card__icon" />
+                  </span>
+                  <span className="starter-prompts-card__text">{prompt.text}</span>
+                  <ChevronRight className="starter-prompts-card__chevron" aria-hidden="true" />
+                </button>
+              )
+            })}
         </div>
+        {loading ? <span className="sr-only">Loading suggested follow-ups</span> : null}
       </section>
     )
   }

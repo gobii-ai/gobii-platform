@@ -21,6 +21,7 @@ from console.api_views import (
     AgentQuickCreateAPIView,
     AgentSpawnIntentAPIView,
     AgentCollaboratorLeaveAPIView,
+    AgentSuggestionsAPIView,
     AgentProcessingStatusAPIView,
     AgentDailyCreditsAPIView,
     AgentAddonsAPIView,
@@ -293,6 +294,7 @@ urlpatterns = [
     path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),
     path("console/api/agents/<uuid:agent_id>/collaboration/leave/", AgentCollaboratorLeaveAPIView.as_view(), name="console_agent_collaborator_leave"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
+    path("console/api/agents/<uuid:agent_id>/suggestions/", AgentSuggestionsAPIView.as_view(), name="console_agent_suggestions"),
     path(
         "console/api/agents/<uuid:agent_id>/spawn-requests/<uuid:spawn_request_id>/decision/",
         AgentSpawnRequestDecisionAPIView.as_view(),

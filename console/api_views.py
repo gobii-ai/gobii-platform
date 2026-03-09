@@ -119,6 +119,7 @@ from console.agent_chat.timeline import (
     serialize_message_event,
     serialize_processing_snapshot,
 )
+from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
 from console.agent_context import resolve_context_override_for_agent
@@ -4159,6 +4160,17 @@ class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
                 except PersistentModelEndpoint.DoesNotExist:
                     return HttpResponseBadRequest("Invalid eval judge endpoint ID")
 
+        if "summarization_endpoint_id" in payload:
+            endpoint_id = payload.get("summarization_endpoint_id")
+            if endpoint_id is None or endpoint_id == "":
+                profile.summarization_endpoint = None
+            else:
+                try:
+                    endpoint = PersistentModelEndpoint.objects.get(pk=endpoint_id)
+                    profile.summarization_endpoint = endpoint
+                except PersistentModelEndpoint.DoesNotExist:
+                    return HttpResponseBadRequest("Invalid summarization endpoint ID")
+
         profile.save()
         return _json_ok(profile_id=str(profile.id))
 
@@ -4241,6 +4253,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                 created_by=request.user,
                 cloned_from=source,
                 eval_judge_endpoint=source.eval_judge_endpoint,
+                summarization_endpoint=source.summarization_endpoint,
             )
 
             # Clone persistent config: token ranges -> tiers -> endpoints
@@ -4894,6 +4907,25 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
             }
         )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentSuggestionsAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        try:
+            prompt_count = int(request.GET.get("prompt_count", DEFAULT_PROMPT_COUNT))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("prompt_count must be an integer")
+
+        processing = build_processing_snapshot(agent)
+        if processing.active:
+            return JsonResponse({"suggestions": [], "source": "none"})
+
+        payload = build_agent_timeline_suggestions(agent, prompt_count=prompt_count)
+        return JsonResponse(payload)
 
 
 class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):

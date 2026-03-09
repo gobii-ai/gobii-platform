@@ -63,6 +63,7 @@ def create_eval_profile_snapshot(source_profile, suite_run_id: str):
             cloned_from=source_profile,
             created_by=source_profile.created_by,
             eval_judge_endpoint=source_profile.eval_judge_endpoint,
+            summarization_endpoint=source_profile.summarization_endpoint,
         )
 
         # Clone token ranges and their tiers
