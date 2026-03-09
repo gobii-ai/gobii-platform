@@ -1,4 +1,4 @@
-from config import settings
+from django.conf import settings
 
 from api.models import CommsChannel, PersistentAgentCommsEndpoint
 

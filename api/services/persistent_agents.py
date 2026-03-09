@@ -32,7 +32,7 @@ from api.services.daily_credit_limits import (
     get_tier_credit_multiplier,
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from config import settings
+from django.conf import settings
 from constants.plans import PlanNamesChoices
 
 
