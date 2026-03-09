@@ -2,6 +2,7 @@
 
 from django.test import TestCase, TransactionTestCase, tag
 from django.contrib.auth import get_user_model
+from django.urls import reverse
 
 from api.models import (
     LLMProvider,
@@ -18,6 +19,7 @@ from api.models import (
     ProfileEmbeddingsTierEndpoint,
 )
 from tests.utils.llm_seed import get_intelligence_tier
+from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
 
 User = get_user_model()
@@ -212,6 +214,17 @@ class LLMRoutingProfileModelTests(TestCase):
         self.assertEqual(clone.cloned_from, original)
         self.assertIn(clone, original.clones.all())
 
+    def test_eval_snapshot_copies_summarization_endpoint(self):
+        profile = LLMRoutingProfile.objects.create(
+            name="snapshot-source",
+            display_name="Snapshot Source",
+            summarization_endpoint=self.persistent_endpoint,
+        )
+
+        snapshot = create_eval_profile_snapshot(profile, suite_run_id="12345678-1234-5678-1234-567812345678")
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot.summarization_endpoint_id, self.persistent_endpoint.id)
+
 
 @tag("llm_routing_profiles_batch")
 class LLMRoutingProfileSerializerTests(TestCase):
@@ -303,6 +316,8 @@ class LLMRoutingProfileSerializerTests(TestCase):
         from console.llm_serializers import serialize_routing_profile_list_item
 
         profile = self._create_full_profile("list-item-test")
+        profile.summarization_endpoint = self.persistent_endpoint
+        profile.save(update_fields=["summarization_endpoint"])
         data = serialize_routing_profile_list_item(profile)
 
         self.assertEqual(data["id"], str(profile.id))
@@ -311,6 +326,7 @@ class LLMRoutingProfileSerializerTests(TestCase):
         self.assertFalse(data["is_active"])
         self.assertIn("created_at", data)
         self.assertIn("updated_at", data)
+        self.assertEqual(data["summarization_endpoint_id"], str(self.persistent_endpoint.id))
 
     def test_serialize_profile_detail(self):
         """Test serializing a full profile with nested config."""
@@ -320,6 +336,8 @@ class LLMRoutingProfileSerializerTests(TestCase):
         )
 
         profile = self._create_full_profile("detail-test")
+        profile.summarization_endpoint = self.persistent_endpoint
+        profile.save(update_fields=["summarization_endpoint"])
         prefetched = get_routing_profile_with_prefetch(str(profile.id))
         data = serialize_routing_profile_detail(prefetched)
 
@@ -343,6 +361,11 @@ class LLMRoutingProfileSerializerTests(TestCase):
         self.assertIn("embeddings", data)
         self.assertEqual(len(data["embeddings"]["tiers"]), 1)
         self.assertEqual(len(data["embeddings"]["tiers"][0]["endpoints"]), 1)
+        self.assertIsNotNone(data["summarization_endpoint"])
+        self.assertEqual(
+            data["summarization_endpoint"]["endpoint_id"],
+            str(self.persistent_endpoint.id),
+        )
 
     def test_build_routing_profiles_list(self):
         """Test building the profiles list."""
@@ -420,3 +443,78 @@ class LLMRoutingProfileActivationTests(TransactionTestCase):
         # Both should exist
         inactive_count = LLMRoutingProfile.objects.filter(is_active=False).count()
         self.assertEqual(inactive_count, 2)
+
+
+@tag("llm_routing_profiles_batch")
+class LLMRoutingProfileApiTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.staff_user = User.objects.create_user(
+            username="llm-admin",
+            email="llm-admin@example.com",
+            password="password123",
+            is_staff=True,
+        )
+        cls.provider = LLMProvider.objects.create(
+            key="api-test-provider",
+            display_name="API Test Provider",
+            enabled=True,
+        )
+        cls.endpoint = PersistentModelEndpoint.objects.create(
+            key="api-summary-endpoint",
+            provider=cls.provider,
+            litellm_model="gpt-4.1-mini",
+            enabled=True,
+        )
+        cls.profile = LLMRoutingProfile.objects.create(
+            name="api-profile",
+            display_name="API Profile",
+            summarization_endpoint=None,
+        )
+
+    def setUp(self):
+        self.client.force_login(self.staff_user)
+
+    def test_patch_updates_summarization_endpoint(self):
+        url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
+        response = self.client.patch(
+            url,
+            data='{"summarization_endpoint_id": "%s"}' % self.endpoint.id,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.summarization_endpoint_id, self.endpoint.id)
+
+    def test_patch_rejects_invalid_summarization_endpoint(self):
+        url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
+        response = self.client.patch(
+            url,
+            data='{"summarization_endpoint_id": "00000000-0000-0000-0000-000000000000"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid summarization endpoint ID", response.content.decode("utf-8"))
+
+    def test_patch_rejects_malformed_summarization_endpoint_uuid(self):
+        url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
+        response = self.client.patch(
+            url,
+            data='{"summarization_endpoint_id": "not-a-uuid"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid summarization endpoint ID", response.content.decode("utf-8"))
+
+    def test_clone_copies_summarization_endpoint(self):
+        self.profile.summarization_endpoint = self.endpoint
+        self.profile.save(update_fields=["summarization_endpoint"])
+
+        url = reverse("console_llm_routing_profile_clone", kwargs={"profile_id": str(self.profile.id)})
+        response = self.client.post(url, data="{}", content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        clone = LLMRoutingProfile.objects.get(id=payload["profile_id"])
+        self.assertEqual(clone.summarization_endpoint_id, self.endpoint.id)

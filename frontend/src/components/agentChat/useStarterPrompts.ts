@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { fetchAgentSuggestions } from '../../api/agentChat'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { TimelineEvent } from './types'
 import {
-  STARTER_PROMPT_POOL,
-  selectStarterPrompts,
   type StarterPrompt,
 } from './StarterPromptSuggestions'
 
@@ -22,6 +21,7 @@ type UseStarterPromptsParams = {
 
 type UseStarterPromptsResult = {
   starterPrompts: StarterPrompt[]
+  starterPromptsLoading: boolean
   starterPromptSubmitting: boolean
   handleStarterPromptSelect: (prompt: StarterPrompt, position: number) => Promise<void>
 }
@@ -36,7 +36,11 @@ export function useStarterPrompts({
   promptCount = 3,
 }: UseStarterPromptsParams): UseStarterPromptsResult {
   const [starterPromptSubmitting, setStarterPromptSubmitting] = useState(false)
+  const [backendPrompts, setBackendPrompts] = useState<StarterPrompt[] | null>(null)
+  const [starterPromptsLoading, setStarterPromptsLoading] = useState(false)
+  const [idleRefreshNonce, setIdleRefreshNonce] = useState(0)
   const starterPromptInFlightRef = useRef(false)
+  const wasWorkingRef = useRef(isWorkingNow)
 
   const userMessageCount = useMemo(
     () =>
@@ -47,22 +51,87 @@ export function useStarterPrompts({
     [events],
   )
 
-  const starterPrompts = useMemo(
-    () => selectStarterPrompts(STARTER_PROMPT_POOL, promptCount),
-    [agentId, promptCount, userMessageCount],
+  useEffect(() => {
+    if (wasWorkingRef.current && !isWorkingNow) {
+      setIdleRefreshNonce((current) => current + 1)
+    }
+    wasWorkingRef.current = isWorkingNow
+  }, [isWorkingNow])
+
+  const canRequestSuggestions = Boolean(
+    agentId
+    && onSendMessage
+    && !initialLoading
+    && !spawnIntentLoading
+    && !isWorkingNow,
   )
+
+  useEffect(() => {
+    if (!canRequestSuggestions || !agentId) {
+      setStarterPromptsLoading(false)
+      return
+    }
+
+    const controller = new AbortController()
+    const run = async () => {
+      setStarterPromptsLoading(true)
+      setBackendPrompts(null)
+      try {
+        const payload = await fetchAgentSuggestions(agentId, {
+          promptCount,
+          signal: controller.signal,
+        })
+        if (controller.signal.aborted) {
+          return
+        }
+        const prompts = (payload.suggestions || []).filter((suggestion): suggestion is StarterPrompt => (
+          typeof suggestion?.id === 'string'
+          && typeof suggestion?.text === 'string'
+          && (
+            suggestion?.category === 'capabilities'
+            || suggestion?.category === 'deliverables'
+            || suggestion?.category === 'integrations'
+            || suggestion?.category === 'planning'
+          )
+        ))
+        setBackendPrompts(prompts.slice(0, promptCount))
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return
+        }
+        console.debug('Failed to fetch agent suggestions.', error)
+        setBackendPrompts([])
+      } finally {
+        if (!controller.signal.aborted) {
+          setStarterPromptsLoading(false)
+        }
+      }
+    }
+
+    void run()
+    return () => controller.abort()
+  }, [agentId, canRequestSuggestions, idleRefreshNonce, promptCount])
+
+  const starterPrompts = useMemo(() => backendPrompts ?? EMPTY_PROMPTS, [backendPrompts])
 
   const canShowStarterPrompts = Boolean(
     !initialLoading
     && !spawnIntentLoading
     && !isWorkingNow
     && onSendMessage
-    && starterPrompts.length > 0,
+  )
+  const showStarterPromptLoading = Boolean(
+    canShowStarterPrompts
+    && (starterPromptsLoading || backendPrompts === null),
   )
 
   useEffect(() => {
     starterPromptInFlightRef.current = false
     setStarterPromptSubmitting(false)
+    setStarterPromptsLoading(false)
+    setBackendPrompts(null)
+    setIdleRefreshNonce(0)
+    wasWorkingRef.current = false
   }, [agentId])
 
   const handleStarterPromptSelect = useCallback(
@@ -93,6 +162,7 @@ export function useStarterPrompts({
 
   return {
     starterPrompts: canShowStarterPrompts ? starterPrompts : EMPTY_PROMPTS,
+    starterPromptsLoading: showStarterPromptLoading,
     starterPromptSubmitting,
     handleStarterPromptSelect,
   }

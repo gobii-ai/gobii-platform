@@ -3268,7 +3268,15 @@ export function LlmConfigScreen() {
       },
     })
 
-  const handleUpdateProfile = async (profileId: string, payload: { display_name?: string; description?: string; eval_judge_endpoint_id?: string | null }) => {
+  const handleUpdateProfile = async (
+    profileId: string,
+    payload: {
+      display_name?: string
+      description?: string
+      eval_judge_endpoint_id?: string | null
+      summarization_endpoint_id?: string | null
+    },
+  ) => {
     return runWithFeedback(
       async () => {
         await llmApi.updateRoutingProfile(profileId, payload)
@@ -3313,6 +3321,23 @@ export function LlmConfigScreen() {
         label: 'Updating eval judge…',
         busyKey: actionKey('profile', selectedProfileId, 'eval-judge'),
         context: 'Eval judge',
+      },
+    )
+  }
+
+  const handleUpdateSummarizationEndpoint = async (endpointId: string | null) => {
+    if (!selectedProfileId) return
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateRoutingProfile(selectedProfileId, { summarization_endpoint_id: endpointId })
+        await invalidateProfiles()
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: endpointId ? 'Summarization model updated' : 'Summarization model cleared',
+        label: 'Updating summarization model…',
+        busyKey: actionKey('profile', selectedProfileId, 'summarization'),
+        context: 'Summarization model',
       },
     )
   }
@@ -3961,9 +3986,43 @@ export function LlmConfigScreen() {
               <div className="rounded-xl border border-slate-200/80 bg-white p-4">
                 <div className="flex items-start gap-3">
                   <BookText className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <h4 className="font-semibold text-slate-900/90">Summaries</h4>
-                    <p className="text-sm text-slate-600">Uses the primary model from the smallest token range, temperature forced to 0.</p>
+                    <p className="text-sm text-slate-600 mb-3">
+                      Optional cheap-model override for summarization and follow-up suggestions. Falls back to tier routing.
+                    </p>
+                    {selectedProfile ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/40"
+                          value={selectedProfile.summarization_endpoint?.endpoint_id ?? ''}
+                          onChange={(e) => handleUpdateSummarizationEndpoint(e.target.value || null)}
+                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization'))}
+                        >
+                          <option value="">— Use default tier fallback —</option>
+                          {endpointChoices.persistent_endpoints.map((ep) => (
+                            <option key={ep.id} value={ep.id}>
+                              {ep.label} ({ep.model})
+                            </option>
+                          ))}
+                        </select>
+                        {selectedProfile.summarization_endpoint && (
+                          <button
+                            type="button"
+                            className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => handleUpdateSummarizationEndpoint(null)}
+                            disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization'))}
+                          >
+                            <X className="size-4" />
+                          </button>
+                        )}
+                        {isBusy(actionKey('profile', selectedProfileId ?? '', 'summarization')) && (
+                          <Loader2 className="size-4 text-amber-600 animate-spin flex-shrink-0" />
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">Select a routing profile to configure this override.</p>
+                    )}
                   </div>
                 </div>
               </div>

@@ -1266,39 +1266,77 @@ def get_summarization_llm_config(
     agent_id: str | None = None,
     routing_profile: Any | None = None,
 ) -> Tuple[str, str, dict]:
-    """
-    Get LiteLLM configuration specifically for summarization tasks.
-
-    Uses the same provider priority as get_llm_config() but with
-    temperature=0 for deterministic summarization.
-
-    Args:
-        agent: Optional agent instance.
-        agent_id: Optional agent ID.
-        routing_profile: Optional LLMRoutingProfile instance. When provided,
-            uses this profile's configuration instead of the active profile.
-
-    Returns:
-        Tuple of (provider_key, model_name, litellm_params)
-    """
-    # DB-only: pick primary config and adjust temperature for summarisation
-    if agent_id is None and agent is not None:
-        possible_id = getattr(agent, "id", None)
-        if possible_id is not None:
-            agent_id = str(possible_id)
-
-    configs = get_llm_config_with_failover(
-        agent_id=agent_id,
-        token_count=0,
+    """Return the first available summarization configuration."""
+    configs = get_summarization_llm_configs(
         agent=agent,
+        agent_id=agent_id,
         routing_profile=routing_profile,
     )
-    provider_key, model, params_with_hints = configs[0]
-    # Remove internal-only hints that shouldn't be passed to litellm
+    return configs[0]
+
+
+def _resolve_summarization_profile(routing_profile: Any | None) -> Any | None:
+    if routing_profile is not None:
+        return routing_profile
+    try:
+        LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
+        return LLMRoutingProfile.objects.filter(is_active=True, is_eval_snapshot=False).first()
+    except (LookupError, DatabaseError):
+        logger.debug("Unable to resolve active routing profile for summarization", exc_info=True)
+        return None
+
+
+def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str, dict] | None:
+    if profile is None:
+        return None
+
+    endpoint = getattr(profile, "summarization_endpoint", None)
+    endpoint_id = getattr(profile, "summarization_endpoint_id", None)
+    if endpoint is None and endpoint_id:
+        try:
+            PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+            endpoint = (
+                PersistentModelEndpoint.objects.select_related("provider")
+                .filter(id=endpoint_id)
+                .first()
+            )
+        except (LookupError, DatabaseError):
+            logger.debug("Unable to resolve summarization endpoint %s", endpoint_id, exc_info=True)
+            endpoint = None
+
+    if endpoint is None:
+        return None
+
+    provider = getattr(endpoint, "provider", None)
+    if provider is None or not getattr(provider, "enabled", False) or not getattr(endpoint, "enabled", False):
+        return None
+
+    api_base_value = (getattr(endpoint, "api_base", "") or "").strip()
+    has_admin_key = bool(getattr(provider, "api_key_encrypted", None))
+    if not has_admin_key and getattr(provider, "env_var_name", None):
+        has_admin_key = bool(os.getenv(provider.env_var_name))
+    if not (api_base_value or has_admin_key):
+        return None
+
+    raw_model = (getattr(endpoint, "litellm_model", "") or "").strip()
+    effective_model = normalize_model_name(provider, raw_model, api_base=api_base_value)
+    if not effective_model:
+        return None
+
+    configs = _build_weighted_failover_configs(
+        [(endpoint, provider, 1.0, effective_model, None)],
+        tier_label="summarization_override",
+    )
+    if not configs:
+        return None
+    return configs[0]
+
+
+def _prepare_summarization_params(model: str, params_with_hints: Dict[str, Any]) -> Dict[str, Any]:
     supports_temperature = bool(params_with_hints.get("supports_temperature", True))
     params = {
-        k: v for k, v in params_with_hints.items()
-        if k not in (
+        key: value for key, value in params_with_hints.items()
+        if key not in (
             "supports_tool_choice",
             "use_parallel_tool_calls",
             "supports_vision",
@@ -1309,8 +1347,6 @@ def get_summarization_llm_config(
         )
     }
 
-    # Default to deterministic temperature unless the endpoint already
-    # specifies a requirement (e.g., GPT-5 must run at temperature=1).
     if not supports_temperature:
         params.pop("temperature", None)
     elif "temperature" not in params or params["temperature"] is None:
@@ -1321,7 +1357,58 @@ def get_summarization_llm_config(
     else:
         params.pop("temperature", None)
 
-    return provider_key, model, params
+    return params
+
+
+def get_summarization_llm_configs(
+    *,
+    agent: Any | None = None,
+    agent_id: str | None = None,
+    routing_profile: Any | None = None,
+) -> List[Tuple[str, str, dict]]:
+    """Return summarization configs with override-first routing and failover fallback."""
+    if agent_id is None and agent is not None:
+        possible_id = getattr(agent, "id", None)
+        if possible_id is not None:
+            agent_id = str(possible_id)
+
+    profile = _resolve_summarization_profile(routing_profile)
+    override_config = _build_summarization_override_config(profile)
+
+    fallback_configs = get_llm_config_with_failover(
+        agent_id=agent_id,
+        token_count=0,
+        agent=agent,
+        routing_profile=routing_profile,
+        allow_unconfigured=True,
+    )
+
+    merged_configs: List[Tuple[str, str, dict]] = []
+    if override_config:
+        merged_configs.append(override_config)
+    merged_configs.extend(fallback_configs)
+
+    if not merged_configs:
+        raise LLMNotConfiguredError(
+            "No LLM provider available. Complete the setup wizard or supply credentials first."
+        )
+
+    deduped: List[Tuple[str, str, dict]] = []
+    seen: set[Tuple[str, str]] = set()
+    for provider_key, model, params_with_hints in merged_configs:
+        dedupe_key = (provider_key, model)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        deduped.append(
+            (
+                provider_key,
+                model,
+                _prepare_summarization_params(model, params_with_hints),
+            )
+        )
+
+    return deduped
 
 
 def _cache_bootstrap_status(is_required: bool) -> None:
@@ -1363,6 +1450,7 @@ __all__ = [
     "get_llm_config",
     "get_llm_config_with_failover",
     "REFERENCE_TOKENIZER_MODEL",
+    "get_summarization_llm_configs",
     "get_summarization_llm_config",
     "LLMNotConfiguredError",
     "invalidate_llm_bootstrap_cache",

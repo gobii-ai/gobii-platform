@@ -14,6 +14,7 @@ from api.agent.core.llm_config import (
     AgentLLMTier,
     get_llm_config,
     get_llm_config_with_failover,
+    get_summarization_llm_configs,
     PROVIDER_CONFIG,
     LLMNotConfiguredError,
     invalidate_llm_bootstrap_cache,
@@ -568,6 +569,111 @@ class TestLLMFailover(TestCase):
         self.assertEqual(provider, seeded["premium_endpoint"].key)
         self.assertEqual(model, seeded["premium_endpoint"].litellm_model)
         self.assertIn("temperature", params)
+
+    def test_summarization_uses_profile_override_before_failover(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
+        ProfileTokenRange = apps.get_model('api', 'ProfileTokenRange')
+        ProfilePersistentTier = apps.get_model('api', 'ProfilePersistentTier')
+        ProfilePersistentTierEndpoint = apps.get_model('api', 'ProfilePersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='openrouter',
+            display_name='OpenRouter',
+            enabled=True,
+            env_var_name='OPENROUTER_API_KEY',
+            browser_backend='OPENAI',
+        )
+        summary_endpoint = PersistentModelEndpoint.objects.create(
+            key='summary_cheap',
+            provider=provider,
+            enabled=True,
+            litellm_model='openrouter/z-ai/glm-4.5-air',
+            supports_tool_choice=True,
+        )
+        fallback_endpoint = PersistentModelEndpoint.objects.create(
+            key='fallback_default',
+            provider=provider,
+            enabled=True,
+            litellm_model='openrouter/z-ai/glm-4.5',
+            supports_tool_choice=True,
+        )
+        profile = LLMRoutingProfile.objects.create(
+            name='summary-override-test',
+            display_name='Summary Override Test',
+            is_active=False,
+            summarization_endpoint=summary_endpoint,
+        )
+        token_range = ProfileTokenRange.objects.create(profile=profile, name='default', min_tokens=0, max_tokens=None)
+        tier = ProfilePersistentTier.objects.create(
+            token_range=token_range,
+            order=1,
+            intelligence_tier=get_intelligence_tier("standard"),
+        )
+        ProfilePersistentTierEndpoint.objects.create(tier=tier, endpoint=fallback_endpoint, weight=1.0)
+
+        with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-openrouter"}, clear=True):
+            configs = get_summarization_llm_configs(routing_profile=profile)
+            provider_key, model, _params = get_summarization_llm_config(routing_profile=profile)
+
+        self.assertTrue(configs)
+        self.assertEqual(configs[0][0], summary_endpoint.key)
+        self.assertEqual(configs[0][1], summary_endpoint.litellm_model)
+        self.assertTrue(any(cfg[0] == fallback_endpoint.key for cfg in configs))
+        self.assertEqual(provider_key, summary_endpoint.key)
+        self.assertEqual(model, summary_endpoint.litellm_model)
+
+    def test_summarization_falls_back_when_override_unusable(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
+        ProfileTokenRange = apps.get_model('api', 'ProfileTokenRange')
+        ProfilePersistentTier = apps.get_model('api', 'ProfilePersistentTier')
+        ProfilePersistentTierEndpoint = apps.get_model('api', 'ProfilePersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='anthropic',
+            display_name='Anthropic',
+            enabled=True,
+            env_var_name='ANTHROPIC_API_KEY',
+            browser_backend='ANTHROPIC',
+        )
+        disabled_override = PersistentModelEndpoint.objects.create(
+            key='summary_disabled',
+            provider=provider,
+            enabled=False,
+            litellm_model='anthropic/disabled',
+            supports_tool_choice=True,
+        )
+        fallback_endpoint = PersistentModelEndpoint.objects.create(
+            key='summary_fallback',
+            provider=provider,
+            enabled=True,
+            litellm_model='anthropic/claude-sonnet-4-20250514',
+            supports_tool_choice=True,
+        )
+        profile = LLMRoutingProfile.objects.create(
+            name='summary-fallback-test',
+            display_name='Summary Fallback Test',
+            is_active=False,
+            summarization_endpoint=disabled_override,
+        )
+        token_range = ProfileTokenRange.objects.create(profile=profile, name='default', min_tokens=0, max_tokens=None)
+        tier = ProfilePersistentTier.objects.create(
+            token_range=token_range,
+            order=1,
+            intelligence_tier=get_intelligence_tier("standard"),
+        )
+        ProfilePersistentTierEndpoint.objects.create(tier=tier, endpoint=fallback_endpoint, weight=1.0)
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-anthropic"}, clear=True):
+            provider_key, model, _params = get_summarization_llm_config(routing_profile=profile)
+
+        self.assertEqual(provider_key, fallback_endpoint.key)
+        self.assertEqual(model, fallback_endpoint.litellm_model)
 
 
 @tag("batch_event_llm")
