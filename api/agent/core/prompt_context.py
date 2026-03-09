@@ -1509,12 +1509,11 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     )
     local_now_for_owner, owner_timezone = resolve_user_local_time(agent.user, now)
     is_offpeak = is_offpeak_hour(local_now_for_owner.hour)
-    offpeak_threshold = getattr(
-        credit_settings,
-        "offpeak_burn_rate_threshold_per_hour",
-        credit_settings.burn_rate_threshold_per_hour,
+    burn_threshold = (
+        credit_settings.offpeak_burn_rate_threshold_per_hour
+        if is_offpeak
+        else credit_settings.burn_rate_threshold_per_hour
     )
-    burn_threshold = offpeak_threshold if is_offpeak else credit_settings.burn_rate_threshold_per_hour
     scaled_threshold = burn_threshold
     try:
         result = apply_tier_credit_multiplier(agent, burn_threshold)

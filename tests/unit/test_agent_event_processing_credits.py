@@ -584,6 +584,7 @@ class PersistentAgentToolCreditTests(TestCase):
             return_value=MagicMock(
                 burn_rate_window_minutes=60,
                 burn_rate_threshold_per_hour=Decimal("4"),
+                offpeak_burn_rate_threshold_per_hour=Decimal("4"),
             ),
         ), patch(
             "api.agent.core.prompt_context.compute_burn_rate",

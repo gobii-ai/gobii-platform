@@ -1723,13 +1723,12 @@ class UserPreferenceAdmin(admin.ModelAdmin):
         return UserPreference.resolve_user_timezone(obj.user, fallback_to_utc=False)
 
     def save_model(self, request, obj, form, change):
-        super().save_model(request, obj, form, change)
         timezone_value = form.cleaned_data.get("timezone", "")
-        UserPreference.update_known_preferences(
-            obj.user,
-            {UserPreference.KEY_USER_TIMEZONE: timezone_value},
-        )
-        obj.refresh_from_db(fields=["preferences", "updated_at"])
+        current_preferences = obj.preferences if isinstance(obj.preferences, dict) else {}
+        updated_preferences = dict(current_preferences)
+        updated_preferences[UserPreference.KEY_USER_TIMEZONE] = timezone_value
+        obj.preferences = updated_preferences
+        super().save_model(request, obj, form, change)
 
 
 User = get_user_model()
