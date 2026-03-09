@@ -20,6 +20,7 @@ import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
+import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
@@ -531,7 +532,6 @@ export function AgentChatLayout({
     events,
     initialLoading,
     spawnIntentLoading,
-    hasMoreNewer: Boolean(hasMoreNewer),
     isWorkingNow,
     onSendMessage,
     promptCount: typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3,
@@ -907,6 +907,14 @@ export function AgentChatLayout({
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}
+                {starterPrompts.length > 0 ? (
+                  <StarterPromptSuggestions
+                    prompts={starterPrompts}
+                    disabled={starterPromptSubmitting}
+                    onSelect={handleStarterPromptSelect}
+                    variant="timeline-list"
+                  />
+                ) : null}
 
                 {showStreamingThinking ? (
                   <StreamingThinkingCard
@@ -980,9 +988,6 @@ export function AgentChatLayout({
           ) : (
             <AgentComposer
               onSubmit={onSendMessage}
-              starterPrompts={starterPrompts}
-              starterPromptsDisabled={starterPromptSubmitting}
-              onStarterPromptSelect={handleStarterPromptSelect}
               onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}

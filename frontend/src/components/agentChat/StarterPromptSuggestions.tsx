@@ -1,4 +1,5 @@
 import { memo } from 'react'
+import { ChevronRight, FileText, Lightbulb, Link2, ListChecks } from 'lucide-react'
 
 export type StarterPrompt = {
   id: string
@@ -64,16 +65,62 @@ export function selectStarterPrompts(pool: StarterPrompt[], targetCount = 5): St
 type StarterPromptSuggestionsProps = {
   prompts: StarterPrompt[]
   disabled?: boolean
+  variant?: 'chips' | 'timeline-list'
   onSelect?: (prompt: StarterPrompt, position: number) => void | Promise<void>
+}
+
+function iconForPromptCategory(category: StarterPrompt['category']) {
+  switch (category) {
+    case 'deliverables':
+      return FileText
+    case 'integrations':
+      return Link2
+    case 'planning':
+      return ListChecks
+    default:
+      return Lightbulb
+  }
 }
 
 export const StarterPromptSuggestions = memo(function StarterPromptSuggestions({
   prompts,
   disabled = false,
+  variant = 'chips',
   onSelect,
 }: StarterPromptSuggestionsProps) {
   if (!prompts.length) {
     return null
+  }
+
+  if (variant === 'timeline-list') {
+    return (
+      <section className="timeline-event starter-prompts-card" aria-label="Suggested follow-ups">
+        <h3 className="starter-prompts-card__title">Suggested follow-ups</h3>
+        <div className="starter-prompts-card__rows" role="list">
+          {prompts.map((prompt, index) => {
+            const Icon = iconForPromptCategory(prompt.category)
+            return (
+              <button
+                key={prompt.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => {
+                  void onSelect?.(prompt, index)
+                }}
+                className="starter-prompts-card__row"
+                aria-label={`Suggested follow-up: ${prompt.text}`}
+              >
+                <span className="starter-prompts-card__icon-wrap" aria-hidden="true">
+                  <Icon className="starter-prompts-card__icon" />
+                </span>
+                <span className="starter-prompts-card__text">{prompt.text}</span>
+                <ChevronRight className="starter-prompts-card__chevron" aria-hidden="true" />
+              </button>
+            )
+          })}
+        </div>
+      </section>
+    )
   }
 
   return (

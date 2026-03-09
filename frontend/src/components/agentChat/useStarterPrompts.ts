@@ -15,7 +15,6 @@ type UseStarterPromptsParams = {
   events: TimelineEvent[]
   initialLoading: boolean
   spawnIntentLoading: boolean
-  hasMoreNewer: boolean
   isWorkingNow: boolean
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   promptCount?: number
@@ -32,7 +31,6 @@ export function useStarterPrompts({
   events,
   initialLoading,
   spawnIntentLoading,
-  hasMoreNewer,
   isWorkingNow,
   onSendMessage,
   promptCount = 3,
@@ -57,8 +55,7 @@ export function useStarterPrompts({
   const canShowStarterPrompts = Boolean(
     !initialLoading
     && !spawnIntentLoading
-    && !hasMoreNewer
-    && (!isWorkingNow || userMessageCount === 1)
+    && !isWorkingNow
     && onSendMessage
     && starterPrompts.length > 0,
   )
