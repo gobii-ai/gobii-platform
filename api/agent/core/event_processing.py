@@ -1805,6 +1805,32 @@ def _get_completed_process_run_count(agent: Optional[PersistentAgent]) -> int:
     ).count()
 
 
+def _create_agent_system_step_once(
+    *,
+    agent: PersistentAgent,
+    description: str,
+    code: str,
+    notes: str,
+) -> bool:
+    if PersistentAgentSystemStep.objects.filter(
+        step__agent=agent,
+        code=code,
+        notes=notes,
+    ).exists():
+        return False
+
+    step = PersistentAgentStep.objects.create(
+        agent=agent,
+        description=description,
+    )
+    PersistentAgentSystemStep.objects.create(
+        step=step,
+        code=code,
+        notes=notes,
+    )
+    return True
+
+
 def _get_recent_preferred_config(
     agent: PersistentAgent,
     run_sequence_number: int,
@@ -2817,20 +2843,18 @@ def _process_agent_events_locked(
     if pause_state["paused"]:
         pause_reason = pause_state["reason"] or "unknown"
         msg = f"Skipped processing because {EXECUTION_PAUSE_MESSAGE.lower()}"
+        pause_note = f"{EXECUTION_PAUSE_NOTE}:{pause_reason}"
         logger.warning(
             "Persistent agent %s skipped because owner execution is paused (reason=%s).",
             persistent_agent_id,
             pause_reason,
         )
 
-        step = PersistentAgentStep.objects.create(
+        _create_agent_system_step_once(
             agent=agent,
             description=msg,
-        )
-        PersistentAgentSystemStep.objects.create(
-            step=step,
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-            notes=f"{EXECUTION_PAUSE_NOTE}:{pause_reason}",
+            notes=pause_note,
         )
 
         span.add_event("Agent processing skipped - owner execution paused")
@@ -2851,19 +2875,12 @@ def _process_agent_events_locked(
             span.add_event("Agent processing skipped - llm bootstrap pending")
             span.set_attribute("llm.bootstrap_required", True)
 
-            if not PersistentAgentSystemStep.objects.filter(
-                step__agent=agent,
+            _create_agent_system_step_once(
+                agent=agent,
+                description=msg,
                 code=PersistentAgentSystemStep.Code.LLM_CONFIGURATION_REQUIRED,
-            ).exists():
-                step = PersistentAgentStep.objects.create(
-                    agent=agent,
-                    description=msg,
-                )
-                PersistentAgentSystemStep.objects.create(
-                    step=step,
-                    code=PersistentAgentSystemStep.Code.LLM_CONFIGURATION_REQUIRED,
-                    notes="llm_configuration_missing",
-                )
+                notes="llm_configuration_missing",
+            )
 
             return agent
 
