@@ -45,6 +45,14 @@
             {{ profile_form.last_name }}
           </div>
         </div>
+        <div>
+          {{ profile_form.timezone.label_tag }}
+          {{ profile_form.timezone }}
+          {% if profile_form.timezone.help_text %}
+            <p class="mt-1 text-xs text-gray-500">{{ profile_form.timezone.help_text }}</p>
+          {% endif %}
+          {{ profile_form.timezone.errors }}
+        </div>
       </div>
       <!-- Hidden input for action -->
       <input type="hidden" name="action" id="action-input" value="">

@@ -36,6 +36,7 @@ from api.services import mcp_servers as mcp_server_service
 from api.services.dedicated_proxy_service import DedicatedProxyService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.prompt_settings import get_prompt_settings
+from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time
 
 from ...models import (
     AgentAllowlistInvite,
@@ -1506,7 +1507,13 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         agent,
         window_minutes=credit_settings.burn_rate_window_minutes,
     )
-    burn_threshold = credit_settings.burn_rate_threshold_per_hour
+    local_now_for_owner, owner_timezone = resolve_user_local_time(agent.user, now)
+    is_offpeak = is_offpeak_hour(local_now_for_owner.hour)
+    burn_threshold = (
+        credit_settings.offpeak_burn_rate_threshold_per_hour
+        if is_offpeak
+        else credit_settings.burn_rate_threshold_per_hour
+    )
     scaled_threshold = burn_threshold
     try:
         result = apply_tier_credit_multiplier(agent, burn_threshold)
@@ -1544,6 +1551,8 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         "burn_rate_threshold_per_hour": effective_threshold,
         "burn_rate_base_threshold_per_hour": scaled_threshold,
         "burn_rate_inactive_weeks": inactive_weeks,
+        "burn_rate_offpeak_active": is_offpeak,
+        "burn_rate_timezone": owner_timezone,
     }
     return state
 
