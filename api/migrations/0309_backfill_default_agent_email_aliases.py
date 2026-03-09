@@ -105,7 +105,7 @@ class Migration(migrations.Migration):
     atomic = False
 
     dependencies = [
-        ("api", "0307_dailycreditconfig_offpeak_threshold"),
+        ("api", "0308_llmroutingprofile_summarization_endpoint"),
     ]
 
     operations = [
