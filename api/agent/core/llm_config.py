@@ -1281,7 +1281,7 @@ def _resolve_summarization_profile(routing_profile: Any | None) -> Any | None:
     try:
         LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
         return LLMRoutingProfile.objects.filter(is_active=True, is_eval_snapshot=False).first()
-    except Exception:
+    except (LookupError, DatabaseError):
         logger.debug("Unable to resolve active routing profile for summarization", exc_info=True)
         return None
 
@@ -1300,7 +1300,7 @@ def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str,
                 .filter(id=endpoint_id)
                 .first()
             )
-        except Exception:
+        except (LookupError, DatabaseError):
             logger.debug("Unable to resolve summarization endpoint %s", endpoint_id, exc_info=True)
             endpoint = None
 

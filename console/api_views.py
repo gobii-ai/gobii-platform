@@ -4157,7 +4157,7 @@ class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
                 try:
                     endpoint = PersistentModelEndpoint.objects.get(pk=endpoint_id)
                     profile.eval_judge_endpoint = endpoint
-                except PersistentModelEndpoint.DoesNotExist:
+                except (PersistentModelEndpoint.DoesNotExist, ValidationError):
                     return HttpResponseBadRequest("Invalid eval judge endpoint ID")
 
         if "summarization_endpoint_id" in payload:
@@ -4168,7 +4168,7 @@ class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
                 try:
                     endpoint = PersistentModelEndpoint.objects.get(pk=endpoint_id)
                     profile.summarization_endpoint = endpoint
-                except PersistentModelEndpoint.DoesNotExist:
+                except (PersistentModelEndpoint.DoesNotExist, ValidationError):
                     return HttpResponseBadRequest("Invalid summarization endpoint ID")
 
         profile.save()

@@ -497,6 +497,16 @@ class LLMRoutingProfileApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid summarization endpoint ID", response.content.decode("utf-8"))
 
+    def test_patch_rejects_malformed_summarization_endpoint_uuid(self):
+        url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
+        response = self.client.patch(
+            url,
+            data='{"summarization_endpoint_id": "not-a-uuid"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid summarization endpoint ID", response.content.decode("utf-8"))
+
     def test_clone_copies_summarization_endpoint(self):
         self.profile.summarization_endpoint = self.endpoint
         self.profile.save(update_fields=["summarization_endpoint"])
