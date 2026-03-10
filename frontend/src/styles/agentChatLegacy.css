@@ -420,6 +420,116 @@
   visibility: hidden;
 }
 
+.banner-overflow-popover {
+  z-index: 50;
+  margin-top: 0.5rem;
+  min-width: 17rem;
+  max-width: min(20rem, calc(100vw - 1.5rem));
+  border-radius: 0.9rem;
+  border: 1px solid rgba(139, 92, 246, 0.14);
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 18px 45px rgba(41, 28, 84, 0.18);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.banner-overflow-menu {
+  padding: 0.45rem;
+}
+
+.banner-overflow-section + .banner-overflow-section {
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(99, 102, 241, 0.08);
+}
+
+.banner-overflow-heading {
+  padding: 0.35rem 0.55rem 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #312455;
+}
+
+.banner-overflow-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.15rem;
+}
+
+.banner-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  width: 100%;
+  cursor: pointer;
+  border: none;
+  border-radius: 0.8rem;
+  background: transparent;
+  padding: 0.72rem 0.75rem;
+  color: #453370;
+  text-align: left;
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.banner-overflow-item:hover,
+.banner-overflow-item:focus-visible {
+  background: rgba(99, 102, 241, 0.08);
+  color: #312455;
+  outline: none;
+}
+
+.banner-overflow-item:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.banner-overflow-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #4f46e5;
+  flex-shrink: 0;
+}
+
+.banner-overflow-item-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.banner-overflow-item-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.banner-overflow-item-description {
+  margin-top: 0.15rem;
+  font-size: 0.69rem;
+  line-height: 1.35;
+  color: #6b5b95;
+}
+
+.banner-overflow-item-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #4f46e5;
+  flex-shrink: 0;
+}
+
+.banner-overflow-item-check--hidden {
+  visibility: hidden;
+}
+
 .banner-settings {
   display: flex;
   align-items: center;
@@ -481,6 +591,14 @@
 .banner-settings-dot--alert {
   background: #f97316;
   box-shadow: 0 0 0 2px #e4dffe, 0 0 6px rgba(249, 115, 22, 0.6);
+}
+
+.banner-desktop-only {
+  display: inline-flex;
+}
+
+.banner-mobile-only {
+  display: none;
 }
 
 .banner-name {
@@ -875,6 +993,14 @@
   .banner-upgrade--text {
     padding: 0.375rem 0.75rem;
   }
+
+  .banner-desktop-only {
+    display: none;
+  }
+
+  .banner-mobile-only {
+    display: inline-flex;
+  }
 }
 
 .banner-progress-wrapper {
@@ -1013,6 +1139,10 @@
 
   .banner-share-label {
     display: none;
+  }
+
+  .banner-overflow-popover {
+    min-width: min(18rem, calc(100vw - 1rem));
   }
 }
 
