@@ -203,6 +203,21 @@ class ConsoleUserPreferencesApiTests(TestCase):
             True,
         )
 
+    def test_optional_simplified_chat_preference_resolver_distinguishes_unset(self):
+        self.assertIsNone(UserPreference.resolve_optional_simplified_chat_enabled(self.user))
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: False},
+        )
+        self.assertFalse(UserPreference.resolve_optional_simplified_chat_enabled(self.user))
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
+        )
+        self.assertTrue(UserPreference.resolve_optional_simplified_chat_enabled(self.user))
+
     def test_patch_rejects_invalid_simplified_chat_preference(self):
         response = self.client.patch(
             self.url,
@@ -290,7 +305,7 @@ class ConsoleUserPreferencesApiTests(TestCase):
             {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
         )
 
-        with override_flag("simplified_chat_ui", active=False):
+        with override_flag("simplified_chat_ui", active=False), override_flag("simplified_chat_default_conversational", active=True):
             response = self.client.get(reverse("console_session"))
 
         self.assertEqual(response.status_code, 200)
@@ -301,24 +316,43 @@ class ConsoleUserPreferencesApiTests(TestCase):
     def test_console_session_exposes_toggle_and_effective_state_when_flag_enabled(self):
         from waffle.testutils import override_flag
 
-        with override_flag("simplified_chat_ui", active=True):
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=False):
             response = self.client.get(reverse("console_session"))
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("simplified_chat_ui"))
         self.assertTrue(payload.get("simplified_chat_toggle_available"))
 
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=True):
+            default_response = self.client.get(reverse("console_session"))
+        self.assertEqual(default_response.status_code, 200)
+        default_payload = default_response.json()
+        self.assertTrue(default_payload.get("simplified_chat_ui"))
+        self.assertTrue(default_payload.get("simplified_chat_toggle_available"))
+
         UserPreference.update_known_preferences(
             self.user,
             {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
         )
 
-        with override_flag("simplified_chat_ui", active=True):
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=False):
             enabled_response = self.client.get(reverse("console_session"))
         self.assertEqual(enabled_response.status_code, 200)
         enabled_payload = enabled_response.json()
         self.assertTrue(enabled_payload.get("simplified_chat_ui"))
         self.assertTrue(enabled_payload.get("simplified_chat_toggle_available"))
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: False},
+        )
+
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=True):
+            saved_false_response = self.client.get(reverse("console_session"))
+        self.assertEqual(saved_false_response.status_code, 200)
+        saved_false_payload = saved_false_response.json()
+        self.assertFalse(saved_false_payload.get("simplified_chat_ui"))
+        self.assertTrue(saved_false_payload.get("simplified_chat_toggle_available"))
 
     def test_profile_page_updates_timezone_preference(self):
         response = self.client.post(

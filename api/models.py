@@ -754,6 +754,22 @@ class UserPreference(models.Model):
         return bool(resolved[cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED])
 
     @classmethod
+    def resolve_optional_simplified_chat_enabled(cls, user) -> bool | None:
+        preference = cls.get_for_user(user)
+        stored = preference.preferences if preference and isinstance(preference.preferences, dict) else {}
+        if cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED not in stored:
+            return None
+        try:
+            normalized = cls._normalize_preference_value(
+                cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED,
+                stored.get(cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED),
+                cls.PREFERENCE_DEFINITIONS[cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED],
+            )
+        except ValueError:
+            return None
+        return bool(normalized)
+
+    @classmethod
     def update_known_preferences(cls, user, updates: dict[str, object]) -> dict[str, object]:
         if not isinstance(updates, dict):
             raise ValueError("preferences must be an object.")

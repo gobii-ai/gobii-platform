@@ -525,26 +525,45 @@ class ConsoleViewsTest(TestCase):
             browser_use_agent=browser_agent,
         )
 
-        with override_flag("simplified_chat_ui", active=True):
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=False):
             response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-simplified-chat-ui="false"')
         self.assertContains(response, 'data-simplified-chat-toggle-available="true"')
 
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=True):
+            default_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(default_response.status_code, 200)
+        self.assertContains(default_response, 'data-simplified-chat-ui="true"')
+        self.assertContains(default_response, 'data-simplified-chat-toggle-available="true"')
+
         UserPreference.update_known_preferences(
             self.user,
             {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
         )
 
-        with override_flag("simplified_chat_ui", active=True):
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=False):
             enabled_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
 
         self.assertEqual(enabled_response.status_code, 200)
         self.assertContains(enabled_response, 'data-simplified-chat-ui="true"')
         self.assertContains(enabled_response, 'data-simplified-chat-toggle-available="true"')
 
-        with override_flag("simplified_chat_ui", active=False):
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: False},
+        )
+
+        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=True):
+            saved_false_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(saved_false_response.status_code, 200)
+        self.assertContains(saved_false_response, 'data-simplified-chat-ui="false"')
+        self.assertContains(saved_false_response, 'data-simplified-chat-toggle-available="true"')
+
+        with override_flag("simplified_chat_ui", active=False), override_flag("simplified_chat_default_conversational", active=True):
             disabled_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
 
         self.assertEqual(disabled_response.status_code, 200)
