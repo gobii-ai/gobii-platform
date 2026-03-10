@@ -125,6 +125,11 @@ export type EndpointChoices = {
   image_generation_endpoints: ProviderEndpoint[]
 }
 
+export type ImageGenerationEndpointPools = {
+  create_image_endpoint_keys: string[]
+  avatar_endpoint_keys: string[]
+}
+
 export type LlmOverviewResponse = {
   stats: LlmStats
   intelligence_tiers: IntelligenceTier[]
@@ -134,6 +139,7 @@ export type LlmOverviewResponse = {
   embeddings: { tiers: EmbeddingTier[] }
   file_handlers: { tiers: FileHandlerTier[] }
   image_generations: { tiers: ImageGenerationTier[] }
+  image_generation_endpoint_pools: ImageGenerationEndpointPools
   choices: EndpointChoices
 }
 
@@ -543,4 +549,11 @@ export function updateProfileEmbeddingTierEndpoint(tierEndpointId: string, paylo
 
 export function deleteProfileEmbeddingTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${profileBase}/embeddings-tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function updateImageGenerationEndpointPools(payload: ImageGenerationEndpointPools) {
+  return jsonRequest<{ ok: boolean; image_generation_endpoint_pools: ImageGenerationEndpointPools }>(
+    `${base}/image-generations/endpoint-pools/`,
+    withCsrf(payload, 'PATCH'),
+  )
 }

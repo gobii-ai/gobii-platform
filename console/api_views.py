@@ -80,6 +80,7 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
     UserPhoneNumber,
+    SystemSetting,
 )
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
@@ -146,6 +147,7 @@ from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
 import litellm
 
+from api.agent.core.image_generation_config import get_configured_image_generation_endpoint_keys
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.agent.core.llm_utils import run_completion
 from api.evals.tasks import gc_eval_runs_task
@@ -2942,12 +2944,95 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
         return JsonResponse({"node": _serialize_agent_fs_node(node)})
 
 
+
+
+def _parse_image_endpoint_keys(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("value must be a list of endpoint keys")
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            raise ValueError("endpoint keys must be strings")
+        endpoint_key = item.strip()
+        if not endpoint_key or endpoint_key in seen:
+            continue
+        seen.add(endpoint_key)
+        cleaned.append(endpoint_key)
+    return cleaned
+
+
+def _set_image_generation_endpoint_pool_setting(setting_key: str, endpoint_keys: list[str]) -> None:
+    SystemSetting.objects.update_or_create(
+        key=setting_key,
+        defaults={"value_text": json.dumps(endpoint_keys)},
+    )
+
+
+def _serialize_image_generation_endpoint_pools() -> dict[str, list[str]]:
+    return {
+        "create_image_endpoint_keys": get_configured_image_generation_endpoint_keys("create_image"),
+        "avatar_endpoint_keys": get_configured_image_generation_endpoint_keys("avatar"),
+    }
+
+
 class ConsoleLLMOverviewAPIView(SystemAdminAPIView):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         payload = build_llm_overview()
         return JsonResponse(payload)
+
+
+
+
+class ImageGenerationEndpointPoolsAPIView(SystemAdminAPIView):
+    http_method_names = ["patch"]
+
+    def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if not isinstance(payload, dict):
+            return HttpResponseBadRequest("JSON object required")
+
+        create_image_raw = payload.get("create_image_endpoint_keys")
+        avatar_raw = payload.get("avatar_endpoint_keys")
+        if create_image_raw is None or avatar_raw is None:
+            return HttpResponseBadRequest("create_image_endpoint_keys and avatar_endpoint_keys are required")
+
+        try:
+            create_image_keys = _parse_image_endpoint_keys(create_image_raw)
+            avatar_keys = _parse_image_endpoint_keys(avatar_raw)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        valid_keys = set(
+            ImageGenerationModelEndpoint.objects.values_list("key", flat=True)
+        )
+        invalid = sorted(
+            {key for key in create_image_keys + avatar_keys if key not in valid_keys}
+        )
+        if invalid:
+            return HttpResponseBadRequest(
+                f"Unknown image generation endpoint key(s): {', '.join(invalid)}"
+            )
+
+        _set_image_generation_endpoint_pool_setting(
+            "CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS",
+            create_image_keys,
+        )
+        _set_image_generation_endpoint_pool_setting(
+            "AGENT_AVATAR_IMAGE_GENERATION_ENDPOINT_KEYS",
+            avatar_keys,
+        )
+        return JsonResponse({
+            "ok": True,
+            "image_generation_endpoint_pools": _serialize_image_generation_endpoint_pools(),
+        })
 
 
 class SystemSettingsListAPIView(SystemAdminAPIView):

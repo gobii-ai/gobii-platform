@@ -2530,10 +2530,19 @@ export function LlmConfigScreen() {
     image_generation_endpoints: [],
   }
 
+  const imageGenerationEndpointPools = overviewQuery.data?.image_generation_endpoint_pools
+  const [createImageEndpointKeys, setCreateImageEndpointKeys] = useState<string[]>([])
+  const [avatarEndpointKeys, setAvatarEndpointKeys] = useState<string[]>([])
+
   useEffect(() => {
     setPendingWeights({})
     setDirtyTierIds(new Set())
   }, [overviewQuery.data, selectedProfile])
+
+  useEffect(() => {
+    setCreateImageEndpointKeys(imageGenerationEndpointPools?.create_image_endpoint_keys ?? [])
+    setAvatarEndpointKeys(imageGenerationEndpointPools?.avatar_endpoint_keys ?? [])
+  }, [imageGenerationEndpointPools])
 
   useEffect(() => {
     if (!providers.length) {
@@ -2565,6 +2574,23 @@ export function LlmConfigScreen() {
     } catch (error) {
       if (rethrow) throw error
     }
+  }
+
+  const handleSaveImageGenerationEndpointPools = () => {
+    return runMutation(
+      () =>
+        llmApi.updateImageGenerationEndpointPools({
+          create_image_endpoint_keys: createImageEndpointKeys,
+          avatar_endpoint_keys: avatarEndpointKeys,
+        }),
+      {
+        successMessage: 'Image endpoint pools updated',
+        label: 'Saving endpoint pools…',
+        busyKey: actionKey('image-generation', 'endpoint-pools', 'save'),
+        context: 'Image generation',
+        rethrow: true,
+      },
+    )
   }
 
   const promptForKey = (message: string) => {
@@ -4162,6 +4188,78 @@ export function LlmConfigScreen() {
                   <PlusCircle className="size-4" /> Add tier
                 </button>
               </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-3">
+                <div className="space-y-1">
+                  <h5 className="text-sm font-semibold text-slate-900/90">Endpoint pools by usage</h5>
+                  <p className="text-xs text-slate-600">Choose which image endpoints are eligible for create_image versus avatar generation.</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className="text-xs font-medium text-slate-700">create_image tool endpoints</span>
+                    <select
+                      multiple
+                      className="h-36 w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                      value={createImageEndpointKeys}
+                      onChange={(event) => {
+                        const values = Array.from(event.target.selectedOptions).map((option) => option.value)
+                        setCreateImageEndpointKeys(values)
+                      }}
+                    >
+                      {endpointChoices.image_generation_endpoints.map((endpoint) => (
+                        <option key={`create-${endpoint.key}`} value={endpoint.key}>
+                          {endpoint.key} · {endpoint.model}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-xs font-medium text-slate-700">Avatar generation endpoints</span>
+                    <select
+                      multiple
+                      className="h-36 w-full rounded-xl border border-slate-200 bg-white px-2 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                      value={avatarEndpointKeys}
+                      onChange={(event) => {
+                        const values = Array.from(event.target.selectedOptions).map((option) => option.value)
+                        setAvatarEndpointKeys(values)
+                      }}
+                    >
+                      {endpointChoices.image_generation_endpoints.map((endpoint) => (
+                        <option key={`avatar-${endpoint.key}`} value={endpoint.key}>
+                          {endpoint.key} · {endpoint.model}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className={button.secondary}
+                    onClick={() => {
+                      setCreateImageEndpointKeys(imageGenerationEndpointPools?.create_image_endpoint_keys ?? [])
+                      setAvatarEndpointKeys(imageGenerationEndpointPools?.avatar_endpoint_keys ?? [])
+                    }}
+                    disabled={isBusy(actionKey('image-generation', 'endpoint-pools', 'save'))}
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    className={button.primary}
+                    onClick={() => {
+                      handleSaveImageGenerationEndpointPools().catch(() => {})
+                    }}
+                    disabled={isBusy(actionKey('image-generation', 'endpoint-pools', 'save'))}
+                  >
+                    {isBusy(actionKey('image-generation', 'endpoint-pools', 'save')) ? (
+                      <><Loader2 className="size-4 animate-spin" /> Saving…</>
+                    ) : (
+                      'Save endpoint pools'
+                    )}
+                  </button>
+                </div>
+              </div>
+
               {imageGenerationTiers.map((tier, index) => {
                 const lastIndex = imageGenerationTiers.length - 1
                 return (

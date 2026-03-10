@@ -1,9 +1,11 @@
+import json
 import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from django.conf import settings
+from django.db import OperationalError, ProgrammingError
 from django.db.models import Prefetch, Q
 
 from api.encryption import SecretsEncryption
@@ -11,6 +13,7 @@ from api.llm.utils import normalize_model_name
 from api.models import (
     ImageGenerationLLMTier,
     ImageGenerationTierEndpoint,
+    SystemSetting,
 )
 from api.openrouter import get_attribution_headers
 
@@ -57,19 +60,78 @@ def _supports_image_config(model_name: str, provider_key: str | None) -> bool:
     return "gemini" in lower_model or "google" in lower_provider
 
 
-def _configured_endpoint_keys_for_usage(usage: str | None) -> set[str] | None:
+def _setting_key_for_usage(usage: str | None) -> str | None:
+    if usage == "create_image":
+        return "CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS"
+    if usage == "avatar":
+        return "AGENT_AVATAR_IMAGE_GENERATION_ENDPOINT_KEYS"
+    return None
+
+
+def _parse_endpoint_keys(raw_value: Any) -> list[str]:
+    if raw_value is None:
+        return []
+
+    if isinstance(raw_value, (list, tuple, set)):
+        values = raw_value
+    elif isinstance(raw_value, str):
+        text = raw_value.strip()
+        if not text:
+            return []
+
+        if text.startswith("["):
+            try:
+                decoded = json.loads(text)
+            except json.JSONDecodeError:
+                decoded = None
+            if isinstance(decoded, list):
+                values = decoded
+            else:
+                values = [item.strip() for item in text.split(",")]
+        else:
+            values = [item.strip() for item in text.split(",")]
+    else:
+        return []
+
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        cleaned.append(item)
+    return cleaned
+
+
+def get_configured_image_generation_endpoint_keys(usage: str | None) -> list[str]:
+    setting_key = _setting_key_for_usage(usage)
+    if not setting_key:
+        return []
+
+    try:
+        override = (
+            SystemSetting.objects.filter(key=setting_key)
+            .values_list("value_text", flat=True)
+            .first()
+        )
+    except (OperationalError, ProgrammingError):
+        override = None
+
+    if override:
+        return _parse_endpoint_keys(override)
+
     if usage == "create_image":
         configured = settings.CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS
     elif usage == "avatar":
         configured = settings.AGENT_AVATAR_IMAGE_GENERATION_ENDPOINT_KEYS
     else:
-        return None
+        configured = []
+    return _parse_endpoint_keys(configured)
 
-    cleaned = {
-        str(endpoint_key).strip()
-        for endpoint_key in configured
-        if str(endpoint_key).strip()
-    }
+
+def _configured_endpoint_keys_for_usage(usage: str | None) -> set[str] | None:
+    cleaned = set(get_configured_image_generation_endpoint_keys(usage))
     if not cleaned:
         return None
     return cleaned

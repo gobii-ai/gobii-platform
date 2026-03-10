@@ -7,6 +7,7 @@ from typing import Any
 
 from django.db.models import Prefetch
 
+from api.agent.core.image_generation_config import get_configured_image_generation_endpoint_keys
 from api.models import (
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -401,6 +402,10 @@ def build_llm_overview() -> dict[str, Any]:
     ]
 
     return {
+        "image_generation_endpoint_pools": {
+            "create_image_endpoint_keys": get_configured_image_generation_endpoint_keys("create_image"),
+            "avatar_endpoint_keys": get_configured_image_generation_endpoint_keys("avatar"),
+        },
         "stats": stats,
         "intelligence_tiers": intelligence_tiers,
         "providers": provider_payload,

@@ -12,6 +12,7 @@ from api.models import (
     ImageGenerationModelEndpoint,
     ImageGenerationTierEndpoint,
     LLMProvider,
+    SystemSetting,
 )
 
 
@@ -228,3 +229,58 @@ class ConsoleLlmAuxModelApiTests(TestCase):
             reverse("console_llm_image_generation_endpoint_detail", args=[endpoint_id])
         )
         self.assertEqual(delete_endpoint_resp.status_code, 200, delete_endpoint_resp.content)
+
+    def test_image_generation_endpoint_pools_patch_and_overview(self):
+        first = self._json_post(
+            "console_llm_image_generation_endpoints",
+            {
+                "provider_id": str(self.provider.id),
+                "key": "img-create",
+                "model": "google/gemini-2.5-flash-image",
+            },
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+
+        second = self._json_post(
+            "console_llm_image_generation_endpoints",
+            {
+                "provider_id": str(self.provider.id),
+                "key": "img-avatar",
+                "model": "black-forest-labs/flux.1-dev",
+            },
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+
+        resp = self._json_patch(
+            "console_llm_image_generation_endpoint_pools",
+            {
+                "create_image_endpoint_keys": ["img-create"],
+                "avatar_endpoint_keys": ["img-avatar"],
+            },
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        self.assertEqual(
+            SystemSetting.objects.get(key="CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS").value_text,
+            '["img-create"]',
+        )
+        self.assertEqual(
+            SystemSetting.objects.get(key="AGENT_AVATAR_IMAGE_GENERATION_ENDPOINT_KEYS").value_text,
+            '["img-avatar"]',
+        )
+
+        overview = self.client.get(reverse("console_llm_overview"))
+        self.assertEqual(overview.status_code, 200, overview.content)
+        pools = overview.json()["image_generation_endpoint_pools"]
+        self.assertEqual(pools["create_image_endpoint_keys"], ["img-create"])
+        self.assertEqual(pools["avatar_endpoint_keys"], ["img-avatar"])
+
+    def test_image_generation_endpoint_pools_patch_rejects_unknown_keys(self):
+        resp = self._json_patch(
+            "console_llm_image_generation_endpoint_pools",
+            {
+                "create_image_endpoint_keys": ["missing-endpoint"],
+                "avatar_endpoint_keys": [],
+            },
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
