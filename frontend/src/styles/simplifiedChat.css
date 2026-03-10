@@ -271,6 +271,11 @@
 
 /* Responsive: tighter padding on small screens */
 @media (max-width: 640px) {
+  .simplified-chat .chat-bubble--agent,
+  .simplified-chat .chat-bubble--user {
+    max-width: 100%;
+  }
+
   .simplified-chat .chat-event.is-agent {
     padding-right: 24px;
   }
