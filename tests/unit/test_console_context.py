@@ -280,11 +280,26 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(resp2.status_code, 403)
 
     def test_agent_detail_scoping(self):
-        # Personal context: org-owned agent should 404
         self._set_personal_context()
         url = reverse("agent_detail", kwargs={"pk": self.org_agent.id})
+
+        # Direct navigation to another context's agent should still render.
         resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 404)
+        self.assertEqual(resp.status_code, 200)
+
+        # Explicit context override query should also render and not mutate session.
+        resp_with_override = self.client.get(
+            url,
+            {
+                "context_type": "organization",
+                "context_id": str(self.org.id),
+            },
+        )
+        self.assertEqual(resp_with_override.status_code, 200)
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(self.owner.id))
+
         # Org context with membership: should 200
         self._set_org_context()
         resp2 = self.client.get(url)
