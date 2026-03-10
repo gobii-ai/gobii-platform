@@ -1391,6 +1391,12 @@ export function AgentChatPage({
     })
   }, [snapToBottom])
 
+  const executeAutoFollow = useCallback(() => {
+    scrollToBottom()
+    isNearBottomRef.current = true
+    setIsNearBottom(true)
+  }, [scrollToBottom])
+
   const runContiguousTimelineBackfill = useCallback(async (agentIdToRefresh: string) => {
     return refreshTimelineLatestInCache(queryClient, agentIdToRefresh, {
       mode: 'contiguous',
@@ -1490,9 +1496,7 @@ export function AgentChatPage({
 
       // If pinned, ensure we stay at the bottom
       if (shouldFollow) {
-        scrollToBottom()
-        isNearBottomRef.current = true
-        setIsNearBottom(true)
+        executeAutoFollow()
         return
       }
       syncNearBottomState(container)
@@ -1500,7 +1504,7 @@ export function AgentChatPage({
 
     observer.observe(composer)
     return () => observer.disconnect()
-  }, [scrollToBottom, shouldAutoFollowTimeline, syncNearBottomState])
+  }, [executeAutoFollow, shouldAutoFollowTimeline, syncNearBottomState])
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
@@ -1520,9 +1524,7 @@ export function AgentChatPage({
       // Skip while user is actively touching to prevent scroll fighting on mobile
       // Uses rAF-coalesced scrollToBottom to avoid feedback loop with virtualizer measurements
       if (shouldFollow) {
-        scrollToBottom()
-        isNearBottomRef.current = true
-        setIsNearBottom(true)
+        executeAutoFollow()
         return
       }
       syncNearBottomState(timelineNode)
@@ -1533,7 +1535,7 @@ export function AgentChatPage({
       observer.observe(inner)
     }
     return () => observer.disconnect()
-  }, [timelineNode, scrollToBottom, shouldAutoFollowTimeline, syncNearBottomState])
+  }, [executeAutoFollow, timelineNode, shouldAutoFollowTimeline, syncNearBottomState])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
