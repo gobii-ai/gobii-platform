@@ -13,6 +13,11 @@ from django.db.models.expressions import OuterRef, Exists
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.proactive_activation import ProactiveActivationService
+from api.services.owner_execution_pause import (
+    get_owner_execution_pause_state,
+    pause_owner_execution,
+    resume_owner_execution,
+)
 from api.services.daily_credit_limits import (
     calculate_daily_credit_slider_bounds,
     get_tier_credit_multiplier,
@@ -1736,12 +1741,41 @@ User = get_user_model()
 if admin.site.is_registered(User):
     admin.site.unregister(User)
 
+
+ADMIN_MANUAL_EXECUTION_PAUSE_REASON = "admin_manual_pause"
+
+
+class CustomUserAdminForm(forms.ModelForm):
+    execution_paused_admin = forms.BooleanField(
+        required=False,
+        label="Execution Paused",
+        help_text="When enabled, this user cannot start new agent or browser-task work.",
+    )
+    execution_pause_reason_admin = forms.CharField(
+        required=False,
+        max_length=64,
+        label="Execution Pause Reason",
+        help_text="Machine-readable reason stored with the pause. Defaults to admin_manual_pause.",
+    )
+
+    class Meta:
+        model = User
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and getattr(self.instance, "pk", None):
+            pause_state = get_owner_execution_pause_state(self.instance)
+            self.fields["execution_paused_admin"].initial = pause_state["paused"]
+            self.fields["execution_pause_reason_admin"].initial = pause_state["reason"]
+
 # ------------------------------------------------------------------
 # CUSTOM USER ADMIN (Optimized)  ------------------------------------
 # ------------------------------------------------------------------
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
+    form = CustomUserAdminForm
     # Keep lightweight inlines only (flags, referral, agents); omit heavy TaskCredit inline.
     inlines = [UserFlagsInlineForUser, UserReferralInlineForUser, BrowserUseAgentInlineForUser]
 
@@ -1773,18 +1807,37 @@ class CustomUserAdmin(UserAdmin):
     def get_readonly_fields(self, request, obj=None):
         # Preserve any readonly fields defined by UserAdmin.
         base = super().get_readonly_fields(request, obj)
-        return base + ("taskcredit_summary_link", "timezone_display",)
+        return base + ("taskcredit_summary_link", "timezone_display", "execution_paused_at_display")
 
     def get_fieldsets(self, request, obj=None):
         # Append a dedicated "Task Credits" fieldset to the default ones.
         fieldsets = list(super().get_fieldsets(request, obj))
         fieldsets.append(("Preferences", {"fields": ("timezone_display",)}))
         fieldsets.append(("Task Credits", {"fields": ("taskcredit_summary_link",)}))
+        if obj is not None:
+            fieldsets.append(
+                (
+                    "Execution Control",
+                    {
+                        "fields": (
+                            "execution_paused_admin",
+                            "execution_pause_reason_admin",
+                            "execution_paused_at_display",
+                        )
+                    },
+                )
+            )
         return tuple(fieldsets)
 
     @admin.display(description="Timezone")
     def timezone_display(self, obj):
         return UserPreference.resolve_user_timezone(obj, fallback_to_utc=False)
+
+    @admin.display(description="Execution Paused At")
+    def execution_paused_at_display(self, obj):
+        pause_state = get_owner_execution_pause_state(obj)
+        paused_at = pause_state["paused_at"]
+        return paused_at or ""
 
     @admin.display(description="Task Credits")
     def taskcredit_summary_link(self, obj):
@@ -1814,6 +1867,35 @@ class CustomUserAdmin(UserAdmin):
             remaining,
             url,
         )
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+
+        if not change:
+            return
+
+        should_pause = bool(form.cleaned_data.get("execution_paused_admin"))
+        pause_reason = (
+            str(form.cleaned_data.get("execution_pause_reason_admin", "") or "").strip()
+            or ADMIN_MANUAL_EXECUTION_PAUSE_REASON
+        )
+        pause_state = get_owner_execution_pause_state(obj)
+
+        if should_pause:
+            if not pause_state["paused"] or pause_state["reason"] != pause_reason:
+                pause_owner_execution(
+                    obj,
+                    pause_reason,
+                    source="django_admin.user_change",
+                    trigger_agent_cleanup=False,
+                )
+            return
+
+        if pause_state["paused"]:
+            resume_owner_execution(
+                obj,
+                source="django_admin.user_change",
+            )
 
 
 # --- DECODO MODELS ---
