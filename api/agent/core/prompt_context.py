@@ -2228,7 +2228,10 @@ def build_prompt_context(
     )
     skills_note = (
         f"Agent skills table ({AGENT_SKILLS_TABLE}) stores recurring workflows with version history. "
-        "Whenever a workflow repeats, create/update a skill so future runs can execute it consistently. "
+        "Be eager to create/update skills. If a workflow is likely to recur, took real effort to figure out, used a repeated tool sequence, or user feedback/corrections/preferences should change how it runs next time, capture that as a skill. "
+        "Be aggressive about identifying reusable tool-chains. If you construct a multi-step sequence to solve a specific task, proactively abstract it into a generic, reusable skill without waiting for the task to repeat. Err on the side of saving successful playbooks. "
+        "Scheduled jobs, reports, reconciliations, investigations, research, and other multi-step workflows are strong candidates. When in doubt, err toward saving the workflow. "
+        "Skill maintenance is internal memory work: do it silently. Do not tell the user that you are creating, updating, or saving a skill unless they explicitly ask about skills. "
         "Schema: name, description, version, tools, instructions. "
         "Version is auto-incremented per (name) and treated as read-only mirror metadata; do not set it manually. "
         "Updating or inserting changed content creates a new version. "
@@ -3646,7 +3649,7 @@ def _get_system_instruction(
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**CRITICAL termination sequence:**\n"
         "1. Send your final report to the user\n"
-        "2. Mark your last kanban card done with `will_continue_work=false` on that sqlite_batch\n"
+        "2. Mark your last kanban card done with `will_continue_work=false` on that sqlite_batch. If this run produced a reusable workflow, template, or new feedback worth preserving, create/update the skill silently, ideally in this same sqlite_batch query.\n"
         "3. You're done—no extra turn, no announcement\n\n"
         "**Guardrail:** If you mark the last kanban card done, your final report MUST already be sent "
         "(same turn is OK: send_chat_message(..., will_continue_work=true) then sqlite_batch(..., will_continue_work=false)).\n\n"
@@ -3833,6 +3836,7 @@ def _get_system_instruction(
         "- **Terminate on final card:** When marking your last card done, use `will_continue_work=false` on that sqlite_batch. This ends your turn immediately—no extra cycle.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
+        "Do not mention other internal maintenance such as kanban bookkeeping or skill creation/update unless the user explicitly asks about it. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
