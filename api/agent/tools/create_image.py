@@ -67,7 +67,7 @@ def is_image_generation_available_for_agent(agent: Optional[PersistentAgent]) ->
     if agent is None:
         return False
     try:
-        return is_image_generation_configured()
+        return is_image_generation_configured(usage="create_image")
     except Exception:
         logger.exception("Failed checking image generation availability")
         return False
@@ -487,7 +487,7 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     )
     if source_error:
         return {"status": "error", "message": source_error}
-    configs = get_image_generation_llm_configs()
+    configs = get_image_generation_llm_configs(usage="create_image")
     if not configs:
         return {
             "status": "error",

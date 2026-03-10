@@ -63,6 +63,18 @@ class AgentAvatarGenerationTests(TestCase):
         agent.refresh_from_db()
         self.assertEqual(agent.visual_description_requested_hash, expected_hash)
 
+    def test_maybe_schedule_agent_avatar_checks_avatar_usage_configuration(self):
+        agent = self._prepare_visual_ready_agent()
+
+        with patch("api.agent.avatar.is_image_generation_configured", return_value=True) as mocked_ready, patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertTrue(scheduled)
+        mocked_ready.assert_called_once_with(usage="avatar")
+        mocked_delay.assert_called_once()
+
     def test_maybe_schedule_agent_avatar_enqueues_avatar_when_visual_exists(self):
         agent = self._create_agent()
         agent.visual_description = "A composed professional with distinct freckles and wire-rim glasses."
@@ -235,11 +247,13 @@ class AgentAvatarGenerationTests(TestCase):
             SimpleNamespace(endpoint_key="second", model="anthropic/image-foo"),
         ]
 
-        with patch("api.agent.tasks.agent_avatar.get_image_generation_llm_configs", return_value=configs), patch(
+        with patch("api.agent.tasks.agent_avatar.get_image_generation_llm_configs", return_value=configs) as mocked_configs, patch(
             "api.agent.tasks.agent_avatar._generate_image_bytes",
             side_effect=[first_error, generated],
         ):
             generate_agent_avatar_task.run(str(agent.id), charter_hash)
+
+        mocked_configs.assert_called_once_with(usage="avatar")
 
         agent.refresh_from_db()
         self.assertIsNotNone(agent.avatar_last_generation_attempt_at)

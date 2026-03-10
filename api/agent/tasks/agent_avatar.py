@@ -164,7 +164,7 @@ def _generate_visual_description_via_llm(
 
 
 def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerationResult:
-    configs = get_image_generation_llm_configs()
+    configs = get_image_generation_llm_configs(usage="avatar")
     if not configs:
         return AvatarGenerationResult(
             image_bytes=None,

@@ -57,26 +57,35 @@ class FileExportToolTests(TestCase):
             browser_use_agent=cls.browser_agent,
         )
 
-    def _seed_image_generation_tier(self, *, supports_image_to_image: bool = False):
+    def _seed_image_generation_tier(
+        self,
+        *,
+        supports_image_to_image: bool = False,
+        provider_key: str = "img-provider",
+        endpoint_key: str = "img-endpoint",
+        tier_order: int = 1,
+        litellm_model: str = "gemini-2.5-flash-image",
+    ):
         provider = LLMProvider.objects.create(
-            key="img-provider",
+            key=provider_key,
             display_name="Image Provider",
             enabled=True,
         )
         endpoint = ImageGenerationModelEndpoint.objects.create(
-            key="img-endpoint",
+            key=endpoint_key,
             provider=provider,
             enabled=True,
-            litellm_model="gemini-2.5-flash-image",
+            litellm_model=litellm_model,
             api_base="https://example.com/v1",
             supports_image_to_image=supports_image_to_image,
         )
-        tier = ImageGenerationLLMTier.objects.create(order=1, description="Tier 1")
+        tier = ImageGenerationLLMTier.objects.create(order=tier_order, description="Tier 1")
         ImageGenerationTierEndpoint.objects.create(
             tier=tier,
             endpoint=endpoint,
             weight=1.0,
         )
+        return endpoint
 
     def test_create_csv_writes_file(self):
         result = execute_create_csv(
@@ -201,6 +210,47 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("No image generation model is configured", result["message"])
+
+    @override_settings(CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS=["allowed-endpoint"])
+    @patch("api.agent.tools.create_image.run_completion")
+    def test_create_image_uses_create_image_endpoint_filter(self, mock_run_completion):
+        self._seed_image_generation_tier(
+            provider_key="img-provider-a",
+            endpoint_key="blocked-endpoint",
+            tier_order=1,
+        )
+        self._seed_image_generation_tier(
+            provider_key="img-provider-b",
+            endpoint_key="allowed-endpoint",
+            tier_order=2,
+            litellm_model="gpt-image-1",
+        )
+
+        png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00"
+        data_uri = "data:image/png;base64," + base64.b64encode(png_bytes).decode("ascii")
+        mock_run_completion.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "images": [
+                            {
+                                "image_url": {
+                                    "url": data_uri,
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+
+        result = execute_create_image(
+            self.agent,
+            {"prompt": "A minimal red circle icon", "file_path": "/exports/icon-filtered.png"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(mock_run_completion.call_args.kwargs["model"], "openai/gpt-image-1")
 
     @patch("api.agent.tools.create_image.run_completion")
     def test_create_image_writes_generated_file(self, mock_run_completion):

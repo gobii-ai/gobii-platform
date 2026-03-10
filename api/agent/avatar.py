@@ -145,7 +145,7 @@ def maybe_schedule_agent_avatar(
         return False
 
     try:
-        image_generation_ready = is_image_generation_configured()
+        image_generation_ready = is_image_generation_configured(usage="avatar")
     except Exception:
         logger.exception("Failed checking image-generation availability for agent %s", agent.id)
         image_generation_ready = False

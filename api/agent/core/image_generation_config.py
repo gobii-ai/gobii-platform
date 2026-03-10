@@ -3,6 +3,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from django.conf import settings
 from django.db.models import Prefetch, Q
 
 from api.encryption import SecretsEncryption
@@ -56,21 +57,45 @@ def _supports_image_config(model_name: str, provider_key: str | None) -> bool:
     return "gemini" in lower_model or "google" in lower_provider
 
 
-def is_image_generation_configured() -> bool:
+def _configured_endpoint_keys_for_usage(usage: str | None) -> set[str] | None:
+    if usage == "create_image":
+        configured = settings.CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS
+    elif usage == "avatar":
+        configured = settings.AGENT_AVATAR_IMAGE_GENERATION_ENDPOINT_KEYS
+    else:
+        return None
+
+    cleaned = {
+        str(endpoint_key).strip()
+        for endpoint_key in configured
+        if str(endpoint_key).strip()
+    }
+    if not cleaned:
+        return None
+    return cleaned
+
+
+def is_image_generation_configured(usage: str | None = None) -> bool:
     """Return True when at least one enabled image-generation tier endpoint exists."""
-    return ImageGenerationTierEndpoint.objects.filter(
+    configured_keys = _configured_endpoint_keys_for_usage(usage)
+
+    query = ImageGenerationTierEndpoint.objects.filter(
         endpoint__enabled=True,
     ).filter(
         Q(endpoint__provider__isnull=True) | Q(endpoint__provider__enabled=True)
-    ).exists()
+    )
+    if configured_keys is not None:
+        query = query.filter(endpoint__key__in=configured_keys)
+    return query.exists()
 
 
-def get_image_generation_llm_configs(limit: int = 5) -> list[ImageGenerationLLMConfig]:
+def get_image_generation_llm_configs(limit: int = 5, usage: str | None = None) -> list[ImageGenerationLLMConfig]:
     tier_prefetch = Prefetch(
         "tier_endpoints",
         queryset=ImageGenerationTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
     )
     tiers = ImageGenerationLLMTier.objects.prefetch_related(tier_prefetch).order_by("order")
+    configured_keys = _configured_endpoint_keys_for_usage(usage)
 
     configs: list[ImageGenerationLLMConfig] = []
     for tier in tiers:
@@ -79,6 +104,8 @@ def get_image_generation_llm_configs(limit: int = 5) -> list[ImageGenerationLLMC
                 continue
             endpoint = entry.endpoint
             if endpoint is None or not getattr(endpoint, "enabled", False):
+                continue
+            if configured_keys is not None and endpoint.key not in configured_keys:
                 continue
 
             provider = getattr(endpoint, "provider", None)
