@@ -64,6 +64,26 @@ type McpServerAssignmentsResponseDTO = {
   message?: string
 }
 
+type PipedreamAppSummaryDTO = {
+  slug: string
+  name: string
+  description: string
+  icon_url: string
+}
+
+type PipedreamAppSettingsDTO = {
+  owner_scope: string
+  owner_label: string
+  platform_apps: PipedreamAppSummaryDTO[]
+  selected_apps: PipedreamAppSummaryDTO[]
+  effective_apps: PipedreamAppSummaryDTO[]
+  message?: string
+}
+
+type PipedreamAppSearchResponseDTO = {
+  results: PipedreamAppSummaryDTO[]
+}
+
 export type McpServer = {
   id: string
   name: string
@@ -136,6 +156,22 @@ export type McpServerAssignmentResponse = {
   message?: string
 }
 
+export type PipedreamAppSummary = {
+  slug: string
+  name: string
+  description: string
+  iconUrl: string
+}
+
+export type PipedreamAppSettings = {
+  ownerScope: string
+  ownerLabel: string
+  platformApps: PipedreamAppSummary[]
+  selectedApps: PipedreamAppSummary[]
+  effectiveApps: PipedreamAppSummary[]
+  message?: string
+}
+
 const mapServer = (server: McpServerDTO): McpServer => ({
   id: server.id,
   name: server.name,
@@ -186,6 +222,22 @@ const mapAssignments = (payload: McpServerAssignmentsResponseDTO): McpServerAssi
   })),
   totalAgents: payload.total_agents ?? 0,
   assignedCount: payload.assigned_count ?? 0,
+  message: payload.message,
+})
+
+const mapPipedreamApp = (app: PipedreamAppSummaryDTO): PipedreamAppSummary => ({
+  slug: app.slug ?? '',
+  name: app.name ?? app.slug ?? '',
+  description: app.description ?? '',
+  iconUrl: app.icon_url ?? '',
+})
+
+const mapPipedreamSettings = (payload: PipedreamAppSettingsDTO): PipedreamAppSettings => ({
+  ownerScope: payload.owner_scope,
+  ownerLabel: payload.owner_label,
+  platformApps: (payload.platform_apps ?? []).map(mapPipedreamApp),
+  selectedApps: (payload.selected_apps ?? []).map(mapPipedreamApp),
+  effectiveApps: (payload.effective_apps ?? []).map(mapPipedreamApp),
   message: payload.message,
 })
 
@@ -241,4 +293,32 @@ export async function updateMcpServerAssignments(assignmentsUrl: string, agentId
     json: { agent_ids: agentIds },
   })
   return mapAssignments(payload)
+}
+
+export async function fetchPipedreamAppSettings(settingsUrl: string): Promise<PipedreamAppSettings> {
+  const payload = await jsonFetch<PipedreamAppSettingsDTO>(settingsUrl)
+  return mapPipedreamSettings(payload)
+}
+
+export async function updatePipedreamAppSettings(
+  settingsUrl: string,
+  selectedAppSlugs: string[],
+): Promise<PipedreamAppSettings> {
+  const payload = await jsonRequest<PipedreamAppSettingsDTO>(settingsUrl, {
+    method: 'PATCH',
+    includeCsrf: true,
+    json: { selected_app_slugs: selectedAppSlugs },
+  })
+  return mapPipedreamSettings(payload)
+}
+
+export async function searchPipedreamApps(searchUrl: string, query: string): Promise<PipedreamAppSummary[]> {
+  const normalizedQuery = query.trim()
+  if (!normalizedQuery) {
+    return []
+  }
+  const url = new URL(searchUrl, window.location.origin)
+  url.searchParams.set('q', normalizedQuery)
+  const payload = await jsonFetch<PipedreamAppSearchResponseDTO>(url.toString())
+  return (payload.results ?? []).map(mapPipedreamApp)
 }

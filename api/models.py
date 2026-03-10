@@ -6652,6 +6652,83 @@ class MCPServerConfig(models.Model):
         self.headers_json_encrypted = self._encrypt_json(value)
 
 
+class PipedreamAppSelection(models.Model):
+    """Owner-scoped extra Pipedream app slugs selected in the console."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="pipedream_app_selections",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="pipedream_app_selections",
+    )
+    selected_app_slugs = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization"],
+                name="unique_pipedream_app_selection_org",
+                condition=Q(organization__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=["user"],
+                name="unique_pipedream_app_selection_user",
+                condition=Q(user__isnull=False),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization"], name="pd_app_selection_org_idx"),
+            models.Index(fields=["user"], name="pd_app_selection_user_idx"),
+        ]
+
+    @staticmethod
+    def normalize_app_slugs(values) -> list[str]:
+        if values is None:
+            return []
+        if not isinstance(values, list):
+            raise ValueError("selected_app_slugs must be a list of strings.")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            if not isinstance(value, str):
+                raise ValueError("selected_app_slugs must be a list of strings.")
+            slug = value.strip().lower()
+            if not slug:
+                continue
+            if slug in seen:
+                continue
+            seen.add(slug)
+            normalized.append(slug)
+        return normalized
+
+    def clean(self):
+        super().clean()
+        has_org = bool(self.organization_id)
+        has_user = bool(self.user_id)
+        if has_org == has_user:
+            raise ValidationError("Pipedream app selections must reference exactly one owner.")
+        try:
+            self.selected_app_slugs = self.normalize_app_slugs(self.selected_app_slugs)
+        except ValueError as exc:
+            raise ValidationError({"selected_app_slugs": str(exc)}) from exc
+
+    def __str__(self) -> str:  # pragma: no cover - trivial display helper
+        owner = self.organization or self.user or "unknown"
+        return f"PipedreamAppSelection<{owner}>"
+
+
 class PersistentAgentSystemMessageBroadcast(models.Model):
     """Represents a single broadcast directive duplicated for all agents."""
 

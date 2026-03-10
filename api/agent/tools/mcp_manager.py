@@ -69,6 +69,12 @@ from ...services.mcp_tool_cache import (
     invalidate_mcp_tool_cache,
     set_cached_mcp_tool_definitions,
 )
+from ...services.pipedream_apps import (
+    build_owner_key,
+    get_effective_pipedream_app_slugs_for_agent,
+    get_platform_pipedream_app_slugs,
+    normalize_app_slugs,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -183,6 +189,14 @@ class MCPToolInfo:
             "description": self.description,
             "parameters": json.dumps(self.parameters) if self.parameters else "{}",
         }
+
+
+@dataclass(frozen=True)
+class PipedreamToolCacheContext:
+    """Owner-scoped discovery inputs for Pipedream tool catalogs."""
+
+    owner_cache_key: str
+    effective_app_slugs: List[str]
 
 
 class GobiiStdioTransport(FastMCPStdioTransport):
@@ -469,6 +483,9 @@ class MCPToolManager:
             except Exception:
                 logger.debug("Error closing MCP client for %s", config_id, exc_info=True)
         self._tools_cache.pop(config_id, None)
+        prefix = f"{config_id}:"
+        for slot_key in [key for key in self._tools_cache if key.startswith(prefix)]:
+            self._tools_cache.pop(slot_key, None)
 
     def _update_refresh_marker(self, runtime: MCPServerRuntime) -> None:
         marker = runtime.updated_at or timezone.now()
@@ -508,12 +525,14 @@ class MCPToolManager:
         agent: Optional[PersistentAgent] = None,
         force_local: bool = False,
         require_client: bool = False,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
     ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
+        slot_key = self._tool_cache_slot_key(runtime, pipedream_context)
         uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
         needs_shared_client = require_client and not uses_per_agent_client
-        if config_id in self._tools_cache:
+        if slot_key in self._tools_cache:
             if not require_client or config_id in self._clients:
                 return True
             if uses_per_agent_client:
@@ -523,11 +542,12 @@ class MCPToolManager:
                 runtime,
                 agent=agent,
                 force_local=force_local or needs_shared_client,
+                pipedream_context=pipedream_context,
             )
         except Exception:
             logger.exception("Failed to register MCP server %s", runtime.name)
             return False
-        if config_id not in self._tools_cache:
+        if slot_key not in self._tools_cache:
             return False
         if require_client and config_id not in self._clients:
             if uses_per_agent_client:
@@ -626,6 +646,49 @@ class MCPToolManager:
         self._server_cache.pop(config_id, None)
         self._pd_agent_clients.clear()
         invalidate_mcp_tool_cache(config_id)
+
+    def invalidate_pipedream_owner_cache(self, owner_scope: str, owner_id: str) -> None:
+        if not owner_id:
+            return
+        owner_prefix = f":{build_owner_key(owner_scope, owner_id)}"
+        for slot_key in [key for key in self._tools_cache if key.endswith(owner_prefix)]:
+            self._tools_cache.pop(slot_key, None)
+
+    def prewarm_pipedream_owner_cache(
+        self,
+        owner_scope: str,
+        owner_id: str,
+        *,
+        app_slugs: Optional[Iterable[str]] = None,
+    ) -> bool:
+        if not owner_id:
+            return False
+        runtime = next(
+            (
+                cached_runtime
+                for cached_runtime in self._server_cache.values()
+                if cached_runtime.name == self.PIPEDREAM_RUNTIME_NAME
+                and cached_runtime.scope == MCPServerConfig.Scope.PLATFORM
+            ),
+            None,
+        )
+        if runtime is None:
+            config = (
+                MCPServerConfig.objects.filter(
+                    is_active=True,
+                    scope=MCPServerConfig.Scope.PLATFORM,
+                    name=self.PIPEDREAM_RUNTIME_NAME,
+                )
+                .select_related("oauth_credential")
+                .first()
+            )
+            if config is None:
+                return False
+            runtime = self._build_runtime_from_config(config)
+            self._server_cache[runtime.config_id] = runtime
+
+        context = self._pipedream_cache_context_for_owner(owner_scope, owner_id, app_slugs=app_slugs)
+        return self._ensure_runtime_registered(runtime, force_local=True, pipedream_context=context)
 
     def _build_runtime_from_config(self, cfg: MCPServerConfig) -> MCPServerRuntime:
         env = dict(cfg.environment or {})
@@ -909,15 +972,58 @@ class MCPToolManager:
         is_http = bool(runtime and runtime.url)
         return get_mcp_http_timeout_seconds() if is_http else get_mcp_stdio_timeout_seconds()
 
-    def _effective_prefetch_apps(self, server: MCPServerRuntime) -> List[str]:
+    def _pipedream_cache_context_for_agent(self, agent: PersistentAgent) -> PipedreamToolCacheContext:
+        if agent.organization_id:
+            owner_cache_key = build_owner_key(MCPServerConfig.Scope.ORGANIZATION, str(agent.organization_id))
+        else:
+            owner_cache_key = build_owner_key(MCPServerConfig.Scope.USER, str(agent.user_id))
+        return PipedreamToolCacheContext(
+            owner_cache_key=owner_cache_key,
+            effective_app_slugs=get_effective_pipedream_app_slugs_for_agent(agent),
+        )
+
+    def _pipedream_cache_context_for_owner(
+        self,
+        owner_scope: str,
+        owner_id: str,
+        *,
+        app_slugs: Optional[Iterable[str]] = None,
+    ) -> PipedreamToolCacheContext:
+        platform_app_slugs = get_platform_pipedream_app_slugs()
+        selected_app_slugs = normalize_app_slugs(app_slugs or [])
+        return PipedreamToolCacheContext(
+            owner_cache_key=build_owner_key(owner_scope, owner_id),
+            effective_app_slugs=normalize_app_slugs([*platform_app_slugs, *selected_app_slugs]),
+        )
+
+    def _tool_cache_slot_key(
+        self,
+        server: MCPServerRuntime,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
+    ) -> str:
+        if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
+            return f"{server.config_id}:{pipedream_context.owner_cache_key}"
+        return server.config_id
+
+    def _effective_prefetch_apps(
+        self,
+        server: MCPServerRuntime,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
+    ) -> List[str]:
+        if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
+            return [slug for slug in pipedream_context.effective_app_slugs if slug]
         if server.prefetch_apps:
             return [s.strip() for s in server.prefetch_apps if s.strip()]
-        if server.name == "pipedream":
+        if server.name == self.PIPEDREAM_RUNTIME_NAME:
             app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
             return [s.strip() for s in app_csv.split(",") if s.strip()]
         return []
 
-    def _tool_cache_fingerprint_payload(self, server: MCPServerRuntime) -> Dict[str, Any]:
+    def _tool_cache_fingerprint_payload(
+        self,
+        server: MCPServerRuntime,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
+    ) -> Dict[str, Any]:
         def _normalize_mapping(values: Dict[str, str]) -> Dict[str, str]:
             return {
                 str(key): str(values[key])
@@ -926,7 +1032,7 @@ class MCPToolManager:
 
         updated_at = server.updated_at.isoformat() if server.updated_at else ""
         oauth_updated_at = server.oauth_updated_at.isoformat() if server.oauth_updated_at else ""
-        prefetch_apps = self._effective_prefetch_apps(server)
+        prefetch_apps = self._effective_prefetch_apps(server, pipedream_context)
 
         return {
             "config_id": server.config_id,
@@ -939,12 +1045,21 @@ class MCPToolManager:
             "updated_at": updated_at,
             "oauth_updated_at": oauth_updated_at,
             "prefetch_apps": prefetch_apps,
+            "pipedream_owner_cache_key": (
+                pipedream_context.owner_cache_key
+                if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None
+                else ""
+            ),
             "headers": _normalize_mapping(server.headers or {}),
             "env": _normalize_mapping(server.env or {}),
         }
 
-    def _build_tool_cache_fingerprint(self, server: MCPServerRuntime) -> str:
-        payload = self._tool_cache_fingerprint_payload(server)
+    def _build_tool_cache_fingerprint(
+        self,
+        server: MCPServerRuntime,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
+    ) -> str:
+        payload = self._tool_cache_fingerprint_payload(server, pipedream_context)
         return build_mcp_tool_cache_fingerprint(payload)
 
     def _serialize_tools_for_cache(self, tools: List["MCPToolInfo"]) -> List[Dict[str, Any]]:
@@ -993,6 +1108,7 @@ class MCPToolManager:
         cache_fingerprint: str,
         *,
         sandbox_mode: bool = False,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
     ) -> bool:
         cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
         if not cached_payload:
@@ -1002,7 +1118,8 @@ class MCPToolManager:
         if not cached_tools:
             return False
 
-        self._tools_cache[server.config_id] = cached_tools
+        slot_key = self._tool_cache_slot_key(server, pipedream_context)
+        self._tools_cache[slot_key] = cached_tools
         if sandbox_mode:
             self._clients.pop(server.config_id, None)
 
@@ -1022,12 +1139,18 @@ class MCPToolManager:
         agent: Optional[PersistentAgent] = None,
         force_local: bool = False,
         prefer_cache: bool = True,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
     ):
         """Register an MCP server and cache its tools."""
 
         sandbox_mode = self._should_route_runtime_via_sandbox(server, agent=agent) and not force_local
-        cache_fingerprint = self._build_tool_cache_fingerprint(server)
-        if prefer_cache and self._load_cached_tools(server, cache_fingerprint, sandbox_mode=sandbox_mode):
+        cache_fingerprint = self._build_tool_cache_fingerprint(server, pipedream_context)
+        if prefer_cache and self._load_cached_tools(
+            server,
+            cache_fingerprint,
+            sandbox_mode=sandbox_mode,
+            pipedream_context=pipedream_context,
+        ):
             if not force_local:
                 return
             # Force-local execution requires an active local client even when tools are cached.
@@ -1047,7 +1170,7 @@ class MCPToolManager:
                 server.config_id,
             )
 
-        if server.name == "pipedream":
+        if server.name == self.PIPEDREAM_RUNTIME_NAME:
             # Check Pipedream credentials before attempting registration
             token = self._get_pipedream_access_token()
             if not token:
@@ -1069,8 +1192,8 @@ class MCPToolManager:
             from fastmcp.client.transports import StreamableHttpTransport
 
             headers: Dict[str, str] = dict(server.headers or {})
-            if server.name == "pipedream" and server.scope == MCPServerConfig.Scope.PLATFORM:
-                prefetch_apps = self._effective_prefetch_apps(server)
+            if server.name == self.PIPEDREAM_RUNTIME_NAME and server.scope == MCPServerConfig.Scope.PLATFORM:
+                prefetch_apps = self._effective_prefetch_apps(server, pipedream_context)
                 prefetch_csv = ",".join(prefetch_apps)
                 headers = self._pd_build_headers(
                     mode="sub-agent",
@@ -1105,14 +1228,17 @@ class MCPToolManager:
         client = Client(transport)
         self._clients[server.config_id] = client
 
-        if prefer_cache and self._load_cached_tools(server, cache_fingerprint):
+        if prefer_cache and self._load_cached_tools(server, cache_fingerprint, pipedream_context=pipedream_context):
             return
 
         loop = self._ensure_event_loop()
         proxy_url = self._select_discovery_proxy_url(server)
         with _use_mcp_proxy(proxy_url):
-            tools = loop.run_until_complete(self._fetch_server_tools(client, server))
-        self._tools_cache[server.config_id] = tools
+            tools = loop.run_until_complete(
+                self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
+            )
+        slot_key = self._tool_cache_slot_key(server, pipedream_context)
+        self._tools_cache[slot_key] = tools
         if tools:
             set_cached_mcp_tool_definitions(
                 server.config_id,
@@ -1143,18 +1269,24 @@ class MCPToolManager:
                     server.config_id,
                 )
 
-    async def _fetch_server_tools(self, client: Client, server: MCPServerRuntime) -> List[MCPToolInfo]:
+    async def _fetch_server_tools(
+        self,
+        client: Client,
+        server: MCPServerRuntime,
+        *,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
+    ) -> List[MCPToolInfo]:
         """Fetch tools from an MCP server, filtering out blacklisted tools.
 
         For Pipedream, discover action tools per app slug in sub-agent mode.
         """
         tools: List[MCPToolInfo] = []
         async with client:
-            if server.name != "pipedream":
+            if server.name != self.PIPEDREAM_RUNTIME_NAME:
                 mcp_tools = await client.list_tools()
                 tools.extend(self._convert_tools(server, mcp_tools))
             else:
-                prefetch = self._effective_prefetch_apps(server)
+                prefetch = self._effective_prefetch_apps(server, pipedream_context)
                 for app_slug in prefetch:
                     try:
                         if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
@@ -1208,7 +1340,7 @@ class MCPToolManager:
         tools: List[MCPToolInfo] = []
         blacklisted_count = 0
         for tool in mcp_tools:
-            if server.name == "pipedream":
+            if server.name == self.PIPEDREAM_RUNTIME_NAME:
                 full_name = tool.name
             else:
                 full_name = f"mcp_{server.name}_{tool.name}"
@@ -1308,9 +1440,13 @@ class MCPToolManager:
             runtime = self._server_cache.get(config_id)
             if not runtime:
                 continue
-            if not self._ensure_runtime_registered(runtime, agent=agent):
+            pipedream_context = None
+            if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
+                pipedream_context = self._pipedream_cache_context_for_agent(agent)
+            if not self._ensure_runtime_registered(runtime, agent=agent, pipedream_context=pipedream_context):
                 continue
-            server_tools = self._tools_cache.get(config_id)
+            slot_key = self._tool_cache_slot_key(runtime, pipedream_context)
+            server_tools = self._tools_cache.get(slot_key)
             if server_tools:
                 tools.extend(server_tools)
         return tools
@@ -1385,7 +1521,7 @@ class MCPToolManager:
         if not runtime:
             return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
 
-        if runtime.name == "pipedream":
+        if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
             return {"status": "error", "message": "Pipedream MCP requires an agent context"}
 
         info = self._resolve_tool_info(tool_name)
@@ -1641,7 +1777,7 @@ class MCPToolManager:
                         break
             
             # Detect Pipedream Connect Link responses and replace with our own Connect Link
-            if server_name == "pipedream":
+            if server_name == self.PIPEDREAM_RUNTIME_NAME:
                 connect_url = None
                 if isinstance(content, dict):
                     # Heuristics: look for a URL containing the Connect Link path
@@ -1858,7 +1994,7 @@ class MCPToolManager:
                         parameters={"type": "object", "properties": {}},
                     )
 
-        runtime = next((r for r in self._server_cache.values() if r.name == "pipedream"), None)
+        runtime = next((r for r in self._server_cache.values() if r.name == self.PIPEDREAM_RUNTIME_NAME), None)
         if runtime and "-" in tool_name:
             return MCPToolInfo(
                 config_id=runtime.config_id,
@@ -1878,6 +2014,10 @@ class MCPToolManager:
     def is_tool_blacklisted(self, tool_name: str) -> bool:
         """Expose blacklist checks for external managers."""
         return self._is_tool_blacklisted(tool_name)
+
+    def get_pipedream_access_token(self) -> Optional[str]:
+        """Expose the shared Pipedream token flow to other services."""
+        return self._get_pipedream_access_token()
 
     def _get_pipedream_access_token(self) -> Optional[str]:
         """Acquire or refresh the Pipedream OAuth access token (cached)."""
@@ -1973,7 +2113,7 @@ class MCPToolManager:
             (
                 srv
                 for srv in self._server_cache.values()
-                if srv.name == "pipedream" and srv.config_id in accessible_ids
+                if srv.name == self.PIPEDREAM_RUNTIME_NAME and srv.config_id in accessible_ids
             ),
             None,
         )
@@ -2028,6 +2168,11 @@ def execute_platform_mcp_tool(server_name: str, tool_name: str, params: Dict[str
 def get_mcp_manager() -> MCPToolManager:
     """Get the global MCP tool manager instance."""
     return _mcp_manager
+
+
+def get_pipedream_access_token() -> Optional[str]:
+    """Return the shared Pipedream API token, if configured."""
+    return _mcp_manager.get_pipedream_access_token()
 
 
 def cleanup_mcp_tools():

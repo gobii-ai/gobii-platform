@@ -11,6 +11,8 @@
        data-list-url="{% url 'console-mcp-server-list' %}"
        data-detail-url-template="{% url 'console-mcp-server-detail' placeholder_id %}"
        data-assign-url-template="{% url 'console-mcp-server-assignments' placeholder_id %}"
+       data-pipedream-apps-url="{% url 'console-pipedream-apps' %}"
+       data-pipedream-app-search-url="{% url 'console-pipedream-app-search' %}"
        data-owner-scope="{{ owner_scope }}"
        data-owner-label="{{ owner_label|escape }}"
        data-allow-commands="{{ allow_mcp_commands|yesno:'true,false' }}"

@@ -161,6 +161,13 @@ from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from api.services.spawn_requests import SpawnRequestResolutionError, SpawnRequestService
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.pipedream_apps import (
+    PipedreamCatalogError,
+    PipedreamCatalogService,
+    get_owner_apps_state,
+    serialize_owner_apps_state,
+    set_owner_selected_app_slugs,
+)
 from api.services.agent_settings_resume import (
     queue_owner_task_pack_resume,
     queue_settings_change_resume,
@@ -5195,6 +5202,65 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
                 )
 
         return JsonResponse({"errors": _form_errors(form)}, status=400)
+
+
+class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "patch"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
+        state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
+        try:
+            payload = serialize_owner_apps_state(state, catalog=PipedreamCatalogService())
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse(payload)
+
+    def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        selected_app_slugs = payload.get("selected_app_slugs")
+        if not isinstance(selected_app_slugs, list):
+            return HttpResponseBadRequest("selected_app_slugs must be an array.")
+
+        owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
+        selected = set_owner_selected_app_slugs(
+            owner_scope,
+            selected_app_slugs,
+            owner_user=owner_user,
+            owner_org=owner_org,
+        )
+
+        manager = get_mcp_manager()
+        owner_id = str(owner_org.id) if owner_scope == MCPServerConfig.Scope.ORGANIZATION and owner_org else str(request.user.id)
+        manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
+        manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
+
+        state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
+        try:
+            payload = serialize_owner_apps_state(state, catalog=PipedreamCatalogService())
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse(payload)
+
+
+class PipedreamAppSearchAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        _resolve_mcp_owner(request)
+        query = str(request.GET.get("q") or "").strip()
+        if not query:
+            return JsonResponse({"results": []})
+        catalog = PipedreamCatalogService()
+        try:
+            results = [app.to_dict() for app in catalog.search_apps(query)]
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse({"results": results})
 
 
 class MCPServerDetailAPIView(LoginRequiredMixin, View):
