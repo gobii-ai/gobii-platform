@@ -76,6 +76,7 @@
   border: 1px solid var(--color-slate-150, #e9edf2);
   max-width: 480px;
   width: fit-content;
+  box-sizing: border-box;
 }
 
 .inline-status-card__icon {
@@ -271,6 +272,15 @@
 
 /* Responsive: tighter padding on small screens */
 @media (max-width: 640px) {
+  .inline-status-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .inline-status-card__detail {
+    max-width: none;
+  }
+
   .simplified-chat .chat-bubble--agent,
   .simplified-chat .chat-bubble--user {
     max-width: 100%;
@@ -289,7 +299,8 @@
 
 /* Existing virtualizer items glide up when new content arrives */
 .simplified-chat-vitem {
-  transition: transform 0.25s ease-out;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 /* ---- New Item Entry Animation ---- */
@@ -330,6 +341,6 @@
   }
 
   .simplified-chat-vitem {
-    transition: none;
+    overflow-x: clip;
   }
 }
