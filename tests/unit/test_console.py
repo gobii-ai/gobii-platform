@@ -25,6 +25,7 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
+from api.models import UserPreference
 
 
 @tag("batch_console_agents")
@@ -507,6 +508,48 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-cta-start-free-trial="true"')
         mock_customer_has_any_individual_subscription.assert_not_called()
+
+    @tag("batch_console_agents")
+    def test_agent_chat_shell_exposes_simplified_chat_toggle_state(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+        from waffle.testutils import override_flag
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Simplified Chat Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Simplified Chat Agent",
+            charter="Simplified chat toggle charter",
+            browser_use_agent=browser_agent,
+        )
+
+        with override_flag("simplified_chat_ui", active=True):
+            response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-simplified-chat-ui="false"')
+        self.assertContains(response, 'data-simplified-chat-toggle-available="true"')
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
+        )
+
+        with override_flag("simplified_chat_ui", active=True):
+            enabled_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(enabled_response.status_code, 200)
+        self.assertContains(enabled_response, 'data-simplified-chat-ui="true"')
+        self.assertContains(enabled_response, 'data-simplified-chat-toggle-available="true"')
+
+        with override_flag("simplified_chat_ui", active=False):
+            disabled_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(disabled_response.status_code, 200)
+        self.assertContains(disabled_response, 'data-simplified-chat-ui="false"')
+        self.assertContains(disabled_response, 'data-simplified-chat-toggle-available="false"')
 
     @tag("batch_console_agents")
     @patch("console.views.customer_has_any_individual_subscription", return_value=True)

@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, Mail, MessageSquare, Settings, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Check, Eye, Mail, MessageSquare, Settings, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
+import { Button, Dialog, DialogTrigger, ListBox, ListBoxItem, Popover, type Key, type Selection } from 'react-aria-components'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
@@ -8,6 +9,7 @@ import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
+import { getSimplifiedChatTriggerPresentation, getSimplifiedChatViewOptions } from './simplifiedChatPresentation'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
@@ -30,6 +32,10 @@ type AgentChatBannerProps = {
   onSettingsOpen?: () => void
   onClose?: () => void
   onShare?: () => void
+  simplifiedChatEnabled?: boolean
+  simplifiedChatToggleAvailable?: boolean
+  simplifiedChatTogglePending?: boolean
+  onSimplifiedChatSelect?: (enabled: boolean) => void
   sidebarCollapsed?: boolean
   children?: ReactNode
 }
@@ -65,6 +71,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   onSettingsOpen,
   onClose,
   onShare,
+  simplifiedChatEnabled = false,
+  simplifiedChatToggleAvailable = false,
+  simplifiedChatTogglePending = false,
+  onSimplifiedChatSelect,
   sidebarCollapsed = true,
   children,
 }: AgentChatBannerProps) {
@@ -160,10 +170,43 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
   const showShareButton = canShowBannerActions && Boolean(onShare)
   const showAuditButton = Boolean(auditUrl)
+  const showSimplifiedChatToggle = simplifiedChatToggleAvailable && Boolean(onSimplifiedChatSelect)
   const showAttentionDot = softTargetExceeded || hardLimitReached
   const settingsLabel = hardLimitReached
     ? 'Daily task limit reached. Open agent settings'
     : 'Open agent settings'
+  const simplifiedChatTrigger = getSimplifiedChatTriggerPresentation(simplifiedChatEnabled)
+  const [viewMenuOpen, setViewMenuOpen] = useState(false)
+  const viewOptions = useMemo(() => getSimplifiedChatViewOptions(), [])
+  const selectedViewKey = simplifiedChatEnabled ? 'conversational' : 'detail'
+  const selectedViewKeys = useMemo(() => new Set<Key>([selectedViewKey]), [selectedViewKey])
+
+  const handleViewSelection = useCallback((keys: Selection) => {
+    if (simplifiedChatTogglePending || !onSimplifiedChatSelect) {
+      return
+    }
+    const resolvedKey = (() => {
+      if (keys === 'all') return null
+      if (typeof keys === 'string' || typeof keys === 'number') {
+        return String(keys)
+      }
+      const [first] = keys as Set<Key>
+      return first ? String(first) : null
+    })()
+    if (!resolvedKey) {
+      return
+    }
+    const option = viewOptions.find((item) => item.key === resolvedKey)
+    if (!option) {
+      return
+    }
+    if (option.enabled === simplifiedChatEnabled) {
+      setViewMenuOpen(false)
+      return
+    }
+    onSimplifiedChatSelect(option.enabled)
+    setViewMenuOpen(false)
+  }, [onSimplifiedChatSelect, simplifiedChatEnabled, simplifiedChatTogglePending, viewOptions])
 
   const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
 
@@ -283,6 +326,62 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             >
               <Stethoscope size={16} />
             </a>
+          ) : null}
+          {showSimplifiedChatToggle ? (
+            <DialogTrigger isOpen={viewMenuOpen} onOpenChange={setViewMenuOpen}>
+              <Button
+                className="banner-settings"
+                aria-label={simplifiedChatTrigger.ariaLabel}
+                isDisabled={simplifiedChatTogglePending}
+              >
+                <Eye size={16} />
+              </Button>
+              <Popover className="banner-view-popover">
+                <Dialog className="banner-view-menu">
+                  <div className="banner-view-header">
+                    <div className="banner-view-title">View</div>
+                    <div className="banner-view-caption">Choose how the chat is presented.</div>
+                  </div>
+                  <ListBox
+                    aria-label="Select chat view"
+                    selectionMode="single"
+                    selectedKeys={selectedViewKeys as unknown as Selection}
+                    onSelectionChange={(keys) => handleViewSelection(keys as Selection)}
+                    className="banner-view-list"
+                  >
+                    {viewOptions.map((option) => {
+                      const OptionIcon = option.icon
+                      return (
+                        <ListBoxItem
+                          key={option.key}
+                          id={option.key}
+                          textValue={option.label}
+                          className="banner-view-option"
+                        >
+                          {({ isSelected }) => (
+                            <>
+                              <span className="banner-view-option-icon" aria-hidden="true">
+                                <OptionIcon size={14} />
+                              </span>
+                              <span className="banner-view-option-copy">
+                                <span className="banner-view-option-label">{option.label}</span>
+                                <span className="banner-view-option-description">{option.description}</span>
+                              </span>
+                              <span
+                                className={`banner-view-option-check${isSelected ? '' : ' banner-view-option-check--hidden'}`}
+                                aria-hidden={isSelected ? undefined : 'true'}
+                              >
+                                <Check size={14} />
+                              </span>
+                            </>
+                          )}
+                        </ListBoxItem>
+                      )
+                    })}
+                  </ListBox>
+                </Dialog>
+              </Popover>
+            </DialogTrigger>
           ) : null}
           {showSettingsButton ? (
             <button

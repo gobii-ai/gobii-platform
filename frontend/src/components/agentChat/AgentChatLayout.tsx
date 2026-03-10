@@ -27,6 +27,7 @@ import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
+import { shouldShowStreamingThinking, shouldUseTypingIndicator } from './simplifiedChatPresentation'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
@@ -120,6 +121,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
+  onSimplifiedChatSelect?: (enabled: boolean) => void
+  simplifiedChatTogglePending?: boolean
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   onComposerFocus?: () => void
   autoScrollPinned?: boolean
@@ -234,6 +237,8 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onShare,
+  onSimplifiedChatSelect,
+  simplifiedChatTogglePending = false,
   onSendMessage,
   onComposerFocus,
   autoScrollPinned = true,
@@ -264,7 +269,7 @@ export function AgentChatLayout({
   composerError = null,
   composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
-  const simplifiedChat = useSimplifiedChat()
+  const { enabled: simplifiedChat, toggleAvailable: simplifiedChatToggleAvailable } = useSimplifiedChat()
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -516,7 +521,13 @@ export function AgentChatLayout({
   const showStreamingSlot = hasStreamingContent && isStreaming
   // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
   // In simplified mode, the typing indicator covers this state instead
-  const showStreamingThinking = !simplifiedChat && isStreaming && Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
+  const showStreamingThinking = shouldShowStreamingThinking({
+    enabled: simplifiedChat,
+    isStreaming,
+    hasReasoning: Boolean(streaming?.reasoning?.trim()),
+    hasStreamingContent,
+    hasMoreNewer: Boolean(hasMoreNewer),
+  })
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -775,8 +786,12 @@ export function AgentChatLayout({
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
-	          onClose={onClose}
-	          onShare={onShare}
+          simplifiedChatEnabled={simplifiedChat}
+          simplifiedChatToggleAvailable={simplifiedChatToggleAvailable}
+          simplifiedChatTogglePending={simplifiedChatTogglePending}
+          onSimplifiedChatSelect={onSimplifiedChatSelect}
+          onClose={onClose}
+          onShare={onShare}
 	          sidebarCollapsed={sidebarCollapsed}
 	        >
             {showHighPriorityBanner && highPriorityBanner ? (
@@ -966,7 +981,7 @@ export function AgentChatLayout({
                 ) : null}
 
                 {shouldRenderResponseSkeleton ? (
-                  simplifiedChat ? (
+                  shouldUseTypingIndicator(simplifiedChat) ? (
                     <TypingIndicator
                       statusText={deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })}
                       agentColorHex={agentColorHex || undefined}

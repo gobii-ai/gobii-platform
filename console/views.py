@@ -93,6 +93,7 @@ from console.daily_credit import (
 )
 from console.home_metrics import get_console_home_metrics
 from console.role_constants import BILLING_MANAGE_ROLES
+from console.simplified_chat import resolve_simplified_chat_state
 
 from api.models import (
     ApiKey,
@@ -5785,7 +5786,9 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         agent_sms_ep = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
         context["agent_email"] = agent_email_ep.address if agent_email_ep else ""
         context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
-        context["simplified_chat_ui"] = flag_is_active(self.request, SIMPLIFIED_CHAT_UI)
+        simplified_chat_state = resolve_simplified_chat_state(self.request)
+        context["simplified_chat_ui"] = simplified_chat_state.enabled
+        context["simplified_chat_toggle_available"] = simplified_chat_state.toggle_available
 
         return context
 

@@ -583,6 +583,7 @@ class UserPreference(models.Model):
 
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
+    KEY_AGENT_CHAT_SIMPLIFIED_ENABLED = "agent.chat.simplified.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -593,6 +594,10 @@ class UserPreference(models.Model):
         KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: {
             "default": [],
             "type": "uuid_list",
+        },
+        KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: {
+            "default": False,
+            "type": "boolean",
         },
         KEY_USER_TIMEZONE: {
             "default": "",
@@ -663,6 +668,12 @@ class UserPreference(models.Model):
         return normalize_timezone_value(value, key=key)
 
     @classmethod
+    def _normalize_boolean_preference_value(cls, key: str, value: object) -> bool:
+        if not isinstance(value, bool):
+            raise ValueError(f"Invalid value for '{key}'. Expected a boolean.")
+        return value
+
+    @classmethod
     def _normalize_preference_value(
         cls,
         key: str,
@@ -679,6 +690,9 @@ class UserPreference(models.Model):
 
         if preference_type == "uuid_list":
             return cls._normalize_uuid_list_preference_value(key, value)
+
+        if preference_type == "boolean":
+            return cls._normalize_boolean_preference_value(key, value)
 
         if preference_type == "timezone":
             return cls._normalize_timezone_preference_value(key, value)
@@ -733,6 +747,11 @@ class UserPreference(models.Model):
         resolved = cls.resolve_known_preferences(user)
         favorite_ids = resolved[cls.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS]
         return list(favorite_ids) if isinstance(favorite_ids, list) else []
+
+    @classmethod
+    def resolve_simplified_chat_enabled(cls, user) -> bool:
+        resolved = cls.resolve_known_preferences(user)
+        return bool(resolved[cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED])
 
     @classmethod
     def update_known_preferences(cls, user, updates: dict[str, object]) -> dict[str, object]:

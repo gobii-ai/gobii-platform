@@ -1,6 +1,7 @@
 import { jsonRequest } from './http'
 export const USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE = 'agent.chat.roster.sort_mode' as const
 export const USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = 'agent.chat.roster.favorite_agent_ids' as const
+export const USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED = 'agent.chat.simplified.enabled' as const
 
 export type UserPreferencesMap = Record<string, unknown>
 
@@ -60,4 +61,8 @@ export function parseFavoriteAgentIdsPreference(value: unknown): string[] {
   }
 
   return normalized
+}
+
+export function parseBooleanPreference(value: unknown): boolean {
+  return value === true
 }

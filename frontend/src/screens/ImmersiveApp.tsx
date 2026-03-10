@@ -29,6 +29,7 @@ type ConsoleSessionPayload = {
   user_id?: string
   email?: string
   simplified_chat_ui?: boolean
+  simplified_chat_toggle_available?: boolean
 }
 
 function readLocation(): LocationSnapshot {
@@ -301,6 +302,7 @@ export function ImmersiveApp() {
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
   const [simplifiedChatUi, setSimplifiedChatUi] = useState(false)
+  const [simplifiedChatToggleAvailable, setSimplifiedChatToggleAvailable] = useState(false)
   const hasSkippedInitialSegmentPage = useRef(false)
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
@@ -369,12 +371,15 @@ export function ImmersiveApp() {
         setViewerUserId(Number.isFinite(numeric) ? numeric : null)
         setViewerEmail(payload?.email ? payload.email : null)
         setSimplifiedChatUi(Boolean(payload?.simplified_chat_ui))
+        setSimplifiedChatToggleAvailable(Boolean(payload?.simplified_chat_toggle_available))
       } catch (err) {
         if (controller.signal.aborted) {
           return
         }
         setViewerUserId(null)
         setViewerEmail(null)
+        setSimplifiedChatUi(false)
+        setSimplifiedChatToggleAvailable(false)
       }
     }
     void loadViewer()
@@ -407,7 +412,7 @@ export function ImmersiveApp() {
   }, [])
 
   return (
-    <SimplifiedChatProvider value={simplifiedChatUi}>
+    <SimplifiedChatProvider initialEnabled={simplifiedChatUi} toggleAvailable={simplifiedChatToggleAvailable}>
       <div className="immersive-shell">
         <div className="immersive-shell__content">
           {route.kind === 'agent-chat' ? (

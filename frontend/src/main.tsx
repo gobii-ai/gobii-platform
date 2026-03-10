@@ -48,6 +48,7 @@ if (shouldInitializeSubscriptionStore) {
 }
 const isStaff = mountNode.dataset.isStaff === 'true'
 const simplifiedChatUi = mountNode.dataset.simplifiedChatUi === 'true'
+const simplifiedChatToggleAvailable = mountNode.dataset.simplifiedChatToggleAvailable === 'true'
 
 const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
@@ -108,7 +109,7 @@ switch (appName) {
       throw new Error('Agent identifier is required for the chat experience')
     }
     screen = (
-      <SimplifiedChatProvider value={simplifiedChatUi}>
+      <SimplifiedChatProvider initialEnabled={simplifiedChatUi} toggleAvailable={simplifiedChatToggleAvailable}>
         <AgentChatPage
           agentId={agentId}
           agentName={agentName}

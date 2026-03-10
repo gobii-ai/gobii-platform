@@ -34,6 +34,10 @@ class ConsoleUserPreferencesApiTests(TestCase):
             [],
         )
         self.assertEqual(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED),
+            False,
+        )
+        self.assertEqual(
             preferences.get(UserPreference.KEY_USER_TIMEZONE),
             "",
         )
@@ -180,6 +184,39 @@ class ConsoleUserPreferencesApiTests(TestCase):
             "America/New_York",
         )
 
+    def test_patch_updates_simplified_chat_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True,
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED),
+            True,
+        )
+
+    def test_patch_rejects_invalid_simplified_chat_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: "true",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_patch_rejects_invalid_timezone_preference(self):
         response = self.client.patch(
             self.url,
@@ -244,6 +281,44 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
+
+    def test_console_session_hides_toggle_and_forces_normal_when_flag_disabled(self):
+        from waffle.testutils import override_flag
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
+        )
+
+        with override_flag("simplified_chat_ui", active=False):
+            response = self.client.get(reverse("console_session"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload.get("simplified_chat_ui"))
+        self.assertFalse(payload.get("simplified_chat_toggle_available"))
+
+    def test_console_session_exposes_toggle_and_effective_state_when_flag_enabled(self):
+        from waffle.testutils import override_flag
+
+        with override_flag("simplified_chat_ui", active=True):
+            response = self.client.get(reverse("console_session"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload.get("simplified_chat_ui"))
+        self.assertTrue(payload.get("simplified_chat_toggle_available"))
+
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
+        )
+
+        with override_flag("simplified_chat_ui", active=True):
+            enabled_response = self.client.get(reverse("console_session"))
+        self.assertEqual(enabled_response.status_code, 200)
+        enabled_payload = enabled_response.json()
+        self.assertTrue(enabled_payload.get("simplified_chat_ui"))
+        self.assertTrue(enabled_payload.get("simplified_chat_toggle_available"))
 
     def test_profile_page_updates_timezone_preference(self):
         response = self.client.post(

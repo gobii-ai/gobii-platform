@@ -25,7 +25,7 @@ def remove_flag(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0302_userpreference"),
+        ("api", "0310_imagegenerationllmtier_use_case"),
         ("waffle", "0001_initial"),
     ]
 
