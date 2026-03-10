@@ -4457,6 +4457,23 @@
   padding: 2.5rem 1.5rem;
 }
 
+.collapsed-event-group-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 1.5rem;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.collapsed-event-group-modal {
+  outline: none;
+}
+
 .tool-cluster-timeline-backdrop {
   position: fixed;
   inset: 0;
@@ -4757,6 +4774,11 @@
   }
 
   .tool-cluster-timeline-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .collapsed-event-group-modal-overlay {
     align-items: flex-end;
     padding: 0;
   }
