@@ -1004,8 +1004,8 @@ def _next_file_handler_order() -> int:
     return (last.order if last else 0) + 1
 
 
-def _next_image_generation_order() -> int:
-    last = ImageGenerationLLMTier.objects.order_by("-order").first()
+def _next_image_generation_order(use_case: str) -> int:
+    last = ImageGenerationLLMTier.objects.filter(use_case=use_case).order_by("-order").first()
     return (last.order if last else 0) + 1
 
 
@@ -1091,10 +1091,14 @@ def _create_aux_tier_from_payload(
     *,
     tier_model,
     next_order_fn,
+    extra_create_kwargs: dict[str, Any] | None = None,
 ):
     description = (payload.get("description") or "").strip()
     order = next_order_fn()
-    return tier_model.objects.create(order=order, description=description)
+    create_kwargs = {"order": order, "description": description}
+    if extra_create_kwargs:
+        create_kwargs.update(extra_create_kwargs)
+    return tier_model.objects.create(**create_kwargs)
 
 
 def _update_aux_tier_from_payload(
@@ -4002,10 +4006,17 @@ class ImageGenerationTierListCreateAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
+        use_case = (payload.get("use_case") or ImageGenerationLLMTier.UseCase.CREATE_IMAGE).strip()
+        valid_use_cases = set(ImageGenerationLLMTier.UseCase.values)
+        if use_case not in valid_use_cases:
+            allowed = ", ".join(sorted(valid_use_cases))
+            return HttpResponseBadRequest(f"use_case must be one of: {allowed}")
+
         tier = _create_aux_tier_from_payload(
             payload,
             tier_model=ImageGenerationLLMTier,
-            next_order_fn=_next_image_generation_order,
+            next_order_fn=lambda: _next_image_generation_order(use_case),
+            extra_create_kwargs={"use_case": use_case},
         )
         return _json_ok(tier_id=str(tier.id))
 
@@ -4022,7 +4033,7 @@ class ImageGenerationTierDetailAPIView(SystemAdminAPIView):
         error_response = _update_aux_tier_from_payload(
             tier,
             payload,
-            queryset=ImageGenerationLLMTier.objects.all(),
+            queryset=ImageGenerationLLMTier.objects.filter(use_case=tier.use_case),
         )
         if error_response:
             return error_response

@@ -9,10 +9,12 @@ from api.models import (
     EmbeddingsTierEndpoint,
     FileHandlerModelEndpoint,
     FileHandlerTierEndpoint,
+    ImageGenerationLLMTier,
     ImageGenerationModelEndpoint,
     ImageGenerationTierEndpoint,
     LLMProvider,
 )
+from console.llm_serializers import build_llm_overview
 
 
 @tag("batch_console_api")
@@ -228,3 +230,58 @@ class ConsoleLlmAuxModelApiTests(TestCase):
             reverse("console_llm_image_generation_endpoint_detail", args=[endpoint_id])
         )
         self.assertEqual(delete_endpoint_resp.status_code, 200, delete_endpoint_resp.content)
+
+    def test_image_generation_tiers_are_scoped_by_use_case_in_api_and_overview(self):
+        endpoint = ImageGenerationModelEndpoint.objects.create(
+            provider=self.provider,
+            key="img-gen-shared",
+            litellm_model="google/gemini-2.5-flash-image",
+            enabled=True,
+        )
+
+        create_image_resp = self._json_post(
+            "console_llm_image_generation_tiers",
+            {"description": "Create tier", "use_case": "create_image"},
+        )
+        self.assertEqual(create_image_resp.status_code, 200, create_image_resp.content)
+        create_image_tier_id = create_image_resp.json()["tier_id"]
+
+        avatar_resp = self._json_post(
+            "console_llm_image_generation_tiers",
+            {"description": "Avatar tier", "use_case": "avatar"},
+        )
+        self.assertEqual(avatar_resp.status_code, 200, avatar_resp.content)
+        avatar_tier_id = avatar_resp.json()["tier_id"]
+
+        create_image_tier = ImageGenerationLLMTier.objects.get(id=create_image_tier_id)
+        avatar_tier = ImageGenerationLLMTier.objects.get(id=avatar_tier_id)
+        self.assertEqual(create_image_tier.use_case, ImageGenerationLLMTier.UseCase.CREATE_IMAGE)
+        self.assertEqual(avatar_tier.use_case, ImageGenerationLLMTier.UseCase.AVATAR)
+        self.assertEqual(create_image_tier.order, 1)
+        self.assertEqual(avatar_tier.order, 1)
+
+        attach_create_resp = self._json_post(
+            "console_llm_image_generation_tier_endpoints",
+            {"endpoint_id": str(endpoint.id), "weight": 1},
+            create_image_tier_id,
+        )
+        self.assertEqual(attach_create_resp.status_code, 200, attach_create_resp.content)
+
+        overview = build_llm_overview()
+        self.assertEqual(len(overview["image_generations"]["create_image_tiers"]), 1)
+        self.assertEqual(len(overview["image_generations"]["avatar_tiers"]), 1)
+        self.assertEqual(
+            overview["image_generations"]["create_image_tiers"][0]["use_case"],
+            "create_image",
+        )
+        self.assertEqual(
+            overview["image_generations"]["avatar_tiers"][0]["use_case"],
+            "avatar",
+        )
+
+        move_avatar_resp = self._json_patch(
+            "console_llm_image_generation_tier_detail",
+            {"move": "up"},
+            avatar_tier_id,
+        )
+        self.assertEqual(move_avatar_resp.status_code, 400, move_avatar_resp.content)

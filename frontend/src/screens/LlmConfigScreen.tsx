@@ -148,6 +148,7 @@ type Tier = {
   name: string
   order: number
   rangeId: string
+  imageUseCase?: 'create_image' | 'avatar'
   intelligenceTier?: llmApi.IntelligenceTier | null
   endpoints: TierEndpoint[]
 }
@@ -203,6 +204,7 @@ type ProviderCardData = {
   endpoints: ProviderEndpointCard[]
 }
 
+type ImageGenerationUseCase = 'create_image' | 'avatar'
 type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation'
 type ProfileTierScope = Exclude<TierScope, 'file_handler' | 'image_generation'>
 type EndpointKind = Extract<llmApi.ProviderEndpoint['type'], TierScope>
@@ -372,6 +374,55 @@ type EndpointFormValues = {
 }
 
 const actionKey = (...parts: Array<string | number | null | undefined>) => parts.filter(Boolean).join(':')
+
+type ImageGenerationSectionConfig = {
+  useCase: ImageGenerationUseCase
+  title: string
+  description: string
+  emptyText: string
+  addSuccessMessage: string
+  addLabel: string
+  addContext: string
+  removeMessage: string
+  removeSuccessMessage: string
+  removeLabel: string
+  moveUpLabel: string
+  moveDownLabel: string
+  moveContext: string
+}
+
+const IMAGE_GENERATION_SECTION_CONFIG: Record<ImageGenerationUseCase, ImageGenerationSectionConfig> = {
+  create_image: {
+    useCase: 'create_image',
+    title: 'Create image tiers',
+    description: 'Fallback order for image generation models used by the create_image tool.',
+    emptyText: 'No create_image tiers configured.',
+    addSuccessMessage: 'Image generation tier added',
+    addLabel: 'Creating image generation tier…',
+    addContext: 'Image generation tiers',
+    removeMessage: 'Any weighting rules tied to this tier will be lost.',
+    removeSuccessMessage: 'Image generation tier removed',
+    removeLabel: 'Removing image generation tier…',
+    moveUpLabel: 'Moving image generation tier up…',
+    moveDownLabel: 'Moving image generation tier down…',
+    moveContext: 'Image generation tiers',
+  },
+  avatar: {
+    useCase: 'avatar',
+    title: 'Avatar image tiers',
+    description: 'Fallback order for agent avatar rendering. If no avatar tiers are configured, avatar generation falls back to create_image tiers.',
+    emptyText: 'No avatar image tiers configured. Avatar generation will use create_image tiers.',
+    addSuccessMessage: 'Avatar image tier added',
+    addLabel: 'Creating avatar image tier…',
+    addContext: 'Avatar image tiers',
+    removeMessage: 'Avatar generation will fall back to create_image tiers when no avatar tiers remain.',
+    removeSuccessMessage: 'Avatar image tier removed',
+    removeLabel: 'Removing avatar image tier…',
+    moveUpLabel: 'Moving avatar image tier up…',
+    moveDownLabel: 'Moving avatar image tier down…',
+    moveContext: 'Avatar image tiers',
+  },
+}
 
 type ActivityNotice = {
   id: string
@@ -813,7 +864,10 @@ function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
   return mapped
 }
 
-function mapImageGenerationTiers(tiers: llmApi.ImageGenerationTier[] = []): Tier[] {
+function mapImageGenerationTiers(
+  tiers: llmApi.ImageGenerationTier[] = [],
+  useCase: ImageGenerationUseCase,
+): Tier[] {
   const mapped = tiers.map((tier) => {
     const normalized = normalizeTierEndpointWeights(tier.endpoints)
     return {
@@ -821,6 +875,7 @@ function mapImageGenerationTiers(tiers: llmApi.ImageGenerationTier[] = []): Tier
       name: (tier.description || '').trim(),
       order: tier.order,
       rangeId: 'image_generation',
+      imageUseCase: useCase,
       intelligenceTier: null,
       endpoints: tier.endpoints.map((endpoint) => ({
         id: endpoint.id,
@@ -830,7 +885,7 @@ function mapImageGenerationTiers(tiers: llmApi.ImageGenerationTier[] = []): Tier
       })),
     }
   })
-  applySequentialFallbackNames(mapped, () => 'image_generation')
+  applySequentialFallbackNames(mapped, () => `image_generation:${useCase}`)
   return mapped
 }
 
@@ -2514,8 +2569,25 @@ export function LlmConfigScreen() {
     [overviewQuery.data?.file_handlers?.tiers],
   )
   const imageGenerationTiers = useMemo(
-    () => mapImageGenerationTiers(overviewQuery.data?.image_generations?.tiers),
-    [overviewQuery.data?.image_generations?.tiers],
+    () => mapImageGenerationTiers(overviewQuery.data?.image_generations?.create_image_tiers, 'create_image'),
+    [overviewQuery.data?.image_generations?.create_image_tiers],
+  )
+  const avatarImageGenerationTiers = useMemo(
+    () => mapImageGenerationTiers(overviewQuery.data?.image_generations?.avatar_tiers, 'avatar'),
+    [overviewQuery.data?.image_generations?.avatar_tiers],
+  )
+  const imageGenerationSections = useMemo(
+    () => ([
+      {
+        ...IMAGE_GENERATION_SECTION_CONFIG.create_image,
+        tiers: imageGenerationTiers,
+      },
+      {
+        ...IMAGE_GENERATION_SECTION_CONFIG.avatar,
+        tiers: avatarImageGenerationTiers,
+      },
+    ]),
+    [avatarImageGenerationTiers, imageGenerationTiers],
   )
 
   const browserTierGroups = useMemo(
@@ -3068,31 +3140,47 @@ export function LlmConfigScreen() {
       }),
     })
 
-  const handleImageGenerationTierAdd = () => runMutation(() => llmApi.createImageGenerationTier({}), {
-    successMessage: 'Image generation tier added',
-    label: 'Creating image generation tier…',
-    busyKey: actionKey('image_generation', 'add'),
-    context: 'Image generation tiers',
-  })
-  const handleImageGenerationTierMove = (tierId: string, direction: 'up' | 'down') =>
-    runMutation(() => llmApi.updateImageGenerationTier(tierId, { move: direction }), {
-      label: direction === 'up' ? 'Moving image generation tier up…' : 'Moving image generation tier down…',
-      busyKey: actionKey('image_generation', tierId, 'move', direction),
-      busyKeys: [actionKey('image_generation', tierId, 'move')],
-      context: 'Image generation tiers',
+  const imageGenerationActionKey = (useCase: ImageGenerationUseCase, ...parts: Array<string | number>) =>
+    actionKey('image_generation', useCase, ...parts)
+
+  const handleImageGenerationTierAdd = (useCase: ImageGenerationUseCase) => {
+    const config = IMAGE_GENERATION_SECTION_CONFIG[useCase]
+    return runMutation(() => llmApi.createImageGenerationTier({ use_case: useCase }), {
+      successMessage: config.addSuccessMessage,
+      label: config.addLabel,
+      busyKey: imageGenerationActionKey(useCase, 'add'),
+      context: config.addContext,
     })
-  const handleImageGenerationTierRemove = (tier: Tier) =>
-    confirmDestructiveAction({
-      title: `Delete image generation tier "${tier.name}"?`,
-      message: 'Any weighting rules tied to this tier will be lost.',
+  }
+
+  const handleImageGenerationTierMove = (
+    useCase: ImageGenerationUseCase,
+    tierId: string,
+    direction: 'up' | 'down',
+  ) => {
+    const config = IMAGE_GENERATION_SECTION_CONFIG[useCase]
+    return runMutation(() => llmApi.updateImageGenerationTier(tierId, { move: direction }), {
+      label: direction === 'up' ? config.moveUpLabel : config.moveDownLabel,
+      busyKey: imageGenerationActionKey(useCase, tierId, 'move', direction),
+      busyKeys: [imageGenerationActionKey(useCase, tierId, 'move')],
+      context: config.moveContext,
+    })
+  }
+
+  const handleImageGenerationTierRemove = (useCase: ImageGenerationUseCase, tier: Tier) => {
+    const config = IMAGE_GENERATION_SECTION_CONFIG[useCase]
+    return confirmDestructiveAction({
+      title: `Delete ${config.title.toLowerCase().slice(0, -1)} "${tier.name}"?`,
+      message: config.removeMessage,
       confirmLabel: 'Delete tier',
       onConfirm: () => runMutation(() => llmApi.deleteImageGenerationTier(tier.id), {
-        successMessage: 'Image generation tier removed',
-        label: 'Removing image generation tier…',
-        busyKey: actionKey('image_generation', tier.id, 'remove'),
+        successMessage: config.removeSuccessMessage,
+        label: config.removeLabel,
+        busyKey: imageGenerationActionKey(useCase, tier.id, 'remove'),
         context: tier.name,
       }),
     })
+  }
 
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
     const useProfile = Boolean(selectedProfile && scope !== 'file_handler' && scope !== 'image_generation')
@@ -4149,43 +4237,45 @@ export function LlmConfigScreen() {
               })}
               {fileHandlerTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No file handler tiers configured.</p>}
             </div>
-            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-start gap-3">
-                  <Atom className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="font-semibold text-slate-900/90">Image generation tiers</h4>
-                    <p className="text-sm text-slate-600">Fallback order for image generation models used by the create_image tool.</p>
+            {imageGenerationSections.map((section) => (
+              <div key={section.useCase} className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start gap-3">
+                    <Atom className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-semibold text-slate-900/90">{section.title}</h4>
+                      <p className="text-sm text-slate-600">{section.description}</p>
+                    </div>
                   </div>
+                  <button type="button" className={button.secondary} onClick={() => handleImageGenerationTierAdd(section.useCase)}>
+                    <PlusCircle className="size-4" /> Add tier
+                  </button>
                 </div>
-                <button type="button" className={button.secondary} onClick={handleImageGenerationTierAdd}>
-                  <PlusCircle className="size-4" /> Add tier
-                </button>
+                {section.tiers.map((tier, index) => {
+                  const lastIndex = section.tiers.length - 1
+                  return (
+                    <TierCard
+                      key={tier.id}
+                      tier={tier}
+                      pendingWeights={pendingWeights}
+                      scope="image_generation"
+                      canMoveUp={index > 0}
+                      canMoveDown={index < lastIndex}
+                      isDirty={dirtyTierIds.has(`image_generation:${tier.id}`)}
+                      isSaving={savingTierIds.has(`image_generation:${tier.id}`)}
+                      onMove={(direction) => handleImageGenerationTierMove(section.useCase, tier.id, direction)}
+                      onRemove={(currentTier) => handleImageGenerationTierRemove(section.useCase, currentTier)}
+                      onAddEndpoint={() => handleTierEndpointAdd(tier, 'image_generation')}
+                      onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'image_generation')}
+                      onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'image_generation')}
+                      onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'image_generation')}
+                      isActionBusy={isBusy}
+                    />
+                  )
+                })}
+                {section.tiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">{section.emptyText}</p>}
               </div>
-              {imageGenerationTiers.map((tier, index) => {
-                const lastIndex = imageGenerationTiers.length - 1
-                return (
-                  <TierCard
-                    key={tier.id}
-                    tier={tier}
-                    pendingWeights={pendingWeights}
-                    scope="image_generation"
-                    canMoveUp={index > 0}
-                    canMoveDown={index < lastIndex}
-                    isDirty={dirtyTierIds.has(`image_generation:${tier.id}`)}
-                    isSaving={savingTierIds.has(`image_generation:${tier.id}`)}
-                    onMove={(direction) => handleImageGenerationTierMove(tier.id, direction)}
-                    onRemove={handleImageGenerationTierRemove}
-                    onAddEndpoint={() => handleTierEndpointAdd(tier, 'image_generation')}
-                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'image_generation')}
-                    onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'image_generation')}
-                    onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'image_generation')}
-                    isActionBusy={isBusy}
-                  />
-                )
-              })}
-              {imageGenerationTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No image generation tiers configured.</p>}
-            </div>
+            ))}
           </div>
         </SectionCard>
       </div>

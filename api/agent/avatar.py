@@ -7,7 +7,7 @@ from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from api.agent.core.image_generation_config import is_image_generation_configured
+from api.agent.core.image_generation_config import is_avatar_image_generation_configured
 from api.agent.short_description import compute_charter_hash
 from api.models import PersistentAgent
 
@@ -145,7 +145,7 @@ def maybe_schedule_agent_avatar(
         return False
 
     try:
-        image_generation_ready = is_image_generation_configured()
+        image_generation_ready = is_avatar_image_generation_configured()
     except Exception:
         logger.exception("Failed checking image-generation availability for agent %s", agent.id)
         image_generation_ready = False

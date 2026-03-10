@@ -13,8 +13,8 @@ from django.db import DatabaseError
 
 from api.models import AgentFsNode, PersistentAgent, PersistentAgentCompletion
 from api.agent.core.image_generation_config import (
-    get_image_generation_llm_configs,
-    is_image_generation_configured,
+    get_create_image_generation_llm_configs,
+    is_create_image_generation_configured,
 )
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.provider_hints import provider_hint_from_model
@@ -67,7 +67,7 @@ def is_image_generation_available_for_agent(agent: Optional[PersistentAgent]) ->
     if agent is None:
         return False
     try:
-        return is_image_generation_configured()
+        return is_create_image_generation_configured()
     except Exception:
         logger.exception("Failed checking image generation availability")
         return False
@@ -487,7 +487,7 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     )
     if source_error:
         return {"status": "error", "message": source_error}
-    configs = get_image_generation_llm_configs()
+    configs = get_create_image_generation_llm_configs()
     if not configs:
         return {
             "status": "error",
