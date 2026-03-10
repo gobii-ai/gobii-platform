@@ -21,6 +21,7 @@ from api.models import (
     ImageGenerationModelEndpoint,
     ImageGenerationLLMTier,
     ImageGenerationTierEndpoint,
+    SystemSetting,
 )
 
 
@@ -211,7 +212,6 @@ class FileExportToolTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("No image generation model is configured", result["message"])
 
-    @override_settings(CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS=["allowed-endpoint"])
     @patch("api.agent.tools.create_image.run_completion")
     def test_create_image_uses_create_image_endpoint_filter(self, mock_run_completion):
         self._seed_image_generation_tier(
@@ -224,6 +224,10 @@ class FileExportToolTests(TestCase):
             endpoint_key="allowed-endpoint",
             tier_order=2,
             litellm_model="gpt-image-1",
+        )
+        SystemSetting.objects.create(
+            key="CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS",
+            value_text='["allowed-endpoint"]',
         )
 
         png_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00"

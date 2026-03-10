@@ -4,7 +4,6 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from django.conf import settings
 from django.db import OperationalError, ProgrammingError
 from django.db.models import Prefetch, Q
 
@@ -121,13 +120,7 @@ def get_configured_image_generation_endpoint_keys(usage: str | None) -> list[str
     if override:
         return _parse_endpoint_keys(override)
 
-    if usage == "create_image":
-        configured = settings.CREATE_IMAGE_IMAGE_GENERATION_ENDPOINT_KEYS
-    elif usage == "avatar":
-        configured = settings.AGENT_AVATAR_IMAGE_GENERATION_ENDPOINT_KEYS
-    else:
-        configured = []
-    return _parse_endpoint_keys(configured)
+    return []
 
 
 def _configured_endpoint_keys_for_usage(usage: str | None) -> set[str] | None:
