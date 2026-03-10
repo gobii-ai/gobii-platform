@@ -21,7 +21,6 @@ function estimateEventSize(event: SimplifiedTimelineItem): number {
   switch (event.kind) {
     case 'collapsed-group':
       return 40
-    case 'inline-charter':
     case 'inline-schedule':
       return 56
     case 'message': {

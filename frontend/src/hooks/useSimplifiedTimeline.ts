@@ -19,12 +19,6 @@ export type CollapsedEventGroup = {
   }
 }
 
-export type InlineCharterUpdate = {
-  kind: 'inline-charter'
-  cursor: string
-  entry: ToolCallEntry
-}
-
 export type InlineScheduleUpdate = {
   kind: 'inline-schedule'
   cursor: string
@@ -34,7 +28,6 @@ export type InlineScheduleUpdate = {
 export type SimplifiedTimelineItem =
   | TimelineEvent
   | CollapsedEventGroup
-  | InlineCharterUpdate
   | InlineScheduleUpdate
 
 // ---------------------------------------------------------------------------
@@ -104,16 +97,12 @@ function makeCollapsedGroup(buffer: TimelineEvent[]): CollapsedEventGroup {
 
 type LatestStatusCursors = {
   kanbanCursor: string | null
-  charterClusterCursor: string | null
-  charterEntry: ToolCallEntry | null
   scheduleClusterCursor: string | null
   scheduleEntry: ToolCallEntry | null
 }
 
 function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
   let kanbanCursor: string | null = null
-  let charterClusterCursor: string | null = null
-  let charterEntry: ToolCallEntry | null = null
   let scheduleClusterCursor: string | null = null
   let scheduleEntry: ToolCallEntry | null = null
 
@@ -125,10 +114,6 @@ function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
     if (event.kind === 'steps') {
       for (let j = event.entries.length - 1; j >= 0; j--) {
         const entry = event.entries[j]
-        if (isCharterEntry(entry) && !charterClusterCursor) {
-          charterClusterCursor = event.cursor
-          charterEntry = entry
-        }
         if (isScheduleEntry(entry) && !scheduleClusterCursor) {
           scheduleClusterCursor = event.cursor
           scheduleEntry = entry
@@ -136,10 +121,10 @@ function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
       }
     }
     // Early exit once all found
-    if (kanbanCursor && charterClusterCursor && scheduleClusterCursor) break
+    if (kanbanCursor && scheduleClusterCursor) break
   }
 
-  return { kanbanCursor, charterClusterCursor, charterEntry, scheduleClusterCursor, scheduleEntry }
+  return { kanbanCursor, scheduleClusterCursor, scheduleEntry }
 }
 
 // ---------------------------------------------------------------------------
@@ -149,7 +134,7 @@ function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
 /**
  * Collapses consecutive non-message events into summary groups.
  *
- * Messages pass through unchanged. The *latest* kanban, charter, and schedule
+ * Messages pass through unchanged. The *latest* kanban and schedule
  * updates also appear inline at their chronological position so the user can
  * see current status at a glance. Older instances of these events collapse
  * normally.
@@ -185,14 +170,10 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
 
     // Steps cluster that contains latest charter and/or schedule
     if (event.kind === 'steps') {
-      const hasCharter = event.cursor === latest.charterClusterCursor
       const hasSchedule = event.cursor === latest.scheduleClusterCursor
 
-      if (hasCharter || hasSchedule) {
+      if (hasSchedule) {
         const filteredEntries = event.entries.filter((entry) => {
-          if (hasCharter && latest.charterEntry && entry.id === latest.charterEntry.id) {
-            return false
-          }
           if (hasSchedule && latest.scheduleEntry && entry.id === latest.scheduleEntry.id) {
             return false
           }
@@ -211,14 +192,7 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
         // Keep remaining cluster content collapsible, but avoid duplicating inline status entries.
         buffer.push(clusterForCollapse)
         flush()
-        // Emit inline items for the latest charter/schedule
-        if (hasCharter && latest.charterEntry) {
-          result.push({
-            kind: 'inline-charter',
-            cursor: `charter:${latest.charterEntry.id ?? event.cursor}`,
-            entry: latest.charterEntry,
-          })
-        }
+        // Emit an inline item for the latest schedule update.
         if (hasSchedule && latest.scheduleEntry) {
           result.push({
             kind: 'inline-schedule',

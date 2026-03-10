@@ -3,7 +3,7 @@ import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { KanbanEventCard } from './KanbanEventCard'
 import { CollapsedEventGroupCard } from './CollapsedEventGroupCard'
-import { InlineCharterCard, InlineScheduleCard } from './InlineStatusCard'
+import { InlineScheduleCard } from './InlineStatusCard'
 import type { ToolClusterEvent } from './types'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 
@@ -31,9 +31,6 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   if (event.kind === 'collapsed-group') {
     return <CollapsedEventGroupCard group={event} />
   }
-  if (event.kind === 'inline-charter') {
-    return <InlineCharterCard entry={event.entry} />
-  }
   if (event.kind === 'inline-schedule') {
     return <InlineScheduleCard entry={event.entry} />
   }
@@ -58,9 +55,9 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
       entryCount: 1,
       collapsible: false,
       collapseThreshold: 3,
+      thinkingEntries: [event],
       earliestTimestamp: event.timestamp ?? null,
       latestTimestamp: event.timestamp ?? null,
-      thinkingEntries: [event],
     }
     return (
       <ToolClusterCard
