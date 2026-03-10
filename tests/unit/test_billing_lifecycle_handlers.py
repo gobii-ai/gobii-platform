@@ -2,6 +2,10 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
+from constants.feature_flags import (
+    OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY,
+    OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED,
+)
 from billing.lifecycle_handlers import register_billing_lifecycle_handlers
 from billing.lifecycle_signals import (
     BillingLifecyclePayload,
@@ -56,9 +60,10 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_TRIAL_ENDED)
         self.assertEqual(kwargs["user_id"], 24)
 
+    @patch("billing.lifecycle_handlers.switch_is_active", return_value=True)
     @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")
     @patch("billing.lifecycle_handlers.Analytics.track_event")
-    def test_trial_conversion_failed_tracks_event(self, mock_track_event, mock_pause_owner):
+    def test_trial_conversion_failed_tracks_event(self, mock_track_event, mock_pause_owner, mock_switch):
         emit_billing_lifecycle_event(
             TRIAL_CONVERSION_FAILED,
             payload=BillingLifecyclePayload(
@@ -77,11 +82,43 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         self.assertEqual(kwargs["user_id"], 7)
         self.assertEqual(kwargs["properties"]["stripe.invoice_id"], "in_fail")
         self.assertEqual(kwargs["properties"]["attempt_number"], 1)
+        mock_switch.assert_called_once_with(OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED)
         mock_pause_owner.assert_called_once()
 
+    @patch("billing.lifecycle_handlers.switch_is_active", return_value=False)
     @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")
     @patch("billing.lifecycle_handlers.Analytics.track_event")
-    def test_subscription_delinquency_entered_tracks_event(self, mock_track_event, mock_pause_owner):
+    def test_trial_conversion_failed_does_not_pause_when_switch_disabled(
+        self,
+        mock_track_event,
+        mock_pause_owner,
+        mock_switch,
+    ):
+        emit_billing_lifecycle_event(
+            TRIAL_CONVERSION_FAILED,
+            payload=BillingLifecyclePayload(
+                owner_type="organization",
+                owner_id="org-1",
+                actor_user_id=7,
+                subscription_id="sub_fail",
+                invoice_id="in_fail",
+                attempt_count=1,
+            ),
+        )
+
+        mock_track_event.assert_called_once()
+        mock_switch.assert_called_once_with(OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED)
+        mock_pause_owner.assert_not_called()
+
+    @patch("billing.lifecycle_handlers.switch_is_active", return_value=True)
+    @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")
+    @patch("billing.lifecycle_handlers.Analytics.track_event")
+    def test_subscription_delinquency_entered_tracks_event(
+        self,
+        mock_track_event,
+        mock_pause_owner,
+        mock_switch,
+    ):
         emit_billing_lifecycle_event(
             SUBSCRIPTION_DELINQUENCY_ENTERED,
             payload=BillingLifecyclePayload(
@@ -98,4 +135,29 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_DELINQUENCY_ENTERED)
         self.assertEqual(kwargs["user_id"], 8)
         self.assertEqual(kwargs["properties"]["subscription_status"], "past_due")
+        mock_switch.assert_called_once_with(OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY)
         mock_pause_owner.assert_called_once()
+
+    @patch("billing.lifecycle_handlers.switch_is_active", return_value=False)
+    @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")
+    @patch("billing.lifecycle_handlers.Analytics.track_event")
+    def test_subscription_delinquency_does_not_pause_when_switch_disabled(
+        self,
+        mock_track_event,
+        mock_pause_owner,
+        mock_switch,
+    ):
+        emit_billing_lifecycle_event(
+            SUBSCRIPTION_DELINQUENCY_ENTERED,
+            payload=BillingLifecyclePayload(
+                owner_type="organization",
+                owner_id="org-2",
+                actor_user_id=8,
+                subscription_id="sub_past_due",
+                subscription_status="past_due",
+            ),
+        )
+
+        mock_track_event.assert_called_once()
+        mock_switch.assert_called_once_with(OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY)
+        mock_pause_owner.assert_not_called()
