@@ -1084,6 +1084,10 @@ export function AgentChatPage({
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
 
+  const shouldAutoFollowTimeline = useCallback(() => {
+    return autoScrollPinnedRef.current && isNearBottomRef.current && !userTouchActiveRef.current
+  }, [])
+
   const syncNearBottomState = useCallback((container: HTMLElement | null): number | null => {
     if (!container) {
       return null
@@ -1334,7 +1338,7 @@ export function AgentChatPage({
   const prevStreamingRef = useRef(timelineStreaming)
 
   if (timelineEvents !== prevEventsRef.current || timelineStreaming !== prevStreamingRef.current) {
-    shouldScrollOnNextUpdateRef.current = autoScrollPinned
+    shouldScrollOnNextUpdateRef.current = autoScrollPinned && isNearBottomRef.current
     prevEventsRef.current = timelineEvents
     prevStreamingRef.current = timelineStreaming
   }
@@ -1386,6 +1390,12 @@ export function AgentChatPage({
       snapToBottom()
     })
   }, [snapToBottom])
+
+  const executeAutoFollow = useCallback(() => {
+    scrollToBottom()
+    isNearBottomRef.current = true
+    setIsNearBottom(true)
+  }, [scrollToBottom])
 
   const runContiguousTimelineBackfill = useCallback(async (agentIdToRefresh: string) => {
     return refreshTimelineLatestInCache(queryClient, agentIdToRefresh, {
@@ -1472,11 +1482,12 @@ export function AgentChatPage({
 
     const observer = new ResizeObserver((entries) => {
       const height = entries[0].borderBoxSize?.[0]?.blockSize ?? entries[0].contentRect.height
+      const shouldFollow = shouldAutoFollowTimeline()
 
       if (prevComposerHeight.current !== null) {
         const delta = height - prevComposerHeight.current
         // If composer grew and we're at the bottom, scroll down to keep content visible
-        if (delta > 0 && autoScrollPinnedRef.current && !userTouchActiveRef.current) {
+        if (delta > 0 && shouldFollow) {
           container.scrollTop += delta
         }
       }
@@ -1484,15 +1495,16 @@ export function AgentChatPage({
       prevComposerHeight.current = height
 
       // If pinned, ensure we stay at the bottom
-      if (autoScrollPinnedRef.current && !userTouchActiveRef.current) {
-        scrollToBottom()
+      if (shouldFollow) {
+        executeAutoFollow()
+        return
       }
       syncNearBottomState(container)
     })
 
     observer.observe(composer)
     return () => observer.disconnect()
-  }, [scrollToBottom, syncNearBottomState])
+  }, [executeAutoFollow, shouldAutoFollowTimeline, syncNearBottomState])
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
@@ -1507,11 +1519,13 @@ export function AgentChatPage({
     const inner = document.getElementById('timeline-events')
 
     const observer = new ResizeObserver(() => {
+      const shouldFollow = shouldAutoFollowTimeline()
       // If pinned, ensure we stay at the bottom when content changes
       // Skip while user is actively touching to prevent scroll fighting on mobile
       // Uses rAF-coalesced scrollToBottom to avoid feedback loop with virtualizer measurements
-      if (autoScrollPinnedRef.current && !userTouchActiveRef.current) {
-        scrollToBottom()
+      if (shouldFollow) {
+        executeAutoFollow()
+        return
       }
       syncNearBottomState(timelineNode)
     })
@@ -1521,7 +1535,7 @@ export function AgentChatPage({
       observer.observe(inner)
     }
     return () => observer.disconnect()
-  }, [timelineNode, scrollToBottom, syncNearBottomState])
+  }, [executeAutoFollow, timelineNode, shouldAutoFollowTimeline, syncNearBottomState])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
