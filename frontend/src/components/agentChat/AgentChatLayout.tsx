@@ -29,6 +29,7 @@ import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import type { ConsoleContext } from '../../api/context'
 import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
@@ -74,6 +75,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
+  currentContext?: ConsoleContext | null
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
@@ -177,6 +179,7 @@ export function AgentChatLayout({
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
   contextSwitcher,
+  currentContext = null,
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
@@ -786,6 +789,7 @@ export function AgentChatLayout({
         llmTierSaving={llmTierSaving}
         llmTierError={llmTierError}
         canManageAgent={canManageAgent}
+        context={currentContext}
       />
       <AgentChatAddonsPanel
         open={addonsOpen}

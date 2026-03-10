@@ -2829,6 +2829,7 @@ export function AgentChatPage({
         agentRosterSortMode={agentRosterSortMode}
         onAgentRosterSortModeChange={handleAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher ?? undefined}
+        currentContext={effectiveContext}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
