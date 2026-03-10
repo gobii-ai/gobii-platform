@@ -4,6 +4,7 @@ import { AlertTriangle, ExternalLink, Settings } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentIntelligenceSlider } from '../common/AgentIntelligenceSlider'
+import type { ConsoleContext } from '../../api/context'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
@@ -22,6 +23,7 @@ type AgentChatSettingsPanelProps = {
   llmTierSaving?: boolean
   llmTierError?: string | null
   canManageAgent?: boolean
+  context?: ConsoleContext | null
   onClose: () => void
 }
 
@@ -51,6 +53,7 @@ export function AgentChatSettingsPanel({
   llmTierSaving = false,
   llmTierError = null,
   canManageAgent = true,
+  context = null,
   onClose,
 }: AgentChatSettingsPanelProps) {
   const [isMobile, setIsMobile] = useState(false)
@@ -164,8 +167,11 @@ export function AgentChatSettingsPanel({
 
   const agentSettingsUrl = useMemo(() => {
     if (!agentId) return '/console/agents/'
-    return `/console/agents/${agentId}/`
-  }, [agentId])
+    const query = context
+      ? `?context_type=${encodeURIComponent(context.type)}&context_id=${encodeURIComponent(context.id)}`
+      : ''
+    return `/console/agents/${agentId}/${query}`
+  }, [agentId, context])
 
   useEffect(() => {
     const checkMobile = () => {

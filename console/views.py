@@ -129,7 +129,8 @@ from observability import traced
 from pages.mixins import PhoneNumberMixin
 from pages.account_info_cache import invalidate_account_info_cache
 
-from .context_helpers import build_console_context
+from .agent_context import resolve_context_override_for_agent
+from .context_helpers import build_console_context, resolve_console_context
 from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
 from billing.addons import AddonEntitlementService
@@ -3240,28 +3241,34 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
     @tracer.start_as_current_span("CONSOLE Agent Detail View - get_object")
     def get_queryset(self):
-        """Scope agents to the active console context.
+        """Scope agents to the effective console context.
 
-        - Organization context: agents owned by the org, and only if the user
-          is an active member of that organization.
-        - Personal context: user-owned agents without an organization.
+        The effective context honors explicit request overrides (header/query)
+        in addition to session state, which keeps deep links from chat aligned
+        with the intended organization/personal scope.
         """
         qs = super().get_queryset().alive().select_related('user__billing')
 
-        context_type = self.request.session.get('context_type', 'personal')
-        if context_type == 'organization':
-            org_id = self.request.session.get('context_id')
-            # Verify membership; if not a member, return no rows to force 404
-            if not OrganizationMembership.objects.filter(
-                user=self.request.user,
-                org_id=org_id,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            ).exists():
-                return qs.none()
+        context_override = None
+        agent_id = self.kwargs.get(self.pk_url_kwarg)
+        if agent_id:
+            context_override, _ = resolve_context_override_for_agent(
+                self.request.user,
+                str(agent_id),
+            )
 
-            return qs.filter(organization_id=org_id)
+        if context_override is not None:
+            context = resolve_console_context(
+                self.request.user,
+                self.request.session,
+                override=context_override,
+            ).current_context
+        else:
+            context = build_console_context(self.request).current_context
 
-        # Personal context
+        if context.type == 'organization':
+            return qs.filter(organization_id=context.id)
+
         if not can_user_use_personal_agents_and_api(self.request.user):
             return qs.none()
         return qs.filter(user=self.request.user, organization__isnull=True)
