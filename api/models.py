@@ -3216,18 +3216,34 @@ class ImageGenerationModelEndpoint(models.Model):
 class ImageGenerationLLMTier(models.Model):
     """Fallback tier ordering for image generation endpoints."""
 
+    class UseCase(models.TextChoices):
+        CREATE_IMAGE = ("create_image", "Create Image")
+        AVATAR = ("avatar", "Avatar")
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    order = models.PositiveIntegerField(unique=True, help_text="1-based order across all image generation tiers.")
+    use_case = models.CharField(
+        max_length=32,
+        choices=UseCase.choices,
+        default=UseCase.CREATE_IMAGE,
+        help_text="Which image-generation workflow this tier ordering applies to.",
+    )
+    order = models.PositiveIntegerField(help_text="1-based order within the selected image generation workflow.")
     description = models.CharField(max_length=256, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["order"]
+        ordering = ["use_case", "order"]
+        constraints = [
+            UniqueConstraint(
+                fields=["use_case", "order"],
+                name="unique_image_generation_tier_order_per_use_case",
+            ),
+        ]
 
     def __str__(self):
-        return f"Tier {self.order}"
+        return f"{self.get_use_case_display()} Tier {self.order}"
 
 
 class ImageGenerationTierEndpoint(models.Model):

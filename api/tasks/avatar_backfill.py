@@ -6,7 +6,7 @@ from django.conf import settings
 from django.db import DatabaseError
 
 from api.agent.avatar import maybe_schedule_agent_avatar
-from api.agent.core.image_generation_config import is_image_generation_configured
+from api.agent.core.image_generation_config import is_avatar_image_generation_configured
 from api.models import PersistentAgent, SystemSetting
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,7 @@ def schedule_agent_avatar_backfill_task(
     if resolved_scan_limit < resolved_batch_size:
         resolved_scan_limit = resolved_batch_size
 
-    if not is_image_generation_configured():
+    if not is_avatar_image_generation_configured():
         return 0
 
     cursor = _read_cursor()

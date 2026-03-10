@@ -157,6 +157,7 @@ def _serialize_weighted_tier_payload(tiers) -> list[dict[str, Any]]:
                 "id": str(tier.id),
                 "order": tier.order,
                 "description": tier.description,
+                "use_case": getattr(tier, "use_case", None),
                 "endpoints": tier_endpoints,
             }
         )
@@ -381,8 +382,13 @@ def build_llm_overview() -> dict[str, Any]:
             "tier_endpoints",
             queryset=ImageGenerationTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
         )
-    ).order_by("order")
-    image_generation_payload = _serialize_weighted_tier_payload(image_generation_tiers)
+    ).order_by("use_case", "order")
+    create_image_generation_payload = _serialize_weighted_tier_payload(
+        image_generation_tiers.filter(use_case=ImageGenerationLLMTier.UseCase.CREATE_IMAGE)
+    )
+    avatar_image_generation_payload = _serialize_weighted_tier_payload(
+        image_generation_tiers.filter(use_case=ImageGenerationLLMTier.UseCase.AVATAR)
+    )
 
     stats = {
         "active_providers": LLMProvider.objects.filter(enabled=True).count(),
@@ -408,7 +414,10 @@ def build_llm_overview() -> dict[str, Any]:
         "browser": browser_payload,
         "embeddings": {"tiers": embedding_payload},
         "file_handlers": {"tiers": file_handler_payload},
-        "image_generations": {"tiers": image_generation_payload},
+        "image_generations": {
+            "create_image_tiers": create_image_generation_payload,
+            "avatar_tiers": avatar_image_generation_payload,
+        },
         "choices": {
             "persistent_endpoints": persistent_choices,
             "browser_endpoints": browser_choices,

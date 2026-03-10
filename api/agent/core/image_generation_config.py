@@ -15,6 +15,10 @@ from api.openrouter import get_attribution_headers
 
 logger = logging.getLogger(__name__)
 
+CREATE_IMAGE_USE_CASE = ImageGenerationLLMTier.UseCase.CREATE_IMAGE
+AVATAR_IMAGE_USE_CASE = ImageGenerationLLMTier.UseCase.AVATAR
+AVATAR_IMAGE_FALLBACK_USE_CASES = (CREATE_IMAGE_USE_CASE,)
+
 
 @dataclass
 class ImageGenerationLLMConfig:
@@ -56,21 +60,64 @@ def _supports_image_config(model_name: str, provider_key: str | None) -> bool:
     return "gemini" in lower_model or "google" in lower_provider
 
 
-def is_image_generation_configured() -> bool:
-    """Return True when at least one enabled image-generation tier endpoint exists."""
+def _build_eligible_tier_endpoint_queryset(use_case: str):
     return ImageGenerationTierEndpoint.objects.filter(
+        tier__use_case=use_case,
         endpoint__enabled=True,
     ).filter(
         Q(endpoint__provider__isnull=True) | Q(endpoint__provider__enabled=True)
-    ).exists()
+    )
 
 
-def get_image_generation_llm_configs(limit: int = 5) -> list[ImageGenerationLLMConfig]:
+def _iter_candidate_use_cases(
+    use_case: str,
+    fallback_use_cases: tuple[str, ...] | list[str] | None = None,
+) -> list[str]:
+    candidates = [use_case]
+    if fallback_use_cases:
+        for candidate in fallback_use_cases:
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+    return candidates
+
+
+def _resolve_image_generation_tiers(
+    use_case: str,
+    fallback_use_cases: tuple[str, ...] | list[str] | None = None,
+):
     tier_prefetch = Prefetch(
         "tier_endpoints",
         queryset=ImageGenerationTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
     )
-    tiers = ImageGenerationLLMTier.objects.prefetch_related(tier_prefetch).order_by("order")
+    for candidate in _iter_candidate_use_cases(use_case, fallback_use_cases):
+        if not _build_eligible_tier_endpoint_queryset(candidate).exists():
+            continue
+        return (
+            ImageGenerationLLMTier.objects.filter(use_case=candidate)
+            .prefetch_related(tier_prefetch)
+            .order_by("order")
+        )
+    return None
+
+
+def is_image_generation_configured(
+    *,
+    use_case: str = CREATE_IMAGE_USE_CASE,
+    fallback_use_cases: tuple[str, ...] | list[str] | None = None,
+) -> bool:
+    """Return True when the requested image-generation workflow has at least one eligible tier endpoint."""
+    return _resolve_image_generation_tiers(use_case, fallback_use_cases) is not None
+
+
+def get_image_generation_llm_configs(
+    *,
+    use_case: str = CREATE_IMAGE_USE_CASE,
+    fallback_use_cases: tuple[str, ...] | list[str] | None = None,
+    limit: int = 5,
+) -> list[ImageGenerationLLMConfig]:
+    tiers = _resolve_image_generation_tiers(use_case, fallback_use_cases)
+    if tiers is None:
+        return []
 
     configs: list[ImageGenerationLLMConfig] = []
     for tier in tiers:
@@ -124,3 +171,26 @@ def get_image_generation_llm_configs(limit: int = 5) -> list[ImageGenerationLLMC
                 return configs
 
     return configs
+
+
+def is_create_image_generation_configured() -> bool:
+    return is_image_generation_configured(use_case=CREATE_IMAGE_USE_CASE)
+
+
+def get_create_image_generation_llm_configs(limit: int = 5) -> list[ImageGenerationLLMConfig]:
+    return get_image_generation_llm_configs(use_case=CREATE_IMAGE_USE_CASE, limit=limit)
+
+
+def is_avatar_image_generation_configured() -> bool:
+    return is_image_generation_configured(
+        use_case=AVATAR_IMAGE_USE_CASE,
+        fallback_use_cases=AVATAR_IMAGE_FALLBACK_USE_CASES,
+    )
+
+
+def get_avatar_image_generation_llm_configs(limit: int = 5) -> list[ImageGenerationLLMConfig]:
+    return get_image_generation_llm_configs(
+        use_case=AVATAR_IMAGE_USE_CASE,
+        fallback_use_cases=AVATAR_IMAGE_FALLBACK_USE_CASES,
+        limit=limit,
+    )

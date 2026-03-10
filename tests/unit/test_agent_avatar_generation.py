@@ -10,10 +10,20 @@ from api.agent.avatar import maybe_schedule_agent_avatar
 from api.agent.short_description import compute_charter_hash
 from api.agent.tasks.agent_avatar import (
     AvatarGenerationResult,
+    _generate_avatar_image,
     generate_agent_avatar_task,
     generate_agent_visual_description_task,
 )
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentCompletion, SystemSetting
+from api.models import (
+    BrowserUseAgent,
+    ImageGenerationLLMTier,
+    ImageGenerationModelEndpoint,
+    ImageGenerationTierEndpoint,
+    LLMProvider,
+    PersistentAgent,
+    PersistentAgentCompletion,
+    SystemSetting,
+)
 from api.tasks.avatar_backfill import schedule_agent_avatar_backfill_task
 
 
@@ -50,6 +60,30 @@ class AgentAvatarGenerationTests(TestCase):
         agent.avatar_last_generation_attempt_at = timezone.now() - timedelta(hours=hours_ago)
         agent.save(update_fields=["avatar_last_generation_attempt_at"])
 
+    def _seed_image_generation_tier(self, *, use_case: str, endpoint_key: str) -> None:
+        provider = LLMProvider.objects.create(
+            key=f"provider-{endpoint_key}",
+            display_name=f"Provider {endpoint_key}",
+            enabled=True,
+        )
+        endpoint = ImageGenerationModelEndpoint.objects.create(
+            key=endpoint_key,
+            provider=provider,
+            enabled=True,
+            litellm_model=f"{endpoint_key}-model",
+            api_base="https://example.com/v1",
+        )
+        tier = ImageGenerationLLMTier.objects.create(
+            use_case=use_case,
+            order=1,
+            description=f"{use_case} tier",
+        )
+        ImageGenerationTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=1.0,
+        )
+
     def test_maybe_schedule_agent_avatar_enqueues_visual_description(self):
         agent = self._create_agent()
         with patch(
@@ -68,7 +102,7 @@ class AgentAvatarGenerationTests(TestCase):
         agent.visual_description = "A composed professional with distinct freckles and wire-rim glasses."
         agent.save(update_fields=["visual_description"])
 
-        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
             "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
         ) as mocked_delay:
             scheduled = maybe_schedule_agent_avatar(agent)
@@ -165,7 +199,7 @@ class AgentAvatarGenerationTests(TestCase):
         agent = self._prepare_visual_ready_agent()
         self._set_avatar_attempt_time(agent, hours_ago=3)
 
-        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
             "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
         ) as mocked_delay:
             scheduled = maybe_schedule_agent_avatar(agent)
@@ -178,7 +212,7 @@ class AgentAvatarGenerationTests(TestCase):
         agent = self._prepare_visual_ready_agent()
         self._set_avatar_attempt_time(agent, hours_ago=25)
 
-        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
             "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
         ) as mocked_delay:
             scheduled = maybe_schedule_agent_avatar(agent)
@@ -192,7 +226,7 @@ class AgentAvatarGenerationTests(TestCase):
         agent.avatar_requested_hash = compute_charter_hash(agent.charter)
         agent.save(update_fields=["avatar_requested_hash"])
 
-        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
             "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
         ) as mocked_delay:
             scheduled = maybe_schedule_agent_avatar(agent)
@@ -205,7 +239,7 @@ class AgentAvatarGenerationTests(TestCase):
         agent.avatar_requested_hash = compute_charter_hash("old charter")
         agent.save(update_fields=["avatar_requested_hash"])
 
-        with patch("api.agent.avatar.is_image_generation_configured", return_value=True), patch(
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
             "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
         ) as mocked_delay:
             scheduled = maybe_schedule_agent_avatar(agent)
@@ -235,7 +269,7 @@ class AgentAvatarGenerationTests(TestCase):
             SimpleNamespace(endpoint_key="second", model="anthropic/image-foo"),
         ]
 
-        with patch("api.agent.tasks.agent_avatar.get_image_generation_llm_configs", return_value=configs), patch(
+        with patch("api.agent.tasks.agent_avatar.get_avatar_image_generation_llm_configs", return_value=configs), patch(
             "api.agent.tasks.agent_avatar._generate_image_bytes",
             side_effect=[first_error, generated],
         ):
@@ -254,7 +288,70 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertEqual(len(completions), 2)
         self.assertEqual([completion.llm_model for completion in completions], [configs[0].model, configs[1].model])
 
-    @patch("api.tasks.avatar_backfill.is_image_generation_configured", return_value=True)
+    def test_generate_avatar_image_prefers_avatar_specific_tiers(self):
+        agent = self._create_agent()
+        self._seed_image_generation_tier(
+            use_case=ImageGenerationLLMTier.UseCase.CREATE_IMAGE,
+            endpoint_key="create-image-endpoint",
+        )
+        self._seed_image_generation_tier(
+            use_case=ImageGenerationLLMTier.UseCase.AVATAR,
+            endpoint_key="avatar-endpoint",
+        )
+        generated = SimpleNamespace(
+            image_bytes=b"avatar-bytes",
+            mime_type="image/png",
+            response={"id": "resp-avatar"},
+        )
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_image_bytes",
+            return_value=generated,
+        ) as mocked_generate:
+            result = _generate_avatar_image(agent, "Generate an avatar")
+
+        self.assertEqual(result.endpoint_key, "avatar-endpoint")
+        self.assertEqual(mocked_generate.call_args.args[0].endpoint_key, "avatar-endpoint")
+
+    def test_generate_avatar_image_falls_back_to_create_image_tiers(self):
+        agent = self._create_agent()
+        self._seed_image_generation_tier(
+            use_case=ImageGenerationLLMTier.UseCase.CREATE_IMAGE,
+            endpoint_key="create-image-endpoint",
+        )
+        generated = SimpleNamespace(
+            image_bytes=b"avatar-bytes",
+            mime_type="image/png",
+            response={"id": "resp-create"},
+        )
+
+        with patch(
+            "api.agent.tasks.agent_avatar._generate_image_bytes",
+            return_value=generated,
+        ) as mocked_generate:
+            result = _generate_avatar_image(agent, "Generate an avatar")
+
+        self.assertEqual(result.endpoint_key, "create-image-endpoint")
+        self.assertEqual(mocked_generate.call_args.args[0].endpoint_key, "create-image-endpoint")
+
+    def test_maybe_schedule_agent_avatar_uses_create_image_fallback_when_avatar_tiers_absent(self):
+        agent = self._prepare_visual_ready_agent()
+        self._seed_image_generation_tier(
+            use_case=ImageGenerationLLMTier.UseCase.CREATE_IMAGE,
+            endpoint_key="create-image-endpoint",
+        )
+
+        with patch("api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertTrue(scheduled)
+        mocked_delay.assert_called_once_with(
+            str(agent.id),
+            compute_charter_hash(agent.charter),
+            None,
+        )
+
+    @patch("api.tasks.avatar_backfill.is_avatar_image_generation_configured", return_value=True)
     def test_schedule_agent_avatar_backfill_task_limits_and_advances_cursor(self, _mock_image_ready):
         agents = [
             self._create_agent("Charter one"),
@@ -300,7 +397,7 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertEqual(scheduled, 0)
         mocked_schedule.assert_not_called()
 
-    @patch("api.tasks.avatar_backfill.is_image_generation_configured", return_value=True)
+    @patch("api.tasks.avatar_backfill.is_avatar_image_generation_configured", return_value=True)
     @patch("api.tasks.avatar_backfill.maybe_schedule_agent_avatar")
     def test_schedule_agent_avatar_backfill_task_skips_pending_agents(
         self,

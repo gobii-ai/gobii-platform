@@ -114,6 +114,7 @@ export type ImageGenerationTier = {
   id: string
   order: number
   description: string
+  use_case?: 'create_image' | 'avatar' | null
   endpoints: TierEndpoint[]
 }
 
@@ -133,7 +134,7 @@ export type LlmOverviewResponse = {
   browser: BrowserPolicy | null
   embeddings: { tiers: EmbeddingTier[] }
   file_handlers: { tiers: FileHandlerTier[] }
-  image_generations: { tiers: ImageGenerationTier[] }
+  image_generations: { create_image_tiers: ImageGenerationTier[]; avatar_tiers: ImageGenerationTier[] }
   choices: EndpointChoices
 }
 
@@ -301,7 +302,7 @@ export function deleteFileHandlerTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/file-handlers/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function createImageGenerationTier(payload: { description?: string }) {
+export function createImageGenerationTier(payload: { description?: string; use_case?: 'create_image' | 'avatar' }) {
   return jsonRequest(`${base}/image-generations/tiers/`, withCsrf(payload))
 }
 

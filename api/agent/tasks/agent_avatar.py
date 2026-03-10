@@ -15,7 +15,7 @@ from api.agent.avatar import (
     maybe_schedule_agent_avatar,
     prepare_visual_description,
 )
-from api.agent.core.image_generation_config import get_image_generation_llm_configs
+from api.agent.core.image_generation_config import get_avatar_image_generation_llm_configs
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.provider_hints import provider_hint_from_model
@@ -164,7 +164,7 @@ def _generate_visual_description_via_llm(
 
 
 def _generate_avatar_image(agent: PersistentAgent, prompt: str) -> AvatarGenerationResult:
-    configs = get_image_generation_llm_configs()
+    configs = get_avatar_image_generation_llm_configs()
     if not configs:
         return AvatarGenerationResult(
             image_bytes=None,

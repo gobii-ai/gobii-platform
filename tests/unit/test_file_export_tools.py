@@ -57,21 +57,26 @@ class FileExportToolTests(TestCase):
             browser_use_agent=cls.browser_agent,
         )
 
-    def _seed_image_generation_tier(self, *, supports_image_to_image: bool = False):
+    def _seed_image_generation_tier(
+        self,
+        *,
+        supports_image_to_image: bool = False,
+        use_case: str = ImageGenerationLLMTier.UseCase.CREATE_IMAGE,
+    ):
         provider = LLMProvider.objects.create(
-            key="img-provider",
+            key=f"img-provider-{use_case}",
             display_name="Image Provider",
             enabled=True,
         )
         endpoint = ImageGenerationModelEndpoint.objects.create(
-            key="img-endpoint",
+            key=f"img-endpoint-{use_case}",
             provider=provider,
             enabled=True,
             litellm_model="gemini-2.5-flash-image",
             api_base="https://example.com/v1",
             supports_image_to_image=supports_image_to_image,
         )
-        tier = ImageGenerationLLMTier.objects.create(order=1, description="Tier 1")
+        tier = ImageGenerationLLMTier.objects.create(order=1, description="Tier 1", use_case=use_case)
         ImageGenerationTierEndpoint.objects.create(
             tier=tier,
             endpoint=endpoint,
@@ -194,6 +199,17 @@ class FileExportToolTests(TestCase):
         self.assertIn("create_pdf", result["message"])
 
     def test_create_image_requires_configured_tier(self):
+        result = execute_create_image(
+            self.agent,
+            {"prompt": "A minimal red circle icon", "file_path": "/exports/icon.png"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("No image generation model is configured", result["message"])
+
+    def test_create_image_ignores_avatar_only_tiers(self):
+        self._seed_image_generation_tier(use_case=ImageGenerationLLMTier.UseCase.AVATAR)
+
         result = execute_create_image(
             self.agent,
             {"prompt": "A minimal red circle icon", "file_path": "/exports/icon.png"},
