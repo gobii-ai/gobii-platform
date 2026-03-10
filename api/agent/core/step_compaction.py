@@ -460,6 +460,8 @@ def llm_summarise_steps(
             agent,
             completion_type=PersistentAgentCompletion.CompletionType.STEP_COMPACTION,
             response=resp,
+            model=model,
+            provider=provider,
         )
 
         set_usage_span_attributes(trace.get_current_span(), usage)
