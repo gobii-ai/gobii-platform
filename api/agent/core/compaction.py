@@ -282,6 +282,8 @@ def llm_summarise_comms(
             agent,
             completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
             response=response,
+            model=model,
+            provider=provider,
         )
 
         set_usage_span_attributes(trace.get_current_span(), usage)

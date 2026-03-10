@@ -16,6 +16,7 @@ from api.models import (
 from api.agent.core.budget import BudgetContext, set_current_context
 from api.agent.core.event_processing import _completion_with_failover
 from api.agent.core.compaction import llm_summarise_comms
+from api.agent.core.step_compaction import llm_summarise_steps
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.tasks.agent_avatar import _generate_visual_description_via_llm as generate_visual_desc_via_llm
 from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_llm
@@ -64,6 +65,16 @@ class TokenUsageTrackingTest(TestCase):
     def tearDown(self):
         set_current_context(None)
         return super().tearDown()
+
+    @staticmethod
+    def _pricing_for_provider_hint(model, custom_llm_provider=None):
+        if custom_llm_provider != "provider-key":
+            return None
+        return {
+            "input_cost_per_token": 0.000002,
+            "cache_read_input_token_cost": 0.000001,
+            "output_cost_per_token": 0.000004,
+        }
     
     def test_completion_with_failover_returns_token_usage(self):
         """Test that _completion_with_failover returns token usage data."""
@@ -343,19 +354,49 @@ class TokenUsageTrackingTest(TestCase):
     @patch("api.agent.core.compaction.get_summarization_llm_config")
     def test_compaction_llm_completion_logged(self, mock_config, mock_run_completion):
         mock_config.return_value = ("provider-key", "model-name", {})
-        mock_run_completion.return_value = make_completion_response(reasoning_content="Chain of thought")
-        mock_run_completion.return_value.provider = "provider-key"
+        mock_run_completion.return_value = make_completion_response(
+            reasoning_content="Chain of thought",
+            model="model-name",
+        )
 
-        summary = llm_summarise_comms("", [], agent=self.agent)
+        with patch("api.agent.core.token_usage.litellm.get_model_info") as mock_get_model_info:
+            mock_get_model_info.side_effect = self._pricing_for_provider_hint
+            summary = llm_summarise_comms("", [], agent=self.agent)
 
         self.assertEqual(summary, "Result")
         completion = PersistentAgentCompletion.objects.filter(
             agent=self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.COMPACTION,
         ).latest("created_at")
+        self.assertEqual(completion.llm_model, "model-name")
         self.assertEqual(completion.llm_provider, "provider-key")
         self.assertEqual(completion.prompt_tokens, 10)
+        self.assertEqual(completion.input_cost_total, Decimal("0.000018"))
+        self.assertEqual(completion.total_cost, Decimal("0.000038"))
         self.assertEqual(completion.thinking_content, "Chain of thought")
+
+    @patch("api.agent.core.step_compaction.run_completion")
+    @patch("api.agent.core.step_compaction.get_summarization_llm_config")
+    def test_step_compaction_llm_completion_logged(self, mock_config, mock_run_completion):
+        mock_config.return_value = ("provider-key", "step-model", {})
+        mock_run_completion.return_value = make_completion_response(
+            content="Step summary",
+            model="step-model",
+        )
+
+        with patch("api.agent.core.token_usage.litellm.get_model_info") as mock_get_model_info:
+            mock_get_model_info.side_effect = self._pricing_for_provider_hint
+            summary = llm_summarise_steps("", [], agent=self.agent)
+
+        self.assertEqual(summary, "Step summary")
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.STEP_COMPACTION,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_model, "step-model")
+        self.assertEqual(completion.llm_provider, "provider-key")
+        self.assertEqual(completion.input_cost_total, Decimal("0.000018"))
+        self.assertEqual(completion.total_cost, Decimal("0.000038"))
 
     @patch("api.agent.tasks.agent_tags.run_completion")
     @patch("api.agent.tasks.agent_tags.get_summarization_llm_config")
@@ -428,16 +469,7 @@ class TokenUsageTrackingTest(TestCase):
 
     @patch("api.agent.core.token_usage.litellm.get_model_info")
     def test_profile_completion_logs_cost_with_provider_hint(self, mock_get_model_info):
-        def _pricing_for_provider_hint(model, custom_llm_provider=None):
-            if custom_llm_provider != "provider-key":
-                return None
-            return {
-                "input_cost_per_token": 0.000002,
-                "cache_read_input_token_cost": 0.000001,
-                "output_cost_per_token": 0.000004,
-            }
-
-        mock_get_model_info.side_effect = _pricing_for_provider_hint
+        mock_get_model_info.side_effect = self._pricing_for_provider_hint
         test_cases = [
             {
                 "name": "tag",
@@ -577,21 +609,22 @@ class TokenUsageTrackingTest(TestCase):
             cached_tokens=3,
             tool_names=["http_request"],
             model="search-model",
-            provider="provider-key",
         )
 
         def _enable(agent, names):
             return {"status": "success", "enabled": names, "already_enabled": [], "evicted": [], "invalid": []}
 
         catalog = [{"full_name": "http_request", "description": "HTTP calls", "parameters": {}}]
-        result = _search_with_llm(
-            agent=self.agent,
-            query="Use HTTP",
-            provider_name="test",
-            catalog=catalog,
-            enable_callback=_enable,
-            empty_message="",
-        )
+        with patch("api.agent.core.token_usage.litellm.get_model_info") as mock_get_model_info:
+            mock_get_model_info.side_effect = self._pricing_for_provider_hint
+            result = _search_with_llm(
+                agent=self.agent,
+                query="Use HTTP",
+                provider_name="test",
+                catalog=catalog,
+                enable_callback=_enable,
+                empty_message="",
+            )
 
         self.assertEqual(result["status"], "success")
         completion = PersistentAgentCompletion.objects.filter(
@@ -599,6 +632,9 @@ class TokenUsageTrackingTest(TestCase):
             completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
         ).latest("created_at")
         self.assertEqual(completion.llm_model, "search-model")
+        self.assertEqual(completion.llm_provider, "provider-key")
+        self.assertEqual(completion.input_cost_total, Decimal("0.000021"))
+        self.assertEqual(completion.total_cost, Decimal("0.000045"))
         self.assertEqual(completion.total_tokens, 18)
 
 
