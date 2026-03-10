@@ -3827,6 +3827,12 @@ class DecodoLowInventoryAlert(models.Model):
         return f"DecodoLowInventoryAlert<{self.sent_on}: {self.active_proxy_count}>"
 
 # api/models.py
+class ExecutionPauseReasonChoices(models.TextChoices):
+    BILLING_DELINQUENCY = "billing_delinquency", "Billing delinquency"
+    TRIAL_CONVERSION_FAILED = "trial_conversion_failed", "Trial conversion failed"
+    ADMIN_MANUAL_PAUSE = "admin_manual_pause", "Admin manual pause"
+
+
 class UserBilling(models.Model):
     """
     Billing information associated with a user.
@@ -3887,6 +3893,7 @@ class UserBilling(models.Model):
         max_length=64,
         blank=True,
         default="",
+        choices=[("", "---------"), *ExecutionPauseReasonChoices.choices],
         help_text="Machine-readable reason for the current execution pause.",
     )
     execution_paused_at = models.DateTimeField(
@@ -4207,6 +4214,7 @@ class OrganizationBilling(models.Model):
         max_length=64,
         blank=True,
         default="",
+        choices=[("", "---------"), *ExecutionPauseReasonChoices.choices],
         help_text="Machine-readable reason for the current execution pause.",
     )
     execution_paused_at = models.DateTimeField(

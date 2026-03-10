@@ -7,6 +7,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.utils import timezone
 
+from api.models import ExecutionPauseReasonChoices
 from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
 
 logger = logging.getLogger(__name__)
@@ -15,8 +16,8 @@ logger = logging.getLogger(__name__)
 EXECUTION_PAUSE_MESSAGE = "Account execution is paused until billing is resolved."
 EXECUTION_PAUSE_NOTE = "owner_execution_paused"
 
-EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY = "billing_delinquency"
-EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED = "trial_conversion_failed"
+EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY = ExecutionPauseReasonChoices.BILLING_DELINQUENCY
+EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED = ExecutionPauseReasonChoices.TRIAL_CONVERSION_FAILED
 
 
 def resolve_agent_owner(agent) -> Any:

@@ -60,6 +60,7 @@ from .models import (
     AgentComputeSession,
     ComputeSnapshot,
     UserPreference,
+    ExecutionPauseReasonChoices,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -1742,7 +1743,7 @@ if admin.site.is_registered(User):
     admin.site.unregister(User)
 
 
-ADMIN_MANUAL_EXECUTION_PAUSE_REASON = "admin_manual_pause"
+ADMIN_MANUAL_EXECUTION_PAUSE_REASON = ExecutionPauseReasonChoices.ADMIN_MANUAL_PAUSE
 
 
 class CustomUserAdminForm(forms.ModelForm):
@@ -1751,11 +1752,11 @@ class CustomUserAdminForm(forms.ModelForm):
         label="Execution Paused",
         help_text="When enabled, this user cannot start new agent or browser-task work.",
     )
-    execution_pause_reason_admin = forms.CharField(
+    execution_pause_reason_admin = forms.ChoiceField(
         required=False,
-        max_length=64,
         label="Execution Pause Reason",
-        help_text="Machine-readable reason stored with the pause. Defaults to admin_manual_pause.",
+        choices=[("", "---------"), *ExecutionPauseReasonChoices.choices],
+        help_text="Reason stored with the pause. Defaults to admin_manual_pause.",
     )
 
     class Meta:
