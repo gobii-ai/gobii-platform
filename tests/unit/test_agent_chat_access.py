@@ -12,6 +12,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    UserFlags,
     UserPreference,
 )
 from console.agent_chat.access import resolve_agent
@@ -158,6 +159,20 @@ class AgentChatAccessTests(TestCase):
         self.assertTrue(billing_status.get("delinquent"))
         self.assertTrue(billing_status.get("actionable"))
         self.assertEqual(billing_status.get("reason"), "past_due")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_roster_ignores_billing_delinquency_for_grandfathered_personal_user(self):
+        UserFlags.objects.create(user=self.user, is_freemium_grandfathered=True)
+        customer = self._fake_customer_with_subscription_status("past_due")
+        with patch("console.agent_addons.get_stripe_customer", return_value=customer):
+            response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        billing_status = payload.get("billingStatus", {})
+        self.assertFalse(billing_status.get("delinquent"))
+        self.assertFalse(billing_status.get("actionable"))
+        self.assertIsNone(billing_status.get("reason"))
 
     @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
     def test_chat_access_ignores_historical_past_due_subscription(self, _mock_normal_access):

@@ -19,6 +19,7 @@ from util.subscription_helper import (
     get_user_max_contacts_per_agent,
     reconcile_user_plan_from_stripe,
 )
+from util.trial_enforcement import is_user_freemium_grandfathered
 
 try:
     import stripe
@@ -89,6 +90,8 @@ def _build_billing_status_payload(owner, owner_type: str, *, can_open_billing: b
         "paymentIntentStatus": None,
         "manageBillingUrl": manage_billing_url if can_open_billing else None,
     }
+    if owner_type == "user" and is_user_freemium_grandfathered(owner):
+        return status_payload
     if not stripe_status().enabled:
         return status_payload
 
