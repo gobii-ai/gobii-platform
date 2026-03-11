@@ -101,6 +101,45 @@ def _normalize_stripe_object(obj):
     return obj
 
 
+def _safe_subscription_timestamp(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _subscription_selection_payload(subscription) -> Mapping[str, Any]:
+    payload = getattr(subscription, "stripe_data", None)
+    if isinstance(payload, Mapping):
+        return payload
+    return {}
+
+
+def get_customer_subscription_candidate(owner, customer_subscriptions: list):
+    subscriptions = list(customer_subscriptions or [])
+    if not subscriptions:
+        return None
+
+    subscriptions.sort(
+        key=lambda subscription: (
+            _safe_subscription_timestamp(_subscription_selection_payload(subscription).get("current_period_end")),
+            _safe_subscription_timestamp(_subscription_selection_payload(subscription).get("created")),
+        ),
+        reverse=True,
+    )
+
+    owner_type = _resolve_owner_type(owner)
+    if owner_type == "organization":
+        billing = getattr(owner, "billing", None)
+        subscription_id = getattr(billing, "stripe_subscription_id", None) if billing is not None else None
+        if isinstance(subscription_id, str) and subscription_id:
+            for subscription in subscriptions:
+                if str(getattr(subscription, "id", "")) == subscription_id:
+                    return subscription
+
+    return subscriptions[0]
+
+
 def _sync_active_subscriptions_from_stripe_customer(customer: Customer | None) -> bool:
     """Refresh locally cached active personal subscriptions from Stripe."""
     if customer is None or Subscription is None:

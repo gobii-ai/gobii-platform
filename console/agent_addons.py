@@ -12,6 +12,7 @@ from constants.plans import PlanNamesChoices
 from util.integrations import IntegrationDisabledError, stripe_status
 from util.subscription_helper import (
     _ensure_stripe_ready,
+    get_customer_subscription_candidate,
     get_active_subscription,
     get_organization_plan,
     get_stripe_customer,
@@ -78,17 +79,6 @@ def _is_invoice_retrying(latest_invoice_payload: Mapping[str, object], latest_in
     return latest_invoice_payload.get("next_payment_attempt") is not None
 
 
-def _resolve_candidate_subscription(owner, owner_type: str, customer_subscriptions: list):
-    if owner_type == "organization":
-        billing = getattr(owner, "billing", None)
-        subscription_id = getattr(billing, "stripe_subscription_id", None) if billing is not None else None
-        if isinstance(subscription_id, str) and subscription_id:
-            for subscription in customer_subscriptions:
-                if str(getattr(subscription, "id", "")) == subscription_id:
-                    return subscription
-    return customer_subscriptions[0] if customer_subscriptions else None
-
-
 def _build_billing_status_payload(owner, owner_type: str, *, can_open_billing: bool, manage_billing_url: str | None) -> dict:
     status_payload = {
         "delinquent": False,
@@ -114,14 +104,7 @@ def _build_billing_status_payload(owner, owner_type: str, *, can_open_billing: b
     if not subscriptions:
         return status_payload
 
-    subscriptions.sort(
-        key=lambda subscription: (
-            _safe_int(_get_subscription_data(subscription).get("current_period_end")),
-            _safe_int(_get_subscription_data(subscription).get("created")),
-        ),
-        reverse=True,
-    )
-    candidate_subscription = _resolve_candidate_subscription(owner, owner_type, subscriptions)
+    candidate_subscription = get_customer_subscription_candidate(owner, subscriptions)
     if candidate_subscription is None:
         return status_payload
 

@@ -4,7 +4,11 @@ from django.conf import settings
 from django.db.utils import DatabaseError, OperationalError, ProgrammingError
 
 from constants.plans import PlanNames
-from util.subscription_helper import get_active_subscription, get_stripe_customer
+from util.subscription_helper import (
+    get_active_subscription,
+    get_customer_subscription_candidate,
+    get_stripe_customer,
+)
 from waffle import get_waffle_switch_model
 
 logger = logging.getLogger(__name__)
@@ -74,16 +78,17 @@ def _has_delinquent_personal_subscription(user) -> bool:
         )
         return False
 
-    for subscription in subscriptions:
-        stripe_data = getattr(subscription, "stripe_data", None)
-        status = None
-        if isinstance(stripe_data, dict):
-            status = _normalize_subscription_status(stripe_data.get("status"))
-        if status is None:
-            status = _normalize_subscription_status(getattr(subscription, "status", None))
-        if status in PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES:
-            return True
-    return False
+    candidate_subscription = get_customer_subscription_candidate(user, subscriptions)
+    if candidate_subscription is None:
+        return False
+
+    stripe_data = getattr(candidate_subscription, "stripe_data", None)
+    status = None
+    if isinstance(stripe_data, dict):
+        status = _normalize_subscription_status(stripe_data.get("status"))
+    if status is None:
+        status = _normalize_subscription_status(getattr(candidate_subscription, "status", None))
+    return status in PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES
 
 
 def can_user_use_personal_agents_and_api(user) -> bool:
