@@ -6,7 +6,14 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
-from api.models import Organization, PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep, UserQuota
+from api.models import (
+    Organization,
+    PersistentAgent,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
+    UserBilling,
+    UserQuota,
+)
 from api.services.proactive_activation import ProactiveActivationService
 from api.tasks.proactive_agents import schedule_proactive_agents_task
 from tests.unit.test_api_persistent_agents import create_browser_agent_without_proxy
@@ -163,6 +170,23 @@ class ProactiveActivationServiceTests(TestCase):
         mock_redis_client.return_value = _FakeRedis()
         self.user.is_active = False
         self.user.save(update_fields=["is_active"])
+
+        triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+
+        self.assertEqual(triggered, [])
+
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_skips_execution_paused_owner(self, mock_redis_client, _mock_flag):
+        mock_redis_client.return_value = _FakeRedis()
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+                "execution_paused_at": timezone.now(),
+            },
+        )
 
         triggered = ProactiveActivationService.trigger_agents(batch_size=5)
 

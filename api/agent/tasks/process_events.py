@@ -21,6 +21,10 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 
 from config.redis_client import get_redis_client
+from api.services.owner_execution_pause import (
+    is_owner_execution_paused,
+    resolve_agent_owner,
+)
 from ..core.event_processing import process_agent_events, _lock_storage_keys
 from ...services.referral_service import ReferralService
 from ..core.processing_flags import (
@@ -374,6 +378,14 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
         )
         if agent is None:
             raise PersistentAgent.DoesNotExist
+
+        owner = resolve_agent_owner(agent)
+        if owner is not None and is_owner_execution_paused(owner):
+            logger.info(
+                "Skipping cron trigger for agent %s because owner execution is paused.",
+                agent.id,
+            )
+            return
 
         if switch_is_active(AGENT_CRON_THROTTLE):
             decision = evaluate_free_plan_cron_throttle(agent, cron_expression)

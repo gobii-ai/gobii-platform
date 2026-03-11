@@ -23,6 +23,7 @@ from pages.signals import (
 )
 from util.analytics import AnalyticsEvent
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
+from api.services.owner_execution_pause import resume_owner_execution as real_resume_owner_execution
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
@@ -1166,6 +1167,48 @@ class SubscriptionSignalTests(TestCase):
         self.assertIn("subscription_delinquency_entered", emitted_names)
 
     @tag("batch_pages")
+    def test_active_subscription_update_resumes_paused_owner(self):
+        self.billing.execution_paused = True
+        self.billing.execution_pause_reason = "billing_delinquency"
+        self.billing.execution_paused_at = timezone.now()
+        self.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+
+        payload = _build_event_payload(status="active", billing_reason="subscription_update")
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            previous_attributes={"status": "past_due"},
+            event_id="evt_recovered_active",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "active"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.resume_owner_execution", wraps=real_resume_owner_execution) as mock_resume_owner:
+
+            handle_subscription_event(event)
+
+        mock_resume_owner.assert_called_once_with(self.user, source="stripe.customer.subscription.updated")
+        self.billing.refresh_from_db()
+        self.assertFalse(self.billing.execution_paused)
+        self.assertEqual(self.billing.execution_pause_reason, "")
+        self.assertIsNone(self.billing.execution_paused_at)
+
+    @tag("batch_pages")
     def test_trial_ended_non_renewal_emits_lifecycle_event(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="canceled")
@@ -1851,6 +1894,47 @@ class PaymentFailedSignalTests(TestCase):
 class PaymentSucceededSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="success-user", email="success@example.com", password="pw")
+
+    def test_invoice_payment_succeeded_does_not_resume_paused_owner(self):
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+                "execution_paused_at": timezone.now(),
+            },
+        )
+        payload = _build_invoice_payload(
+            customer_id="cus_user_succeeded",
+            subscription_id="sub_user_succeeded",
+            amount_due=3000,
+            amount_paid=3000,
+            status="paid",
+        )
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
+            subscription=SimpleNamespace(id="sub_user_succeeded"),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.resume_owner_execution", wraps=real_resume_owner_execution) as mock_resume_owner, \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.Analytics.track_event_anonymous"), \
+            patch("pages.signals.get_plan_by_product_id", return_value=None):
+
+            handle_invoice_payment_succeeded(event)
+
+        mock_resume_owner.assert_not_called()
+        billing = UserBilling.objects.get(user=self.user)
+        self.assertTrue(billing.execution_paused)
+        self.assertEqual(billing.execution_pause_reason, "billing_delinquency")
+        self.assertIsNotNone(billing.execution_paused_at)
 
     def test_invoice_payment_succeeded_for_user_tracks_event(self):
         payload = _build_invoice_payload(

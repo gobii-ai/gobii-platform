@@ -30,3 +30,11 @@ MULTISEND_ENABLED = "multisend_enabled"
 AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION = (
     "agent_retry_completion_on_web_session_activation"
 )
+
+# Owner-wide execution pause controls for billing lifecycle events.
+OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY = (
+    "owner_execution_pause_on_billing_delinquency"
+)
+OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED = (
+    "owner_execution_pause_on_trial_conversion_failed"
+)

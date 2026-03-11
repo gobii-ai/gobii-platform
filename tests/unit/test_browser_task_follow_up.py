@@ -5,7 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
-from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask
+from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask, UserBilling
 from api.tasks.browser_agent_tasks import _schedule_agent_follow_up
 
 
@@ -87,3 +87,21 @@ class BrowserTaskFollowUpTests(TestCase):
 
         mock_delay.assert_called_once_with(str(self.persistent_agent.id), eval_run_id=None)
 
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    def test_follow_up_skips_when_owner_execution_paused(self, mock_delay) -> None:
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+            },
+        )
+
+        _schedule_agent_follow_up(
+            self.task,
+            budget_id=None,
+            branch_id=None,
+            depth=None,
+        )
+
+        mock_delay.assert_not_called()

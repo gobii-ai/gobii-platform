@@ -38,6 +38,12 @@ from ..services.browser_settings import (
     DEFAULT_MAX_BROWSER_STEPS,
     get_browser_settings_for_owner,
 )
+from ..services.owner_execution_pause import (
+    EXECUTION_PAUSE_MESSAGE,
+    is_owner_execution_paused,
+    resolve_agent_owner,
+    resolve_browser_task_owner,
+)
 from ..services.task_webhooks import trigger_task_webhook
 from ..services.referral_service import ReferralService
 from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
@@ -145,6 +151,14 @@ def _schedule_agent_follow_up(
         return
 
     agent_id = str(persistent_agent.id)
+    owner = resolve_agent_owner(persistent_agent)
+    if owner is not None and is_owner_execution_paused(owner):
+        logger.info(
+            "Skipping follow-up for task %s because owner execution is paused for agent %s",
+            task_obj.id,
+            agent_id,
+        )
+        return
 
     try:
         from api.agent.tasks.process_events import process_agent_events_task
@@ -1704,6 +1718,7 @@ def _process_browser_use_task_core(
 
     with traced("PROCESS Browser Use Task Core") as span:
         span.set_attribute('task.id', str(browser_use_agent_task_id))
+        should_schedule_follow_up = True
         try:
             task_obj = BrowserUseAgentTask.objects.get(id=browser_use_agent_task_id)
 
@@ -1717,6 +1732,40 @@ def _process_browser_use_task_core(
 
         except BrowserUseAgentTask.DoesNotExist:
             logger.error("BrowserUseAgentTask %s not found", browser_use_agent_task_id)
+            return
+
+        owner = resolve_browser_task_owner(task_obj)
+        if owner is not None and is_owner_execution_paused(owner):
+            should_schedule_follow_up = False
+            task_obj.status = BrowserUseAgentTask.StatusChoices.CANCELLED
+            task_obj.error_message = EXECUTION_PAUSE_MESSAGE
+            task_obj.updated_at = timezone.now()
+            task_obj.save(update_fields=["status", "error_message", "updated_at"])
+            logger.info(
+                "Cancelled browser task %s before execution because owner execution is paused.",
+                task_obj.id,
+            )
+            span.set_attribute("owner.execution_paused", True)
+            if branch_id and task_obj.agent and hasattr(task_obj.agent, 'persistent_agent'):
+                try:
+                    AgentBudgetManager.bump_branch_depth(
+                        agent_id=str(task_obj.agent.persistent_agent.id),
+                        branch_id=str(branch_id),
+                        delta=-1,
+                    )
+                    logger.info(
+                        "Decremented outstanding children for agent %s branch %s after paused task %s",
+                        task_obj.agent.persistent_agent.id,
+                        branch_id,
+                        task_obj.id,
+                    )
+                except Exception as e:
+                    logger.warning("Failed to decrement outstanding children for branch %s: %s", branch_id, e)
+
+            try:
+                trigger_task_webhook(task_obj)
+            except Exception:
+                logger.exception("Unexpected error while triggering webhook for task %s", task_obj.id)
             return
 
         task_obj.status = BrowserUseAgentTask.StatusChoices.IN_PROGRESS
@@ -1824,7 +1873,7 @@ def _process_browser_use_task_core(
                 agent_tier = get_agent_llm_tier(agent_context)
                 agent_span.set_attribute("browser_tier.intelligence_tier", agent_tier.value)
 
-                owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
+                owner = resolve_browser_task_owner(task_obj, agent_context=agent_context)
                 captcha_enabled = _has_advanced_captcha_resolution(owner)
                 agent_span.set_attribute("captcha.addon_enabled", captcha_enabled)
                 actions = ['mcp_brightdata_search_engine']
@@ -2082,7 +2131,7 @@ def _process_browser_use_task_core(
                 ])
 
             # Trigger agent event processing if this task belongs to a persistent agent
-            if task_obj.agent:
+            if should_schedule_follow_up and task_obj.agent:
                 _schedule_agent_follow_up(
                     task_obj,
                     budget_id=budget_id,

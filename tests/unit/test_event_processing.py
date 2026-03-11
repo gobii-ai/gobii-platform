@@ -1218,6 +1218,22 @@ class CronTriggerTaskTests(TestCase):
         # Verify process_agent_events was called
         mock_process_events.assert_called_once_with(str(self.agent.id))
 
+    @patch('api.agent.tasks.process_events.process_agent_events')
+    def test_cron_trigger_task_skips_paused_owner(self, mock_process_events):
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+                "execution_paused_at": timezone.now(),
+            },
+        )
+
+        process_agent_cron_trigger_task(str(self.agent.id), "@daily")
+
+        self.assertEqual(PersistentAgentCronTrigger.objects.count(), 0)
+        mock_process_events.assert_not_called()
+
     @patch('api.agent.tasks.process_events.logger')
     @patch('api.agent.tasks.process_events.process_agent_events')
     def test_cron_trigger_task_logs_quota_validation_as_info(self, mock_process_events, mock_logger):

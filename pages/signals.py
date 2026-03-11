@@ -64,6 +64,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
 )
+from api.services.owner_execution_pause import resume_owner_execution
 from api.services.referral_service import ReferralService
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
@@ -2016,6 +2017,16 @@ def handle_subscription_event(event, **kwargs):
                 )
 
             downgrade_owner_to_free_plan(owner)
+            try:
+                resume_owner_execution(
+                    owner,
+                    source=f"stripe.{event_type}.downgrade_to_free",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to resume owner execution after downgrade for owner %s",
+                    getattr(owner, "id", None) or owner,
+                )
 
             try:
                 DedicatedProxyService.release_for_owner(owner)
@@ -2164,6 +2175,14 @@ def handle_subscription_event(event, **kwargs):
         # Proceed when the subscription is active or trialing and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))
         if sub.status in ("active", "trialing") and licensed_item is not None:
+            try:
+                resume_owner_execution(owner, source=f"stripe.{event_type}")
+            except Exception:
+                logger.exception(
+                    "Failed to resume owner execution for active subscription owner %s",
+                    getattr(owner, "id", None) or owner,
+                )
+
             price_info = licensed_item.get("price") or {}
             if not isinstance(price_info, Mapping):
                 price_info = {}

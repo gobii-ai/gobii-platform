@@ -1,5 +1,16 @@
 import logging
 
+from waffle import switch_is_active
+
+from constants.feature_flags import (
+    OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY,
+    OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED,
+)
+from api.services.owner_execution_pause import (
+    EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
+    EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED,
+    pause_owner_execution_by_ref,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 from .lifecycle_signals import (
@@ -14,6 +25,20 @@ from .lifecycle_signals import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _billing_pause_switch_enabled(switch_name: str, *, event_name: str, payload) -> bool:
+    if switch_is_active(switch_name):
+        return True
+
+    logger.info(
+        "Skipping owner execution pause for %s on %s/%s because switch '%s' is disabled.",
+        event_name,
+        payload.owner_type,
+        payload.owner_id,
+        switch_name,
+    )
+    return False
 
 
 def _base_properties(payload) -> dict:
@@ -91,7 +116,18 @@ def _handle_trial_conversion_failed(sender, payload, **_kwargs) -> None:
         event_name=TRIAL_CONVERSION_FAILED,
     )
 
-    # TODO: lock account
+    if _billing_pause_switch_enabled(
+        OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED,
+        event_name=TRIAL_CONVERSION_FAILED,
+        payload=payload,
+    ):
+        pause_owner_execution_by_ref(
+            payload.owner_type,
+            payload.owner_id,
+            EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED,
+            source="billing.lifecycle.trial_conversion_failed",
+            paused_at=payload.occurred_at,
+        )
 
 
 def _handle_subscription_delinquency_entered(sender, payload, **_kwargs) -> None:
@@ -103,6 +139,19 @@ def _handle_subscription_delinquency_entered(sender, payload, **_kwargs) -> None
         event=AnalyticsEvent.BILLING_DELINQUENCY_ENTERED,
         event_name=SUBSCRIPTION_DELINQUENCY_ENTERED,
     )
+
+    if _billing_pause_switch_enabled(
+        OWNER_EXECUTION_PAUSE_ON_BILLING_DELINQUENCY,
+        event_name=SUBSCRIPTION_DELINQUENCY_ENTERED,
+        payload=payload,
+    ):
+        pause_owner_execution_by_ref(
+            payload.owner_type,
+            payload.owner_id,
+            EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
+            source="billing.lifecycle.subscription_delinquency_entered",
+            paused_at=payload.occurred_at,
+        )
 
 
 def register_billing_lifecycle_handlers() -> None:

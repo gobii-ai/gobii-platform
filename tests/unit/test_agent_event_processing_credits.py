@@ -14,6 +14,7 @@ from api.models import (
     PersistentAgentSystemStep,
     TaskCredit,
     CommsChannel,
+    UserBilling,
     UserPreference,
 )
 from django.contrib.auth import get_user_model
@@ -131,6 +132,66 @@ class PersistentAgentCreditGateTests(TestCase):
         self.assertFalse(
             self.agent.steps.filter(description="Process events").exists(),
             "Normal event-window step should not be created on early exit",
+        )
+
+    def test_owner_execution_pause_exits_early(self):
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+                "execution_paused_at": timezone.now(),
+            },
+        )
+
+        with patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+            from api.agent.core.event_processing import _process_agent_events_locked
+
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+
+            loop_mock.assert_not_called()
+
+        sys_steps = PersistentAgentSystemStep.objects.filter(
+            step__agent=self.agent,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes__icontains="owner_execution_paused",
+        )
+        self.assertTrue(sys_steps.exists(), "Expected a paused-owner system step to be created")
+        self.assertFalse(
+            self.agent.steps.filter(description="Process events").exists(),
+            "Normal event-window step should not be created when owner execution is paused",
+        )
+
+    def test_owner_execution_pause_system_step_is_deduped(self):
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "execution_paused": True,
+                "execution_pause_reason": "billing_delinquency",
+                "execution_paused_at": timezone.now(),
+            },
+        )
+
+        with patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
+            from api.agent.core.event_processing import _process_agent_events_locked
+
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+
+            loop_mock.assert_not_called()
+
+        sys_steps = PersistentAgentSystemStep.objects.filter(
+            step__agent=self.agent,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes="owner_execution_paused:billing_delinquency",
+        )
+        self.assertEqual(sys_steps.count(), 1)
+        self.assertEqual(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description="Skipped processing because account execution is paused until billing is resolved.",
+            ).count(),
+            1,
         )
 
     def test_proprietary_mode_with_credits_proceeds(self):
