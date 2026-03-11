@@ -30,12 +30,14 @@ type SubscriptionState = {
   upgradeModalDismissible: boolean
   isProprietaryMode: boolean
   pricingModalAlmostFullScreen: boolean
+  ctaPricingCancelTextUnderBtn: boolean
   ctaStartFreeTrial: boolean
   trialDaysByPlan: TrialDaysByPlan
   trialEligible: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
   setProprietaryMode: (isProprietary: boolean) => void
   setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen: boolean) => void
+  setCtaPricingCancelTextUnderBtn: (ctaPricingCancelTextUnderBtn: boolean) => void
   setCtaStartFreeTrial: (ctaStartFreeTrial: boolean) => void
   setTrialDaysByPlan: (trialDaysByPlan: TrialDaysByPlan) => void
   setTrialEligible: (trialEligible: boolean) => void
@@ -52,12 +54,14 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   upgradeModalDismissible: true,
   isProprietaryMode: false,
   pricingModalAlmostFullScreen: true,
+  ctaPricingCancelTextUnderBtn: false,
   ctaStartFreeTrial: false,
   trialDaysByPlan: { startup: 0, scale: 0 },
   trialEligible: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
   setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
   setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen) => set({ pricingModalAlmostFullScreen }),
+  setCtaPricingCancelTextUnderBtn: (ctaPricingCancelTextUnderBtn) => set({ ctaPricingCancelTextUnderBtn }),
   setCtaStartFreeTrial: (ctaStartFreeTrial) => set({ ctaStartFreeTrial }),
   setTrialDaysByPlan: (trialDaysByPlan) => set({ trialDaysByPlan }),
   setTrialEligible: (trialEligible) => set({ trialEligible }),
@@ -96,6 +100,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
         currentPlan: plan,
         isProprietaryMode: Boolean(data?.is_proprietary_mode),
         pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
+        ctaPricingCancelTextUnderBtn: normalizeBoolean(data?.cta_pricing_cancel_text_under_btn),
         ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
         trialDaysByPlan: normalizeTrialDaysByPlan(data),
         trialEligible: normalizeBoolean(data?.trial_eligible),
@@ -116,6 +121,7 @@ type UserPlanPayload = {
   plan?: string | null
   is_proprietary_mode?: boolean
   pricing_modal_almost_full_screen?: boolean | string | null
+  cta_pricing_cancel_text_under_btn?: boolean | string | null
   cta_start_free_trial?: boolean | string | null
   startup_trial_days?: number | string | null
   scale_trial_days?: number | string | null
@@ -126,6 +132,7 @@ type UserPlanResponse = {
   plan: PlanTier | null
   isProprietaryMode: boolean
   pricingModalAlmostFullScreen: boolean
+  ctaPricingCancelTextUnderBtn: boolean
   ctaStartFreeTrial: boolean
   trialDaysByPlan: TrialDaysByPlan
   trialEligible: boolean
@@ -177,6 +184,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         plan: null,
         isProprietaryMode: false,
         pricingModalAlmostFullScreen: true,
+        ctaPricingCancelTextUnderBtn: false,
         ctaStartFreeTrial: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
         trialEligible: false,
@@ -188,6 +196,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       plan,
       isProprietaryMode: Boolean(data?.is_proprietary_mode),
       pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
+      ctaPricingCancelTextUnderBtn: normalizeBoolean(data?.cta_pricing_cancel_text_under_btn),
       ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
       trialDaysByPlan: normalizeTrialDaysByPlan(data),
       trialEligible: normalizeBoolean(data?.trial_eligible),
@@ -199,6 +208,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         plan: null,
         isProprietaryMode: false,
         pricingModalAlmostFullScreen: true,
+        ctaPricingCancelTextUnderBtn: false,
         ctaStartFreeTrial: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
         trialEligible: false,
@@ -209,6 +219,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       plan: null,
       isProprietaryMode: false,
       pricingModalAlmostFullScreen: true,
+      ctaPricingCancelTextUnderBtn: false,
       ctaStartFreeTrial: false,
       trialDaysByPlan: { startup: 0, scale: 0 },
       trialEligible: false,
@@ -226,6 +237,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   // Check for data attributes first (server-rendered templates)
   const proprietaryAttr = mountElement.dataset.isProprietaryMode
   const pricingModalAlmostFullScreenAttr = mountElement.dataset.pricingModalAlmostFullScreen
+  const ctaPricingCancelTextUnderBtnAttr = mountElement.dataset.ctaPricingCancelTextUnderBtn
   const ctaStartFreeTrialAttr = mountElement.dataset.ctaStartFreeTrial
   const planAttr = mountElement.dataset.userPlan
   const trialEligibleAttr = mountElement.dataset.trialEligible
@@ -237,6 +249,9 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   useSubscriptionStore.getState().setTrialDaysByPlan(trialDaysByPlan)
   useSubscriptionStore.getState().setPricingModalAlmostFullScreen(
     normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
+  )
+  useSubscriptionStore.getState().setCtaPricingCancelTextUnderBtn(
+    normalizeBoolean(ctaPricingCancelTextUnderBtnAttr),
   )
   useSubscriptionStore.getState().setCtaStartFreeTrial(normalizeBoolean(ctaStartFreeTrialAttr))
 
@@ -260,6 +275,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       plan,
       isProprietaryMode,
       pricingModalAlmostFullScreen,
+      ctaPricingCancelTextUnderBtn,
       ctaStartFreeTrial,
       trialDaysByPlan: apiTrialDaysByPlan,
       trialEligible,
@@ -268,6 +284,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     useSubscriptionStore.getState().setCurrentPlan(plan)
     useSubscriptionStore.getState().setProprietaryMode(isProprietaryMode)
     useSubscriptionStore.getState().setPricingModalAlmostFullScreen(pricingModalAlmostFullScreen)
+    useSubscriptionStore.getState().setCtaPricingCancelTextUnderBtn(ctaPricingCancelTextUnderBtn)
     useSubscriptionStore.getState().setCtaStartFreeTrial(ctaStartFreeTrial)
     useSubscriptionStore.getState().setTrialDaysByPlan(apiTrialDaysByPlan)
     useSubscriptionStore.getState().setTrialEligible(trialEligible)
