@@ -413,9 +413,9 @@ def build_agent_addons_payload(
 
     if can_open_billing:
         try:
-            manage_billing_url = reverse("billing")
+            manage_billing_url = settings.STRIPE_CUSTOMER_PORTAL
             if agent.organization_id:
-                manage_billing_url = f"{manage_billing_url}?org_id={agent.organization_id}"
+                manage_billing_url = f"{reverse("billing")}?org_id={agent.organization_id}"
         except NoReverseMatch:
             manage_billing_url = None
 
