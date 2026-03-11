@@ -22,6 +22,7 @@ type ChatSidebarProps = {
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
+  createAgentDisabledReason?: string | null
   rosterSortMode?: AgentRosterSortMode
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
@@ -39,6 +40,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onSelectAgent,
   onToggleAgentFavorite,
   onCreateAgent,
+  createAgentDisabledReason = null,
   rosterSortMode = 'recent',
   onRosterSortModeChange,
   contextSwitcher,
@@ -129,6 +131,7 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const hasAgents = agents.length > 0
   const showSortToggle = agents.length >= 2
+  const createAgentDisabled = Boolean(createAgentDisabledReason)
 
   const fishCollateralEnabled = useMemo(() => {
     if (typeof document === 'undefined') {
@@ -216,7 +219,9 @@ export const ChatSidebar = memo(function ChatSidebar({
                 type="button"
                 className="chat-sidebar-create-btn chat-sidebar-create-btn--drawer"
                 onClick={handleCreateAgent}
+                disabled={createAgentDisabled}
                 aria-label="New agent"
+                title={createAgentDisabledReason ?? undefined}
               >
                 <span className="chat-sidebar-create-btn-icon">
                   <Plus className="h-4 w-4" />
@@ -366,8 +371,10 @@ export const ChatSidebar = memo(function ChatSidebar({
                 type="button"
                 className="chat-sidebar-create-btn"
                 onClick={handleCreateAgent}
+                disabled={createAgentDisabled}
                 aria-label="New agent"
                 data-collapsed={collapsed}
+                title={createAgentDisabledReason ?? undefined}
               >
                 <span className="chat-sidebar-create-btn-icon">
                   <Plus className="h-4 w-4" />

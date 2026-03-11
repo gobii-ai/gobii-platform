@@ -72,6 +72,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
+  createAgentDisabledReason?: string | null
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
@@ -176,6 +177,7 @@ export function AgentChatLayout({
   onSelectAgent,
   onToggleAgentFavorite,
   onCreateAgent,
+  createAgentDisabledReason = null,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
   contextSwitcher,
@@ -734,6 +736,7 @@ export function AgentChatLayout({
         onSelectAgent={onSelectAgent}
         onToggleAgentFavorite={onToggleAgentFavorite}
         onCreateAgent={onCreateAgent}
+        createAgentDisabledReason={createAgentDisabledReason}
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}

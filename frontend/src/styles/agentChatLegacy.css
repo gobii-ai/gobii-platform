@@ -6203,6 +6203,14 @@
   outline-offset: 2px;
 }
 
+.chat-sidebar-create-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  border-color: rgba(167, 139, 250, 0.18);
+  background: rgba(167, 139, 250, 0.04);
+  color: rgba(196, 181, 253, 0.7);
+}
+
 .chat-sidebar-create-btn-icon {
   display: flex;
   align-items: center;
@@ -6230,6 +6238,10 @@
   background: rgba(255, 255, 255, 0.06);
 }
 
+.chat-sidebar-create-btn[data-collapsed='true']:disabled {
+  background: transparent;
+}
+
 .chat-sidebar-create-btn[data-collapsed='true'] .chat-sidebar-create-btn-icon {
   width: 2.375rem;
   height: 2.375rem;
@@ -6242,6 +6254,12 @@
 .chat-sidebar-create-btn[data-collapsed='true']:hover .chat-sidebar-create-btn-icon {
   border-color: rgba(167, 139, 250, 0.6);
   background: rgba(167, 139, 250, 0.1);
+}
+
+.chat-sidebar-create-btn[data-collapsed='true']:disabled .chat-sidebar-create-btn-icon {
+  border-color: rgba(167, 139, 250, 0.2);
+  background: transparent;
+  color: rgba(196, 181, 253, 0.55);
 }
 
 /* Drawer variant of create button */
@@ -6265,11 +6283,22 @@
   background: rgba(99, 102, 241, 0.15);
 }
 
+.chat-sidebar-create-btn--drawer:disabled {
+  background: rgba(99, 102, 241, 0.03);
+  color: rgba(67, 56, 202, 0.55);
+  border-bottom-color: rgba(226, 232, 240, 0.35);
+}
+
 .chat-sidebar-create-btn--drawer .chat-sidebar-create-btn-icon {
   width: 2.75rem;
   height: 2.75rem;
   background: rgba(99, 102, 241, 0.1);
   color: #4f46e5;
+}
+
+.chat-sidebar-create-btn--drawer:disabled .chat-sidebar-create-btn-icon {
+  background: rgba(99, 102, 241, 0.05);
+  color: rgba(79, 70, 229, 0.55);
 }
 
 /* Sidebar search */
