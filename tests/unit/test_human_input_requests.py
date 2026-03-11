@@ -6,6 +6,7 @@ from django.test import Client, TestCase, override_settings, tag
 
 from api.agent.comms.human_input_requests import (
     create_human_input_request,
+    list_pending_human_input_requests,
     resolve_human_input_request_for_message,
 )
 from api.agent.core.prompt_context import _get_recent_human_input_responses_block
@@ -88,10 +89,14 @@ class HumanInputRequestTests(TestCase):
         *,
         question: str = "Which option works best?",
         options: list[dict[str, str]] | None = None,
+        conversation: PersistentAgentConversation | None = None,
+        requested_via_channel: str = CommsChannel.WEB,
+        originating_step=None,
     ) -> PersistentAgentHumanInputRequest:
         return PersistentAgentHumanInputRequest.objects.create(
             agent=self.agent,
-            conversation=self.conversation,
+            conversation=conversation or self.conversation,
+            originating_step=originating_step,
             question=question,
             options_json=options or [],
             input_mode=(
@@ -99,8 +104,41 @@ class HumanInputRequestTests(TestCase):
                 if options
                 else PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY
             ),
-            requested_via_channel=CommsChannel.WEB,
+            requested_via_channel=requested_via_channel,
             requested_message=self._create_prompt_message(),
+        )
+
+    def _create_cross_channel_message(
+        self,
+        *,
+        channel: str,
+        body: str,
+        raw_payload: dict | None = None,
+    ) -> PersistentAgentMessage:
+        agent_address = "agent@example.com" if channel == CommsChannel.EMAIL else "+15555550100"
+        user_address = "person@example.com" if channel == CommsChannel.EMAIL else "+15555550199"
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=channel,
+            address=agent_address,
+        )
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=channel,
+            address=user_address,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=channel,
+            address=user_address,
+        )
+        return PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=conversation,
+            owner_agent=self.agent,
+            body=body,
+            raw_payload=raw_payload or {"source": "test"},
         )
 
     def test_tool_definition_allows_optional_options(self):
@@ -379,6 +417,133 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.PENDING)
         self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
 
+    def test_email_reply_resolves_single_web_request_when_only_batch_is_open(self):
+        request_obj = self._create_request(
+            question="What's our next foodie destination?",
+            options=[
+                {"key": "sushi", "title": "Sushi", "description": "Fresh fish."},
+                {"key": "ramen", "title": "Ramen", "description": "Hot noodles."},
+            ],
+        )
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body="Sushi",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, request_obj.id)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(request_obj.selected_option_key, "sushi")
+        self.assertEqual(list_pending_human_input_requests(self.agent), [])
+
+    def test_cross_channel_reply_does_not_resolve_when_multiple_batches_are_open_without_reference(self):
+        first_request = self._create_request(question="First question?")
+        second_request = self._create_request(question="Second question?")
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body="Take the metro",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+        self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    def test_email_reply_reference_code_resolves_correct_web_request_across_channels(self):
+        older = self._create_request(
+            question="Older question?",
+            options=[{"key": "sushi", "title": "Sushi", "description": "Fresh fish."}],
+        )
+        newer = self._create_request(question="Newer question?")
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body=f"{older.reference_code} Sushi",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, older.id)
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(older.selected_option_key, "sushi")
+        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    def test_email_reply_resolves_web_batch_from_numbered_answers(self):
+        from api.models import PersistentAgentStep
+
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Cross-channel batch",
+            credits_cost=0,
+        )
+        first_request = self._create_request(
+            question="What's our next foodie destination?",
+            options=[
+                {"key": "sushi", "title": "Sushi", "description": "Fresh fish."},
+                {"key": "ramen", "title": "Ramen", "description": "Hot noodles."},
+            ],
+            originating_step=step,
+        )
+        second_request = self._create_request(
+            question="How should we travel to our next spot?",
+            options=[],
+            originating_step=step,
+        )
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body="1. Sushi\n2. Take the metro",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, first_request.id)
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(first_request.selected_option_key, "sushi")
+        self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(second_request.free_text, "Take the metro")
+        self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
+        self.assertEqual(list_pending_human_input_requests(self.agent), [])
+
+    def test_partial_cross_channel_batch_reply_leaves_unanswered_requests_pending(self):
+        from api.models import PersistentAgentStep
+
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Partial SMS batch",
+            credits_cost=0,
+        )
+        first_request = self._create_request(
+            question="What's our next foodie destination?",
+            options=[],
+            originating_step=step,
+        )
+        second_request = self._create_request(
+            question="How should we travel to our next spot?",
+            options=[],
+            originating_step=step,
+        )
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.SMS,
+            body="2. Take the metro",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, second_request.id)
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+        self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(second_request.free_text, "Take the metro")
+
     def test_prompt_context_block_includes_recent_response(self):
         request_obj = self._create_request(question="What is the status?")
         request_obj.status = PersistentAgentHumanInputRequest.Status.ANSWERED
@@ -488,6 +653,39 @@ class HumanInputRequestApiTests(TestCase):
         self.client = Client()
         self.client.force_login(self.user)
 
+    def _create_cross_channel_message(
+        self,
+        *,
+        channel: str,
+        body: str,
+        raw_payload: dict | None = None,
+    ) -> PersistentAgentMessage:
+        agent_address = "agent@example.com" if channel == CommsChannel.EMAIL else "+15555550100"
+        user_address = "person@example.com" if channel == CommsChannel.EMAIL else "+15555550199"
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=channel,
+            address=agent_address,
+        )
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=channel,
+            address=user_address,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=channel,
+            address=user_address,
+        )
+        return PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=conversation,
+            owner_agent=self.agent,
+            body=body,
+            raw_payload=raw_payload or {"source": "test"},
+        )
+
     def test_timeline_and_response_endpoint(self):
         timeline_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(timeline_response.status_code, 200)
@@ -588,3 +786,15 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(second_request.free_text, "Follow up with a summary.")
         self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
+
+    def test_timeline_pending_requests_clear_after_cross_channel_resolution(self):
+        resolve_human_input_request_for_message(
+            self._create_cross_channel_message(
+                channel=CommsChannel.EMAIL,
+                body="Ship it",
+            )
+        )
+
+        timeline_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(timeline_response.status_code, 200)
+        self.assertEqual(timeline_response.json()["pending_human_input_requests"], [])

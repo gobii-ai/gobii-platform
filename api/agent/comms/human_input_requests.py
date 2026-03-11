@@ -26,6 +26,7 @@ from api.models import (
 HUMAN_INPUT_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 REFERENCE_CODE_RE = re.compile(r"\b(HIR-[A-Z0-9]{6})\b", re.IGNORECASE)
+BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
 MAX_OPTION_COUNT = 6
 
 
@@ -44,6 +45,16 @@ class PreparedHumanInputResponse:
     selected_option_key: str
     selected_option_title: str
     free_text: str
+
+
+@dataclass(slots=True)
+class ResolvedHumanInputResponse:
+    request: PersistentAgentHumanInputRequest
+    selected_option_key: str
+    selected_option_title: str
+    free_text: str
+    resolution_source: str
+    raw_reply_text: str
 
 
 def _coerce_string(value: Any) -> str:
@@ -542,6 +553,206 @@ def _match_option_by_title(
     return None
 
 
+def _batch_key_for_request(request_obj: PersistentAgentHumanInputRequest) -> str:
+    return str(request_obj.originating_step_id or request_obj.id)
+
+
+def _order_requests_for_batch(
+    requests: list[PersistentAgentHumanInputRequest],
+) -> list[PersistentAgentHumanInputRequest]:
+    return sorted(
+        requests,
+        key=lambda request: (
+            request.created_at or timezone.now(),
+            str(request.id),
+        ),
+    )
+
+
+def _get_pending_batch_for_request(
+    request_obj: PersistentAgentHumanInputRequest,
+) -> list[PersistentAgentHumanInputRequest]:
+    queryset = PersistentAgentHumanInputRequest.objects.filter(
+        agent_id=request_obj.agent_id,
+        status=PersistentAgentHumanInputRequest.Status.PENDING,
+    )
+    if request_obj.originating_step_id:
+        queryset = queryset.filter(originating_step_id=request_obj.originating_step_id)
+    else:
+        queryset = queryset.filter(id=request_obj.id)
+    return _order_requests_for_batch(list(queryset))
+
+
+def _get_unambiguous_pending_batch_for_agent(agent_id) -> list[PersistentAgentHumanInputRequest]:
+    request_objects = _order_requests_for_batch(
+        list(
+            PersistentAgentHumanInputRequest.objects.filter(
+                agent_id=agent_id,
+                status=PersistentAgentHumanInputRequest.Status.PENDING,
+            )
+        )
+    )
+    if not request_objects:
+        return []
+
+    batch_members: dict[str, list[PersistentAgentHumanInputRequest]] = {}
+    for request_obj in request_objects:
+        batch_members.setdefault(_batch_key_for_request(request_obj), []).append(request_obj)
+    if len(batch_members) != 1:
+        return []
+    return next(iter(batch_members.values()))
+
+
+def _extract_numbered_batch_answers(text: str) -> list[tuple[int, str]]:
+    numbered_answers: list[tuple[int, str]] = []
+    current_number: int | None = None
+    current_lines: list[str] = []
+
+    for raw_line in (text or "").splitlines():
+        match = BATCH_ANSWER_ENTRY_RE.match(raw_line)
+        if match:
+            if current_number is not None:
+                answer_body = "\n".join(current_lines).strip()
+                if answer_body:
+                    numbered_answers.append((current_number, answer_body))
+            current_number = int(match.group("number"))
+            current_lines = [_coerce_string(match.group("body"))]
+            continue
+        if current_number is not None:
+            current_lines.append(raw_line.rstrip())
+
+    if current_number is not None:
+        answer_body = "\n".join(current_lines).strip()
+        if answer_body:
+            numbered_answers.append((current_number, answer_body))
+    return numbered_answers
+
+
+def _split_paragraph_batch_answers(text: str) -> list[str]:
+    return [chunk.strip() for chunk in re.split(r"\n\s*\n+", text or "") if chunk.strip()]
+
+
+def _resolve_request_response(
+    request_obj: PersistentAgentHumanInputRequest,
+    *,
+    body_text: str,
+    direct_option_key: str = "",
+    direct_option_title: str = "",
+    direct_request_id: str | None = None,
+    reference_code: str | None = None,
+) -> ResolvedHumanInputResponse:
+    cleaned_body = _strip_reference_code(body_text, reference_code)
+    selected_option_key = ""
+    selected_option_title = ""
+    free_text = ""
+    resolution_source = ""
+
+    if direct_request_id and direct_option_key:
+        selected_option_key = direct_option_key
+        selected_option_title = direct_option_title
+        resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.DIRECT
+    elif request_obj.input_mode == PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT:
+        matched_by_number = _match_option_by_number(request_obj, cleaned_body)
+        matched_by_title = _match_option_by_title(request_obj, cleaned_body)
+        if reference_code:
+            resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.REFERENCE_CODE
+        if matched_by_number:
+            selected_option_key, selected_option_title = matched_by_number
+            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.OPTION_NUMBER
+        elif matched_by_title:
+            selected_option_key, selected_option_title = matched_by_title
+            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.OPTION_TITLE
+        else:
+            free_text = cleaned_body
+            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
+    else:
+        free_text = cleaned_body
+        resolution_source = (
+            PersistentAgentHumanInputRequest.ResolutionSource.REFERENCE_CODE
+            if reference_code
+            else PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
+        )
+
+    return ResolvedHumanInputResponse(
+        request=request_obj,
+        selected_option_key=selected_option_key,
+        selected_option_title=selected_option_title,
+        free_text=free_text,
+        resolution_source=resolution_source,
+        raw_reply_text=body_text,
+    )
+
+
+def _apply_resolved_request(
+    resolved: ResolvedHumanInputResponse,
+    *,
+    message: PersistentAgentMessage,
+) -> PersistentAgentHumanInputRequest:
+    request_obj = resolved.request
+    request_obj.selected_option_key = resolved.selected_option_key
+    request_obj.selected_option_title = resolved.selected_option_title
+    request_obj.free_text = resolved.free_text
+    request_obj.raw_reply_text = resolved.raw_reply_text
+    request_obj.raw_reply_message = message
+    request_obj.resolution_source = resolved.resolution_source
+    request_obj.resolved_at = timezone.now()
+    request_obj.status = PersistentAgentHumanInputRequest.Status.ANSWERED
+    request_obj.save(
+        update_fields=[
+            "selected_option_key",
+            "selected_option_title",
+            "free_text",
+            "raw_reply_text",
+            "raw_reply_message",
+            "resolution_source",
+            "resolved_at",
+            "status",
+            "updated_at",
+        ]
+    )
+    return request_obj
+
+
+def _resolve_batch_requests_from_body(
+    requests: list[PersistentAgentHumanInputRequest],
+    *,
+    body_text: str,
+    reference_code: str | None = None,
+) -> list[ResolvedHumanInputResponse]:
+    ordered_requests = _order_requests_for_batch(requests)
+    numbered_answers = _extract_numbered_batch_answers(_strip_reference_code(body_text, reference_code))
+    if numbered_answers:
+        resolved_by_request_id: dict[str, ResolvedHumanInputResponse] = {}
+        for question_number, answer_body in numbered_answers:
+            if question_number < 1 or question_number > len(ordered_requests):
+                continue
+            target_request = ordered_requests[question_number - 1]
+            resolved_by_request_id[str(target_request.id)] = _resolve_request_response(
+                target_request,
+                body_text=answer_body,
+                reference_code=reference_code,
+            )
+        if resolved_by_request_id:
+            return [
+                resolved_by_request_id[str(request.id)]
+                for request in ordered_requests
+                if str(request.id) in resolved_by_request_id
+            ]
+
+    paragraph_answers = _split_paragraph_batch_answers(_strip_reference_code(body_text, reference_code))
+    if len(paragraph_answers) == len(ordered_requests) and len(paragraph_answers) > 1:
+        return [
+            _resolve_request_response(
+                request_obj,
+                body_text=answer_body,
+                reference_code=reference_code,
+            )
+            for request_obj, answer_body in zip(ordered_requests, paragraph_answers)
+        ]
+
+    return []
+
+
 def _resolve_request_candidates(
     message: PersistentAgentMessage,
     direct_request_id: str | None,
@@ -586,67 +797,85 @@ def resolve_human_input_request_for_message(
     direct_option_title = _coerce_string(raw_payload.get("human_input_selected_option_title"))
     body_text = _coerce_string(message.body)
     reference_code = _extract_reference_code(body_text)
-    cleaned_body = _strip_reference_code(body_text, reference_code)
 
     candidates = _resolve_request_candidates(message, direct_request_id, reference_code)
-    if not candidates:
+    resolved_requests: list[ResolvedHumanInputResponse] = []
+
+    if direct_request_id:
+        if not candidates:
+            return None
+        resolved_requests = [
+            _resolve_request_response(
+                candidates[0],
+                body_text=body_text,
+                direct_option_key=direct_option_key,
+                direct_option_title=direct_option_title,
+                direct_request_id=direct_request_id,
+                reference_code=reference_code,
+            )
+        ]
+    elif reference_code:
+        if not candidates:
+            return None
+        referenced_request = candidates[0]
+        referenced_batch = _get_pending_batch_for_request(referenced_request)
+        batch_resolutions = _resolve_batch_requests_from_body(
+            referenced_batch,
+            body_text=body_text,
+            reference_code=reference_code,
+        )
+        if batch_resolutions:
+            resolved_requests = batch_resolutions
+        else:
+            resolved_requests = [
+                _resolve_request_response(
+                    referenced_request,
+                    body_text=body_text,
+                    reference_code=reference_code,
+                )
+            ]
+    elif candidates:
+        resolved_requests = [
+            _resolve_request_response(
+                candidates[0],
+                body_text=body_text,
+                reference_code=reference_code,
+            )
+        ]
+    elif (
+        message.conversation_id
+        and message.conversation.channel in {CommsChannel.EMAIL, CommsChannel.SMS}
+    ):
+        unambiguous_batch = _get_unambiguous_pending_batch_for_agent(message.owner_agent_id)
+        if not unambiguous_batch:
+            return None
+        batch_resolutions = _resolve_batch_requests_from_body(
+            unambiguous_batch,
+            body_text=body_text,
+            reference_code=reference_code,
+        )
+        if batch_resolutions:
+            resolved_requests = batch_resolutions
+        else:
+            resolved_requests = [
+                _resolve_request_response(
+                    unambiguous_batch[0],
+                    body_text=body_text,
+                    reference_code=reference_code,
+                )
+            ]
+
+    if not resolved_requests:
         return None
 
-    request_obj = candidates[0]
-
-    selected_option_key = ""
-    selected_option_title = ""
-    free_text = ""
-    resolution_source = ""
-
-    if direct_request_id and direct_option_key:
-        selected_option_key = direct_option_key
-        selected_option_title = direct_option_title
-        resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.DIRECT
-    elif request_obj.input_mode == PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT:
-        matched_by_number = _match_option_by_number(request_obj, cleaned_body)
-        matched_by_title = _match_option_by_title(request_obj, cleaned_body)
-        if reference_code:
-            resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.REFERENCE_CODE
-        if matched_by_number:
-            selected_option_key, selected_option_title = matched_by_number
-            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.OPTION_NUMBER
-        elif matched_by_title:
-            selected_option_key, selected_option_title = matched_by_title
-            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.OPTION_TITLE
-        else:
-            free_text = cleaned_body
-            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
-    else:
-        free_text = cleaned_body
-        resolution_source = (
-            PersistentAgentHumanInputRequest.ResolutionSource.REFERENCE_CODE
-            if reference_code
-            else PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
+    persisted_requests = [
+        _apply_resolved_request(
+            resolved,
+            message=message,
         )
-
-    request_obj.selected_option_key = selected_option_key
-    request_obj.selected_option_title = selected_option_title
-    request_obj.free_text = free_text
-    request_obj.raw_reply_text = body_text
-    request_obj.raw_reply_message = message
-    request_obj.resolution_source = resolution_source
-    request_obj.resolved_at = timezone.now()
-    request_obj.status = PersistentAgentHumanInputRequest.Status.ANSWERED
-    request_obj.save(
-        update_fields=[
-            "selected_option_key",
-            "selected_option_title",
-            "free_text",
-            "raw_reply_text",
-            "raw_reply_message",
-            "resolution_source",
-            "resolved_at",
-            "status",
-            "updated_at",
-        ]
-    )
-    return request_obj
+        for resolved in resolved_requests
+    ]
+    return persisted_requests[0]
 
 
 def build_human_input_response_message(
