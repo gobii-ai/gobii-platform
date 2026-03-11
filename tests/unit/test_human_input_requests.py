@@ -23,6 +23,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    UserPhoneNumber,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -113,10 +114,11 @@ class HumanInputRequestTests(TestCase):
         *,
         channel: str,
         body: str,
+        sender_address: str | None = None,
         raw_payload: dict | None = None,
     ) -> PersistentAgentMessage:
         agent_address = "agent@example.com" if channel == CommsChannel.EMAIL else "+15555550100"
-        user_address = "person@example.com" if channel == CommsChannel.EMAIL else "+15555550199"
+        user_address = sender_address or (self.user.email if channel == CommsChannel.EMAIL else "+15555550199")
         agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=channel,
@@ -438,6 +440,20 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(request_obj.selected_option_key, "sushi")
         self.assertEqual(list_pending_human_input_requests(self.agent), [])
 
+    def test_cross_channel_reply_from_wrong_sender_does_not_resolve_single_web_batch(self):
+        request_obj = self._create_request(question="What's our next foodie destination?")
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body="Sushi",
+            sender_address="other-person@example.com",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
     def test_cross_channel_reply_does_not_resolve_when_multiple_batches_are_open_without_reference(self):
         first_request = self._create_request(question="First question?")
         second_request = self._create_request(question="Second question?")
@@ -529,6 +545,11 @@ class HumanInputRequestTests(TestCase):
             question="How should we travel to our next spot?",
             options=[],
             originating_step=step,
+        )
+        UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+15555550199",
+            is_verified=True,
         )
         reply = self._create_cross_channel_message(
             channel=CommsChannel.SMS,
@@ -658,10 +679,11 @@ class HumanInputRequestApiTests(TestCase):
         *,
         channel: str,
         body: str,
+        sender_address: str | None = None,
         raw_payload: dict | None = None,
     ) -> PersistentAgentMessage:
         agent_address = "agent@example.com" if channel == CommsChannel.EMAIL else "+15555550100"
-        user_address = "person@example.com" if channel == CommsChannel.EMAIL else "+15555550199"
+        user_address = sender_address or (self.user.email if channel == CommsChannel.EMAIL else "+15555550199")
         agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=channel,

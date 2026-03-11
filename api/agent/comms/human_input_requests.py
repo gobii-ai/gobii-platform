@@ -1,10 +1,12 @@
 """Helpers for persistent-agent human input requests."""
 
 from dataclasses import dataclass
+from email.utils import parseaddr
 import json
 import re
 from typing import Any
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from django.utils.html import escape
@@ -21,6 +23,8 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     build_web_agent_address,
+    parse_web_user_address,
+    UserPhoneNumber,
 )
 
 HUMAN_INPUT_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
@@ -603,6 +607,55 @@ def _get_unambiguous_pending_batch_for_agent(agent_id) -> list[PersistentAgentHu
     return next(iter(batch_members.values()))
 
 
+def _sender_matches_request_identity(
+    request_obj: PersistentAgentHumanInputRequest,
+    message: PersistentAgentMessage,
+) -> bool:
+    if request_obj.conversation.channel != CommsChannel.WEB or not message.from_endpoint_id:
+        return False
+
+    user_id, agent_id = parse_web_user_address(request_obj.conversation.address)
+    if not user_id or agent_id != str(request_obj.agent_id):
+        return False
+
+    sender_address = PersistentAgentCommsEndpoint.normalize_address(
+        message.conversation.channel,
+        message.from_endpoint.address,
+    )
+    if not sender_address:
+        return False
+
+    user_model = get_user_model()
+    try:
+        matched_user = user_model.objects.only("id", "email").get(id=user_id)
+    except user_model.DoesNotExist:
+        return False
+
+    if message.conversation.channel == CommsChannel.EMAIL:
+        sender_email = (parseaddr(sender_address)[1] or sender_address).lower()
+        return sender_email == (matched_user.email or "").strip().lower()
+
+    if message.conversation.channel == CommsChannel.SMS:
+        return UserPhoneNumber.objects.filter(
+            user_id=matched_user.id,
+            phone_number__iexact=sender_address,
+            is_verified=True,
+        ).exists()
+
+    return False
+
+
+def _get_unambiguous_cross_channel_batch_for_message(
+    message: PersistentAgentMessage,
+) -> list[PersistentAgentHumanInputRequest]:
+    request_objects = _get_unambiguous_pending_batch_for_agent(message.owner_agent_id)
+    if not request_objects:
+        return []
+    if not all(_sender_matches_request_identity(request_obj, message) for request_obj in request_objects):
+        return []
+    return request_objects
+
+
 def _extract_numbered_batch_answers(text: str) -> list[tuple[int, str]]:
     numbered_answers: list[tuple[int, str]] = []
     current_number: int | None = None
@@ -846,7 +899,7 @@ def resolve_human_input_request_for_message(
         message.conversation_id
         and message.conversation.channel in {CommsChannel.EMAIL, CommsChannel.SMS}
     ):
-        unambiguous_batch = _get_unambiguous_pending_batch_for_agent(message.owner_agent_id)
+        unambiguous_batch = _get_unambiguous_cross_channel_batch_for_message(message)
         if not unambiguous_batch:
             return None
         batch_resolutions = _resolve_batch_requests_from_body(

@@ -575,15 +575,27 @@ export const AgentComposer = memo(function AgentComposer({
   const handleActiveHumanInputRequestChange = useCallback((nextRequestId: string) => {
     const currentRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null
     const trimmedBody = body.trim()
-    if (currentRequest && trimmedBody) {
-      setDraftHumanInputResponses((current) => ({
-        ...current,
-        [currentRequest.id]: {
-          ...current[currentRequest.id],
-          requestId: currentRequest.id,
-          freeText: trimmedBody,
-        },
-      }))
+    if (currentRequest) {
+      setDraftHumanInputResponses((current) => {
+        const next = { ...current }
+        const existing = next[currentRequest.id]
+        if (trimmedBody) {
+          next[currentRequest.id] = {
+            ...existing,
+            requestId: currentRequest.id,
+            freeText: trimmedBody,
+          }
+        } else if (existing?.selectedOptionKey) {
+          next[currentRequest.id] = {
+            ...existing,
+            requestId: currentRequest.id,
+            freeText: '',
+          }
+        } else {
+          delete next[currentRequest.id]
+        }
+        return next
+      })
     }
     setActiveHumanInputRequestId(nextRequestId)
   }, [activeHumanInputRequestId, body, pendingHumanInputRequests])
