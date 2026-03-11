@@ -68,6 +68,7 @@ from ...models import (
 from ...services.web_sessions import get_active_web_sessions
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
+from .kanban_state import get_kanban_state
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from .llm_config import (
     AgentLLMTier,
@@ -2857,20 +2858,12 @@ def _get_work_completion_prompt(
             assigned_agent=agent,
             status=PersistentAgentKanbanCard.Status.DOING,
         ).values_list("title", flat=True)[:3])
-
-        todo_count = PersistentAgentKanbanCard.objects.filter(
-            assigned_agent=agent,
-            status=PersistentAgentKanbanCard.Status.TODO,
-        ).count()
-
-        open_cards = len(doing_cards) + todo_count
-
-        done_count = PersistentAgentKanbanCard.objects.filter(
-            assigned_agent=agent,
-            status=PersistentAgentKanbanCard.Status.DONE,
-        ).count()
+        kanban_state = get_kanban_state(agent)
     except Exception:
         return None
+
+    open_cards = kanban_state.todo_count + kanban_state.doing_count
+    done_count = kanban_state.done_count
 
     # If all work is done, tell the agent to stop
     if open_cards <= 0:
