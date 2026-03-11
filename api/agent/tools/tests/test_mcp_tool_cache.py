@@ -1,6 +1,7 @@
+import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from django.test import SimpleTestCase, tag, override_settings
 from django.utils import timezone
@@ -225,3 +226,31 @@ class MCPToolCacheTests(SimpleTestCase):
 
         self.assertIn(keep_key, manager._tools_cache)
         self.assertNotIn(drop_key, manager._tools_cache)
+
+    def test_fetch_server_tools_lists_pipedream_once_for_prefetched_apps(self):
+        manager = MCPToolManager()
+        runtime = replace(self._runtime(), name="pipedream")
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.__aexit__.return_value = None
+        client.list_tools.return_value = [
+            SimpleNamespace(
+                name="google_sheets-add-row",
+                description="Add row",
+                inputSchema={"type": "object", "properties": {}},
+            )
+        ]
+
+        tools = asyncio.run(
+            manager._fetch_server_tools(
+                client,
+                runtime,
+                pipedream_context=PipedreamToolCacheContext(
+                    owner_cache_key="user:test",
+                    effective_app_slugs=["google_sheets", "trello"],
+                ),
+            )
+        )
+
+        client.list_tools.assert_awaited_once()
+        self.assertEqual([tool.full_name for tool in tools], ["google_sheets-add-row"])

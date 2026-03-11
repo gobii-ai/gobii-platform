@@ -1278,7 +1278,8 @@ class MCPToolManager:
     ) -> List[MCPToolInfo]:
         """Fetch tools from an MCP server, filtering out blacklisted tools.
 
-        For Pipedream, discover action tools per app slug in sub-agent mode.
+        For Pipedream, discover the effective tool catalog once using the
+        preconfigured app set attached to the runtime headers.
         """
         tools: List[MCPToolInfo] = []
         async with client:
@@ -1287,28 +1288,23 @@ class MCPToolManager:
                 tools.extend(self._convert_tools(server, mcp_tools))
             else:
                 prefetch = self._effective_prefetch_apps(server, pipedream_context)
-                for app_slug in prefetch:
+                try:
+                    app_tools = await client.list_tools()
+                    logger.info(
+                        "Pipedream list_tools returned %d tools for %d app slugs",
+                        len(app_tools or []),
+                        len(prefetch),
+                    )
                     try:
-                        if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:
-                            client.transport.headers["x-pd-app-slug"] = app_slug
-                            client.transport.headers["x-pd-tool-mode"] = "sub-agent"
-                        app_tools = await client.list_tools()
-                        logger.info(
-                            "Pipedream list_tools returned %d tools for app_slug='%s'",
-                            len(app_tools or []),
-                            app_slug,
-                        )
-                        # Log raw tool names from server response (best-effort)
-                        try:
-                            for t in app_tools or []:
-                                name = getattr(t, "name", "<unnamed>")
-                                desc = (getattr(t, "description", None) or "").strip()
-                                logger.info("Pipedream raw tool: %s | %s", name, desc)
-                        except Exception:
-                            logger.exception("Error while logging raw Pipedream tools for '%s'", app_slug)
-                        tools.extend(self._convert_tools(server, app_tools))
-                    except Exception as e:
-                        logger.warning(f"Pipedream prefetch for app '{app_slug}' failed: {e}")
+                        for t in app_tools or []:
+                            name = getattr(t, "name", "<unnamed>")
+                            desc = (getattr(t, "description", None) or "").strip()
+                            logger.info("Pipedream raw tool: %s | %s", name, desc)
+                    except Exception:
+                        logger.exception("Error while logging raw Pipedream tools")
+                    tools.extend(self._convert_tools(server, app_tools))
+                except Exception as e:
+                    logger.warning("Pipedream prefetch failed for app set %s: %s", prefetch, e)
         
         # Note: blacklist logging moved inside converter per-batch
         # Deduplicate by full tool name to avoid repeated entries across app slugs
