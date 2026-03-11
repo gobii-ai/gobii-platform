@@ -1,5 +1,14 @@
 import { jsonFetch, jsonRequest } from './http'
 
+export type EmailProviderDefaults = {
+  smtp_host: string
+  smtp_port: number
+  smtp_security: string
+  imap_host: string
+  imap_port: number
+  imap_security: string
+}
+
 export type AgentEmailSettingsPayload = {
   agent: {
     id: string
@@ -7,16 +16,7 @@ export type AgentEmailSettingsPayload = {
     backUrl: string
     helpUrl: string
   }
-  providerDefaults: {
-    gmail?: {
-      smtp_host: string
-      smtp_port: number
-      smtp_security: string
-      imap_host: string
-      imap_port: number
-      imap_security: string
-    }
-  }
+  providerDefaults: Record<string, EmailProviderDefaults | undefined>
   defaultEmailDomain: string
   endpoint: {
     address: string

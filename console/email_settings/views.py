@@ -32,22 +32,13 @@ from console.api_views import (
     _coerce_bool,
     _parse_json_body,
 )
+from console.email_settings.constants import EMAIL_OAUTH_PROVIDER_DEFAULTS
 from console.forms import AgentEmailAccountConsoleForm
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 
 logger = logging.getLogger(__name__)
 
-EMAIL_OAUTH_PROVIDER_DEFAULTS = {
-    "gmail": {
-        "smtp_host": "smtp.gmail.com",
-        "smtp_port": 587,
-        "smtp_security": "starttls",
-        "imap_host": "imap.gmail.com",
-        "imap_port": 993,
-        "imap_security": "ssl",
-    },
-}
 EMAIL_ENDPOINT_REQUIRED_ERROR = "Please provide a valid email address."
 EMAIL_ENDPOINT_CONFLICT_ERROR = "That email address is already assigned to another agent."
 AGENT_EMAIL_ACCOUNT_COPY_EXCLUDED_FIELDS = {"endpoint", "created_at", "updated_at"}
@@ -402,11 +393,23 @@ def _format_email_connection_error(raw_error: Any) -> str:
     lowered = normalized.lower()
     if "empty username or password" in lowered:
         return "Username or password is missing. Enter both values and try again."
+    if "smtpclientauthentication is disabled for the tenant" in lowered or "smtp auth is disabled" in lowered:
+        return "SMTP AUTH is disabled for this Microsoft 365 tenant or mailbox. Enable authenticated SMTP and try again."
+    if "user is authenticated but not connected" in lowered or "5.7.139" in lowered:
+        return "Microsoft accepted the sign-in but blocked SMTP AUTH for this mailbox. Enable authenticated SMTP and try again."
+    if (
+        "imap is disabled" in lowered
+        or "pop is disabled" in lowered
+        or "application-specific password required" in lowered
+    ):
+        return "IMAP access is disabled for this mailbox. Enable IMAP for the account and try again."
     if (
         "username and password not accepted" in lowered
         or "badcredentials" in lowered
         or "authentication failed" in lowered
         or "invalid credentials" in lowered
+        or "5.7.3 authentication unsuccessful" in lowered
+        or "535 5.7.3" in lowered
     ):
         return "Authentication failed. Check your username and password. For Gmail manual setup, use an app password."
     return normalized or "Connection test failed."

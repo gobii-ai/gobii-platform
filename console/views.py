@@ -91,6 +91,7 @@ from console.daily_credit import (
     parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
+from console.email_settings.constants import EMAIL_OAUTH_PROVIDER_DEFAULTS
 from console.home_metrics import get_console_home_metrics
 from console.role_constants import BILLING_MANAGE_ROLES
 
@@ -6373,16 +6374,7 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
     """Simple console page to edit an agent-owned email account settings."""
     template_name = "console/agent_email_settings.html"
 
-    OAUTH_PROVIDER_DEFAULTS = {
-        "gmail": {
-            "smtp_host": "smtp.gmail.com",
-            "smtp_port": 587,
-            "smtp_security": "starttls",
-            "imap_host": "imap.gmail.com",
-            "imap_port": 993,
-            "imap_security": "ssl",
-        },
-    }
+    OAUTH_PROVIDER_DEFAULTS = EMAIL_OAUTH_PROVIDER_DEFAULTS
 
     def _validate_smtp_connection(self, account: AgentEmailAccount) -> tuple[bool, str]:
         try:

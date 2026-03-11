@@ -15,6 +15,15 @@ import {
   type EmailSettingsSaveRequest,
 } from '../api/agentEmailSettings'
 import { HttpError } from '../api/http'
+import {
+  EMAIL_OAUTH_PROVIDER_CONFIG,
+  EMAIL_PROVIDER_OPTIONS,
+  getProviderLabel,
+  isOAuthProviderKey,
+  matchProviderFromDefaults,
+  type OAuthProviderKey,
+  type ProviderKey,
+} from './agentEmailSettingsProviders'
 
 type AgentEmailSettingsScreenProps = {
   agentId: string
@@ -23,7 +32,6 @@ type AgentEmailSettingsScreenProps = {
   testUrl: string
 }
 
-type ProviderKey = 'gmail' | 'custom'
 type ConnectionType = 'oauth' | 'manual'
 
 type DraftState = {
@@ -48,10 +56,6 @@ type DraftState = {
   imapIdleEnabled: boolean
   pollIntervalSec: string
 }
-
-const oauthScope = 'https://mail.google.com/'
-const gmailAuthEndpoint = 'https://accounts.google.com/o/oauth2/v2/auth'
-const gmailTokenEndpoint = 'https://oauth2.googleapis.com/token'
 
 function randomString(length: number): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~'
@@ -88,18 +92,15 @@ function toPortValue(value: string): number | null {
 }
 
 function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
-  const gmailDefaults = settings.providerDefaults.gmail
   const hasMailDirectionSelected = settings.account.isInboundEnabled || settings.account.isOutboundEnabled
   const hasOAuthConfigured =
     settings.oauth.connected
     || settings.account.smtpAuth === 'oauth2'
     || settings.account.imapAuth === 'oauth2'
-  const inferredProvider: ProviderKey =
-    hasOAuthConfigured
-    || settings.oauth.provider.toLowerCase() === 'gmail'
-    || settings.account.smtpHost === (gmailDefaults?.smtp_host ?? '')
-      ? 'gmail'
-      : 'custom'
+  const oauthProvider = settings.oauth.provider.toLowerCase()
+  const inferredProvider: ProviderKey = isOAuthProviderKey(oauthProvider)
+    ? oauthProvider
+    : (matchProviderFromDefaults(settings.providerDefaults, settings.account.smtpHost) ?? 'custom')
   const hasConfiguredConnection = hasOAuthConfigured || (hasMailDirectionSelected && Boolean(
     settings.account.exists
     || settings.account.smtpHost
@@ -162,22 +163,29 @@ function describeHttpError(error: unknown): string {
   return `${error.status} ${error.statusText}`
 }
 
-function applyGmailDefaults(draft: DraftState, settings: AgentEmailSettingsPayload): DraftState {
-  const gmail = settings.providerDefaults.gmail
-  if (!gmail) {
+function applyProviderDefaults(
+  draft: DraftState,
+  settings: AgentEmailSettingsPayload,
+  provider: ProviderKey,
+): DraftState {
+  if (!isOAuthProviderKey(provider)) {
+    return draft
+  }
+  const defaults = settings.providerDefaults[provider]
+  if (!defaults) {
     return draft
   }
   const oauthMode = draft.connectionType === 'oauth'
   return {
     ...draft,
-    smtpHost: gmail.smtp_host,
-    smtpPort: String(gmail.smtp_port),
-    smtpSecurity: gmail.smtp_security,
+    smtpHost: defaults.smtp_host,
+    smtpPort: String(defaults.smtp_port),
+    smtpSecurity: defaults.smtp_security,
     smtpAuth: oauthMode ? 'oauth2' : 'login',
     smtpUsername: draft.smtpUsername || draft.endpointAddress,
-    imapHost: gmail.imap_host,
-    imapPort: String(gmail.imap_port),
-    imapSecurity: gmail.imap_security,
+    imapHost: defaults.imap_host,
+    imapPort: String(defaults.imap_port),
+    imapSecurity: defaults.imap_security,
     imapAuth: oauthMode ? 'oauth2' : 'login',
     imapUsername: draft.imapUsername || draft.endpointAddress,
     imapFolder: draft.imapFolder || 'INBOX',
@@ -198,12 +206,12 @@ function syncUsernamesWithEndpoint(current: DraftState, endpointAddress: string)
 }
 
 function buildSavePayload(draft: DraftState, previousEndpointAddress: string): EmailSettingsSaveRequest {
-  const oauthMode = draft.provider === 'gmail' && draft.connectionType === 'oauth'
+  const oauthMode = isOAuthProviderKey(draft.provider) && draft.connectionType === 'oauth'
   return {
     endpointAddress: draft.endpointAddress.trim(),
     previousEndpointAddress: previousEndpointAddress.trim(),
     connectionMode: oauthMode ? 'oauth2' : 'custom',
-    oauthProvider: oauthMode ? 'gmail' : '',
+    oauthProvider: oauthMode ? draft.provider : '',
     smtpHost: draft.smtpHost.trim(),
     smtpPort: toPortValue(draft.smtpPort),
     smtpSecurity: draft.smtpSecurity,
@@ -291,6 +299,9 @@ export function AgentEmailSettingsScreen({
 
   const settings = settingsQuery.data
   const defaultEmailDomainLabel = settings?.defaultEmailDomain ? `@${settings.defaultEmailDomain}` : 'default Gobii'
+  const oauthProvider = draft && isOAuthProviderKey(draft.provider) ? draft.provider : null
+  const oauthProviderConfig = oauthProvider ? EMAIL_OAUTH_PROVIDER_CONFIG[oauthProvider] : null
+  const oauthProviderLabel = oauthProviderConfig?.label ?? getProviderLabel(settings?.oauth.provider || '')
 
   useEffect(() => {
     if (!settings) {
@@ -329,7 +340,7 @@ export function AgentEmailSettingsScreen({
       if (settings?.oauth.statusUrl) {
         void fetchEmailOAuthStatus(settings.oauth.statusUrl)
       }
-      setBanner('Gmail OAuth connected. You can now save settings.')
+      setBanner('OAuth connected. You can now save settings.')
       setErrorBanner(null)
     }
     window.addEventListener('storage', handleStorage)
@@ -341,7 +352,7 @@ export function AgentEmailSettingsScreen({
   const hasMailDirection = Boolean(draft && (draft.isInboundEnabled || draft.isOutboundEnabled))
   const hasProvider = Boolean(draft?.provider)
   const hasConnectionType = Boolean(draft?.connectionType)
-  const oauthRequired = Boolean(draft && draft.provider === 'gmail' && draft.connectionType === 'oauth')
+  const oauthRequired = Boolean(draft && isOAuthProviderKey(draft.provider) && draft.connectionType === 'oauth')
   const hasSavedSmtpPassword = Boolean(settings?.account.hasSmtpPassword)
   const hasSavedImapPassword = Boolean(settings?.account.hasImapPassword)
   const setupValid = hasAddress && hasMailDirection && hasProvider && hasConnectionType
@@ -355,10 +366,14 @@ export function AgentEmailSettingsScreen({
     setDraft((current) => (current ? updater(current) : current))
   }, [isResetPending])
 
-  const launchOAuth = useCallback(async (resolvedSettings: AgentEmailSettingsPayload) => {
+  const launchOAuth = useCallback(async (
+    resolvedSettings: AgentEmailSettingsPayload,
+    provider: OAuthProviderKey,
+  ) => {
     if (!resolvedSettings.account.id) {
       throw new Error('Email account was not created yet.')
     }
+    const providerConfig = EMAIL_OAUTH_PROVIDER_CONFIG[provider]
     const popup = window.open('', '_blank')
     if (!popup) {
       throw new Error('Allow pop-ups to continue OAuth.')
@@ -370,9 +385,9 @@ export function AgentEmailSettingsScreen({
 
     const session = await startEmailOAuth(resolvedSettings.oauth.startUrl, {
       account_id: resolvedSettings.account.id,
-      provider: 'gmail',
-      scope: oauthScope,
-      token_endpoint: gmailTokenEndpoint,
+      provider,
+      scope: providerConfig.scope,
+      token_endpoint: providerConfig.tokenEndpoint,
       use_gobii_app: true,
       redirect_uri: callbackUrl,
       state,
@@ -380,9 +395,9 @@ export function AgentEmailSettingsScreen({
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
       metadata: {
-        provider: 'gmail',
-        authorization_endpoint: gmailAuthEndpoint,
-        token_endpoint: gmailTokenEndpoint,
+        provider,
+        authorization_endpoint: providerConfig.authorizationEndpoint,
+        token_endpoint: providerConfig.tokenEndpoint,
         sasl_mechanism: 'XOAUTH2',
       },
     })
@@ -401,19 +416,24 @@ export function AgentEmailSettingsScreen({
       response_type: 'code',
       client_id: session.client_id,
       redirect_uri: callbackUrl,
-      scope: oauthScope,
+      scope: providerConfig.scope,
       state: stateKey,
       code_challenge: codeChallenge,
       code_challenge_method: 'S256',
-      access_type: 'offline',
-      prompt: 'consent',
     })
-    popup.location.href = `${gmailAuthEndpoint}?${params.toString()}`
+    for (const [key, value] of Object.entries(providerConfig.authorizationParams)) {
+      params.set(key, value)
+    }
+    const loginHint = draft?.endpointAddress.trim()
+    if (loginHint) {
+      params.set('login_hint', loginHint)
+    }
+    popup.location.href = `${providerConfig.authorizationEndpoint}?${params.toString()}`
     popup.focus()
-  }, [])
+  }, [draft?.endpointAddress])
 
   const handleConnectOAuth = useCallback(async () => {
-    if (!draft) {
+    if (!draft || !oauthProvider) {
       return
     }
     setErrorBanner(null)
@@ -422,13 +442,17 @@ export function AgentEmailSettingsScreen({
       const ensured = await ensureAccountMutation.mutateAsync({ endpointAddress: draft.endpointAddress.trim() })
       const nextSettings = ensured.settings
       setPendingOAuthSettings(nextSettings)
-      setGuidanceAck(false)
-      setGuidanceError(null)
-      setShowGuidance(true)
+      if (EMAIL_OAUTH_PROVIDER_CONFIG[oauthProvider].guidanceTitle) {
+        setGuidanceAck(false)
+        setGuidanceError(null)
+        setShowGuidance(true)
+        return
+      }
+      await launchOAuth(nextSettings, oauthProvider)
     } catch (error) {
       setErrorBanner(describeHttpError(error))
     }
-  }, [draft, ensureAccountMutation])
+  }, [draft, ensureAccountMutation, launchOAuth, oauthProvider])
 
   const handleContinueFromGuidance = useCallback(async () => {
     if (!guidanceAck) {
@@ -439,14 +463,18 @@ export function AgentEmailSettingsScreen({
       setGuidanceError('Unable to start OAuth right now. Please try again.')
       return
     }
+    if (!oauthProvider) {
+      setGuidanceError('Choose an OAuth provider before continuing.')
+      return
+    }
     setShowGuidance(false)
     setGuidanceError(null)
     try {
-      await launchOAuth(pendingOAuthSettings)
+      await launchOAuth(pendingOAuthSettings, oauthProvider)
     } catch (error) {
       setErrorBanner(error instanceof Error ? error.message : 'Unable to start OAuth.')
     }
-  }, [guidanceAck, launchOAuth, pendingOAuthSettings])
+  }, [guidanceAck, launchOAuth, oauthProvider, pendingOAuthSettings])
 
   const handleDisconnectOAuth = useCallback(async () => {
     if (!settings?.oauth.revokeUrl) {
@@ -687,7 +715,7 @@ export function AgentEmailSettingsScreen({
                           next.imapUsername = current.endpointAddress.trim()
                         }
                       }
-                      return provider === 'gmail' ? applyGmailDefaults(next, settings) : next
+                      return isOAuthProviderKey(provider) ? applyProviderDefaults(next, settings, provider) : next
                     })
                   }}
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -695,8 +723,11 @@ export function AgentEmailSettingsScreen({
                   <option value="" disabled>
                     Select provider
                   </option>
-                  <option value="gmail">Gmail</option>
-                  <option value="custom">Other provider</option>
+                  {EMAIL_PROVIDER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             )}
@@ -707,30 +738,36 @@ export function AgentEmailSettingsScreen({
               </div>
             )}
 
-            {hasMailDirection && draft.provider === 'gmail' && (
+            {hasMailDirection && draft.provider !== 'custom' && hasProvider && (
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-slate-700">Connection Type</p>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() =>
-                      updateDraft((current) =>
-                        applyGmailDefaults({ ...current, connectionType: 'oauth' }, settings),
-                      )
+                      updateDraft((current) => {
+                        if (!isOAuthProviderKey(current.provider)) {
+                          return current
+                        }
+                        return applyProviderDefaults({ ...current, connectionType: 'oauth' }, settings, current.provider)
+                      })
                     }
                     className={`rounded-lg border p-3 text-left text-sm ${
                       draft.connectionType === 'oauth' ? 'border-blue-500 bg-blue-50 text-blue-900' : 'border-blue-200'
                     }`}
                   >
                     <div className="font-semibold">OAuth (recommended)</div>
-                    <div className="mt-1 text-slate-700">Connect using Google OAuth and skip app passwords.</div>
+                    <div className="mt-1 text-slate-700">Connect using {oauthProviderLabel} OAuth and skip manual secrets.</div>
                   </button>
                   <button
                     type="button"
                     onClick={() =>
-                      updateDraft((current) =>
-                        applyGmailDefaults({ ...current, connectionType: 'manual' }, settings),
-                      )
+                      updateDraft((current) => {
+                        if (!isOAuthProviderKey(current.provider)) {
+                          return current
+                        }
+                        return applyProviderDefaults({ ...current, connectionType: 'manual' }, settings, current.provider)
+                      })
                     }
                     className={`rounded-lg border p-3 text-left text-sm ${
                       draft.connectionType === 'manual' ? 'border-blue-500 bg-blue-50 text-blue-900' : 'border-blue-200'
@@ -743,19 +780,24 @@ export function AgentEmailSettingsScreen({
               </div>
             )}
 
-            {hasMailDirection && draft.provider === 'gmail' && !hasConnectionType && (
+            {hasMailDirection && draft.provider !== 'custom' && hasProvider && !hasConnectionType && (
               <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
                 Choose a connection type to continue.
               </div>
             )}
 
-            {hasMailDirection && draft.provider === 'gmail' && draft.connectionType === 'oauth' && (
+            {hasMailDirection && oauthProvider && draft.connectionType === 'oauth' && oauthProviderConfig && (
               <div className="rounded-lg bg-blue-50 p-4 space-y-3">
                 <div className="space-y-2 text-sm">
                   <div className="inline-flex items-center gap-2 text-slate-700">
                     {oauthConnected ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Mail className="h-4 w-4 text-blue-700" />}
-                    <span>{oauthConnected ? 'Gmail OAuth connected' : 'OAuth connection required before saving'}</span>
+                    <span>{oauthConnected ? `${oauthProviderConfig.label} OAuth connected` : `${oauthProviderConfig.label} OAuth connection required before saving`}</span>
                   </div>
+                  {(oauthProvider === 'microsoft' || oauthProvider === 'outlook') && (
+                    <p className="text-slate-700">
+                      Gobii will open Microsoft sign-in in a popup. Tenant consent, authenticated SMTP, or mailbox IMAP settings can still block delivery even after OAuth succeeds.
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -763,7 +805,7 @@ export function AgentEmailSettingsScreen({
                       className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white"
                       disabled={ensureAccountMutation.isPending}
                     >
-                      {ensureAccountMutation.isPending ? 'Preparing...' : 'Connect Gmail OAuth'}
+                      {ensureAccountMutation.isPending ? 'Preparing...' : `Connect ${oauthProviderConfig.label} OAuth`}
                     </button>
                     <button
                       type="button"
@@ -1043,7 +1085,7 @@ export function AgentEmailSettingsScreen({
 
             {oauthRequired && !oauthConnected && (
               <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                Connect Gmail OAuth before saving.
+                Connect {oauthProviderLabel} OAuth before saving.
               </div>
             )}
 
@@ -1093,18 +1135,20 @@ export function AgentEmailSettingsScreen({
           <div className="absolute inset-0 bg-slate-900/60" />
           <div className="relative flex min-h-full items-center justify-center px-4 py-8">
             <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-lg">
-              <h2 className="text-xl font-semibold text-slate-900">Before you continue to Google</h2>
+              <h2 className="text-xl font-semibold text-slate-900">{oauthProviderConfig?.guidanceTitle ?? 'Before you continue'}</h2>
               <p className="mt-2 text-sm text-slate-700">
-                If Google shows an unverified-app warning, click <strong>Advanced</strong>, then <strong>Go to Gobii (unsafe)</strong>.
+                {oauthProviderConfig?.guidanceBody ?? 'Review the provider guidance before continuing.'}
               </p>
-              <img
-                src="/static/images/email/google-oauth-advanced-warning.png"
-                alt="Google warning screen with Advanced highlighted"
-                className="mt-3 w-full rounded-lg border border-slate-200"
-              />
+              {oauthProviderConfig?.guidanceImage && (
+                <img
+                  src={oauthProviderConfig.guidanceImage}
+                  alt={`${oauthProviderConfig.label} OAuth guidance`}
+                  className="mt-3 w-full rounded-lg border border-slate-200"
+                />
+              )}
               <label className="mt-3 inline-flex items-start gap-2 text-sm text-slate-800">
                 <input type="checkbox" checked={guidanceAck} onChange={(event) => setGuidanceAck(event.currentTarget.checked)} className="mt-0.5 rounded" />
-                <span>I understand how to proceed.</span>
+                <span>{oauthProviderConfig?.guidanceConfirmLabel ?? 'I understand how to proceed.'}</span>
               </label>
               {guidanceError && <p className="mt-2 text-xs text-amber-700">{guidanceError}</p>}
               <div className="mt-4 flex justify-end gap-2">
@@ -1112,7 +1156,7 @@ export function AgentEmailSettingsScreen({
                   Cancel
                 </button>
                 <button type="button" onClick={() => void handleContinueFromGuidance()} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white">
-                  Continue to Google
+                  {oauthProviderConfig?.guidanceContinueLabel ?? 'Continue'}
                 </button>
               </div>
             </div>
