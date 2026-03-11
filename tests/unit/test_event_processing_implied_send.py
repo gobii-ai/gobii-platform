@@ -63,6 +63,13 @@ class ImpliedSendTests(TestCase):
         resp.choices = [choice]
         return resp
 
+    def _run_loop(self):
+        with patch(
+            "api.models.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={"success": True, "credit": None, "error_message": None},
+        ):
+            return ep._run_agent_loop(self.agent, is_first_run=False)
+
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
@@ -104,7 +111,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
@@ -171,7 +178,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
@@ -214,7 +221,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
@@ -268,7 +275,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertTrue(mock_send_chat.called)
         params = mock_send_chat.call_args[0][1]
@@ -307,7 +314,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertTrue(mock_send_chat.called)
         self.assertGreaterEqual(len(mock_send_chat.call_args_list), 1)
@@ -351,11 +358,57 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertTrue(mock_send_chat.called)
         params = mock_send_chat.call_args[0][1]
         self.assertTrue(params.get("will_continue_work"))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_is_suppressed_when_work_complete_state_is_active(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Deliver itinerary to Matt",
+            status=PersistentAgentKanbanCard.Status.DONE,
+        )
+
+        resp = self._mock_completion(
+            "-- STOP --",
+            reasoning_content="All cards are done, so I should stop without sending anything.",
+        )
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            self._run_loop()
+
+        self.assertFalse(mock_send_chat.called)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Internal reasoning:",
+            ).exists()
+        )
 
     @patch("api.agent.core.event_processing._should_imply_continue", return_value=False)
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
@@ -407,7 +460,7 @@ class ImpliedSendTests(TestCase):
         ]
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertTrue(mock_send_chat.called)
         params = mock_send_chat.call_args[0][1]
@@ -442,7 +495,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertTrue(mock_send_chat.called)
         params = mock_send_chat.call_args[0][1]
@@ -515,7 +568,7 @@ class ImpliedSendTests(TestCase):
         ]
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertTrue(mock_send_chat.called)
         self.assertEqual(mock_completion.call_count, 2)
@@ -565,7 +618,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertTrue(mock_send_chat.called)
         params = mock_send_chat.call_args[0][1]
@@ -618,7 +671,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         params = mock_send_chat.call_args[0][1]
         self.assertTrue(params.get("will_continue_work"))
@@ -668,7 +721,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         params = mock_send_chat.call_args[0][1]
         self.assertIsNone(params.get("will_continue_work"))
@@ -718,7 +771,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         params = mock_send_chat.call_args[0][1]
         self.assertIsNone(params.get("will_continue_work"))
@@ -768,7 +821,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         params = mock_send_chat.call_args[0][1]
         self.assertIsNone(params.get("will_continue_work"))
@@ -823,7 +876,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         self.assertFalse(mock_send_chat.called)
         self.assertFalse(mock_send_email.called)
@@ -868,7 +921,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         reasoning_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
@@ -917,7 +970,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 5):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         # Should be called MAX_NO_TOOL_STREAK times before auto-sleeping
         # (thinking content doesn't cause immediate stop; streak limit does)
@@ -988,7 +1041,7 @@ class ImpliedSendTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
+            self._run_loop()
 
         # Implied send should NOT have been called (no active web session)
         self.assertFalse(mock_send_chat.called)
