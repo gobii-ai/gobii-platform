@@ -134,7 +134,7 @@ export function PipedreamAppsModal({
   return (
     <Modal
       title="Add Apps"
-      subtitle={`Search available apps and enable additional ones for ${initialSettings.ownerLabel}.`}
+      subtitle="Search available apps and enable additional ones."
       onClose={onClose}
       footer={footer}
       widthClass="sm:max-w-4xl"
@@ -153,7 +153,6 @@ export function PipedreamAppsModal({
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-semibold text-slate-900">Added apps</h3>
-              <p className="text-xs text-slate-500">Included apps stay on automatically. Only the ones you added can be removed here.</p>
             </div>
             <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
               {selectedSlugs.length} selected
