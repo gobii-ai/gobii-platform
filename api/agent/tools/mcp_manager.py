@@ -1295,13 +1295,16 @@ class MCPToolManager:
                         len(app_tools or []),
                         len(prefetch),
                     )
-                    try:
-                        for t in app_tools or []:
-                            name = getattr(t, "name", "<unnamed>")
-                            desc = (getattr(t, "description", None) or "").strip()
-                            logger.info("Pipedream raw tool: %s | %s", name, desc)
-                    except Exception:
-                        logger.exception("Error while logging raw Pipedream tools")
+                    for index, tool in enumerate(app_tools or []):
+                        try:
+                            name = getattr(tool, "name", "<unnamed>")
+                            desc = (getattr(tool, "description", None) or "").strip()
+                            logger.info("Pipedream raw tool[%d]: %s | %s", index, name, desc)
+                        except Exception:
+                            logger.exception(
+                                "Error while logging raw Pipedream tool at index %d",
+                                index,
+                            )
                     tools.extend(self._convert_tools(server, app_tools))
                 except Exception as e:
                     logger.warning("Pipedream prefetch failed for app set %s: %s", prefetch, e)

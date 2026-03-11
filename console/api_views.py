@@ -5238,7 +5238,7 @@ class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         manager = get_mcp_manager()
-        owner_id = str(owner_org.id) if owner_scope == MCPServerConfig.Scope.ORGANIZATION and owner_org else str(request.user.id)
+        owner_id = str(owner_org.id) if owner_scope == MCPServerConfig.Scope.ORGANIZATION else str(owner_user.id)
         manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
         manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
 

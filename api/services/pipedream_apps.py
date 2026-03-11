@@ -17,6 +17,7 @@ from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledT
 
 logger = logging.getLogger(__name__)
 
+PIPEDREAM_RUNTIME_NAME = "pipedream"
 SEARCH_CACHE_TTL_SECONDS = 300
 APP_CACHE_TTL_SECONDS = 1800
 SEARCH_CACHE_PREFIX = "pipedream:apps:search:v1"
@@ -104,7 +105,7 @@ def get_platform_pipedream_app_slugs() -> list[str]:
     config = (
         MCPServerConfig.objects.filter(
             scope=MCPServerConfig.Scope.PLATFORM,
-            name="pipedream",
+            name=PIPEDREAM_RUNTIME_NAME,
             is_active=True,
         )
         .only("prefetch_apps")
@@ -172,7 +173,7 @@ def _delete_disabled_enabled_tools(
         return
 
     pipedream_server_ids = list(
-        MCPServerConfig.objects.filter(name="pipedream").values_list("id", flat=True)
+        MCPServerConfig.objects.filter(name=PIPEDREAM_RUNTIME_NAME).values_list("id", flat=True)
     )
     if not pipedream_server_ids:
         return
@@ -186,7 +187,7 @@ def _delete_disabled_enabled_tools(
         PersistentAgentEnabledTool.objects.filter(
             agent_id__in=agent_ids,
         ).filter(
-            Q(server_config_id__in=pipedream_server_ids) | Q(tool_server="pipedream")
+            Q(server_config_id__in=pipedream_server_ids) | Q(tool_server=PIPEDREAM_RUNTIME_NAME)
         ).filter(
             Q(tool_name__startswith=prefix) | Q(tool_full_name__startswith=prefix)
         ).delete()
