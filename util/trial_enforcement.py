@@ -18,6 +18,9 @@ PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE = (
     "Start a free trial to use personal agents or personal API keys."
 )
 PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH = "personal_free_trial_enforcement"
+# Chat-only recovery path: include incomplete so users with an unfinished checkout
+# can get back into chat long enough to resolve billing, without reopening broader
+# personal-agent creation or API-key access.
 PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES = {"past_due", "unpaid", "incomplete"}
 
 
