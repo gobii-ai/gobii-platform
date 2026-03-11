@@ -7,7 +7,26 @@ export function normalizeTimelineEvent(event: TimelineEvent): TimelineEvent {
     return event
   }
 
-  const candidate = pickHtmlCandidate(event.message.bodyHtml, event.message.bodyText)
+  const explicitHtml = event.message.bodyHtml?.trim()
+  if (explicitHtml) {
+    const sanitized = sanitizeHtml(explicitHtml)
+    if ((event.message.bodyHtml ?? '') === sanitized) {
+      return event
+    }
+
+    return {
+      ...event,
+      message: {
+        ...event.message,
+        bodyHtml: sanitized,
+      },
+    }
+  }
+
+  const channel = event.message.channel?.toLowerCase()
+  const candidate = channel === 'web'
+    ? null
+    : pickHtmlCandidate(undefined, event.message.bodyText)
   if (!candidate) {
     if (event.message.bodyHtml === undefined) {
       return {

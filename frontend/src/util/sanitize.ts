@@ -13,20 +13,23 @@ export function sanitizeHtml(value: string): string {
   })
 }
 
-const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
+const HTML_DOCUMENT_PREFIX_PATTERN = /^<(?:!doctype\s+html|html|body)\b/i
+const HTML_BLOCK_PREFIX_PATTERN = /^<(p|div|table|thead|tbody|tr|td|th|ul|ol|li|blockquote|pre|h[1-6]|section|article|header|footer|nav|main|form|dl|dt|dd|figure|figcaption|hr|address)\b/i
 
 /**
  * Check if content appears to be HTML rather than markdown.
  *
- * Only returns true for content with block-level HTML tags (p, div, table, etc.),
- * NOT for inline elements like <br>, <a>, <img> which are commonly used within markdown.
- * This prevents markdown content with <br> tags from being incorrectly treated as HTML.
+ * Only returns true when the content clearly starts as block HTML.
+ * This keeps markdown that happens to mention literal tags, such as `<p>` inside
+ * inline code, from being promoted into HTML rendering.
  */
 export function looksLikeHtml(value: string | null | undefined): boolean {
   if (!value) return false
-  // Block-level tags that indicate actual HTML content
-  const blockTagPattern = /<(p|div|table|thead|tbody|tr|td|th|ul|ol|li|blockquote|pre|h[1-6]|section|article|header|footer|nav|main|form|dl|dt|dd|figure|figcaption|hr|address)(?:\s[^>]*)?>/i
-  return blockTagPattern.test(value.trim())
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return false
+  }
+  return HTML_DOCUMENT_PREFIX_PATTERN.test(trimmed) || HTML_BLOCK_PREFIX_PATTERN.test(trimmed)
 }
 
 export function pickHtmlCandidate(
@@ -43,7 +46,7 @@ export function pickHtmlCandidate(
     return null
   }
 
-  if (looksLikeHtml(textCandidate) || HTML_TAG_FALLBACK_PATTERN.test(textCandidate)) {
+  if (looksLikeHtml(textCandidate)) {
     return textCandidate
   }
 
