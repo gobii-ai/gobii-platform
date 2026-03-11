@@ -127,12 +127,18 @@ class AgentChatAccessTests(TestCase):
     @patch("util.trial_enforcement.get_active_subscription", return_value=None)
     def test_roster_includes_personal_agent_with_past_due_subscription(self, _mock_get_active_subscription):
         customer = self._fake_customer_with_subscription_status("past_due")
-        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer), \
+             patch("console.agent_addons.get_stripe_customer", return_value=customer):
             response = self.client.get(reverse("console_agent_roster"))
 
         self.assertEqual(response.status_code, 200)
-        roster_ids = {entry["id"] for entry in response.json().get("agents", [])}
+        payload = response.json()
+        roster_ids = {entry["id"] for entry in payload.get("agents", [])}
         self.assertIn(str(self.personal_agent.id), roster_ids)
+        billing_status = payload.get("billingStatus", {})
+        self.assertTrue(billing_status.get("delinquent"))
+        self.assertTrue(billing_status.get("actionable"))
+        self.assertEqual(billing_status.get("reason"), "past_due")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_resolve_agent_allows_shared_personal_agent_for_collaborator(self):

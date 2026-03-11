@@ -128,6 +128,7 @@ from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone,
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.views import build_llm_intelligence_props
 from console.agent_addons import (
+    _build_billing_status_payload,
     build_agent_addons_payload,
     update_contact_pack_quantities,
     update_task_pack_quantities,
@@ -1829,6 +1830,24 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             user=user,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
+        billing_manage_org_ids = set(
+            org_memberships.filter(role__in=BILLING_MANAGE_ROLES).values_list("org_id", flat=True)
+        )
+        can_open_billing = bool(
+            owner_type == "user"
+            or (organization is not None and organization.id in billing_manage_org_ids)
+        )
+        manage_billing_url = None
+        if can_open_billing:
+            manage_billing_url = reverse("billing")
+            if organization is not None:
+                manage_billing_url = f"{manage_billing_url}?org_id={organization.id}"
+        billing_status = _build_billing_status_payload(
+            owner,
+            owner_type,
+            can_open_billing=can_open_billing,
+            manage_billing_url=manage_billing_url,
+        )
         org_ids = set(org_memberships.values_list("org_id", flat=True))
         admin_org_ids = set(
             org_memberships.filter(
@@ -1895,6 +1914,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "requested_agent_status": requested_agent_status,
                 "agent_roster_sort_mode": agent_roster_sort_mode,
                 "favorite_agent_ids": favorite_agent_ids,
+                "billingStatus": billing_status,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,
             }

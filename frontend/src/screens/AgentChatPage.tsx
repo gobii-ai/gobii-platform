@@ -16,6 +16,7 @@ import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
+import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
@@ -2488,7 +2489,7 @@ export function AgentChatPage({
     }
     return '/console/billing/'
   }, [effectiveContext])
-  const billingStatus = addonsPayload?.status?.billing ?? null
+  const billingStatus = addonsPayload?.status?.billing ?? rosterQuery.data?.billingStatus ?? null
   const billingManageUrl = billingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
   const highPriorityBanner = useMemo(() => {
     if (!billingStatus?.delinquent || !billingStatus?.actionable || !billingManageUrl) {
@@ -2762,10 +2763,24 @@ export function AgentChatPage({
       )
     }
     return renderSelectionLayout(
-      <AgentSelectState
-        hasAgents={rosterAgents.length > 0}
-        onCreateAgent={handleCreateAgent}
-      />,
+      <div className="flex w-full flex-col gap-4 pb-6 pt-0">
+        {highPriorityBanner ? (
+          <HighPriorityBanner
+            title={highPriorityBanner.title}
+            message={highPriorityBanner.message}
+            actionLabel={highPriorityBanner.actionLabel}
+            actionHref={highPriorityBanner.actionHref}
+            dismissible={highPriorityBanner.dismissible}
+            tone={highPriorityBanner.tone}
+          />
+        ) : null}
+        <div className="mx-auto flex w-full max-w-3xl px-4">
+          <AgentSelectState
+            hasAgents={rosterAgents.length > 0}
+            onCreateAgent={handleCreateAgent}
+          />
+        </div>
+      </div>,
     )
   }
 
