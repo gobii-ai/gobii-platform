@@ -8,6 +8,7 @@ import type { PendingHumanInputRequest } from '../../types/agentChat'
 type HumanInputComposerPanelProps = {
   requests: PendingHumanInputRequest[]
   activeRequestId: string | null
+  draftResponses?: Record<string, { selectedOptionKey?: string; freeText?: string }>
   disabled?: boolean
   busyRequestId?: string | null
   onActiveRequestChange: (requestId: string) => void
@@ -59,6 +60,7 @@ function OptionDescriptionButton({
 export function HumanInputComposerPanel({
   requests,
   activeRequestId,
+  draftResponses = {},
   disabled = false,
   busyRequestId = null,
   onActiveRequestChange,
@@ -71,6 +73,7 @@ export function HumanInputComposerPanel({
   const activeRequest = requests.find((request) => request.id === activeRequestId) ?? requests[0]
   const activeIndex = Math.max(0, requests.findIndex((request) => request.id === activeRequest.id))
   const isFreeTextOnly = activeRequest.inputMode === 'free_text_only' || activeRequest.options.length === 0
+  const activeDraft = draftResponses[activeRequest.id]
 
   return (
     <section
@@ -120,21 +123,28 @@ export function HumanInputComposerPanel({
         <div className="mt-4 grid gap-2">
           {activeRequest.options.map((option, index) => {
             const isBusy = busyRequestId === activeRequest.id
+            const isSelected = activeDraft?.selectedOptionKey === option.key
             return (
               <div
                 key={option.key}
-                className="flex items-center gap-2 rounded-[0.9rem] border border-slate-200 bg-slate-50 px-2 py-2 transition hover:border-slate-300 hover:bg-slate-100"
+                className={`flex items-center gap-2 rounded-[0.9rem] border px-2 py-2 transition ${
+                  isSelected
+                    ? 'border-sky-300 bg-sky-50'
+                    : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
+                }`}
               >
                 <button
                   type="button"
                   onClick={() => void onSelectOption(activeRequest.id, option.key)}
                   disabled={disabled || isBusy}
-                  className="group flex min-w-0 flex-1 items-center gap-3 rounded-[0.75rem] px-1 py-0.5 text-left disabled:cursor-wait disabled:opacity-60"
+                  className={`group flex min-w-0 flex-1 items-center gap-3 rounded-[0.75rem] px-1 py-0.5 text-left disabled:cursor-wait disabled:opacity-60 ${
+                    isSelected ? 'text-sky-950' : ''
+                  }`}
                 >
-                  <span className="w-5 shrink-0 text-sm font-semibold text-slate-400">
+                  <span className={`w-5 shrink-0 text-sm font-semibold ${isSelected ? 'text-sky-600' : 'text-slate-400'}`}>
                     {index + 1}.
                   </span>
-                  <div className="min-w-0 flex-1 text-sm font-semibold text-slate-900">
+                  <div className={`min-w-0 flex-1 text-sm font-semibold ${isSelected ? 'text-sky-950' : 'text-slate-900'}`}>
                     {option.title}
                   </div>
                 </button>

@@ -53,7 +53,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "Ask the user for input. Use this when you need the human to pick an option, "
                 "answer a question, or provide open-ended feedback. If you pass options, the user "
                 "can choose one OR reply in their own words. If you omit options, the user will "
-                "reply with free text only."
+                "reply with free text only. Keep questions concise and make sure it is only the question without extra fluff."
             ),
             "parameters": {
                 "type": "object",

@@ -487,6 +487,16 @@ export const AgentComposer = memo(function AgentComposer({
   const activeHumanInputRequest =
     pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
     ?? null
+
+  useEffect(() => {
+    if (!activeHumanInputRequest) {
+      return
+    }
+    const draft = draftHumanInputResponses[activeHumanInputRequest.id]
+    const nextBody = draft?.freeText ?? ''
+    setBody((current) => (current === nextBody ? current : nextBody))
+  }, [activeHumanInputRequest, draftHumanInputResponses])
+
   const composerPlaceholder = activeHumanInputRequest
     ? `Other option · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
     : `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
@@ -561,6 +571,22 @@ export const AgentComposer = memo(function AgentComposer({
     onRespondHumanInput,
     pendingHumanInputRequests,
   ])
+
+  const handleActiveHumanInputRequestChange = useCallback((nextRequestId: string) => {
+    const currentRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null
+    const trimmedBody = body.trim()
+    if (currentRequest && trimmedBody) {
+      setDraftHumanInputResponses((current) => ({
+        ...current,
+        [currentRequest.id]: {
+          ...current[currentRequest.id],
+          requestId: currentRequest.id,
+          freeText: trimmedBody,
+        },
+      }))
+    }
+    setActiveHumanInputRequestId(nextRequestId)
+  }, [activeHumanInputRequestId, body, pendingHumanInputRequests])
 
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
@@ -844,9 +870,10 @@ export const AgentComposer = memo(function AgentComposer({
             <HumanInputComposerPanel
               requests={pendingHumanInputRequests}
               activeRequestId={activeHumanInputRequestId}
+              draftResponses={draftHumanInputResponses}
               disabled={disabled || isSending}
               busyRequestId={busyHumanInputRequestId}
-              onActiveRequestChange={setActiveHumanInputRequestId}
+              onActiveRequestChange={handleActiveHumanInputRequestChange}
               onSelectOption={handleSelectHumanInputOption}
             />
           </div>
