@@ -128,6 +128,7 @@ class MCPToolCacheTests(SimpleTestCase):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream")
         manager._tools_cache[runtime.config_id] = [self._tool(runtime.config_id, "google_sheets-create-spreadsheet")]
+        manager._tool_cache_fingerprints[runtime.config_id] = manager._build_tool_cache_fingerprint(runtime)
 
         with patch.object(manager, "_get_pipedream_access_token", return_value="token"):
             self.assertTrue(manager._ensure_runtime_registered(runtime, require_client=True))
@@ -136,6 +137,7 @@ class MCPToolCacheTests(SimpleTestCase):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream")
         manager._tools_cache[runtime.config_id] = [self._tool(runtime.config_id, "google_sheets-create-spreadsheet")]
+        manager._tool_cache_fingerprints[runtime.config_id] = manager._build_tool_cache_fingerprint(runtime)
 
         with patch.object(manager, "_get_pipedream_access_token", return_value=None):
             self.assertFalse(manager._ensure_runtime_registered(runtime, require_client=True))
@@ -144,6 +146,7 @@ class MCPToolCacheTests(SimpleTestCase):
         manager = MCPToolManager()
         runtime = self._runtime()
         manager._tools_cache[runtime.config_id] = [self._tool(runtime.config_id, "mcp_example_first")]
+        manager._tool_cache_fingerprints[runtime.config_id] = manager._build_tool_cache_fingerprint(runtime)
 
         with patch.object(manager, "_register_server") as register_mock:
             self.assertFalse(manager._ensure_runtime_registered(runtime, require_client=True))
@@ -187,6 +190,9 @@ class MCPToolCacheTests(SimpleTestCase):
                 parameters={},
             )
         ]
+        manager._tool_cache_fingerprints[manager._tool_cache_slot_key(runtime, owner_one_context)] = (
+            manager._build_tool_cache_fingerprint(runtime, owner_one_context)
+        )
         manager._tools_cache[manager._tool_cache_slot_key(runtime, owner_two_context)] = [
             MCPToolInfo(
                 config_id=runtime.config_id,
@@ -197,6 +203,9 @@ class MCPToolCacheTests(SimpleTestCase):
                 parameters={},
             )
         ]
+        manager._tool_cache_fingerprints[manager._tool_cache_slot_key(runtime, owner_two_context)] = (
+            manager._build_tool_cache_fingerprint(runtime, owner_two_context)
+        )
 
         with patch.object(manager, "_needs_refresh", return_value=False):
             with patch("api.agent.tools.mcp_manager.agent_accessible_server_configs", return_value=[SimpleNamespace(id=runtime.config_id)]):
@@ -212,6 +221,60 @@ class MCPToolCacheTests(SimpleTestCase):
         self.assertEqual([tool.full_name for tool in agent_one_tools], ["trello-create-card"])
         self.assertEqual([tool.full_name for tool in agent_two_tools], ["slack-send-message"])
 
+    def test_ensure_runtime_registered_reregisters_when_pipedream_apps_change_for_same_owner(self):
+        manager = MCPToolManager()
+        runtime = replace(self._runtime(), name="pipedream", config_id="pd-config")
+        original_context = PipedreamToolCacheContext(
+            owner_cache_key="user:one",
+            effective_app_slugs=["trello"],
+        )
+        updated_context = PipedreamToolCacheContext(
+            owner_cache_key="user:one",
+            effective_app_slugs=["slack"],
+        )
+        slot_key = manager._tool_cache_slot_key(runtime, original_context)
+        manager._tools_cache[slot_key] = [
+            MCPToolInfo(
+                config_id=runtime.config_id,
+                full_name="trello-create-card",
+                server_name="pipedream",
+                tool_name="trello-create-card",
+                description="Trello",
+                parameters={},
+            )
+        ]
+        manager._tool_cache_fingerprints[slot_key] = manager._build_tool_cache_fingerprint(runtime, original_context)
+
+        def _fake_register(server, *, agent=None, force_local=False, prefer_cache=True, pipedream_context=None):
+            new_slot_key = manager._tool_cache_slot_key(server, pipedream_context)
+            manager._tools_cache[new_slot_key] = [
+                MCPToolInfo(
+                    config_id=server.config_id,
+                    full_name="slack-send-message",
+                    server_name="pipedream",
+                    tool_name="slack-send-message",
+                    description="Slack",
+                    parameters={},
+                )
+            ]
+            manager._tool_cache_fingerprints[new_slot_key] = manager._build_tool_cache_fingerprint(
+                server,
+                pipedream_context,
+            )
+
+        with patch.object(manager, "_register_server", side_effect=_fake_register) as register_mock:
+            self.assertTrue(manager._ensure_runtime_registered(runtime, pipedream_context=updated_context))
+
+        register_mock.assert_called_once()
+        self.assertEqual(
+            [tool.full_name for tool in manager._tools_cache[slot_key]],
+            ["slack-send-message"],
+        )
+        self.assertEqual(
+            manager._tool_cache_fingerprints[slot_key],
+            manager._build_tool_cache_fingerprint(runtime, updated_context),
+        )
+
     def test_invalidate_pipedream_owner_cache_removes_only_matching_slot(self):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream", config_id="pd-config")
@@ -221,6 +284,8 @@ class MCPToolCacheTests(SimpleTestCase):
         drop_key = manager._tool_cache_slot_key(runtime, drop_context)
         manager._tools_cache[keep_key] = [self._tool(runtime.config_id, "slack-send-message")]
         manager._tools_cache[drop_key] = [self._tool(runtime.config_id, "trello-create-card")]
+        manager._tool_cache_fingerprints[keep_key] = manager._build_tool_cache_fingerprint(runtime, keep_context)
+        manager._tool_cache_fingerprints[drop_key] = manager._build_tool_cache_fingerprint(runtime, drop_context)
 
         manager.invalidate_pipedream_owner_cache("user", "drop")
 
