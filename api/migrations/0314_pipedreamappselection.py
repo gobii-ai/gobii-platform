@@ -7,7 +7,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0310_imagegenerationllmtier_use_case"),
+        ("api", "0313_add_owner_execution_pause_switches"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
