@@ -64,7 +64,6 @@ export async function fetchAgentTimeline(
 
 type PendingHumanInputRequestWire = {
   id?: unknown
-  title?: unknown
   question?: unknown
   options?: unknown
   createdAt?: unknown
@@ -113,9 +112,8 @@ function normalizePendingHumanInputRequest(raw: unknown): PendingHumanInputReque
   }
   const request = raw as PendingHumanInputRequestWire
   const id = asNonEmptyString(request.id)
-  const title = asNonEmptyString(request.title)
   const question = asNonEmptyString(request.question)
-  if (!id || !title || !question) {
+  if (!id || !question) {
     return null
   }
 
@@ -135,7 +133,6 @@ function normalizePendingHumanInputRequest(raw: unknown): PendingHumanInputReque
 
   return {
     id,
-    title,
     question,
     options,
     createdAt: asNonEmptyString(request.createdAt) ?? asNonEmptyString(request.created_at),

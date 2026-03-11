@@ -9311,7 +9311,6 @@ class PersistentAgentHumanInputRequest(models.Model):
         blank=True,
         related_name="human_input_requests",
     )
-    title = models.CharField(max_length=255)
     question = models.TextField()
     options_json = models.JSONField(default=list, blank=True)
     input_mode = models.CharField(

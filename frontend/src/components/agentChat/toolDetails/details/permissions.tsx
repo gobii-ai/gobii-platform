@@ -81,8 +81,8 @@ function normalizeHumanInputOption(value: unknown): HumanInputOptionDetail | nul
 
 export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
   const params = (entry.parameters as Record<string, unknown>) || {}
-  const title = typeof params['title'] === 'string' ? params['title'] : null
   const question = typeof params['question'] === 'string' ? params['question'] : null
+  const requestsRaw = Array.isArray(params['requests']) ? params['requests'] : []
   const optionsRaw = params['options']
   const options = Array.isArray(optionsRaw)
     ? (optionsRaw.map(normalizeHumanInputOption).filter(Boolean) as HumanInputOptionDetail[])
@@ -133,8 +133,10 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
 
   const introText = isNonEmptyString(messageValue)
     ? messageValue
-    : title || question
-      ? [title, question].filter(Boolean).join('\n')
+    : question
+      ? question
+      : requestsRaw.length > 1
+        ? `${requestsRaw.length} questions requested`
       : entry.summary || entry.caption || null
 
   return (

@@ -125,7 +125,7 @@ def _render_prompt_text(
     compact: bool,
     include_reference: bool,
 ) -> str:
-    lines = [request_obj.title.strip(), request_obj.question.strip()]
+    lines = [request_obj.question.strip()]
     options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
     if options:
         lines.append("")
@@ -153,7 +153,6 @@ def _render_prompt_text(
 
 def _render_prompt_html(request_obj: PersistentAgentHumanInputRequest) -> str:
     parts = [
-        f"<p><strong>{escape(request_obj.title)}</strong></p>",
         f"<p>{escape(request_obj.question)}</p>",
     ]
     options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
@@ -203,7 +202,7 @@ def _send_request_prompt(
             agent,
             {
                 "to_address": target.address,
-                "subject": _truncate(f"Quick question: {request_obj.title}", 120),
+                "subject": _truncate(f"Quick question: {request_obj.question}", 120),
                 "mobile_first_html": _render_prompt_html(request_obj),
                 "will_continue_work": False,
             },
@@ -215,7 +214,6 @@ def _create_human_input_request_for_target(
     agent: PersistentAgent,
     target: HumanInputTarget,
     *,
-    title: str,
     question: str,
     raw_options: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
@@ -228,7 +226,6 @@ def _create_human_input_request_for_target(
     request_obj = PersistentAgentHumanInputRequest.objects.create(
         agent=agent,
         conversation=target.conversation,
-        title=title,
         question=question,
         options_json=options,
         input_mode=input_mode,
@@ -263,7 +260,6 @@ def _create_human_input_request_for_target(
 def create_human_input_request(
     agent: PersistentAgent,
     *,
-    title: str,
     question: str,
     raw_options: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
@@ -277,7 +273,6 @@ def create_human_input_request(
     return _create_human_input_request_for_target(
         agent,
         target,
-        title=title,
         question=question,
         raw_options=raw_options,
     )
@@ -300,7 +295,6 @@ def create_human_input_requests_batch(
         result = _create_human_input_request_for_target(
             agent,
             target,
-            title=_coerce_string(request.get("title")),
             question=_coerce_string(request.get("question")),
             raw_options=request.get("options"),
         )
@@ -341,7 +335,6 @@ def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> 
 def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInputRequest) -> dict[str, Any]:
     return {
         "id": str(request_obj.id),
-        "title": request_obj.title,
         "question": request_obj.question,
         "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
         "createdAt": request_obj.created_at.isoformat() if request_obj.created_at else None,
@@ -393,7 +386,6 @@ def serialize_human_input_tool_result(step, raw_result: Any) -> Any:
     result_data.update(
         {
             "request_id": str(request_obj.id),
-            "title": request_obj.title,
             "question": request_obj.question,
             "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
             "status": request_obj.status,
@@ -413,7 +405,6 @@ def serialize_human_input_tool_result(step, raw_result: Any) -> Any:
         result_data["requests"] = [
             {
                 "request_id": str(request.id),
-                "title": request.title,
                 "question": request.question,
                 "options": request.options_json if isinstance(request.options_json, list) else [],
                 "status": request.status,

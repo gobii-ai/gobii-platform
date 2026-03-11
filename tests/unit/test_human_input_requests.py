@@ -2,7 +2,7 @@ import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase, tag
+from django.test import Client, TestCase, override_settings, tag
 
 from api.agent.comms.human_input_requests import (
     create_human_input_request,
@@ -27,6 +27,7 @@ from api.models import (
 )
 
 
+@override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 @tag("batch_human_input")
 class HumanInputRequestTests(TestCase):
     def setUp(self):
@@ -85,14 +86,12 @@ class HumanInputRequestTests(TestCase):
     def _create_request(
         self,
         *,
-        title: str = "Choose one",
         question: str = "Which option works best?",
         options: list[dict[str, str]] | None = None,
     ) -> PersistentAgentHumanInputRequest:
         return PersistentAgentHumanInputRequest.objects.create(
             agent=self.agent,
             conversation=self.conversation,
-            title=title,
             question=question,
             options_json=options or [],
             input_mode=(
@@ -108,8 +107,13 @@ class HumanInputRequestTests(TestCase):
         tool = get_request_human_input_tool()
         function = tool["function"]
         self.assertEqual(function["name"], "request_human_input")
+        self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
+        self.assertEqual(
+            function["parameters"]["properties"]["requests"]["items"]["required"],
+            ["question"],
+        )
 
     @patch("api.agent.comms.human_input_requests.execute_send_chat_message")
     def test_execute_request_human_input_creates_free_text_request(self, mock_send_chat_message):
@@ -119,7 +123,6 @@ class HumanInputRequestTests(TestCase):
         result = execute_request_human_input(
             self.agent,
             {
-                "title": "Missing detail",
                 "question": "What should I tell the team?",
                 "options": [],
             },
@@ -137,7 +140,6 @@ class HumanInputRequestTests(TestCase):
         result = execute_request_human_input(
             self.agent,
             {
-                "title": "Too many",
                 "question": "Which one?",
                 "options": [
                     {"title": f"Option {index}", "description": "Choice"}
@@ -163,12 +165,10 @@ class HumanInputRequestTests(TestCase):
             {
                 "requests": [
                     {
-                        "title": "Question one",
                         "question": "What should happen first?",
                         "options": [{"title": "Ship", "description": "Move now."}],
                     },
                     {
-                        "title": "Question two",
                         "question": "What should happen second?",
                         "options": [],
                     },
@@ -222,7 +222,6 @@ class HumanInputRequestTests(TestCase):
 
         create_human_input_request(
             self.agent,
-            title="Pick a format",
             question="How should I send this?",
             raw_options=[
                 {"title": "Short summary", "description": "A concise update."},
@@ -233,7 +232,7 @@ class HumanInputRequestTests(TestCase):
         self.assertTrue(mock_send_email.called)
         params = mock_send_email.call_args.args[1]
         self.assertEqual(params["to_address"], "person@example.com")
-        self.assertIn("Quick question: Pick a format", params["subject"])
+        self.assertIn("Quick question: How should I send this?", params["subject"])
         self.assertIn("Reply with the number, the option title, or your own words.", params["mobile_first_html"])
         self.assertIn("Short summary", params["mobile_first_html"])
         self.assertIn("Detailed memo", params["mobile_first_html"])
@@ -321,10 +320,7 @@ class HumanInputRequestTests(TestCase):
         )
 
     def test_resolve_free_text_only_request(self):
-        request_obj = self._create_request(
-            title="More detail",
-            question="What should I include?",
-        )
+        request_obj = self._create_request(question="What should I include?")
         reply = PersistentAgentMessage.objects.create(
             is_outbound=False,
             from_endpoint=self.user_endpoint,
@@ -343,12 +339,10 @@ class HumanInputRequestTests(TestCase):
 
     def test_reference_code_targets_older_request(self):
         older = self._create_request(
-            title="Old request",
             question="Old question?",
             options=[{"key": "yes", "title": "Yes", "description": "Proceed"}],
         )
         newer = self._create_request(
-            title="New request",
             question="New question?",
             options=[{"key": "no", "title": "No", "description": "Stop"}],
         )
@@ -371,8 +365,8 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
     def test_latest_open_request_is_fallback_when_ambiguous(self):
-        older = self._create_request(title="Old request", question="Old question?")
-        newer = self._create_request(title="New request", question="New question?")
+        older = self._create_request(question="Old question?")
+        newer = self._create_request(question="New question?")
         reply = PersistentAgentMessage.objects.create(
             is_outbound=False,
             from_endpoint=self.user_endpoint,
@@ -392,7 +386,7 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
 
     def test_prompt_context_block_includes_recent_response(self):
-        request_obj = self._create_request(title="Status", question="What is the status?")
+        request_obj = self._create_request(question="What is the status?")
         request_obj.status = PersistentAgentHumanInputRequest.Status.ANSWERED
         request_obj.free_text = "Ship it tomorrow."
         request_obj.raw_reply_text = "Ship it tomorrow."
@@ -420,7 +414,6 @@ class HumanInputRequestTests(TestCase):
             step=step,
             tool_name="request_human_input",
             tool_params={
-                "title": "Choose a direction",
                 "question": "What should I do next?",
                 "options": [{"title": "Ship it", "description": "Move forward now."}],
             },
@@ -430,7 +423,6 @@ class HumanInputRequestTests(TestCase):
             agent=self.agent,
             conversation=self.conversation,
             originating_step=step,
-            title="Choose a direction",
             question="What should I do next?",
             options_json=[{"key": "ship", "title": "Ship it", "description": "Move forward now."}],
             input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
@@ -449,9 +441,11 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(entry["toolName"], "request_human_input")
         self.assertEqual(entry["result"]["status"], PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(entry["result"]["request_id"], str(request_obj.id))
+        self.assertNotIn("title", entry["result"])
         self.assertEqual(entry["result"]["selected_option_title"], "Ship it")
 
 
+@override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 @tag("batch_human_input")
 class HumanInputRequestApiTests(TestCase):
     def setUp(self):
@@ -492,13 +486,12 @@ class HumanInputRequestApiTests(TestCase):
             to_endpoint=self.user_endpoint,
             conversation=self.conversation,
             owner_agent=self.agent,
-            body="Choose one",
+            body="What should I do next?",
             raw_payload={"source": "test"},
         )
         self.request_obj = PersistentAgentHumanInputRequest.objects.create(
             agent=self.agent,
             conversation=self.conversation,
-            title="Choose a direction",
             question="What should I do next?",
             options_json=[
                 {"key": "ship", "title": "Ship it", "description": "Move forward now."},
@@ -516,6 +509,11 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(timeline_response.status_code, 200)
         timeline_payload = timeline_response.json()
         self.assertEqual(len(timeline_payload["pending_human_input_requests"]), 1)
+        self.assertNotIn("title", timeline_payload["pending_human_input_requests"][0])
+        self.assertEqual(
+            timeline_payload["pending_human_input_requests"][0]["question"],
+            "What should I do next?",
+        )
         self.assertEqual(
             timeline_payload["pending_human_input_requests"][0]["referenceCode"],
             self.request_obj.reference_code,

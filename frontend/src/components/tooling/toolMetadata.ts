@@ -589,25 +589,29 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     detailKind: 'humanInputRequest',
     derive(entry, parameters) {
       const result = parseResultObject(entry.result)
-      const title = coerceString(parameters?.['title']) || coerceString(result?.['title'])
       const question = coerceString(parameters?.['question']) || coerceString(result?.['question'])
+      const batchRequests = Array.isArray(parameters?.['requests']) ? parameters?.['requests'] as unknown[] : []
       const status = coerceString(result?.['status'])?.toLowerCase()
       const inputMode = coerceString(result?.['input_mode']) || coerceString(result?.['inputMode'])
       const optionsRaw = parameters?.['options']
       const optionCount = Array.isArray(optionsRaw) ? optionsRaw.length : 0
+      const requestCountRaw = result?.['requests_count']
+      const requestCount = typeof requestCountRaw === 'number' ? requestCountRaw : batchRequests.length
       const referenceCode = coerceString(result?.['reference_code']) || coerceString(result?.['referenceCode'])
 
       let caption: string | null = null
-      if (status === 'answered') {
-        caption = title ? `Answered: ${truncate(title, 40)}` : 'Answer received'
+      if (status === 'answered' && requestCount <= 1) {
+        caption = question ? `Answered: ${truncate(question, 40)}` : 'Answer received'
+      } else if (requestCount > 1 && status === 'answered') {
+        caption = `Answered ${requestCount} questions`
+      } else if (requestCount > 1) {
+        caption = `Awaiting ${requestCount} questions`
       } else if (optionCount > 0) {
-        caption = title
-          ? `Awaiting choice: ${truncate(title, 40)}`
+        caption = question
+          ? `Awaiting choice: ${truncate(question, 40)}`
           : `Awaiting ${optionCount} option${optionCount === 1 ? '' : 's'}`
       } else if ((inputMode || '').toLowerCase() === 'free_text_only') {
-        caption = title ? `Awaiting reply: ${truncate(title, 42)}` : 'Awaiting free-text reply'
-      } else if (title) {
-        caption = truncate(title, 48)
+        caption = question ? `Awaiting reply: ${truncate(question, 42)}` : 'Awaiting free-text reply'
       } else if (question) {
         caption = truncate(question, 48)
       }

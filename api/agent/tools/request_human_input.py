@@ -30,10 +30,6 @@ def get_request_human_input_tool() -> dict[str, Any]:
     request_schema = {
         "type": "object",
         "properties": {
-            "title": {
-                "type": "string",
-                "description": "Short title for the request shown prominently to the user.",
-            },
             "question": {
                 "type": "string",
                 "description": "Primary question or prompt for the user.",
@@ -46,7 +42,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 ),
             },
         },
-        "required": ["title", "question"],
+        "required": ["question"],
     }
 
     return {
@@ -62,10 +58,6 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "title": {
-                        "type": "string",
-                        "description": "Short title for the request shown prominently to the user.",
-                    },
                     "question": {
                         "type": "string",
                         "description": "Primary question or prompt for the user.",
@@ -82,7 +74,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                         "items": request_schema,
                         "description": (
                             "Optional list of multiple input requests to ask in one tool call. "
-                            "When provided, omit the top-level title/question/options."
+                            "When provided, omit the top-level question/options."
                         ),
                     },
                 },
@@ -146,19 +138,17 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
                     "status": "error",
                     "message": "Each request must be an object.",
                 }
-            title = str(raw_request.get("title") or "").strip()
             question = str(raw_request.get("question") or "").strip()
-            if not title or not question:
+            if not question:
                 return {
                     "status": "error",
-                    "message": "Each request must include title and question.",
+                    "message": "Each request must include question.",
                 }
             options, error = _normalize_request_options(raw_request.get("options"))
             if error:
                 return error
             requests.append(
                 {
-                    "title": title,
                     "question": question,
                     "options": options or [],
                 }
@@ -166,12 +156,11 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
 
         return create_human_input_requests_batch(agent, requests=requests)
 
-    title = str(params.get("title") or "").strip()
     question = str(params.get("question") or "").strip()
-    if not title or not question:
+    if not question:
         return {
             "status": "error",
-            "message": "Missing required parameters: title and question.",
+            "message": "Missing required parameter: question.",
         }
 
     options, error = _normalize_request_options(params.get("options"))
@@ -180,7 +169,6 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
 
     return create_human_input_request(
         agent,
-        title=title,
         question=question,
         raw_options=options or [],
     )

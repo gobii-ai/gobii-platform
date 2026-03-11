@@ -104,7 +104,6 @@ export type PendingHumanInputRequestInputMode = 'options_plus_text' | 'free_text
 
 export type PendingHumanInputRequest = {
   id: string
-  title: string
   question: string
   options: HumanInputOption[]
   createdAt?: string | null

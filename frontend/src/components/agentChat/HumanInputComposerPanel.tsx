@@ -44,7 +44,7 @@ function OptionDescriptionButton({
       </Button>
       <div
         role="tooltip"
-        className={`pointer-events-none absolute right-0 top-full z-50 mt-2 max-w-64 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-700 shadow-xl transition ${
+        className={`pointer-events-none absolute right-0 top-full z-50 mt-2 w-80 max-w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm leading-5 text-slate-700 shadow-xl transition ${
           isPinnedOpen
             ? 'visible opacity-100'
             : 'invisible opacity-0 group-hover/tooltip:visible group-hover/tooltip:opacity-100 group-focus-within/tooltip:visible group-focus-within/tooltip:opacity-100'
@@ -78,14 +78,9 @@ export function HumanInputComposerPanel({
       aria-label="Pending human input request"
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[1.02rem] font-semibold tracking-[-0.02em] text-slate-900">
-            {activeRequest.title}
-          </h3>
-          <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">
-            {activeRequest.question}
-          </p>
-        </div>
+        <p className="min-w-0 flex-1 whitespace-pre-line text-[1.02rem] font-semibold leading-7 tracking-[-0.02em] text-slate-900">
+          {activeRequest.question}
+        </p>
         {requests.length > 1 ? (
           <div className="flex shrink-0 items-center gap-2 text-sm text-slate-500">
             <button

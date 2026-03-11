@@ -16,7 +16,6 @@ class Migration(migrations.Migration):
             name='PersistentAgentHumanInputRequest',
             fields=[
                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('title', models.CharField(max_length=255)),
                 ('question', models.TextField()),
                 ('options_json', models.JSONField(blank=True, default=list)),
                 ('input_mode', models.CharField(choices=[('options_plus_text', 'Options plus text'), ('free_text_only', 'Free text only')], default='free_text_only', max_length=32)),
