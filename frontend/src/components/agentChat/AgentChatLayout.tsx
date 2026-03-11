@@ -144,6 +144,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
+  starterPromptsDisabled?: boolean
+  composerDisabled?: boolean
+  composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
 }
@@ -249,6 +252,9 @@ export function AgentChatLayout({
   llmTierError = null,
   onOpenTaskPacks,
   spawnIntentLoading = false,
+  starterPromptsDisabled = false,
+  composerDisabled = false,
+  composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
@@ -921,7 +927,7 @@ export function AgentChatLayout({
                     prompts={starterPrompts}
                     loading={starterPromptsLoading}
                     loadingCount={starterPromptCount}
-                    disabled={starterPromptSubmitting}
+                    disabled={starterPromptSubmitting || starterPromptsDisabled || composerDisabled}
                     onSelect={handleStarterPromptSelect}
                   />
                 ) : null}
@@ -1021,6 +1027,8 @@ export function AgentChatLayout({
               intelligenceError={llmTierError}
               onOpenTaskPacks={resolvedOpenTaskPacks}
               canManageAgent={canManageAgent}
+              disabled={composerDisabled}
+              disabledReason={composerDisabledReason}
               submitError={composerError}
               showSubmitErrorUpgrade={composerErrorShowUpgrade}
             />

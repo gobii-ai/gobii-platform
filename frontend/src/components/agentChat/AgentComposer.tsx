@@ -102,6 +102,7 @@ const workingPanelStorageCodec = {
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   disabled?: boolean
+  disabledReason?: string | null
   autoFocus?: boolean
   // Key that triggers re-focus when changed (e.g., agentId for switching agents)
   focusKey?: string | null
@@ -134,6 +135,7 @@ type AgentComposerProps = {
 export const AgentComposer = memo(function AgentComposer({
   onSubmit,
   disabled = false,
+  disabledReason = null,
   autoFocus = false,
   focusKey,
   onFocus,
@@ -177,6 +179,9 @@ export const AgentComposer = memo(function AgentComposer({
   const [countdownProgress, setCountdownProgress] = useState(0)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRotationTimeRef = useRef<number>(Date.now())
+  const composerPlaceholder = disabledReason || `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+  const feedbackMessage = disabledReason || submitError
+  const showSubmitErrorAlert = Boolean(submitError && !disabledReason)
 
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
@@ -696,9 +701,13 @@ export const AgentComposer = memo(function AgentComposer({
               />
               <label
                 htmlFor={attachmentInputId}
-                className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-slate-200/60 text-slate-400 transition-all hover:border-slate-300 hover:text-slate-500"
+                className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200/60 text-slate-400 transition-all ${
+                  disabled
+                    ? 'cursor-not-allowed opacity-60'
+                    : 'cursor-pointer hover:border-slate-300 hover:text-slate-500'
+                }`}
                 aria-label="Attach file"
-                title="Attach file"
+                title={disabledReason || 'Attach file'}
               >
                 <Paperclip className="h-4 w-4" aria-hidden="true" />
               </label>
@@ -707,7 +716,7 @@ export const AgentComposer = memo(function AgentComposer({
                 rows={1}
                 required={attachments.length === 0}
                 className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:outline-none focus:ring-0"
-                placeholder={`Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`}
+                placeholder={composerPlaceholder}
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 onKeyDown={handleKeyDown}
@@ -739,7 +748,7 @@ export const AgentComposer = memo(function AgentComposer({
                 type="submit"
                 className="composer-send-button"
                 disabled={disabled || isSending || (!body.trim() && attachments.length === 0)}
-                title={isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`}
+                title={disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)}
                 aria-label={isSending ? 'Sending message' : 'Send message'}
               >
                 {isSending ? (
@@ -781,10 +790,14 @@ export const AgentComposer = memo(function AgentComposer({
                 ))}
               </div>
             ) : null}
-            {submitError ? (
-              <div className="composer-submit-error" role="alert" aria-live="polite">
-                <span className="composer-submit-error-text">{submitError}</span>
-                {showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
+            {feedbackMessage ? (
+              <div
+                className="composer-submit-error"
+                role={showSubmitErrorAlert ? 'alert' : undefined}
+                aria-live={showSubmitErrorAlert ? 'polite' : undefined}
+              >
+                <span className="composer-submit-error-text">{feedbackMessage}</span>
+                {!disabledReason && showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
                   <button
                     type="button"
                     className="composer-submit-error-upgrade"

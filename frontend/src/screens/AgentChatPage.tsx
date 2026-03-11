@@ -181,6 +181,10 @@ function resolveCreateAgentDisabledMessage(reason?: string | null, actionable = 
   return prefix
 }
 
+function resolveSendMessageDisabledMessage(): string {
+  return 'Resolve billing before sending more messages.'
+}
+
 const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persistent agents available/i
 
 type CreateAgentErrorState = {
@@ -2155,6 +2159,9 @@ export function AgentChatPage({
 
   const selectedAgentBillingStatus = addonsPayload?.status?.billing ?? null
   const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
+  const sendMessageDisabledReason = !isNewAgent && selectedAgentBillingStatus?.delinquent
+    ? resolveSendMessageDisabledMessage()
+    : null
   const createAgentDisabledReason = currentContextBillingStatus?.delinquent
     ? resolveCreateAgentDisabledMessage(
       currentContextBillingStatus.reason,
@@ -2633,6 +2640,9 @@ export function AgentChatPage({
     if (!activeAgentId && !isNewAgent) {
       return
     }
+    if (sendMessageDisabledReason) {
+      return
+    }
     const hasMessageContent = body.trim().length > 0 || attachments.length > 0
     if (!hasMessageContent) {
       return
@@ -2724,6 +2734,7 @@ export function AgentChatPage({
     refetchBurnRateSummary,
     scrollToBottom,
     sendMessage,
+    sendMessageDisabledReason,
     shouldFetchUsageBurnRate,
   ])
 
@@ -2964,6 +2975,8 @@ export function AgentChatPage({
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
         composerError={createAgentError?.message ?? null}
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
+        composerDisabled={Boolean(sendMessageDisabledReason)}
+        composerDisabledReason={sendMessageDisabledReason}
         events={timelineEvents}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
@@ -3000,6 +3013,7 @@ export function AgentChatPage({
         llmTierSaving={intelligenceBusy}
         llmTierError={intelligenceError}
         spawnIntentLoading={showSpawnIntentLoader}
+        starterPromptsDisabled={Boolean(sendMessageDisabledReason)}
       />
     </div>
   )
