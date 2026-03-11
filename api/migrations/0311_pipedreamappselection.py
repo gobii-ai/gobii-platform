@@ -52,6 +52,16 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="pipedreamappselection",
+            constraint=models.CheckConstraint(
+                condition=(
+                    models.Q(organization__isnull=False, user__isnull=True)
+                    | models.Q(organization__isnull=True, user__isnull=False)
+                ),
+                name="pd_app_selection_exactly_one_owner",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="pipedreamappselection",
             constraint=models.UniqueConstraint(
                 condition=models.Q(organization__isnull=False),
                 fields=("organization",),

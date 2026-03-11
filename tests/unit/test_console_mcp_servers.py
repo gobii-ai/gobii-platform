@@ -24,6 +24,21 @@ from api.services.pipedream_apps import PipedreamCatalogError
 from util.analytics import AnalyticsEvent
 
 
+def _create_console_test_agent(*, user, organization=None, name: str) -> PersistentAgent:
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(BrowserUseAgent, "select_random_proxy", return_value=None))
+        if organization is not None:
+            stack.enter_context(patch.object(PersistentAgent, "_validate_org_seats", return_value=None))
+        browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
+        return PersistentAgent.objects.create(
+            user=user,
+            organization=organization,
+            name=name,
+            charter="",
+            browser_use_agent=browser,
+        )
+
+
 @tag("batch_console_mcp_servers")
 class MCPServerListAPITests(TestCase):
     def setUp(self):
@@ -365,20 +380,6 @@ class PipedreamAppsAPITests(TestCase):
         session["context_name"] = org.name
         session.save()
 
-    def _create_agent(self, *, user, organization=None, name: str) -> PersistentAgent:
-        with ExitStack() as stack:
-            stack.enter_context(patch.object(BrowserUseAgent, "select_random_proxy", return_value=None))
-            if organization is not None:
-                stack.enter_context(patch.object(PersistentAgent, "_validate_org_seats", return_value=None))
-            browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
-            return PersistentAgent.objects.create(
-                user=user,
-                organization=organization,
-                name=name,
-                charter="",
-                browser_use_agent=browser,
-            )
-
     @staticmethod
     def _app(slug: str) -> dict[str, str]:
         return {
@@ -433,6 +434,15 @@ class PipedreamAppsAPITests(TestCase):
             app_slugs=["trello", "slack"],
         )
 
+    def test_patch_rejects_non_string_app_slugs(self):
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({"selected_app_slugs": ["trello", 123]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
     @patch("console.api_views.PipedreamCatalogService.get_apps")
     @patch("console.api_views.get_mcp_manager")
     def test_patch_filters_platform_defaults_from_selected_apps(self, mock_get_mcp_manager, mock_get_apps):
@@ -470,7 +480,7 @@ class PipedreamAppsAPITests(TestCase):
             type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
             for slug in slugs
         ]
-        agent = self._create_agent(user=self.user, name="Cleanup Agent")
+        agent = _create_console_test_agent(user=self.user, name="Cleanup Agent")
         pipedream_server = MCPServerConfig.objects.get(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream")
         PipedreamAppSelection.objects.create(user=self.user, selected_app_slugs=["trello"])
         PersistentAgentEnabledTool.objects.create(
@@ -602,20 +612,6 @@ class MCPServerAssignmentAPITests(TestCase):
         )
         self.client.force_login(self.user)
 
-    def _create_agent(self, *, user, organization=None, name: str) -> PersistentAgent:
-        with ExitStack() as stack:
-            stack.enter_context(patch.object(BrowserUseAgent, "select_random_proxy", return_value=None))
-            if organization is not None:
-                stack.enter_context(patch.object(PersistentAgent, "_validate_org_seats", return_value=None))
-            browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
-            return PersistentAgent.objects.create(
-                user=user,
-                organization=organization,
-                name=name,
-                charter="",
-                browser_use_agent=browser,
-            )
-
     def _set_org_context(self, org: Organization):
         session = self.client.session
         session["context_type"] = "organization"
@@ -631,8 +627,8 @@ class MCPServerAssignmentAPITests(TestCase):
             display_name="User Scope",
             url="https://user.example.com/mcp",
         )
-        agent_one = self._create_agent(user=self.user, name="Alpha")
-        agent_two = self._create_agent(user=self.user, name="Beta")
+        agent_one = _create_console_test_agent(user=self.user, name="Alpha")
+        agent_two = _create_console_test_agent(user=self.user, name="Beta")
         PersistentAgentMCPServer.objects.create(agent=agent_one, server_config=server)
 
         response = self.client.get(reverse("console-mcp-server-assignments", args=[server.id]))
@@ -655,8 +651,8 @@ class MCPServerAssignmentAPITests(TestCase):
             display_name="User Update",
             url="https://update.example.com/mcp",
         )
-        agent_one = self._create_agent(user=self.user, name="One")
-        agent_two = self._create_agent(user=self.user, name="Two")
+        agent_one = _create_console_test_agent(user=self.user, name="One")
+        agent_two = _create_console_test_agent(user=self.user, name="Two")
         PersistentAgentMCPServer.objects.create(agent=agent_one, server_config=server)
         PersistentAgentEnabledTool.objects.create(
             agent=agent_one,
@@ -706,8 +702,8 @@ class MCPServerAssignmentAPITests(TestCase):
             display_name="Org Assign Server",
             url="https://org.example.com/mcp",
         )
-        agent_one = self._create_agent(user=self.user, organization=org, name="Org One")
-        agent_two = self._create_agent(user=self.user, organization=org, name="Org Two")
+        agent_one = _create_console_test_agent(user=self.user, organization=org, name="Org One")
+        agent_two = _create_console_test_agent(user=self.user, organization=org, name="Org Two")
         PersistentAgentEnabledTool.objects.create(
             agent=agent_two,
             tool_full_name="demo.tool",

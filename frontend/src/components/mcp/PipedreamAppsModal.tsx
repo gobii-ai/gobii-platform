@@ -6,10 +6,9 @@ import {
   searchPipedreamApps,
   updatePipedreamAppSettings,
   type PipedreamAppSettings,
-  type PipedreamAppSummary,
 } from '../../api/mcp'
-import { HttpError } from '../../api/http'
 import { Modal } from '../common/Modal'
+import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from './PipedreamAppsShared'
 
 type PipedreamAppsModalProps = {
   settingsUrl: string
@@ -59,7 +58,7 @@ export function PipedreamAppsModal({
       onClose()
     },
     onError: (error) => {
-      const message = resolveErrorMessage(error, 'Unable to update apps.')
+      const message = resolvePipedreamAppsErrorMessage(error, 'Unable to update apps.')
       setStatusMessage(message)
       onError(message)
     },
@@ -170,7 +169,7 @@ export function PipedreamAppsModal({
                   onClick={() => handleRemove(app.slug)}
                   disabled={mutation.isPending}
                 >
-                  <AppIcon app={app} />
+                  <PipedreamAppIcon app={app} />
                   <span>{app.name}</span>
                   <X className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
                 </button>
@@ -204,7 +203,7 @@ export function PipedreamAppsModal({
             </div>
           ) : searchQuery.isError ? (
             <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {resolveErrorMessage(searchQuery.error, 'Unable to search apps.')}
+              {resolvePipedreamAppsErrorMessage(searchQuery.error, 'Unable to search apps.')}
             </div>
           ) : searchResults.length === 0 && !searchQuery.isFetching ? (
             <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-4 text-sm text-slate-600">
@@ -224,7 +223,7 @@ export function PipedreamAppsModal({
                       disabled={mutation.isPending || isPlatform}
                     >
                       <div className="flex min-w-0 items-start gap-3">
-                        <AppIcon app={app} />
+                        <PipedreamAppIcon app={app} />
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="text-sm font-semibold text-slate-900">{app.name}</p>
@@ -266,35 +265,4 @@ export function PipedreamAppsModal({
       </div>
     </Modal>
   )
-}
-
-function AppIcon({ app }: { app: PipedreamAppSummary }) {
-  if (app.iconUrl) {
-    return (
-      <img
-        src={app.iconUrl}
-        alt=""
-        className="h-9 w-9 rounded-lg border border-slate-200 bg-white object-cover"
-        loading="lazy"
-      />
-    )
-  }
-  return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-700">
-      {app.name.slice(0, 2)}
-    </span>
-  )
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof HttpError && typeof error.body === 'object' && error.body && 'error' in error.body) {
-    const message = error.body.error
-    if (typeof message === 'string' && message.trim()) {
-      return message
-    }
-  }
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  return fallback
 }

@@ -63,6 +63,7 @@ from api.services.browser_settings import (
     DEFAULT_MAX_BROWSER_TASKS,
     DEFAULT_VISION_DETAIL_LEVEL,
 )
+from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
 from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
@@ -6676,6 +6677,13 @@ class PipedreamAppSelection(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(organization__isnull=False, user__isnull=True)
+                    | Q(organization__isnull=True, user__isnull=False)
+                ),
+                name="pd_app_selection_exactly_one_owner",
+            ),
             models.UniqueConstraint(
                 fields=["organization"],
                 name="unique_pipedream_app_selection_org",
@@ -6692,27 +6700,6 @@ class PipedreamAppSelection(models.Model):
             models.Index(fields=["user"], name="pd_app_selection_user_idx"),
         ]
 
-    @staticmethod
-    def normalize_app_slugs(values) -> list[str]:
-        if values is None:
-            return []
-        if not isinstance(values, list):
-            raise ValueError("selected_app_slugs must be a list of strings.")
-
-        normalized: list[str] = []
-        seen: set[str] = set()
-        for value in values:
-            if not isinstance(value, str):
-                raise ValueError("selected_app_slugs must be a list of strings.")
-            slug = value.strip().lower()
-            if not slug:
-                continue
-            if slug in seen:
-                continue
-            seen.add(slug)
-            normalized.append(slug)
-        return normalized
-
     def clean(self):
         super().clean()
         has_org = bool(self.organization_id)
@@ -6720,7 +6707,11 @@ class PipedreamAppSelection(models.Model):
         if has_org == has_user:
             raise ValidationError("Pipedream app selections must reference exactly one owner.")
         try:
-            self.selected_app_slugs = self.normalize_app_slugs(self.selected_app_slugs)
+            self.selected_app_slugs = normalize_pipedream_app_slugs(
+                self.selected_app_slugs,
+                strict=True,
+                require_list=True,
+            )
         except ValueError as exc:
             raise ValidationError({"selected_app_slugs": str(exc)}) from exc
 

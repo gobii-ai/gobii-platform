@@ -5,6 +5,7 @@ import { Loader2, Plus, Sparkles } from 'lucide-react'
 import { fetchPipedreamAppSettings, type PipedreamAppSummary } from '../../api/mcp'
 import { useModal } from '../../hooks/useModal'
 import { PipedreamAppsModal } from './PipedreamAppsModal'
+import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from './PipedreamAppsShared'
 
 type PipedreamAppsPanelProps = {
   settingsUrl: string
@@ -74,7 +75,7 @@ export function PipedreamAppsPanel({
         ) : settingsQuery.isError ? (
           <div className="px-6 py-5">
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {resolveErrorMessage(settingsQuery.error, 'Unable to load apps right now.')}
+              {resolvePipedreamAppsErrorMessage(settingsQuery.error, 'Unable to load apps right now.')}
             </div>
           </div>
         ) : settingsQuery.data ? (
@@ -132,7 +133,7 @@ function AppColumn({
               key={app.slug}
               className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${accentClass}`}
             >
-              <AppIcon app={app} />
+              <PipedreamAppIcon app={app} size="sm" />
               <span className={tone === 'platform' ? 'text-slate-800' : 'text-blue-900'}>{app.name}</span>
             </span>
           ))}
@@ -144,29 +145,4 @@ function AppColumn({
       )}
     </div>
   )
-}
-
-function AppIcon({ app }: { app: PipedreamAppSummary }) {
-  if (app.iconUrl) {
-    return (
-      <img
-        src={app.iconUrl}
-        alt=""
-        className="h-6 w-6 rounded-lg border border-slate-200 bg-white object-cover"
-        loading="lazy"
-      />
-    )
-  }
-  return (
-    <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-[10px] font-semibold uppercase text-slate-700">
-      {app.name.slice(0, 2)}
-    </span>
-  )
-}
-
-function resolveErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  return fallback
 }

@@ -1,6 +1,8 @@
 """Owner-scoped Pipedream app selection and catalog helpers."""
 
+import hashlib
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -10,6 +12,7 @@ from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Q, QuerySet
 
+from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool, PipedreamAppSelection
 
 logger = logging.getLogger(__name__)
@@ -50,36 +53,31 @@ class PipedreamOwnerAppsState:
     effective_app_slugs: list[str]
 
 
-def normalize_app_slug(value: object) -> str:
-    if not isinstance(value, str):
-        return ""
-    slug = value.strip().lower().replace(" ", "_")
-    return slug
-
-
-def normalize_app_slugs(values: Iterable[object]) -> list[str]:
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        slug = normalize_app_slug(value)
-        if not slug or slug in seen:
-            continue
-        seen.add(slug)
-        normalized.append(slug)
-    return normalized
-
-
 def serialize_owner_apps_state(
     state: PipedreamOwnerAppsState,
     catalog: Optional["PipedreamCatalogService"] = None,
 ) -> dict[str, object]:
     catalog_service = catalog or PipedreamCatalogService()
+    app_lookup: dict[str, dict[str, str]] = {}
+    for app in catalog_service.get_apps(
+        normalize_app_slugs(
+            [
+                *state.platform_app_slugs,
+                *state.selected_app_slugs,
+                *state.effective_app_slugs,
+            ]
+        )
+    ):
+        app_data = app.to_dict()
+        slug = str(app_data.get("slug") or "").strip()
+        if slug and slug not in app_lookup:
+            app_lookup[slug] = app_data
     return {
         "owner_scope": state.owner_scope,
         "owner_label": state.owner_label,
-        "platform_apps": [app.to_dict() for app in catalog_service.get_apps(state.platform_app_slugs)],
-        "selected_apps": [app.to_dict() for app in catalog_service.get_apps(state.selected_app_slugs)],
-        "effective_apps": [app.to_dict() for app in catalog_service.get_apps(state.effective_app_slugs)],
+        "platform_apps": [app_lookup[slug] for slug in state.platform_app_slugs if slug in app_lookup],
+        "selected_apps": [app_lookup[slug] for slug in state.selected_app_slugs if slug in app_lookup],
+        "effective_apps": [app_lookup[slug] for slug in state.effective_app_slugs if slug in app_lookup],
     }
 
 
@@ -97,9 +95,9 @@ def build_owner_key(owner_scope: str, owner_id: str) -> str:
 def owner_id_from_scope(owner_scope: str, owner_user=None, owner_org=None) -> str:
     if owner_scope == MCPServerConfig.Scope.ORGANIZATION and owner_org is not None:
         return str(owner_org.id)
-    if owner_user is not None:
+    if owner_scope == MCPServerConfig.Scope.USER and owner_user is not None:
         return str(owner_user.id)
-    return ""
+    raise ValueError(f"Unable to resolve owner id for scope '{owner_scope}'.")
 
 
 def get_platform_pipedream_app_slugs() -> list[str]:
@@ -197,7 +195,7 @@ def _delete_disabled_enabled_tools(
 def set_owner_selected_app_slugs(owner_scope: str, selected_app_slugs: Iterable[object], owner_user=None, owner_org=None) -> list[str]:
     platform_app_slugs = get_platform_pipedream_app_slugs()
     platform_set = set(platform_app_slugs)
-    normalized = [slug for slug in normalize_app_slugs(selected_app_slugs) if slug not in platform_set]
+    normalized = [slug for slug in normalize_app_slugs(selected_app_slugs, strict=True) if slug not in platform_set]
     prior = get_owner_selected_app_slugs(owner_scope, owner_user=owner_user, owner_org=owner_org)
 
     with transaction.atomic():
@@ -227,7 +225,8 @@ def set_owner_selected_app_slugs(owner_scope: str, selected_app_slugs: Iterable[
 
 
 def _search_cache_key(query: str, limit: int) -> str:
-    return f"{SEARCH_CACHE_PREFIX}:{query}:{limit}"
+    query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()
+    return f"{SEARCH_CACHE_PREFIX}:{query_hash}:{limit}"
 
 
 def _app_cache_key(slug: str) -> str:
@@ -346,18 +345,28 @@ class PipedreamCatalogService:
         return parsed
 
     def get_apps(self, slugs: Iterable[str]) -> list[PipedreamAppSummary]:
+        normalized_slugs = normalize_app_slugs(slugs)
+        if not normalized_slugs:
+            return []
+
         results: list[PipedreamAppSummary] = []
-        for slug in normalize_app_slugs(slugs):
-            try:
-                results.append(self.get_app(slug))
-            except PipedreamCatalogError:
-                logger.warning("Failed to hydrate Pipedream app '%s'", slug, exc_info=True)
-                results.append(
-                    PipedreamAppSummary(
-                        slug=slug,
-                        name=slug.replace("_", " "),
-                        description="",
-                        icon_url="",
+        max_workers = min(len(normalized_slugs), 8)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                slug: executor.submit(self.get_app, slug)
+                for slug in normalized_slugs
+            }
+            for slug in normalized_slugs:
+                try:
+                    results.append(futures[slug].result())
+                except PipedreamCatalogError:
+                    logger.warning("Failed to hydrate Pipedream app '%s'", slug, exc_info=True)
+                    results.append(
+                        PipedreamAppSummary(
+                            slug=slug,
+                            name=slug.replace("_", " "),
+                            description="",
+                            icon_url="",
+                        )
                     )
-                )
         return results

@@ -5227,12 +5227,15 @@ class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest("selected_app_slugs must be an array.")
 
         owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
-        selected = set_owner_selected_app_slugs(
-            owner_scope,
-            selected_app_slugs,
-            owner_user=owner_user,
-            owner_org=owner_org,
-        )
+        try:
+            selected = set_owner_selected_app_slugs(
+                owner_scope,
+                selected_app_slugs,
+                owner_user=owner_user,
+                owner_org=owner_org,
+            )
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
 
         manager = get_mcp_manager()
         owner_id = str(owner_org.id) if owner_scope == MCPServerConfig.Scope.ORGANIZATION and owner_org else str(request.user.id)
@@ -5241,10 +5244,10 @@ class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
 
         state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
         try:
-            payload = serialize_owner_apps_state(state, catalog=PipedreamCatalogService())
+            response_data = serialize_owner_apps_state(state, catalog=PipedreamCatalogService())
         except PipedreamCatalogError as exc:
             return JsonResponse({"error": str(exc)}, status=502)
-        return JsonResponse(payload)
+        return JsonResponse(response_data)
 
 
 class PipedreamAppSearchAPIView(ApiLoginRequiredMixin, View):
