@@ -163,6 +163,7 @@ from util.subscription_helper import (
 )
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_access_personal_agent_chat,
     can_user_use_personal_agents_and_api,
 )
 from util.urls import (
@@ -2649,7 +2650,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
-            if can_user_use_personal_agents_and_api(self.request.user):
+            if can_user_access_personal_agent_chat(self.request.user):
                 persistent_agents = PersistentAgent.objects.non_eval().alive().filter(
                     user=self.request.user,
                     organization__isnull=True,  # Only personal agents

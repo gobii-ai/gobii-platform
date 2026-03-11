@@ -1850,6 +1850,37 @@ class ConsoleViewsTest(TestCase):
         mock_get_available.assert_called()
 
     @tag("batch_console_agents")
+    @patch('console.views.can_user_use_personal_agents_and_api', return_value=False)
+    @patch('console.views.can_user_access_personal_agent_chat', return_value=True)
+    def test_agent_list_payload_includes_personal_agents_for_chat_recovery_users(
+        self,
+        _mock_chat_access,
+        _mock_personal_access,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Recovery Browser',
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Recovery Agent',
+            charter='Recover billing in chat',
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse('agents'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = self._get_agent_list_payload(response)
+        self.assertEqual(
+            [agent['name'] for agent in payload['agents']],
+            [persistent_agent.name],
+        )
+        self.assertFalse(payload['canSpawnAgents'])
+
+    @tag("batch_console_agents")
     def test_agent_detail_allows_selecting_dedicated_ip(self):
         from api.models import PersistentAgent, BrowserUseAgent, ProxyServer, DedicatedProxyAllocation
 
