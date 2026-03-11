@@ -16,7 +16,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
-from django.db import transaction, models, IntegrityError, DatabaseError
+from django.db import transaction, models, IntegrityError
 from django.db.models import Q, Sum
 from django.http import (
     FileResponse,
@@ -163,6 +163,7 @@ from util.subscription_helper import (
 )
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_access_personal_agent_chat,
     can_user_use_personal_agents_and_api,
 )
 from util.urls import (
@@ -177,7 +178,7 @@ from console.agent_chat.access import resolve_agent_for_request, user_can_manage
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED, get_plan_config
-from waffle import flag_is_active, get_waffle_flag_model
+from waffle import flag_is_active
 from api.services.email_verification import has_verified_email
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 
@@ -451,13 +452,14 @@ from django.views.decorators.http import require_POST, require_http_methods
 from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSource
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
-from constants.feature_flags import ORGANIZATIONS, PRICING_MODAL_ALMOST_FULL_SCREEN
+from constants.feature_flags import CTA_START_FREE_TRIAL, ORGANIZATIONS, PRICING_MODAL_ALMOST_FULL_SCREEN
 from constants.grant_types import GrantTypeChoices
 from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
+from util.waffle_flags import is_waffle_flag_active
 from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.agent.tasks import process_agent_events_task
@@ -607,14 +609,16 @@ def _is_checkout_trial_eligible(user) -> bool:
 
 def _is_pricing_modal_almost_full_screen_enabled(request: HttpRequest | None) -> bool:
     """Default to enabled when the flag row is missing."""
-    try:
-        Flag = get_waffle_flag_model()
-        flag = Flag.objects.filter(name=PRICING_MODAL_ALMOST_FULL_SCREEN).first()
-        if flag is None:
-            return True
-        return flag.is_active(request)
-    except (DatabaseError, ImproperlyConfigured):
-        return True
+    return is_waffle_flag_active(
+        PRICING_MODAL_ALMOST_FULL_SCREEN,
+        request,
+        default=True,
+    )
+
+
+def _is_cta_start_free_trial_enabled(request: HttpRequest | None) -> bool:
+    """Default to disabled until the rollout is explicitly enabled."""
+    return is_waffle_flag_active(CTA_START_FREE_TRIAL, request, default=False)
 
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
@@ -2102,6 +2106,7 @@ def get_user_plan_api(request):
     startup_trial_days, scale_trial_days = _get_checkout_trial_days()
     trial_eligible = _is_checkout_trial_eligible(request.user)
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
+    cta_start_free_trial = _is_cta_start_free_trial_enabled(request)
 
     try:
         plan = reconcile_user_plan_from_stripe(request.user)
@@ -2119,6 +2124,7 @@ def get_user_plan_api(request):
             'scale_trial_days': scale_trial_days,
             'trial_eligible': trial_eligible,
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
+            'cta_start_free_trial': cta_start_free_trial,
         })
     except Exception as e:
         return JsonResponse({
@@ -2128,6 +2134,7 @@ def get_user_plan_api(request):
             'scale_trial_days': scale_trial_days,
             'trial_eligible': trial_eligible,
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
+            'cta_start_free_trial': cta_start_free_trial,
             'error': str(e),
         })
 
@@ -2643,7 +2650,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
-            if can_user_use_personal_agents_and_api(self.request.user):
+            if can_user_access_personal_agent_chat(self.request.user):
                 persistent_agents = PersistentAgent.objects.non_eval().alive().filter(
                     user=self.request.user,
                     organization__isnull=True,  # Only personal agents
@@ -5707,11 +5714,18 @@ class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
 
 
 class SharedAgentAccessMixin:
+    allow_delinquent_personal_chat = False
+
     def get_object(self, queryset=None):
         agent_id = self.kwargs.get(self.pk_url_kwarg)
         if not agent_id:
             raise Http404
-        agent = resolve_agent_for_request(self.request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            self.request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=self.allow_delinquent_personal_chat,
+        )
         self._can_manage_agent = user_can_manage_agent(self.request.user, agent)
         self._is_collaborator = user_is_collaborator(self.request.user, agent)
         self._can_manage_collaborators = False
@@ -5748,6 +5762,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
     context_object_name = "agent"
     pk_url_kwarg = "pk"
     template_name = "console/persistent_agent_chat_shell.html"
+    allow_delinquent_personal_chat = True
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -5761,6 +5776,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["scale_trial_days"] = scale_trial_days
         context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user)
         context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
+        context["cta_start_free_trial"] = _is_cta_start_free_trial_enabled(self.request)
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
 
@@ -5781,6 +5797,7 @@ class AgentAvatarProxyView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView)
     context_object_name = "agent"
     pk_url_kwarg = "pk"
     http_method_names = ["get"]
+    allow_delinquent_personal_chat = True
 
     def get(self, request, *args, **kwargs):
         agent = self.get_object()

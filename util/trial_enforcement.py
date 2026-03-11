@@ -4,7 +4,11 @@ from django.conf import settings
 from django.db.utils import DatabaseError, OperationalError, ProgrammingError
 
 from constants.plans import PlanNames
-from util.subscription_helper import get_active_subscription
+from util.subscription_helper import (
+    get_active_subscription,
+    get_customer_subscription_candidate,
+    get_stripe_customer,
+)
 from waffle import get_waffle_switch_model
 
 logger = logging.getLogger(__name__)
@@ -14,6 +18,10 @@ PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE = (
     "Start a free trial to use personal agents or personal API keys."
 )
 PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH = "personal_free_trial_enforcement"
+# Chat-only recovery path: include incomplete so users with an unfinished checkout
+# can get back into chat long enough to resolve billing, without reopening broader
+# personal-agent creation or API-key access.
+PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES = {"past_due", "unpaid", "incomplete"}
 
 
 def is_personal_trial_enforcement_enabled() -> bool:
@@ -52,6 +60,40 @@ def is_user_freemium_grandfathered(user) -> bool:
     return bool(flags and getattr(flags, "is_freemium_grandfathered", False))
 
 
+def _normalize_subscription_status(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized or None
+
+
+def _has_delinquent_personal_subscription(user) -> bool:
+    customer = get_stripe_customer(user)
+    if customer is None:
+        return False
+
+    try:
+        subscriptions = list(customer.subscriptions.all())
+    except (AttributeError, TypeError):
+        logger.exception(
+            "Failed to inspect personal subscriptions for delinquent chat access user=%s",
+            getattr(user, "id", None),
+        )
+        return False
+
+    candidate_subscription = get_customer_subscription_candidate(user, subscriptions)
+    if candidate_subscription is None:
+        return False
+
+    stripe_data = getattr(candidate_subscription, "stripe_data", None)
+    status = None
+    if isinstance(stripe_data, dict):
+        status = _normalize_subscription_status(stripe_data.get("status"))
+    if status is None:
+        status = _normalize_subscription_status(getattr(candidate_subscription, "status", None))
+    return status in PERSONAL_CHAT_ALLOWED_DELINQUENT_STATUSES
+
+
 def can_user_use_personal_agents_and_api(user) -> bool:
     if not user or not getattr(user, "pk", None):
         return False
@@ -85,5 +127,23 @@ def can_user_use_personal_agents_and_api(user) -> bool:
         billing = getattr(user, "billing", None)
         allowed = bool(billing and getattr(billing, "subscription", None) != PlanNames.FREE)
 
+    setattr(user, cache_attr, bool(allowed))
+    return bool(allowed)
+
+
+def can_user_access_personal_agent_chat(user) -> bool:
+    if can_user_use_personal_agents_and_api(user):
+        return True
+
+    if not user or not getattr(user, "pk", None):
+        return False
+
+    # Let delinquent paid users reach chat so the UI can direct them back to billing.
+    cache_attr = "_personal_agent_chat_access_allowed"
+    cached = getattr(user, cache_attr, None)
+    if cached is not None:
+        return bool(cached)
+
+    allowed = _has_delinquent_personal_subscription(user)
     setattr(user, cache_attr, bool(allowed))
     return bool(allowed)

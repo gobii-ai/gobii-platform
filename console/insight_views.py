@@ -40,6 +40,7 @@ from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
 from djstripe.models import Price
 from util.subscription_helper import get_organization_plan, reconcile_user_plan_from_stripe
+from util.trial_enforcement import can_user_use_personal_agents_and_api
 from api.services.email_verification import has_verified_email
 
 logger = logging.getLogger(__name__)
@@ -338,6 +339,12 @@ def _get_agent_setup_insights(
     return insights
 
 
+def _should_include_agent_setup_insights(user: Any, agent: PersistentAgent) -> bool:
+    if agent.organization_id is not None:
+        return True
+    return can_user_use_personal_agents_and_api(user)
+
+
 def _estimate_time_saved_minutes(tasks_completed: int, credits_used: Decimal) -> float:
     """
     Estimate time saved based on task count and credit usage.
@@ -552,7 +559,8 @@ def generate_insights_for_agent(
     )
 
     insights: list[dict] = []
-    insights.extend(_get_agent_setup_insights(request, agent, organization))
+    if _should_include_agent_setup_insights(user, agent):
+        insights.extend(_get_agent_setup_insights(request, agent, organization))
 
     time_saved = _get_time_saved_insight(ctx)
     if time_saved:
@@ -577,7 +585,11 @@ class AgentInsightsAPIView(LoginRequiredMixin, View):
 
         # Resolve agent with access check
         try:
-            agent = resolve_agent_for_request(request, agent_id)
+            agent = resolve_agent_for_request(
+                request,
+                agent_id,
+                allow_delinquent_personal_chat=True,
+            )
         except Exception:
             return JsonResponse({"error": "Agent not found"}, status=404)
 

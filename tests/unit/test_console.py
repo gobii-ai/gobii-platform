@@ -279,6 +279,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(payload.get("scale_trial_days"), 30)
         self.assertTrue(payload.get("trial_eligible"))
         self.assertTrue(payload.get("pricing_modal_almost_full_screen"))
+        self.assertFalse(payload.get("cta_start_free_trial"))
         mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
@@ -314,6 +315,41 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("pricing_modal_almost_full_screen"))
+        mock_customer_has_any_individual_subscription.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription")
+    @patch("console.views.get_stripe_customer")
+    @patch("console.views.get_stripe_settings")
+    def test_user_plan_api_includes_cta_start_free_trial_flag_state(
+        self,
+        mock_get_stripe_settings,
+        mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="cta_start_free_trial",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=14,
+            scale_trial_days=30,
+        )
+        mock_get_stripe_customer.return_value = None
+
+        response = self.client.get(reverse("get_user_plan"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload.get("cta_start_free_trial"))
         mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
@@ -374,6 +410,7 @@ class ConsoleViewsTest(TestCase):
         self.assertContains(response, 'data-scale-trial-days="18"')
         self.assertContains(response, 'data-trial-eligible="true"')
         self.assertContains(response, 'data-pricing-modal-almost-full-screen="true"')
+        self.assertContains(response, 'data-cta-start-free-trial="false"')
         self.assertContains(response, 'data-is-staff="false"')
         mock_customer_has_any_individual_subscription.assert_not_called()
 
@@ -422,6 +459,53 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-pricing-modal-almost-full-screen="false"')
+        mock_customer_has_any_individual_subscription.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.customer_has_any_individual_subscription")
+    @patch("console.views.get_stripe_customer")
+    @patch("console.views.get_stripe_settings")
+    def test_agent_chat_shell_exposes_cta_start_free_trial_data_attribute_state(
+        self,
+        mock_get_stripe_settings,
+        mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="cta_start_free_trial",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=9,
+            scale_trial_days=18,
+        )
+        mock_get_stripe_customer.return_value = None
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="CTA Start Free Trial Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="CTA Start Free Trial Agent",
+            charter="CTA start free trial charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-cta-start-free-trial="true"')
         mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
@@ -1187,6 +1271,78 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(billing.get("manageBillingUrl"), "/console/billing/")
 
     @tag("batch_console_agents")
+    def test_agent_addons_api_ignores_billing_delinquency_for_grandfathered_user(self):
+        from api.models import PersistentAgent, BrowserUseAgent, UserFlags
+
+        class FakeSubscriptions:
+            def __init__(self, subscriptions):
+                self._subscriptions = subscriptions
+
+            def all(self):
+                return list(self._subscriptions)
+
+        UserFlags.objects.create(user=self.user, is_freemium_grandfathered=True)
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Grandfathered Billing Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Grandfathered Billing Agent",
+            charter="Billing warning",
+            browser_use_agent=browser_agent,
+        )
+        url = reverse("console_agent_addons", kwargs={"agent_id": agent.id})
+
+        customer = SimpleNamespace(
+            subscriptions=FakeSubscriptions([
+                SimpleNamespace(
+                    id="sub_past_due",
+                    status="past_due",
+                    stripe_data={
+                        "status": "past_due",
+                        "current_period_end": 200,
+                        "created": 100,
+                        "latest_invoice": {
+                            "status": "open",
+                            "payment_intent": {"status": "requires_payment_method"},
+                        },
+                    },
+                )
+            ])
+        )
+
+        with patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.agent_addons.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.agent_addons.get_active_subscription", return_value=None), \
+             patch("console.agent_addons.get_stripe_customer", return_value=customer), \
+             patch(
+                 "console.agent_addons._build_contact_cap_payload",
+                 return_value=(
+                     {
+                         "limit": 100,
+                         "used": 0,
+                         "remaining": 100,
+                         "active": 0,
+                         "pending": 0,
+                         "unlimited": False,
+                     },
+                     False,
+                 ),
+             ), \
+             patch("console.agent_addons._build_contact_pack_options", return_value=[]), \
+             patch("console.agent_addons._build_task_pack_options", return_value=[]):
+            response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        billing = payload.get("status", {}).get("billing", {})
+        self.assertFalse(billing.get("delinquent"))
+        self.assertFalse(billing.get("actionable"))
+        self.assertIsNone(billing.get("reason"))
+
+    @tag("batch_console_agents")
     def test_agent_addons_api_reports_billing_not_delinquent_for_active_subscription(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -1692,6 +1848,37 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(payload['agentsAvailable'], 5)
         self.assertTrue(payload['canSpawnAgents'])
         mock_get_available.assert_called()
+
+    @tag("batch_console_agents")
+    @patch('console.views.can_user_use_personal_agents_and_api', return_value=False)
+    @patch('console.views.can_user_access_personal_agent_chat', return_value=True)
+    def test_agent_list_payload_includes_personal_agents_for_chat_recovery_users(
+        self,
+        _mock_chat_access,
+        _mock_personal_access,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Recovery Browser',
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Recovery Agent',
+            charter='Recover billing in chat',
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse('agents'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = self._get_agent_list_payload(response)
+        self.assertEqual(
+            [agent['name'] for agent in payload['agents']],
+            [persistent_agent.name],
+        )
+        self.assertFalse(payload['canSpawnAgents'])
 
     @tag("batch_console_agents")
     def test_agent_detail_allows_selecting_dedicated_ip(self):

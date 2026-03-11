@@ -128,6 +128,7 @@ from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone,
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.views import build_llm_intelligence_props
 from console.agent_addons import (
+    _build_billing_status_payload,
     build_agent_addons_payload,
     update_contact_pack_quantities,
     update_task_pack_quantities,
@@ -1803,7 +1804,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             to_attr="primary_sms_endpoints",
         )
         agents_qs = (
-            agent_queryset_for(request.user, context_info.current_context)
+            agent_queryset_for(
+                request.user,
+                context_info.current_context,
+                allow_delinquent_personal_chat=True,
+            )
             .select_related("agent_color")
             .prefetch_related(email_prefetch, sms_prefetch)
             .order_by("name")
@@ -1824,6 +1829,24 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         org_memberships = OrganizationMembership.objects.filter(
             user=user,
             status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        billing_manage_org_ids = set(
+            org_memberships.filter(role__in=BILLING_MANAGE_ROLES).values_list("org_id", flat=True)
+        )
+        can_open_billing = bool(
+            owner_type == "user"
+            or (organization is not None and organization.id in billing_manage_org_ids)
+        )
+        manage_billing_url = None
+        if can_open_billing:
+            manage_billing_url = reverse("billing")
+            if organization is not None:
+                manage_billing_url = f"{manage_billing_url}?org_id={organization.id}"
+        billing_status = _build_billing_status_payload(
+            owner,
+            owner_type,
+            can_open_billing=can_open_billing,
+            manage_billing_url=manage_billing_url,
         )
         org_ids = set(org_memberships.values_list("org_id", flat=True))
         admin_org_ids = set(
@@ -1891,6 +1914,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "requested_agent_status": requested_agent_status,
                 "agent_roster_sort_mode": agent_roster_sort_mode,
                 "favorite_agent_ids": favorite_agent_ids,
+                "billingStatus": billing_status,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,
             }
@@ -2255,7 +2279,12 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         if direction_raw not in {"initial", "older", "newer"}:
             return HttpResponseBadRequest("Invalid direction parameter")
         direction = direction_raw  # type: ignore[assignment]
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
 
         cursor = request.GET.get("cursor") or None
         try:
@@ -2288,7 +2317,12 @@ class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "post"]
 
     def get(self, request: HttpRequest, agent_id: str, spawn_request_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         try:
             response_payload = SpawnRequestService.get_request_status(
                 agent=agent,
@@ -2303,7 +2337,12 @@ class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse(response_payload)
 
     def post(self, request: HttpRequest, agent_id: str, spawn_request_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         if not _can_user_resolve_spawn_requests(request.user, agent):
             return JsonResponse({"error": "Not permitted to approve or decline spawn requests."}, status=403)
 
@@ -2338,7 +2377,12 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         attachments: list[Any] = []
         message_text = ""
         if request.content_type and request.content_type.startswith("multipart/form-data"):
@@ -4917,7 +4961,12 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         snapshot = build_processing_snapshot(agent)
         return JsonResponse(
             {
@@ -4932,7 +4981,12 @@ class AgentSuggestionsAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         try:
             prompt_count = int(request.GET.get("prompt_count", DEFAULT_PROMPT_COUNT))
         except (TypeError, ValueError):
@@ -5002,12 +5056,20 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "post"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
         payload = build_agent_quick_settings_payload(agent)
         return JsonResponse(payload)
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
         owner = agent.organization or agent.user
         credit_settings = get_daily_credit_settings_for_owner(owner)
         try:
@@ -5049,7 +5111,11 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
 
     @staticmethod
     def _resolve_agent_addons_context(request: HttpRequest, agent_id: str):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
         owner = agent.organization or agent.user
         plan_payload = (
             get_organization_plan(agent.organization)
@@ -6159,7 +6225,12 @@ class AgentWebSessionStartAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -6192,7 +6263,12 @@ class AgentWebSessionHeartbeatAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -6218,7 +6294,12 @@ class AgentWebSessionEndAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:

@@ -72,6 +72,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
+  createAgentDisabledReason?: string | null
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
@@ -143,6 +144,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
   spawnIntentLoading?: boolean
+  starterPromptsDisabled?: boolean
+  composerDisabled?: boolean
+  composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
 }
@@ -176,6 +180,7 @@ export function AgentChatLayout({
   onSelectAgent,
   onToggleAgentFavorite,
   onCreateAgent,
+  createAgentDisabledReason = null,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
   contextSwitcher,
@@ -247,6 +252,9 @@ export function AgentChatLayout({
   llmTierError = null,
   onOpenTaskPacks,
   spawnIntentLoading = false,
+  starterPromptsDisabled = false,
+  composerDisabled = false,
+  composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
@@ -734,6 +742,7 @@ export function AgentChatLayout({
         onSelectAgent={onSelectAgent}
         onToggleAgentFavorite={onToggleAgentFavorite}
         onCreateAgent={onCreateAgent}
+        createAgentDisabledReason={createAgentDisabledReason}
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
@@ -918,7 +927,7 @@ export function AgentChatLayout({
                     prompts={starterPrompts}
                     loading={starterPromptsLoading}
                     loadingCount={starterPromptCount}
-                    disabled={starterPromptSubmitting}
+                    disabled={starterPromptSubmitting || starterPromptsDisabled || composerDisabled}
                     onSelect={handleStarterPromptSelect}
                   />
                 ) : null}
@@ -1018,6 +1027,8 @@ export function AgentChatLayout({
               intelligenceError={llmTierError}
               onOpenTaskPacks={resolvedOpenTaskPacks}
               canManageAgent={canManageAgent}
+              disabled={composerDisabled}
+              disabledReason={composerDisabledReason}
               submitError={composerError}
               showSubmitErrorUpgrade={composerErrorShowUpgrade}
             />

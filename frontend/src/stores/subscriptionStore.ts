@@ -30,11 +30,13 @@ type SubscriptionState = {
   upgradeModalDismissible: boolean
   isProprietaryMode: boolean
   pricingModalAlmostFullScreen: boolean
+  ctaStartFreeTrial: boolean
   trialDaysByPlan: TrialDaysByPlan
   trialEligible: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
   setProprietaryMode: (isProprietary: boolean) => void
   setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen: boolean) => void
+  setCtaStartFreeTrial: (ctaStartFreeTrial: boolean) => void
   setTrialDaysByPlan: (trialDaysByPlan: TrialDaysByPlan) => void
   setTrialEligible: (trialEligible: boolean) => void
   openUpgradeModal: (source?: UpgradeModalSource, options?: UpgradeModalOptions) => void
@@ -50,11 +52,13 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   upgradeModalDismissible: true,
   isProprietaryMode: false,
   pricingModalAlmostFullScreen: true,
+  ctaStartFreeTrial: false,
   trialDaysByPlan: { startup: 0, scale: 0 },
   trialEligible: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
   setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
   setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen) => set({ pricingModalAlmostFullScreen }),
+  setCtaStartFreeTrial: (ctaStartFreeTrial) => set({ ctaStartFreeTrial }),
   setTrialDaysByPlan: (trialDaysByPlan) => set({ trialDaysByPlan }),
   setTrialEligible: (trialEligible) => set({ trialEligible }),
   openUpgradeModal: (source = 'unknown', options = {}) => set((state) => {
@@ -92,6 +96,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
         currentPlan: plan,
         isProprietaryMode: Boolean(data?.is_proprietary_mode),
         pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
+        ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
         trialDaysByPlan: normalizeTrialDaysByPlan(data),
         trialEligible: normalizeBoolean(data?.trial_eligible),
         isLoading: false,
@@ -111,6 +116,7 @@ type UserPlanPayload = {
   plan?: string | null
   is_proprietary_mode?: boolean
   pricing_modal_almost_full_screen?: boolean | string | null
+  cta_start_free_trial?: boolean | string | null
   startup_trial_days?: number | string | null
   scale_trial_days?: number | string | null
   trial_eligible?: boolean | string | null
@@ -120,6 +126,7 @@ type UserPlanResponse = {
   plan: PlanTier | null
   isProprietaryMode: boolean
   pricingModalAlmostFullScreen: boolean
+  ctaStartFreeTrial: boolean
   trialDaysByPlan: TrialDaysByPlan
   trialEligible: boolean
   authenticated: boolean
@@ -170,6 +177,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         plan: null,
         isProprietaryMode: false,
         pricingModalAlmostFullScreen: true,
+        ctaStartFreeTrial: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
         trialEligible: false,
         authenticated: false,
@@ -180,6 +188,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       plan,
       isProprietaryMode: Boolean(data?.is_proprietary_mode),
       pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
+      ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
       trialDaysByPlan: normalizeTrialDaysByPlan(data),
       trialEligible: normalizeBoolean(data?.trial_eligible),
       authenticated: true,
@@ -190,6 +199,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         plan: null,
         isProprietaryMode: false,
         pricingModalAlmostFullScreen: true,
+        ctaStartFreeTrial: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
         trialEligible: false,
         authenticated: false,
@@ -199,6 +209,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       plan: null,
       isProprietaryMode: false,
       pricingModalAlmostFullScreen: true,
+      ctaStartFreeTrial: false,
       trialDaysByPlan: { startup: 0, scale: 0 },
       trialEligible: false,
       authenticated: true,
@@ -215,6 +226,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   // Check for data attributes first (server-rendered templates)
   const proprietaryAttr = mountElement.dataset.isProprietaryMode
   const pricingModalAlmostFullScreenAttr = mountElement.dataset.pricingModalAlmostFullScreen
+  const ctaStartFreeTrialAttr = mountElement.dataset.ctaStartFreeTrial
   const planAttr = mountElement.dataset.userPlan
   const trialEligibleAttr = mountElement.dataset.trialEligible
   const trialDaysByPlan: TrialDaysByPlan = {
@@ -226,6 +238,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   useSubscriptionStore.getState().setPricingModalAlmostFullScreen(
     normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
   )
+  useSubscriptionStore.getState().setCtaStartFreeTrial(normalizeBoolean(ctaStartFreeTrialAttr))
 
   // If we have both data attributes, use them directly
   if (
@@ -247,6 +260,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       plan,
       isProprietaryMode,
       pricingModalAlmostFullScreen,
+      ctaStartFreeTrial,
       trialDaysByPlan: apiTrialDaysByPlan,
       trialEligible,
     },
@@ -254,6 +268,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     useSubscriptionStore.getState().setCurrentPlan(plan)
     useSubscriptionStore.getState().setProprietaryMode(isProprietaryMode)
     useSubscriptionStore.getState().setPricingModalAlmostFullScreen(pricingModalAlmostFullScreen)
+    useSubscriptionStore.getState().setCtaStartFreeTrial(ctaStartFreeTrial)
     useSubscriptionStore.getState().setTrialDaysByPlan(apiTrialDaysByPlan)
     useSubscriptionStore.getState().setTrialEligible(trialEligible)
   })

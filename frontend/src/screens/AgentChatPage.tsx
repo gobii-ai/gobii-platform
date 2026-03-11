@@ -16,6 +16,7 @@ import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
+import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
@@ -171,6 +172,17 @@ function resolveBillingAlertMessage(reason?: string | null): string {
     default:
       return 'We are unable to process billing for your subscription right now.'
   }
+}
+
+function resolveCreateAgentDisabledMessage(reason?: string | null, actionable = false): string {
+  const prefix = actionable
+    ? `${resolveBillingAlertMessage(reason)} Resolve billing before creating new agents.`
+    : 'New agent creation is unavailable until the workspace billing issue is resolved.'
+  return prefix
+}
+
+function resolveSendMessageDisabledMessage(): string {
+  return 'Resolve billing before sending more messages.'
 }
 
 const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persistent agents available/i
@@ -459,9 +471,16 @@ type AgentNotFoundStateProps = {
   hasOtherAgents: boolean
   deleted?: boolean
   onCreateAgent: () => void
+  createAgentDisabledReason?: string | null
 }
 
-function AgentNotFoundState({ hasOtherAgents, deleted = false, onCreateAgent }: AgentNotFoundStateProps) {
+function AgentNotFoundState({
+  hasOtherAgents,
+  deleted = false,
+  onCreateAgent,
+  createAgentDisabledReason = null,
+}: AgentNotFoundStateProps) {
+  const createAgentDisabled = Boolean(createAgentDisabledReason)
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
       <div className="mb-6 flex size-16 items-center justify-center rounded-full bg-amber-100 text-amber-600">
@@ -480,11 +499,20 @@ function AgentNotFoundState({ hasOtherAgents, deleted = false, onCreateAgent }: 
       <button
         type="button"
         onClick={onCreateAgent}
-        className="group inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        disabled={createAgentDisabled}
+        title={createAgentDisabledReason ?? undefined}
+        className={`group inline-flex items-center justify-center gap-x-2 rounded-lg px-6 py-3 font-semibold text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+          createAgentDisabled
+            ? 'cursor-not-allowed bg-slate-400/80'
+            : 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl'
+        }`}
       >
         <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
         Create New Agent
       </button>
+      {createAgentDisabledReason ? (
+        <p className="mt-3 max-w-md text-center text-sm text-slate-500">{createAgentDisabledReason}</p>
+      ) : null}
     </div>
   )
 }
@@ -492,9 +520,15 @@ function AgentNotFoundState({ hasOtherAgents, deleted = false, onCreateAgent }: 
 type AgentSelectStateProps = {
   hasAgents: boolean
   onCreateAgent?: () => void
+  createAgentDisabledReason?: string | null
 }
 
-function AgentSelectState({ hasAgents, onCreateAgent }: AgentSelectStateProps) {
+function AgentSelectState({
+  hasAgents,
+  onCreateAgent,
+  createAgentDisabledReason = null,
+}: AgentSelectStateProps) {
+  const createAgentDisabled = Boolean(createAgentDisabledReason)
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Agent workspace</p>
@@ -510,11 +544,20 @@ function AgentSelectState({ hasAgents, onCreateAgent }: AgentSelectStateProps) {
         <button
           type="button"
           onClick={onCreateAgent}
-          className="group mt-2 inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          disabled={createAgentDisabled}
+          title={createAgentDisabledReason ?? undefined}
+          className={`group mt-2 inline-flex items-center justify-center gap-x-2 rounded-lg px-6 py-3 font-semibold text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+            createAgentDisabled
+              ? 'cursor-not-allowed bg-slate-400/80'
+              : 'bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl'
+          }`}
         >
           <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
           Create Your First Agent
         </button>
+      ) : null}
+      {!hasAgents && createAgentDisabledReason ? (
+        <p className="max-w-lg text-sm text-slate-500">{createAgentDisabledReason}</p>
       ) : null}
     </div>
   )
@@ -2114,6 +2157,18 @@ export function AgentChatPage({
     }
   }, [initialLoading, switchingAgentId])
 
+  const selectedAgentBillingStatus = addonsPayload?.status?.billing ?? null
+  const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
+  const sendMessageDisabledReason = !isNewAgent && selectedAgentBillingStatus?.delinquent
+    ? resolveSendMessageDisabledMessage()
+    : null
+  const createAgentDisabledReason = currentContextBillingStatus?.delinquent
+    ? resolveCreateAgentDisabledMessage(
+      currentContextBillingStatus.reason,
+      currentContextBillingStatus.actionable,
+    )
+    : null
+
   const handleSelectAgent = useCallback(
     (agent: AgentRosterEntry) => {
       if (agent.id === activeAgentId) {
@@ -2138,6 +2193,9 @@ export function AgentChatPage({
   )
 
   const handleCreateAgent = useCallback(() => {
+    if (createAgentDisabledReason) {
+      return
+    }
     // Use the prop callback if provided (for client-side navigation in ImmersiveApp)
     if (onCreateAgent) {
       onCreateAgent()
@@ -2145,7 +2203,7 @@ export function AgentChatPage({
     }
     // Fall back to full page navigation for console mode
     window.location.assign('/console/agents/create/quick/')
-  }, [onCreateAgent])
+  }, [createAgentDisabledReason, onCreateAgent])
 
   const handleJumpToLatest = useCallback(() => {
     const currentAgentId = activeAgentIdRef.current
@@ -2380,6 +2438,7 @@ export function AgentChatPage({
     onSelectAgent: handleSelectAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
     onCreateAgent: handleCreateAgent,
+    createAgentDisabledReason,
     rosterSortMode: agentRosterSortMode,
     onRosterSortModeChange: handleAgentRosterSortModeChange,
     defaultCollapsed: selectionSidebarCollapsed,
@@ -2488,22 +2547,39 @@ export function AgentChatPage({
     }
     return '/console/billing/'
   }, [effectiveContext])
-  const billingStatus = addonsPayload?.status?.billing ?? null
-  const billingManageUrl = billingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
+  const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
+  const billingManageUrl = bannerBillingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
   const highPriorityBanner = useMemo(() => {
-    if (!billingStatus?.delinquent || !billingStatus?.actionable || !billingManageUrl) {
+    if (!bannerBillingStatus?.delinquent || !bannerBillingStatus?.actionable || !billingManageUrl) {
       return null
     }
     return {
       id: 'billing-delinquent',
       title: 'Billing issue needs attention',
-      message: `${resolveBillingAlertMessage(billingStatus.reason)} Visit billing to fix this and avoid disruption.`,
+      message: `${resolveBillingAlertMessage(bannerBillingStatus.reason)} Visit billing to fix this and avoid disruption.`,
       actionLabel: 'Open billing',
       actionHref: billingManageUrl,
       dismissible: false,
       tone: 'critical' as const,
     }
-  }, [billingManageUrl, billingStatus?.actionable, billingStatus?.delinquent, billingStatus?.reason])
+  }, [
+    bannerBillingStatus?.actionable,
+    bannerBillingStatus?.delinquent,
+    bannerBillingStatus?.reason,
+    billingManageUrl,
+  ])
+
+  useEffect(() => {
+    if (!isNewAgent || !createAgentDisabledReason || typeof window === 'undefined') {
+      return
+    }
+    if (window.location.pathname !== '/app/agents/new') {
+      return
+    }
+    const selectionUrl = `/app/agents${window.location.search}${window.location.hash}`
+    window.history.replaceState({}, '', selectionUrl)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, [createAgentDisabledReason, isNewAgent])
 
   const closeGate = useCallback(() => {
     pendingCreateRef.current = null
@@ -2562,6 +2638,9 @@ export function AgentChatPage({
 
   const handleSend = useCallback(async (body: string, attachments: File[] = [], charterOverride?: string | null) => {
     if (!activeAgentId && !isNewAgent) {
+      return
+    }
+    if (sendMessageDisabledReason) {
       return
     }
     const hasMessageContent = body.trim().length > 0 || attachments.length > 0
@@ -2655,6 +2734,7 @@ export function AgentChatPage({
     refetchBurnRateSummary,
     scrollToBottom,
     sendMessage,
+    sendMessageDisabledReason,
     shouldFetchUsageBurnRate,
   ])
 
@@ -2762,10 +2842,25 @@ export function AgentChatPage({
       )
     }
     return renderSelectionLayout(
-      <AgentSelectState
-        hasAgents={rosterAgents.length > 0}
-        onCreateAgent={handleCreateAgent}
-      />,
+      <div className="flex w-full flex-col gap-4 pb-6 pt-0">
+        {highPriorityBanner ? (
+          <HighPriorityBanner
+            title={highPriorityBanner.title}
+            message={highPriorityBanner.message}
+            actionLabel={highPriorityBanner.actionLabel}
+            actionHref={highPriorityBanner.actionHref}
+            dismissible={highPriorityBanner.dismissible}
+            tone={highPriorityBanner.tone}
+          />
+        ) : null}
+        <div className="mx-auto flex w-full max-w-3xl px-4">
+          <AgentSelectState
+            hasAgents={rosterAgents.length > 0}
+            onCreateAgent={handleCreateAgent}
+            createAgentDisabledReason={createAgentDisabledReason}
+          />
+        </div>
+      </div>,
     )
   }
 
@@ -2776,6 +2871,7 @@ export function AgentChatPage({
         deleted={requestedAgentDeleted}
         hasOtherAgents={rosterAgents.length > 0}
         onCreateAgent={handleCreateAgent}
+        createAgentDisabledReason={createAgentDisabledReason}
       />,
     )
   }
@@ -2840,6 +2936,7 @@ export function AgentChatPage({
         onSelectAgent={handleSelectAgent}
         onToggleAgentFavorite={handleToggleAgentFavorite}
         onCreateAgent={handleCreateAgent}
+        createAgentDisabledReason={createAgentDisabledReason}
         agentRosterSortMode={agentRosterSortMode}
         onAgentRosterSortModeChange={handleAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher ?? undefined}
@@ -2878,6 +2975,8 @@ export function AgentChatPage({
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
         composerError={createAgentError?.message ?? null}
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
+        composerDisabled={Boolean(sendMessageDisabledReason)}
+        composerDisabledReason={sendMessageDisabledReason}
         events={timelineEvents}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
@@ -2914,6 +3013,7 @@ export function AgentChatPage({
         llmTierSaving={intelligenceBusy}
         llmTierError={intelligenceError}
         spawnIntentLoading={showSpawnIntentLoader}
+        starterPromptsDisabled={Boolean(sendMessageDisabledReason)}
       />
     </div>
   )

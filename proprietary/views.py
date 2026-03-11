@@ -16,13 +16,14 @@ from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
+from util.waffle_flags import is_waffle_flag_active
 from util.subscription_helper import (
     customer_has_any_individual_subscription,
     get_stripe_customer,
     get_user_plan,
 )
 from util.fish_collateral import is_fish_collateral_enabled
-from constants.feature_flags import SUPPORT_INTERCOM
+from constants.feature_flags import CTA_START_FREE_TRIAL, SUPPORT_INTERCOM
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings
@@ -68,9 +69,16 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 return False
 
         trial_eligible = _is_trial_eligible()
+        cta_start_free_trial = is_waffle_flag_active(
+            CTA_START_FREE_TRIAL,
+            self.request,
+            default=False,
+        )
 
         def _trial_cta(days: int, label: str) -> str:
             if days > 0 and trial_eligible:
+                if cta_start_free_trial:
+                    return "Start Free Trial"
                 return f"Start {days}-day Free Trial"
             return f"Subscribe to {label}"
 
