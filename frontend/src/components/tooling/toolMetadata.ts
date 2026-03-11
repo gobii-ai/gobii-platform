@@ -16,6 +16,7 @@ import {
   FilePen,
   Globe,
   ContactRound,
+  MessageSquareQuote,
   Mail,
   MessageSquareText,
   MessageCircle,
@@ -576,6 +577,54 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         caption: caption ?? entry.caption ?? 'Create agent',
         summary: message ?? entry.summary ?? null,
         separateFromPreview: true,
+      }
+    },
+  },
+  {
+    name: 'request_human_input',
+    label: 'Human input request',
+    icon: MessageSquareQuote,
+    iconBgClass: 'bg-amber-100',
+    iconColorClass: 'text-amber-700',
+    detailKind: 'humanInputRequest',
+    derive(entry, parameters) {
+      const result = parseResultObject(entry.result)
+      const title = coerceString(parameters?.['title']) || coerceString(result?.['title'])
+      const question = coerceString(parameters?.['question']) || coerceString(result?.['question'])
+      const status = coerceString(result?.['status'])?.toLowerCase()
+      const inputMode = coerceString(result?.['input_mode']) || coerceString(result?.['inputMode'])
+      const optionsRaw = parameters?.['options']
+      const optionCount = Array.isArray(optionsRaw) ? optionsRaw.length : 0
+      const referenceCode = coerceString(result?.['reference_code']) || coerceString(result?.['referenceCode'])
+
+      let caption: string | null = null
+      if (status === 'answered') {
+        caption = title ? `Answered: ${truncate(title, 40)}` : 'Answer received'
+      } else if (optionCount > 0) {
+        caption = title
+          ? `Awaiting choice: ${truncate(title, 40)}`
+          : `Awaiting ${optionCount} option${optionCount === 1 ? '' : 's'}`
+      } else if ((inputMode || '').toLowerCase() === 'free_text_only') {
+        caption = title ? `Awaiting reply: ${truncate(title, 42)}` : 'Awaiting free-text reply'
+      } else if (title) {
+        caption = truncate(title, 48)
+      } else if (question) {
+        caption = truncate(question, 48)
+      }
+
+      const summaryParts: string[] = []
+      if (referenceCode) {
+        summaryParts.push(`Ref ${referenceCode}`)
+      }
+      if (optionCount > 0) {
+        summaryParts.push(`${optionCount} option${optionCount === 1 ? '' : 's'}`)
+      } else if ((inputMode || '').toLowerCase() === 'free_text_only') {
+        summaryParts.push('Free text')
+      }
+
+      return {
+        caption: caption ?? entry.caption ?? 'Human input request',
+        summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
       }
     },
   },

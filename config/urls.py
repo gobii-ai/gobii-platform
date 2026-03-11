@@ -17,6 +17,7 @@ from console.api_views import (
     AgentFsNodeMoveAPIView,
     AgentFsNodeUploadAPIView,
     AgentMessageCreateAPIView,
+    AgentHumanInputRequestResponseAPIView,
     AgentChatRosterAPIView,
     AgentQuickCreateAPIView,
     AgentSpawnIntentAPIView,
@@ -297,6 +298,11 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/collaboration/leave/", AgentCollaboratorLeaveAPIView.as_view(), name="console_agent_collaborator_leave"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/suggestions/", AgentSuggestionsAPIView.as_view(), name="console_agent_suggestions"),
+    path(
+        "console/api/agents/<uuid:agent_id>/human-input-requests/<uuid:request_id>/respond/",
+        AgentHumanInputRequestResponseAPIView.as_view(),
+        name="console_agent_human_input_request_respond",
+    ),
     path(
         "console/api/agents/<uuid:agent_id>/spawn-requests/<uuid:spawn_request_id>/decision/",
         AgentSpawnRequestDecisionAPIView.as_view(),

@@ -54,6 +54,7 @@ from ...models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
     PersistentAgentKanbanCard,
+    PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentPromptArchive,
@@ -2108,6 +2109,12 @@ def build_prompt_context(
         ),
         weight=1,
         non_shrinkable=True
+    )
+    human_input_block = _get_recent_human_input_responses_block(agent)
+    important_group.section_text(
+        "human_input_responses",
+        human_input_block,
+        weight=2,
     )
 
     if agent.charter:
@@ -5510,4 +5517,35 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
             "If you just requested these, follow up with the user through the appropriate communication channel."
         )
 
+    return "\n".join(lines)
+
+
+def _get_recent_human_input_responses_block(agent: PersistentAgent) -> str:
+    responses = list(
+        PersistentAgentHumanInputRequest.objects.filter(
+            agent=agent,
+            status=PersistentAgentHumanInputRequest.Status.ANSWERED,
+        )
+        .select_related("raw_reply_message")
+        .order_by("-resolved_at", "-created_at")[:8]
+    )
+    if not responses:
+        return "No recent human input responses."
+
+    lines = ["Recent human input responses:"]
+    for response in responses:
+        lines.append(f"- [{response.reference_code}] {response.title}")
+        lines.append(f"  Input mode: {response.input_mode}")
+        if response.selected_option_key:
+            lines.append(
+                "  Selected option: "
+                f"{response.selected_option_title or response.selected_option_key} "
+                f"(key={response.selected_option_key})"
+            )
+        if response.free_text:
+            lines.append(f"  Free text: {response.free_text}")
+        if response.raw_reply_text:
+            lines.append(f"  Raw reply: {response.raw_reply_text}")
+        if response.resolution_source:
+            lines.append(f"  Resolution source: {response.resolution_source}")
     return "\n".join(lines)

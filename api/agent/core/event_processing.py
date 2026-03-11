@@ -118,6 +118,7 @@ from console.agent_chat.signals import broadcast_kanban_changes
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
+from ..tools.request_human_input import execute_request_human_input
 from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
 from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, should_skip_auto_substitution
@@ -125,6 +126,7 @@ from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import clear_variables, substitute_variables
+from ..comms.human_input_requests import attach_originating_step_from_result
 from ...models import (
     PersistentAgent,
     PersistentAgentMessage,
@@ -4022,6 +4024,8 @@ def _run_agent_loop(
                                 )
                             elif tool_name == "request_contact_permission":
                                 result = execute_request_contact_permission(agent, exec_params)
+                            elif tool_name == "request_human_input":
+                                result = execute_request_human_input(agent, exec_params)
                             elif tool_name == "spawn_agent":
                                 result = execute_spawn_agent(agent, exec_params)
                             elif tool_name == "search_tools":
@@ -4127,6 +4131,8 @@ def _run_agent_loop(
                                 attach_completion=_attach_completion,
                                 attach_prompt_archive=_attach_prompt_archive,
                             )
+                        if tool_name == "request_human_input" and isinstance(result, dict):
+                            attach_originating_step_from_result(step, result)
                         allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
                         tool_had_error = is_error_status
                         tool_had_warning = _is_warning_status(result)

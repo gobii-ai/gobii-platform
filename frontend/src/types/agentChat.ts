@@ -92,6 +92,28 @@ export type ProcessingSnapshot = {
   nextScheduledAt?: string | null
 }
 
+export type HumanInputOption = {
+  key: string
+  title: string
+  description: string
+}
+
+export type PendingHumanInputRequestStatus = 'pending' | 'answered' | 'cancelled' | 'expired'
+
+export type PendingHumanInputRequestInputMode = 'options_plus_text' | 'free_text_only'
+
+export type PendingHumanInputRequest = {
+  id: string
+  title: string
+  question: string
+  options: HumanInputOption[]
+  createdAt?: string | null
+  status: PendingHumanInputRequestStatus
+  referenceCode?: string | null
+  activeConversationChannel?: string | null
+  inputMode: PendingHumanInputRequestInputMode
+}
+
 export type MessageEvent = {
   kind: 'message'
   cursor: string
@@ -144,6 +166,7 @@ export type AgentTimelineSnapshot = {
   hasMoreNewer?: boolean
   processingActive?: boolean
   processingSnapshot?: ProcessingSnapshot
+  pendingHumanInputRequests?: PendingHumanInputRequest[]
 }
 
 export type StreamEventPayload = {

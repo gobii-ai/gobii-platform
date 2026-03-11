@@ -1,7 +1,7 @@
 import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline } from '../api/agentChat'
-import type { TimelineEvent } from '../types/agentChat'
+import type { PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import {
@@ -49,6 +49,35 @@ export function flushPendingEventsToCache(
     return
   }
   injectEventsIntoCache(queryClient, agentId, events)
+}
+
+export function replacePendingHumanInputRequestsInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  pendingHumanInputRequests: PendingHumanInputRequest[],
+) {
+  const key = timelineQueryKey(agentId)
+  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+    if (!old?.pages?.length) {
+      return old
+    }
+
+    const pages = [...old.pages]
+    const lastIndex = pages.length - 1
+    const lastPage = pages[lastIndex]
+    pages[lastIndex] = {
+      ...lastPage,
+      raw: {
+        ...lastPage.raw,
+        pending_human_input_requests: pendingHumanInputRequests,
+      },
+    }
+
+    return {
+      ...old,
+      pages,
+    }
+  })
 }
 
 function injectEventsIntoCache(

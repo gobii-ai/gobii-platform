@@ -23,6 +23,7 @@ from bleach.sanitizer import Cleaner
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.agent.core.schedule_parser import ScheduleParser
+from api.agent.comms.human_input_requests import serialize_human_input_tool_result
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.models import (
@@ -661,7 +662,9 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         "toolName": tool_name,
         "meta": meta,
         "parameters": tool_call.tool_params,
-        "result": tool_call.result,
+        "result": serialize_human_input_tool_result(step, tool_call.result)
+        if tool_name == "request_human_input"
+        else tool_call.result,
         "status": status,
     }
     preview_image_url = _extract_tool_image_url(tool_call)
@@ -724,6 +727,7 @@ def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor
     qs = (
         PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=False)
         .select_related("tool_call")
+        .prefetch_related("human_input_requests")
         .order_by("-created_at", "-id")
     )
     if direction == "older" and cursor is not None:

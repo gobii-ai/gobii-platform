@@ -32,6 +32,10 @@ from django.urls import NoReverseMatch, reverse
 from django.utils.text import get_valid_filename
 
 from api.agent.comms.adapters import ParsedMessage
+from api.agent.comms.human_input_requests import (
+    list_pending_human_input_requests,
+    submit_human_input_response,
+)
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
@@ -62,6 +66,7 @@ from api.models import (
     AgentEmailOAuthSession,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentHumanInputRequest,
     PersistentAgentSystemMessage,
     PersistentLLMTier,
     PersistentModelEndpoint,
@@ -2313,8 +2318,59 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_color_hex": agent.get_display_color(),
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_url(),
+            "pending_human_input_requests": list_pending_human_input_requests(agent),
         }
         return JsonResponse(payload)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, request_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        human_input_request = get_object_or_404(
+            PersistentAgentHumanInputRequest.objects.select_related(
+                "agent",
+                "conversation",
+                "requested_message__from_endpoint",
+            ),
+            id=request_id,
+            agent=agent,
+        )
+
+        if human_input_request.status != PersistentAgentHumanInputRequest.Status.PENDING:
+            return JsonResponse({"error": "This request is no longer pending."}, status=400)
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        selected_option_key = str(body.get("selected_option_key") or "").strip() or None
+        free_text = str(body.get("free_text") or "").strip() or None
+        if bool(selected_option_key) == bool(free_text):
+            return JsonResponse(
+                {"error": "Provide exactly one of selected_option_key or free_text."},
+                status=400,
+            )
+
+        try:
+            message = submit_human_input_response(
+                human_input_request,
+                selected_option_key=selected_option_key,
+                free_text=free_text,
+            )
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+        return JsonResponse(
+            {
+                "event": serialize_message_event(message),
+                "pending_human_input_requests": list_pending_human_input_requests(agent),
+            },
+            status=201,
+        )
 
 
 class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):

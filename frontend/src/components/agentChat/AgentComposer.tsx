@@ -4,7 +4,8 @@ import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
-import type { ProcessingWebTask } from '../../types/agentChat'
+import { HumanInputComposerPanel } from './HumanInputComposerPanel'
+import type { PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useLocalStorageState } from '../../hooks/useLocalStorageState'
@@ -99,8 +100,20 @@ const workingPanelStorageCodec = {
   },
 }
 
+type ComposerSubmitMeta = {
+  humanInputRequestId?: string | null
+}
+
+type HumanInputComposerResponse = {
+  requestId: string
+  selectedOptionKey?: string
+  freeText?: string
+}
+
 type AgentComposerProps = {
-  onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
+  onSubmit?: (message: string, attachments?: File[], meta?: ComposerSubmitMeta) => void | Promise<void>
+  pendingHumanInputRequests?: PendingHumanInputRequest[]
+  onRespondHumanInput?: (response: HumanInputComposerResponse) => Promise<void>
   disabled?: boolean
   disabledReason?: string | null
   autoFocus?: boolean
@@ -134,6 +147,8 @@ type AgentComposerProps = {
 
 export const AgentComposer = memo(function AgentComposer({
   onSubmit,
+  pendingHumanInputRequests = [],
+  onRespondHumanInput,
   disabled = false,
   disabledReason = null,
   autoFocus = false,
@@ -166,6 +181,9 @@ export const AgentComposer = memo(function AgentComposer({
   const [attachments, setAttachments] = useState<File[]>([])
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [activeHumanInputRequestId, setActiveHumanInputRequestId] = useState<string | null>(null)
+  const [armedHumanInputRequestId, setArmedHumanInputRequestId] = useState<string | null>(null)
+  const [busyHumanInputRequestId, setBusyHumanInputRequestId] = useState<string | null>(null)
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -395,6 +413,23 @@ export const AgentComposer = memo(function AgentComposer({
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
 
+  useEffect(() => {
+    if (!pendingHumanInputRequests.length) {
+      setActiveHumanInputRequestId(null)
+      setArmedHumanInputRequestId(null)
+      setBusyHumanInputRequestId(null)
+      return
+    }
+    const hasActiveRequest = pendingHumanInputRequests.some((request) => request.id === activeHumanInputRequestId)
+    if (!hasActiveRequest) {
+      setActiveHumanInputRequestId(pendingHumanInputRequests[0]?.id ?? null)
+    }
+    const hasArmedRequest = pendingHumanInputRequests.some((request) => request.id === armedHumanInputRequestId)
+    if (!hasArmedRequest) {
+      setArmedHumanInputRequestId(null)
+    }
+  }, [activeHumanInputRequestId, armedHumanInputRequestId, pendingHumanInputRequests])
+
   // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
   useEffect(() => {
     if (!autoFocus) return
@@ -439,6 +474,8 @@ export const AgentComposer = memo(function AgentComposer({
       return
     }
     const attachmentsSnapshot = attachments.slice()
+    const armedRequest = pendingHumanInputRequests.find((request) => request.id === armedHumanInputRequestId) ?? null
+    const shouldSubmitAsHumanInput = Boolean(armedRequest && trimmed && attachmentsSnapshot.length === 0)
     if (onSubmit) {
       try {
         setIsSending(true)
@@ -448,7 +485,14 @@ export const AgentComposer = memo(function AgentComposer({
           fileInputRef.current.value = ''
         }
         requestAnimationFrame(() => adjustTextareaHeight(true))
-        await onSubmit(trimmed, attachmentsSnapshot)
+        await onSubmit(
+          trimmed,
+          attachmentsSnapshot,
+          shouldSubmitAsHumanInput ? { humanInputRequestId: armedRequest?.id ?? null } : undefined,
+        )
+        if (shouldSubmitAsHumanInput) {
+          setArmedHumanInputRequestId(null)
+        }
       } finally {
         setIsSending(false)
       }
@@ -460,7 +504,45 @@ export const AgentComposer = memo(function AgentComposer({
       }
       requestAnimationFrame(() => adjustTextareaHeight(true))
     }
-  }, [adjustTextareaHeight, attachments, body, disabled, isSending, onSubmit])
+  }, [
+    adjustTextareaHeight,
+    armedHumanInputRequestId,
+    attachments,
+    body,
+    disabled,
+    isSending,
+    onSubmit,
+    pendingHumanInputRequests,
+  ])
+
+  const armedHumanInputRequest =
+    pendingHumanInputRequests.find((request) => request.id === armedHumanInputRequestId)
+    ?? null
+  const composerPlaceholder = armedHumanInputRequest
+    ? `Answer this question · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+    : `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+
+  const handleArmHumanInputComposer = useCallback((requestId: string) => {
+    setActiveHumanInputRequestId(requestId)
+    setArmedHumanInputRequestId(requestId)
+    textareaRef.current?.focus()
+  }, [])
+
+  const handleDisarmHumanInputComposer = useCallback(() => {
+    setArmedHumanInputRequestId(null)
+  }, [])
+
+  const handleSelectHumanInputOption = useCallback(async (requestId: string, optionKey: string) => {
+    if (!onRespondHumanInput || disabled || isSending || busyHumanInputRequestId) {
+      return
+    }
+    try {
+      setBusyHumanInputRequestId(requestId)
+      await onRespondHumanInput({ requestId, selectedOptionKey: optionKey })
+    } finally {
+      setBusyHumanInputRequestId(null)
+    }
+  }, [busyHumanInputRequestId, disabled, isSending, onRespondHumanInput])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -486,6 +568,7 @@ export const AgentComposer = memo(function AgentComposer({
     if (!files.length) {
       return
     }
+    setArmedHumanInputRequestId(null)
     setAttachments((current) => [...current, ...files])
   }, [disabled, isSending])
 
@@ -678,6 +761,22 @@ export const AgentComposer = memo(function AgentComposer({
                 </div>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {pendingHumanInputRequests.length > 0 ? (
+          <div className="mb-3">
+            <HumanInputComposerPanel
+              requests={pendingHumanInputRequests}
+              activeRequestId={activeHumanInputRequestId}
+              armedRequestId={armedHumanInputRequestId}
+              disabled={disabled || isSending}
+              busyRequestId={busyHumanInputRequestId}
+              onActiveRequestChange={setActiveHumanInputRequestId}
+              onSelectOption={handleSelectHumanInputOption}
+              onArmComposer={handleArmHumanInputComposer}
+              onDisarmComposer={handleDisarmHumanInputComposer}
+            />
           </div>
         ) : null}
 

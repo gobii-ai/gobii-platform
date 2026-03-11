@@ -17,7 +17,7 @@ import mimetypes
 import os
 import requests
 from django.contrib.sites.models import Site
-from django.core.exceptions import MultipleObjectsReturned
+from django.core.exceptions import MultipleObjectsReturned, ValidationError
 from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
 from django.db import DatabaseError, transaction
@@ -769,6 +769,16 @@ def ingest_inbound_message(
             raw_payload=parsed.raw_payload,
             owner_agent_id=agent_id,
         )
+
+        try:
+            from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
+
+            resolve_human_input_request_for_message(message)
+        except (DatabaseError, ValidationError, ValueError, TypeError):
+            logging.exception(
+                "Failed resolving human input request for inbound message %s",
+                getattr(message, "id", None),
+            )
 
         with traced("AGENT MSG Save Attachments") as attachment_span:
             attachment_span.set_attribute("message.id", str(message.id))

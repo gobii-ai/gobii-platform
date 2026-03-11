@@ -197,6 +197,7 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         try:
             step = (
                 PersistentAgentStep.objects.select_related("agent", "tool_call", "system_step")
+                .prefetch_related("human_input_requests")
                 .get(id=instance.id)
             )
         except PersistentAgentStep.DoesNotExist:  # pragma: no cover - defensive guard

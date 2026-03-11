@@ -49,6 +49,12 @@ type CredentialDetail = {
   description: string | null
 }
 
+type HumanInputOptionDetail = {
+  key: string | null
+  title: string | null
+  description: string | null
+}
+
 function normalizeCredential(value: unknown): CredentialDetail | null {
   if (!isRecord(value)) return null
   const nameValue = value['name']
@@ -60,6 +66,109 @@ function normalizeCredential(value: unknown): CredentialDetail | null {
   const domainPattern = typeof domainValue === 'string' && domainValue.trim().length ? domainValue : null
   const description = typeof descriptionValue === 'string' && descriptionValue.trim().length ? descriptionValue : null
   return { name, key, domainPattern, description }
+}
+
+function normalizeHumanInputOption(value: unknown): HumanInputOptionDetail | null {
+  if (!isRecord(value)) return null
+  const keyValue = value['key'] ?? value['option_key'] ?? value['optionKey']
+  const titleValue = value['title']
+  const descriptionValue = value['description']
+  const key = typeof keyValue === 'string' && keyValue.trim().length ? keyValue : null
+  const title = typeof titleValue === 'string' && titleValue.trim().length ? titleValue : null
+  const description = typeof descriptionValue === 'string' && descriptionValue.trim().length ? descriptionValue : null
+  return { key, title, description }
+}
+
+export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
+  const params = (entry.parameters as Record<string, unknown>) || {}
+  const title = typeof params['title'] === 'string' ? params['title'] : null
+  const question = typeof params['question'] === 'string' ? params['question'] : null
+  const optionsRaw = params['options']
+  const options = Array.isArray(optionsRaw)
+    ? (optionsRaw.map(normalizeHumanInputOption).filter(Boolean) as HumanInputOptionDetail[])
+    : []
+
+  const result = parseResultObject(entry.result)
+  const statusValue = typeof result?.['status'] === 'string' ? (result['status'] as string) : null
+  const messageValue = typeof result?.['message'] === 'string' ? (result['message'] as string) : null
+  const referenceCode =
+    typeof result?.['reference_code'] === 'string'
+      ? (result['reference_code'] as string)
+      : typeof result?.['referenceCode'] === 'string'
+        ? (result['referenceCode'] as string)
+        : null
+  const inputMode =
+    typeof result?.['input_mode'] === 'string'
+      ? (result['input_mode'] as string)
+      : typeof result?.['inputMode'] === 'string'
+        ? (result['inputMode'] as string)
+        : options.length > 0
+          ? 'options_plus_text'
+          : 'free_text_only'
+  const selectedOptionTitle =
+    typeof result?.['selected_option_title'] === 'string'
+      ? (result['selected_option_title'] as string)
+      : typeof result?.['selectedOptionTitle'] === 'string'
+        ? (result['selectedOptionTitle'] as string)
+        : null
+  const freeText =
+    typeof result?.['free_text'] === 'string'
+      ? (result['free_text'] as string)
+      : typeof result?.['freeText'] === 'string'
+        ? (result['freeText'] as string)
+        : null
+  const rawReply =
+    typeof result?.['raw_reply_text'] === 'string'
+      ? (result['raw_reply_text'] as string)
+      : typeof result?.['rawReplyText'] === 'string'
+        ? (result['rawReplyText'] as string)
+        : null
+
+  const infoItems: Array<{ label: string; value: ReactNode } | null> = [
+    statusValue ? { label: 'Status', value: statusValue.toUpperCase() } : null,
+    referenceCode ? { label: 'Reference', value: referenceCode } : null,
+    { label: 'Mode', value: inputMode === 'free_text_only' ? 'Free text only' : 'Options + free text' },
+    selectedOptionTitle ? { label: 'Selected option', value: selectedOptionTitle } : null,
+  ]
+
+  const introText = isNonEmptyString(messageValue)
+    ? messageValue
+    : title || question
+      ? [title, question].filter(Boolean).join('\n')
+      : entry.summary || entry.caption || null
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      {introText ? <p className="whitespace-pre-line text-slate-700">{introText}</p> : null}
+      <KeyValueList items={infoItems} />
+      {options.length > 0 ? (
+        <Section title={`Option${options.length === 1 ? '' : 's'}`}>
+          <ol className="space-y-3">
+            {options.map((option, index) => (
+              <li key={option.key || `human-input-option-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                <p className="font-semibold text-slate-800">
+                  {index + 1}. {option.title || `Option ${index + 1}`}
+                </p>
+                {option.description ? (
+                  <p className="mt-1 whitespace-pre-line text-slate-600">{option.description}</p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </Section>
+      ) : null}
+      {freeText ? (
+        <Section title="Captured free-text answer">
+          <p className="whitespace-pre-line text-slate-700">{freeText}</p>
+        </Section>
+      ) : null}
+      {rawReply && rawReply !== freeText ? (
+        <Section title="Raw reply">
+          <p className="whitespace-pre-line text-slate-700">{rawReply}</p>
+        </Section>
+      ) : null}
+    </div>
+  )
 }
 
 export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {

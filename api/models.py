@@ -9273,6 +9273,108 @@ class PersistentAgentMessage(models.Model):
         super().save(*args, **kwargs)
 
 
+class PersistentAgentHumanInputRequest(models.Model):
+    """Pending or answered human-input prompt tied to a conversation."""
+
+    class InputMode(models.TextChoices):
+        OPTIONS_PLUS_TEXT = "options_plus_text", "Options plus text"
+        FREE_TEXT_ONLY = "free_text_only", "Free text only"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ANSWERED = "answered", "Answered"
+        CANCELLED = "cancelled", "Cancelled"
+        EXPIRED = "expired", "Expired"
+
+    class ResolutionSource(models.TextChoices):
+        REFERENCE_CODE = "reference_code", "Reference code"
+        OPTION_NUMBER = "option_number", "Option number"
+        OPTION_TITLE = "option_title", "Option title"
+        FREE_TEXT = "free_text", "Free text"
+        DIRECT = "direct", "Direct"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="human_input_requests",
+    )
+    conversation = models.ForeignKey(
+        "PersistentAgentConversation",
+        on_delete=models.CASCADE,
+        related_name="human_input_requests",
+    )
+    originating_step = models.ForeignKey(
+        "PersistentAgentStep",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="human_input_requests",
+    )
+    title = models.CharField(max_length=255)
+    question = models.TextField()
+    options_json = models.JSONField(default=list, blank=True)
+    input_mode = models.CharField(
+        max_length=32,
+        choices=InputMode.choices,
+        default=InputMode.FREE_TEXT_ONLY,
+    )
+    reference_code = models.CharField(max_length=16, unique=True, editable=False)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    requested_via_channel = models.CharField(max_length=32, choices=CommsChannel.choices)
+    requested_message = models.ForeignKey(
+        "PersistentAgentMessage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="human_input_requests_sent",
+    )
+    selected_option_key = models.CharField(max_length=128, blank=True)
+    selected_option_title = models.CharField(max_length=255, blank=True)
+    free_text = models.TextField(blank=True)
+    raw_reply_text = models.TextField(blank=True)
+    raw_reply_message = models.ForeignKey(
+        "PersistentAgentMessage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="human_input_requests_resolved",
+    )
+    resolution_source = models.CharField(
+        max_length=32,
+        choices=ResolutionSource.choices,
+        blank=True,
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "status", "-created_at"], name="pa_hir_agent_status_idx"),
+            models.Index(fields=["conversation", "status", "-created_at"], name="pa_hir_conv_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"HumanInputRequest<{self.reference_code}:{self.status}>"
+
+    def save(self, *args, **kwargs):
+        if not self.reference_code:
+            alphabet = string.ascii_uppercase + string.digits
+            while True:
+                candidate = "HIR-" + "".join(secrets.choice(alphabet) for _ in range(6))
+                if not PersistentAgentHumanInputRequest.objects.filter(reference_code=candidate).exists():
+                    self.reference_code = candidate
+                    break
+        return super().save(*args, **kwargs)
+
+
 class PersistentAgentEmailFooter(models.Model):
     """Reusable snippets appended to outbound emails for eligible agents."""
 
