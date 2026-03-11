@@ -89,7 +89,7 @@ export function PipedreamAppsPanel({
             />
             <AppColumn
               title="Your apps"
-              caption="Additional apps enbabled for your Agents"
+              caption="Additional apps enabled for your Agents"
               apps={settingsQuery.data.selectedApps}
               emptyText="No additional apps enabled yet."
               tone="selected"
