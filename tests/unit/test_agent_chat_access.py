@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.test import Client, TestCase, override_settings, tag
@@ -66,6 +67,25 @@ class AgentChatAccessTests(TestCase):
         session["context_name"] = self.user.get_full_name() or self.user.username
         session.save()
 
+    def _fake_customer_with_subscription_status(self, status: str):
+        class FakeSubscriptions:
+            def __init__(self, subscriptions):
+                self._subscriptions = subscriptions
+
+            def all(self):
+                return list(self._subscriptions)
+
+        return SimpleNamespace(
+            subscriptions=FakeSubscriptions(
+                [
+                    SimpleNamespace(
+                        status=status,
+                        stripe_data={"status": status},
+                    )
+                ]
+            )
+        )
+
     def test_resolve_agent_allows_org_agent_with_override(self):
         override = {"type": "organization", "id": str(self.org.id)}
         agent = resolve_agent(
@@ -91,6 +111,28 @@ class AgentChatAccessTests(TestCase):
         with self.assertRaises(PermissionDenied) as raised:
             resolve_agent(self.user, self.client.session, str(self.personal_agent.id))
         self.assertIn("Start a free trial", str(raised.exception))
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("util.trial_enforcement.get_active_subscription", return_value=None)
+    def test_chat_shell_allows_personal_owner_with_past_due_subscription(self, _mock_get_active_subscription):
+        customer = self._fake_customer_with_subscription_status("past_due")
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+            response = self.client.get(
+                reverse("agent_chat_shell", kwargs={"pk": self.personal_agent.id})
+            )
+
+        self.assertEqual(response.status_code, 200)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("util.trial_enforcement.get_active_subscription", return_value=None)
+    def test_roster_includes_personal_agent_with_past_due_subscription(self, _mock_get_active_subscription):
+        customer = self._fake_customer_with_subscription_status("past_due")
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+            response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        roster_ids = {entry["id"] for entry in response.json().get("agents", [])}
+        self.assertIn(str(self.personal_agent.id), roster_ids)
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_resolve_agent_allows_shared_personal_agent_for_collaborator(self):

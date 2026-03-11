@@ -93,7 +93,13 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _resolve_agent(self, user, session, agent_id):
-        return resolve_agent(user, session, agent_id, allow_shared=True)
+        return resolve_agent(
+            user,
+            session,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
 
 
 class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
@@ -258,7 +264,14 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
     @database_sync_to_async
     def _resolve_agent(self, user, session, agent_id, context_override=None):
-        return resolve_agent(user, session, agent_id, context_override=context_override, allow_shared=True)
+        return resolve_agent(
+            user,
+            session,
+            agent_id,
+            context_override=context_override,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
 
 
 class EchoConsumer(AsyncJsonWebsocketConsumer):

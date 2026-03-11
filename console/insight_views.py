@@ -577,7 +577,11 @@ class AgentInsightsAPIView(LoginRequiredMixin, View):
 
         # Resolve agent with access check
         try:
-            agent = resolve_agent_for_request(request, agent_id)
+            agent = resolve_agent_for_request(
+                request,
+                agent_id,
+                allow_delinquent_personal_chat=True,
+            )
         except Exception:
             return JsonResponse({"error": "Agent not found"}, status=404)
 

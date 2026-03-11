@@ -5707,11 +5707,18 @@ class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
 
 
 class SharedAgentAccessMixin:
+    allow_delinquent_personal_chat = False
+
     def get_object(self, queryset=None):
         agent_id = self.kwargs.get(self.pk_url_kwarg)
         if not agent_id:
             raise Http404
-        agent = resolve_agent_for_request(self.request, agent_id, allow_shared=True)
+        agent = resolve_agent_for_request(
+            self.request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=self.allow_delinquent_personal_chat,
+        )
         self._can_manage_agent = user_can_manage_agent(self.request.user, agent)
         self._is_collaborator = user_is_collaborator(self.request.user, agent)
         self._can_manage_collaborators = False
@@ -5748,6 +5755,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
     context_object_name = "agent"
     pk_url_kwarg = "pk"
     template_name = "console/persistent_agent_chat_shell.html"
+    allow_delinquent_personal_chat = True
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -5781,6 +5789,7 @@ class AgentAvatarProxyView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView)
     context_object_name = "agent"
     pk_url_kwarg = "pk"
     http_method_names = ["get"]
+    allow_delinquent_personal_chat = True
 
     def get(self, request, *args, **kwargs):
         agent = self.get_object()

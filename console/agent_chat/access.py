@@ -6,24 +6,47 @@ from console.context_helpers import ConsoleContext, resolve_console_context
 from console.context_overrides import get_context_override
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    can_user_access_personal_agent_chat,
     can_user_use_personal_agents_and_api,
 )
 
 
-def _is_blocked_personal_owner(user, agent: PersistentAgent) -> bool:
+def _can_access_personal_agent(user, *, allow_delinquent_personal_chat: bool = False) -> bool:
+    if allow_delinquent_personal_chat:
+        return can_user_access_personal_agent_chat(user)
+    return can_user_use_personal_agents_and_api(user)
+
+
+def _is_blocked_personal_owner(
+    user,
+    agent: PersistentAgent,
+    *,
+    allow_delinquent_personal_chat: bool = False,
+) -> bool:
     return bool(
         agent.organization_id is None
         and agent.user_id == user.id
-        and not can_user_use_personal_agents_and_api(user)
+        and not _can_access_personal_agent(
+            user,
+            allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+        )
     )
 
 
-def agent_queryset_for(user, context: ConsoleContext) -> QuerySet:
+def agent_queryset_for(
+    user,
+    context: ConsoleContext,
+    *,
+    allow_delinquent_personal_chat: bool = False,
+) -> QuerySet:
     """Return queryset of agents visible to the user within the console context."""
     qs = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent")
     if context.type == "organization":
         return qs.filter(organization_id=context.id)
-    if not can_user_use_personal_agents_and_api(user):
+    if not _can_access_personal_agent(
+        user,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+    ):
         return qs.none()
     return qs.filter(user=user, organization__isnull=True)
 
@@ -61,12 +84,21 @@ def resolve_agent(
     agent_id: str,
     context_override: dict | None = None,
     allow_shared: bool = False,
+    allow_delinquent_personal_chat: bool = False,
 ) -> PersistentAgent:
     context_info = resolve_console_context(user, session, override=context_override)
-    queryset = agent_queryset_for(user, context_info.current_context)
+    queryset = agent_queryset_for(
+        user,
+        context_info.current_context,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+    )
     try:
         agent = queryset.get(pk=agent_id)
-        if _is_blocked_personal_owner(user, agent):
+        if _is_blocked_personal_owner(
+            user,
+            agent,
+            allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+        ):
             raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
         return agent
     except PersistentAgent.DoesNotExist as exc:  # pragma: no cover - defensive guard
@@ -75,7 +107,10 @@ def resolve_agent(
             if agent:
                 return agent
         if (
-            not can_user_use_personal_agents_and_api(user)
+            not _can_access_personal_agent(
+                user,
+                allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+            )
             and PersistentAgent.objects.non_eval().alive().filter(
                 pk=agent_id,
                 user=user,
@@ -86,7 +121,13 @@ def resolve_agent(
         raise PermissionDenied("Agent not found in current context") from exc
 
 
-def resolve_agent_for_request(request, agent_id: str, *, allow_shared: bool = False) -> PersistentAgent:
+def resolve_agent_for_request(
+    request,
+    agent_id: str,
+    *,
+    allow_shared: bool = False,
+    allow_delinquent_personal_chat: bool = False,
+) -> PersistentAgent:
     context_override = get_context_override(request)
     return resolve_agent(
         request.user,
@@ -94,4 +135,5 @@ def resolve_agent_for_request(request, agent_id: str, *, allow_shared: bool = Fa
         agent_id,
         context_override=context_override,
         allow_shared=allow_shared,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
     )
