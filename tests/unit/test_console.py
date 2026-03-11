@@ -1259,6 +1259,7 @@ class ConsoleViewsTest(TestCase):
             source="agent_addons_api",
         )
 
+    @override_settings(STRIPE_CUSTOMER_PORTAL="https://billing.example.test/portal")
     @tag("batch_console_agents")
     def test_agent_addons_api_reports_billing_delinquent_for_past_due_subscription(self):
         from api.models import PersistentAgent, BrowserUseAgent
@@ -1330,7 +1331,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(billing.get("reason"), "past_due")
         self.assertEqual(billing.get("subscriptionStatus"), "past_due")
         self.assertEqual(billing.get("paymentIntentStatus"), "requires_payment_method")
-        self.assertEqual(billing.get("manageBillingUrl"), "/console/billing/")
+        self.assertEqual(billing.get("manageBillingUrl"), "https://billing.example.test/portal")
 
     @tag("batch_console_agents")
     def test_agent_addons_api_ignores_billing_delinquency_for_grandfathered_user(self):
@@ -1474,6 +1475,7 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(billing.get("actionable"))
         self.assertIsNone(billing.get("reason"))
 
+    @override_settings(STRIPE_CUSTOMER_PORTAL="https://billing.example.test/portal")
     @tag("batch_console_agents")
     def test_agent_addons_api_reports_billing_delinquent_for_retrying_invoice(self):
         from api.models import PersistentAgent, BrowserUseAgent
@@ -1547,7 +1549,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(billing.get("subscriptionStatus"), "active")
         self.assertEqual(billing.get("latestInvoiceStatus"), "open")
         self.assertIsNone(billing.get("paymentIntentStatus"))
-        self.assertEqual(billing.get("manageBillingUrl"), "/console/billing/")
+        self.assertEqual(billing.get("manageBillingUrl"), "https://billing.example.test/portal")
 
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
