@@ -192,7 +192,7 @@
   width: 8px;
   height: 8px;
   border-radius: 9999px;
-  background: var(--dot-color, #8b5cf6);
+  background: var(--color-slate-500, #64748b);
   opacity: 0.4;
   animation: typingBounce 1.4s ease-in-out infinite;
 }
@@ -216,32 +216,12 @@
   }
 }
 
-/* Glowing status text with left-to-right shimmer */
 .typing-indicator__status {
   font-size: 0.6875rem;
   line-height: 1rem;
   font-weight: 500;
   padding-left: 2px;
-  background: linear-gradient(
-    90deg,
-    var(--glow-color, #8b5cf6) 0%,
-    color-mix(in srgb, var(--glow-color, #8b5cf6) 50%, #fff) 50%,
-    var(--glow-color, #8b5cf6) 100%
-  );
-  background-size: 200% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: statusGlow 2s linear infinite;
-}
-
-@keyframes statusGlow {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
+  color: var(--color-slate-600, #475569);
 }
 
 /* ---- iMessage-style Bubble Arrows & Spacing ---- */
@@ -333,7 +313,7 @@
     animation: none;
     background: none;
     -webkit-text-fill-color: currentColor;
-    color: var(--glow-color, #8b5cf6);
+    color: var(--color-slate-600, #475569);
   }
 
   .simplified-chat [data-animate-entry="true"] > * {

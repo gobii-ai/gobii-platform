@@ -10,23 +10,14 @@ type TypingIndicatorProps = {
 }
 
 export function deriveTypingStatusText({
-  streaming,
-  processingWebTasks,
-  awaitingResponse,
+  streaming: _streaming,
+  processingWebTasks: _processingWebTasks,
+  awaitingResponse: _awaitingResponse,
 }: {
   streaming: StreamState | null | undefined
   processingWebTasks: ProcessingWebTask[]
   awaitingResponse: boolean
 }): string {
-  if (streaming && !streaming.done) {
-    if (streaming.content?.trim()) return 'Composing...'
-    if (streaming.reasoning?.trim()) return 'Thinking...'
-  }
-  if (processingWebTasks.length > 0) {
-    const task = processingWebTasks[0]
-    if (task.statusLabel) return task.statusLabel
-  }
-  if (awaitingResponse) return 'Composing...'
   return 'Working...'
 }
 
@@ -37,7 +28,7 @@ export function TypingIndicator({
   agentFirstName,
   hidden,
 }: TypingIndicatorProps) {
-  const dotColor = agentColorHex || '#8b5cf6'
+  const avatarColor = agentColorHex || '#475569'
 
   return (
     <div
@@ -52,19 +43,19 @@ export function TypingIndicator({
           ) : (
             <div
               className="typing-indicator__avatar-fallback"
-              style={{ backgroundColor: dotColor }}
+              style={{ backgroundColor: avatarColor }}
             >
               {agentFirstName.charAt(0).toUpperCase()}
             </div>
           )}
         </div>
         <div className="typing-indicator__body">
-          <div className="typing-indicator__bubble" style={{ '--dot-color': dotColor } as React.CSSProperties}>
+          <div className="typing-indicator__bubble">
             <span className="typing-indicator__dot" />
             <span className="typing-indicator__dot" />
             <span className="typing-indicator__dot" />
           </div>
-          <span className="typing-indicator__status" style={{ '--glow-color': dotColor } as React.CSSProperties}>
+          <span className="typing-indicator__status">
             {statusText}
           </span>
         </div>

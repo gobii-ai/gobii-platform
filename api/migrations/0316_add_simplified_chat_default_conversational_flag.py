@@ -1,10 +1,11 @@
 from django.db import migrations
 
-FLAG_NAME = "simplified_chat_ui"
+
+FLAG_NAME = "simplified_chat_default_conversational"
 
 
 def add_flag(apps, schema_editor):
-    """Create the simplified_chat_ui waffle flag (idempotent)."""
+    """Create the simplified chat default-view waffle flag (idempotent)."""
     try:
         Flag = apps.get_model("waffle", "Flag")
     except LookupError:
@@ -25,7 +26,7 @@ def remove_flag(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0310_imagegenerationllmtier_use_case"),
+        ("api", "0315_merge_20260311_2033"),
         ("waffle", "0001_initial"),
     ]
 
