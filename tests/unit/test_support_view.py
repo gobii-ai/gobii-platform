@@ -37,6 +37,25 @@ class SupportViewTurnstileTests(TestCase):
             payload["cf-turnstile-response"] = "stub-token"
         return payload
 
+    @staticmethod
+    def _prequalify_payload(include_turnstile=False):
+        payload = {
+            "name": "Test User",
+            "email": "user@example.com",
+            "company": "Test Company",
+            "role": "Operations Lead",
+            "team_size": "6-20",
+            "monthly_volume": "250_1000",
+            "budget_range": "500_2000",
+            "timeline": "this_quarter",
+            "use_case": "Automate inbound lead qualification.",
+            "website": "https://example.com",
+            "notes": "Important account.",
+        }
+        if include_turnstile:
+            payload["cf-turnstile-response"] = "stub-token"
+        return payload
+
     def _assert_single_email(
         self,
         *,
@@ -229,3 +248,20 @@ class SupportViewTurnstileTests(TestCase):
         response = self.client.post(reverse("proprietary:contact"), self._payload(include_turnstile=True))
         self.assertEqual(response.status_code, 500)
         self.assertIn("Contact email is not configured.", response.content.decode())
+
+    @tag(BATCH_TAG)
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_prequalify_post_uses_public_contact_email(self, _mock_validate):
+        response = self.client.post(
+            reverse("proprietary:prequalify"),
+            self._prequalify_payload(include_turnstile=True),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("We will review and follow up within 1-2 business days.", response.content.decode())
+        self._assert_single_email(
+            to=["contact@example.com"],
+            subject="Pre-qualification request: Test Company",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            reply_to=["user@example.com"],
+        )

@@ -323,9 +323,9 @@ class PrequalifyView(ProprietaryModeRequiredMixin, TemplateView):
             context["error_messages"] = error_messages
             return self.render_to_response(context, status=400)
 
-        support_email = settings.SUPPORT_EMAIL
-        if not support_email:
-            message = "Support email is not configured."
+        recipient_email = settings.PUBLIC_CONTACT_EMAIL or settings.SUPPORT_EMAIL
+        if not recipient_email:
+            message = "Contact email is not configured."
             if wants_json:
                 return JsonResponse({"ok": False, "message": message}, status=500)
             context = self.get_context_data()
@@ -372,7 +372,7 @@ class PrequalifyView(ProprietaryModeRequiredMixin, TemplateView):
                 subject,
                 plain_message,
                 settings.DEFAULT_FROM_EMAIL,
-                [support_email],
+                [recipient_email],
                 reply_to=[cleaned["email"]],
             )
             email.attach_alternative(html_message, "text/html")
