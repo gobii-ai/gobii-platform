@@ -50,6 +50,10 @@ export function useStarterPrompts({
       ),
     [events],
   )
+  const hasAgentMessage = useMemo(
+    () => events.some((event) => event.kind === 'message' && Boolean(event.message.isOutbound)),
+    [events],
+  )
 
   useEffect(() => {
     if (wasWorkingRef.current && !isWorkingNow) {
@@ -61,6 +65,7 @@ export function useStarterPrompts({
   const canRequestSuggestions = Boolean(
     agentId
     && onSendMessage
+    && hasAgentMessage
     && !initialLoading
     && !spawnIntentLoading
     && !isWorkingNow,
@@ -115,7 +120,8 @@ export function useStarterPrompts({
   const starterPrompts = useMemo(() => backendPrompts ?? EMPTY_PROMPTS, [backendPrompts])
 
   const canShowStarterPrompts = Boolean(
-    !initialLoading
+    hasAgentMessage
+    && !initialLoading
     && !spawnIntentLoading
     && !isWorkingNow
     && onSendMessage
