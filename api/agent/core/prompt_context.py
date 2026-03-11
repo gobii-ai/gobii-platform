@@ -2862,7 +2862,8 @@ def _get_work_completion_prompt(
     except Exception:
         return None
 
-    open_cards = kanban_state.todo_count + kanban_state.doing_count
+    todo_count = kanban_state.todo_count
+    open_cards = todo_count + kanban_state.doing_count
     done_count = kanban_state.done_count
 
     # If all work is done, tell the agent to stop

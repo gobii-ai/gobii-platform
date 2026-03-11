@@ -335,11 +335,6 @@ def _has_open_kanban_work(agent: PersistentAgent) -> bool:
     return get_kanban_state(agent).has_open_work
 
 
-def _is_work_complete_stop_state(agent: PersistentAgent) -> bool:
-    """Return True when kanban is in the all-done state that triggers stop guidance."""
-    return get_kanban_state(agent).is_work_complete
-
-
 def _remove_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
     if not text:
         return text, False
@@ -3582,7 +3577,8 @@ def _run_agent_loop(
             implied_stop_after_send = False  # Track if implied send should force stop
             implied_send_message_text = ""
             if message_text and not has_explicit_send:
-                if _is_work_complete_stop_state(agent):
+                kanban_state = get_kanban_state(agent)
+                if kanban_state.is_work_complete:
                     logger.info(
                         "Agent %s: suppressing implied send because kanban work is already complete.",
                         agent.id,
@@ -3591,7 +3587,7 @@ def _run_agent_loop(
                     # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                     # This is safer—agent won't keep running unexpectedly.
                     has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
-                    has_open_kanban_work = _has_open_kanban_work(agent)
+                    has_open_kanban_work = kanban_state.has_open_work
                     implied_will_continue = _should_imply_continue(
                         has_canonical_continuation=has_canonical_continuation,
                         has_other_tool_calls=has_other_tool_calls,
