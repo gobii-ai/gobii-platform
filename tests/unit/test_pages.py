@@ -1287,6 +1287,36 @@ class ProprietaryPricingTrialCopyTests(TestCase):
         self.assertEqual(plans[0]["cta"], "Start 7-day Free Trial")
         self.assertEqual(plans[1]["cta"], "Start 14-day Free Trial")
 
+    @tag("batch_pages")
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=False)
+    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_new_trial"))
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_cta_omits_trial_days_when_flag_enabled(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_stripe_customer,
+        _mock_has_any_subscription,
+        _mock_get_user_plan,
+    ):
+        user = get_user_model().objects.create_user(
+            email="pricing_flagged@test.com",
+            password="pw",
+            username="pricing_flagged_user",
+        )
+        self.client.force_login(user)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag("cta_start_free_trial", active=True):
+            context = self._get_pricing_context_for_user(user)
+
+        plans = context["pricing_plans"]
+        self.assertEqual(plans[0]["cta"], "Start Free Trial")
+        self.assertEqual(plans[1]["cta"], "Start Free Trial")
+
 
 @tag("batch_pages")
 class AuthLinkTests(TestCase):
