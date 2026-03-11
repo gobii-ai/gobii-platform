@@ -63,6 +63,7 @@ from api.services.browser_settings import (
     DEFAULT_MAX_BROWSER_TASKS,
     DEFAULT_VISION_DETAIL_LEVEL,
 )
+from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
 from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
@@ -6650,6 +6651,73 @@ class MCPServerConfig(models.Model):
     @headers.setter
     def headers(self, value: dict[str, str] | None) -> None:
         self.headers_json_encrypted = self._encrypt_json(value)
+
+
+class PipedreamAppSelection(models.Model):
+    """Owner-scoped extra Pipedream app slugs selected in the console."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="pipedream_app_selections",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="pipedream_app_selections",
+    )
+    selected_app_slugs = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(organization__isnull=False, user__isnull=True)
+                    | Q(organization__isnull=True, user__isnull=False)
+                ),
+                name="pd_app_selection_exactly_one_owner",
+            ),
+            models.UniqueConstraint(
+                fields=["organization"],
+                name="unique_pipedream_app_selection_org",
+                condition=Q(organization__isnull=False),
+            ),
+            models.UniqueConstraint(
+                fields=["user"],
+                name="unique_pipedream_app_selection_user",
+                condition=Q(user__isnull=False),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization"], name="pd_app_selection_org_idx"),
+            models.Index(fields=["user"], name="pd_app_selection_user_idx"),
+        ]
+
+    def clean(self):
+        super().clean()
+        has_org = bool(self.organization_id)
+        has_user = bool(self.user_id)
+        if has_org == has_user:
+            raise ValidationError("Pipedream app selections must reference exactly one owner.")
+        try:
+            self.selected_app_slugs = normalize_pipedream_app_slugs(
+                self.selected_app_slugs,
+                strict=True,
+                require_list=True,
+            )
+        except ValueError as exc:
+            raise ValidationError({"selected_app_slugs": str(exc)}) from exc
+
+    def __str__(self) -> str:  # pragma: no cover - trivial display helper
+        owner = self.organization or self.user or "unknown"
+        return f"PipedreamAppSelection<{owner}>"
 
 
 class PersistentAgentSystemMessageBroadcast(models.Model):

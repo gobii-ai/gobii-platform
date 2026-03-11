@@ -10,6 +10,7 @@ import {
 import { McpServerFormModal } from '../components/mcp/McpServerFormModal'
 import { AssignServerModal } from '../components/mcp/AssignServerModal'
 import { DeleteServerDialog } from '../components/mcp/DeleteServerDialog'
+import { PipedreamAppsPanel } from '../components/mcp/PipedreamAppsPanel'
 import { useModal } from '../hooks/useModal'
 
 type McpServersScreenProps = {
@@ -19,6 +20,8 @@ type McpServersScreenProps = {
   ownerScope?: string
   ownerLabel?: string
   allowCommands?: boolean
+  pipedreamAppsUrl: string
+  pipedreamAppSearchUrl: string
   oauthStartUrl: string
   oauthMetadataUrl: string
   oauthCallbackPath: string
@@ -33,6 +36,8 @@ export function McpServersScreen({
   ownerScope,
   ownerLabel,
   allowCommands = false,
+  pipedreamAppsUrl,
+  pipedreamAppSearchUrl,
   oauthStartUrl,
   oauthMetadataUrl,
   oauthCallbackPath,
@@ -187,6 +192,12 @@ export function McpServersScreen({
           {errorBanner}
         </div>
       )}
+      <PipedreamAppsPanel
+        settingsUrl={pipedreamAppsUrl}
+        searchUrl={pipedreamAppSearchUrl}
+        onSuccess={handleSuccess}
+        onError={handleError}
+      />
       <div className="gobii-card-base">
         <div className="px-6 py-4 border-b border-gray-200/70 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>

@@ -452,7 +452,14 @@ class MCPToolManagerTests(TestCase):
 
         observed_agents: list[Any] = []
 
-        def _fake_register(_runtime, *, agent=None, force_local=False, prefer_cache=True):
+        def _fake_register(
+            _runtime,
+            *,
+            agent=None,
+            force_local=False,
+            prefer_cache=True,
+            pipedream_context=None,
+        ):
             observed_agents.append(agent)
             self.manager._tools_cache[_runtime.config_id] = []
 

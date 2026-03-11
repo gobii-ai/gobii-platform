@@ -194,9 +194,14 @@ switch (appName) {
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
+    const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl
+    const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl
     const allowCommands = mountNode.dataset.allowCommands === 'true'
     if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath) {
       throw new Error('MCP OAuth endpoints are required')
+    }
+    if (!pipedreamAppsUrl || !pipedreamAppSearchUrl) {
+      throw new Error('Pipedream app endpoints are required')
     }
 
     screen = (
@@ -207,6 +212,8 @@ switch (appName) {
         ownerScope={mountNode.dataset.ownerScope}
         ownerLabel={mountNode.dataset.ownerLabel}
         allowCommands={allowCommands}
+        pipedreamAppsUrl={pipedreamAppsUrl}
+        pipedreamAppSearchUrl={pipedreamAppSearchUrl}
         oauthStartUrl={oauthStartUrl}
         oauthMetadataUrl={oauthMetadataUrl}
         oauthCallbackPath={oauthCallbackPath}

@@ -11,6 +11,7 @@ from django.utils import timezone
 from api.models import (
     MCPServerConfig,
     MCPServerOAuthSession,
+    PipedreamAppSelection,
     Organization,
     OrganizationMembership,
     BrowserUseAgent,
@@ -19,7 +20,23 @@ from api.models import (
     PersistentAgentMCPServer,
 )
 from console.forms import MCPServerConfigForm
+from api.services.pipedream_apps import PipedreamCatalogError
 from util.analytics import AnalyticsEvent
+
+
+def _create_console_test_agent(*, user, organization=None, name: str) -> PersistentAgent:
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(BrowserUseAgent, "select_random_proxy", return_value=None))
+        if organization is not None:
+            stack.enter_context(patch.object(PersistentAgent, "_validate_org_seats", return_value=None))
+        browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
+        return PersistentAgent.objects.create(
+            user=user,
+            organization=organization,
+            name=name,
+            charter="",
+            browser_use_agent=browser,
+        )
 
 
 @tag("batch_console_mcp_servers")
@@ -338,6 +355,254 @@ class MCPServerCrudAPITests(TestCase):
 
 
 @tag("batch_console_mcp_servers")
+class PipedreamAppsAPITests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="pipedream-owner",
+            email="pipedream-owner@example.com",
+            password="test-pass-123",
+        )
+        self.client.force_login(self.user)
+        self.settings_url = reverse("console-pipedream-apps")
+        self.search_url = reverse("console-pipedream-app-search")
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            display_name="Pipedream",
+            url="https://remote.mcp.pipedream.net",
+            prefetch_apps=["google_sheets", "google_docs"],
+        )
+
+    def _set_org_context(self, org: Organization):
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+
+    @staticmethod
+    def _app(slug: str) -> dict[str, str]:
+        return {
+            "slug": slug,
+            "name": slug.replace("_", " ").title(),
+            "description": f"{slug} description",
+            "icon_url": f"https://example.com/{slug}.png",
+        }
+
+    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    def test_get_returns_user_scope_apps(self, mock_get_apps):
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["trello"],
+        )
+        mock_get_apps.side_effect = lambda slugs: [
+            type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
+            for slug in slugs
+        ]
+
+        response = self.client.get(self.settings_url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["owner_scope"], "user")
+        self.assertEqual([app["slug"] for app in payload["platform_apps"]], ["google_sheets", "google_docs"])
+        self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["trello"])
+        self.assertEqual([app["slug"] for app in payload["effective_apps"]], ["google_sheets", "google_docs", "trello"])
+
+    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("console.api_views.get_mcp_manager")
+    def test_patch_updates_user_scope_apps(self, mock_get_mcp_manager, mock_get_apps):
+        mock_get_apps.side_effect = lambda slugs: [
+            type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
+            for slug in slugs
+        ]
+
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({"selected_app_slugs": ["trello", "trello", "slack"]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        selection = PipedreamAppSelection.objects.get(user=self.user)
+        self.assertEqual(selection.selected_app_slugs, ["trello", "slack"])
+        manager = mock_get_mcp_manager.return_value
+        manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(self.user.id))
+        manager.prewarm_pipedream_owner_cache.assert_called_once_with(
+            "user",
+            str(self.user.id),
+            app_slugs=["trello", "slack"],
+        )
+
+    def test_patch_rejects_non_string_app_slugs(self):
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({"selected_app_slugs": ["trello", 123]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("console.api_views.get_mcp_manager")
+    def test_patch_filters_platform_defaults_from_selected_apps(self, mock_get_mcp_manager, mock_get_apps):
+        mock_get_apps.side_effect = lambda slugs: [
+            type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
+            for slug in slugs
+        ]
+
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({"selected_app_slugs": ["google_docs", "trello"]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        selection = PipedreamAppSelection.objects.get(user=self.user)
+        self.assertEqual(selection.selected_app_slugs, ["trello"])
+        payload = response.json()
+        self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["trello"])
+        self.assertEqual(
+            [app["slug"] for app in payload["effective_apps"]],
+            ["google_sheets", "google_docs", "trello"],
+        )
+        manager = mock_get_mcp_manager.return_value
+        manager.prewarm_pipedream_owner_cache.assert_called_once_with(
+            "user",
+            str(self.user.id),
+            app_slugs=["trello"],
+        )
+
+    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("console.api_views.get_mcp_manager")
+    def test_patch_removes_disabled_enabled_tools(self, mock_get_mcp_manager, mock_get_apps):
+        mock_get_apps.side_effect = lambda slugs: [
+            type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
+            for slug in slugs
+        ]
+        agent = _create_console_test_agent(user=self.user, name="Cleanup Agent")
+        pipedream_server = MCPServerConfig.objects.get(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream")
+        PipedreamAppSelection.objects.create(user=self.user, selected_app_slugs=["trello"])
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="trello-create-card",
+            tool_server="pipedream",
+            tool_name="trello-create-card",
+            server_config=pipedream_server,
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="google_sheets-add-row",
+            tool_server="pipedream",
+            tool_name="google_sheets-add-row",
+            server_config=pipedream_server,
+        )
+
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({"selected_app_slugs": []}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name="trello-create-card").exists()
+        )
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name="google_sheets-add-row").exists()
+        )
+        self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
+
+    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    def test_get_returns_org_scope_apps(self, mock_get_apps):
+        org = Organization.objects.create(name="Acme", slug="acme", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        self._set_org_context(org)
+        PipedreamAppSelection.objects.create(
+            organization=org,
+            selected_app_slugs=["notion"],
+        )
+        mock_get_apps.side_effect = lambda slugs: [
+            type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
+            for slug in slugs
+        ]
+
+        response = self.client.get(self.settings_url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["owner_scope"], "organization")
+        self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["notion"])
+
+    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("console.api_views.get_mcp_manager")
+    def test_patch_updates_org_scope_apps(self, mock_get_mcp_manager, mock_get_apps):
+        org = Organization.objects.create(name="Acme Patch", slug="acme-patch", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        self._set_org_context(org)
+        mock_get_apps.side_effect = lambda slugs: [
+            type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
+            for slug in slugs
+        ]
+
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({"selected_app_slugs": ["hubspot"]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        selection = PipedreamAppSelection.objects.get(organization=org)
+        self.assertEqual(selection.selected_app_slugs, ["hubspot"])
+        manager = mock_get_mcp_manager.return_value
+        manager.invalidate_pipedream_owner_cache.assert_called_once_with("organization", str(org.id))
+        manager.prewarm_pipedream_owner_cache.assert_called_once_with(
+            "organization",
+            str(org.id),
+            app_slugs=["hubspot"],
+        )
+
+    def test_org_viewer_is_blocked(self):
+        org = Organization.objects.create(name="Viewer Org", slug="viewer-org-mcp", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.VIEWER,
+        )
+        self._set_org_context(org)
+
+        response = self.client.get(self.settings_url)
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("console.api_views.PipedreamCatalogService.search_apps")
+    def test_search_returns_results(self, mock_search_apps):
+        mock_search_apps.return_value = [
+            type("App", (), {"to_dict": lambda self: PipedreamAppsAPITests._app("trello")})()
+        ]
+
+        response = self.client.get(self.search_url, {"q": "trello"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"][0]["slug"], "trello")
+
+    @patch("console.api_views.PipedreamCatalogService.search_apps")
+    def test_search_returns_upstream_error(self, mock_search_apps):
+        mock_search_apps.side_effect = PipedreamCatalogError("boom")
+
+        response = self.client.get(self.search_url, {"q": "trello"})
+
+        self.assertEqual(response.status_code, 502)
+
+@tag("batch_console_mcp_servers")
 class MCPServerAssignmentAPITests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
@@ -346,20 +611,6 @@ class MCPServerAssignmentAPITests(TestCase):
             password="test-pass-123",
         )
         self.client.force_login(self.user)
-
-    def _create_agent(self, *, user, organization=None, name: str) -> PersistentAgent:
-        with ExitStack() as stack:
-            stack.enter_context(patch.object(BrowserUseAgent, "select_random_proxy", return_value=None))
-            if organization is not None:
-                stack.enter_context(patch.object(PersistentAgent, "_validate_org_seats", return_value=None))
-            browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
-            return PersistentAgent.objects.create(
-                user=user,
-                organization=organization,
-                name=name,
-                charter="",
-                browser_use_agent=browser,
-            )
 
     def _set_org_context(self, org: Organization):
         session = self.client.session
@@ -376,8 +627,8 @@ class MCPServerAssignmentAPITests(TestCase):
             display_name="User Scope",
             url="https://user.example.com/mcp",
         )
-        agent_one = self._create_agent(user=self.user, name="Alpha")
-        agent_two = self._create_agent(user=self.user, name="Beta")
+        agent_one = _create_console_test_agent(user=self.user, name="Alpha")
+        agent_two = _create_console_test_agent(user=self.user, name="Beta")
         PersistentAgentMCPServer.objects.create(agent=agent_one, server_config=server)
 
         response = self.client.get(reverse("console-mcp-server-assignments", args=[server.id]))
@@ -400,8 +651,8 @@ class MCPServerAssignmentAPITests(TestCase):
             display_name="User Update",
             url="https://update.example.com/mcp",
         )
-        agent_one = self._create_agent(user=self.user, name="One")
-        agent_two = self._create_agent(user=self.user, name="Two")
+        agent_one = _create_console_test_agent(user=self.user, name="One")
+        agent_two = _create_console_test_agent(user=self.user, name="Two")
         PersistentAgentMCPServer.objects.create(agent=agent_one, server_config=server)
         PersistentAgentEnabledTool.objects.create(
             agent=agent_one,
@@ -451,8 +702,8 @@ class MCPServerAssignmentAPITests(TestCase):
             display_name="Org Assign Server",
             url="https://org.example.com/mcp",
         )
-        agent_one = self._create_agent(user=self.user, organization=org, name="Org One")
-        agent_two = self._create_agent(user=self.user, organization=org, name="Org Two")
+        agent_one = _create_console_test_agent(user=self.user, organization=org, name="Org One")
+        agent_two = _create_console_test_agent(user=self.user, organization=org, name="Org Two")
         PersistentAgentEnabledTool.objects.create(
             agent=agent_two,
             tool_full_name="demo.tool",
