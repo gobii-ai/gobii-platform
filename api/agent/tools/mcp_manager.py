@@ -533,17 +533,25 @@ class MCPToolManager:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
         slot_key = self._tool_cache_slot_key(runtime, pipedream_context)
-        cache_fingerprint = self._build_tool_cache_fingerprint(runtime, pipedream_context)
         uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
         needs_shared_client = require_client and not uses_per_agent_client
         if slot_key in self._tools_cache:
-            cached_fingerprint = self._tool_cache_fingerprints.get(slot_key)
-            if cached_fingerprint == cache_fingerprint and (not require_client or config_id in self._clients):
-                return True
-            if cached_fingerprint == cache_fingerprint and uses_per_agent_client:
-                return self._runtime_per_agent_client_ready(runtime)
-            self._tools_cache.pop(slot_key, None)
-            self._tool_cache_fingerprints.pop(slot_key, None)
+            if runtime.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
+                cache_fingerprint = self._build_tool_cache_fingerprint(runtime, pipedream_context)
+                cached_fingerprint = self._tool_cache_fingerprints.get(slot_key)
+                if cached_fingerprint and cached_fingerprint != cache_fingerprint:
+                    self._tools_cache.pop(slot_key, None)
+                    self._tool_cache_fingerprints.pop(slot_key, None)
+                else:
+                    if not require_client or config_id in self._clients:
+                        return True
+                    if uses_per_agent_client:
+                        return self._runtime_per_agent_client_ready(runtime)
+            else:
+                if not require_client or config_id in self._clients:
+                    return True
+                if uses_per_agent_client:
+                    return self._runtime_per_agent_client_ready(runtime)
         try:
             self._register_server(
                 runtime,
