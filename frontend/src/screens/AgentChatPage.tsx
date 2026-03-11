@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
-import { respondToHumanInputRequest } from '../api/agentChat'
+import { respondToHumanInputRequest, respondToHumanInputRequestsBatch } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
   updateUserPreferences,
@@ -2722,9 +2722,6 @@ export function AgentChatPage({
       return
     }
     const charterOverride = typeof thirdArg === 'string' || thirdArg === null ? thirdArg : null
-    const humanInputRequestId = typeof thirdArg === 'object' && thirdArg !== null
-      ? thirdArg.humanInputRequestId ?? null
-      : null
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
       const authenticated = await ensureAuthenticated()
@@ -2791,17 +2788,6 @@ export function AgentChatPage({
         (current) => touchRosterEntryLastInteraction(current, activeAgentId, sentAt),
       )
     }
-    if (activeAgentId && humanInputRequestId && body.trim().length > 0 && attachments.length === 0) {
-      const result = await respondToHumanInputRequest(activeAgentId, humanInputRequestId, { free_text: body.trim() })
-      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
-      if (result.event) {
-        receiveRealtimeEvent(result.event)
-      }
-      if (autoScrollPinnedRef.current) {
-        scrollToBottom()
-      }
-      return
-    }
     await sendMessage(body, attachments)
     if (!autoScrollPinnedRef.current) return
     scrollToBottom()
@@ -2829,14 +2815,27 @@ export function AgentChatPage({
   ])
 
   const handleRespondHumanInputRequest = useCallback(async (
-    requestId: string,
-    response: { selectedOptionKey?: string; freeText?: string },
+    response:
+      | { requestId: string; selectedOptionKey?: string; freeText?: string }
+      | { batchId: string; responses: Array<{ requestId: string; selectedOptionKey?: string; freeText?: string }> },
   ) => {
     if (!activeAgentId) {
       return
     }
-    if (response.selectedOptionKey) {
-      const result = await respondToHumanInputRequest(activeAgentId, requestId, {
+    if ('responses' in response) {
+      const result = await respondToHumanInputRequestsBatch(activeAgentId, {
+        responses: response.responses.map((item) => (
+          item.selectedOptionKey
+            ? { request_id: item.requestId, selected_option_key: item.selectedOptionKey }
+            : { request_id: item.requestId, free_text: item.freeText?.trim() ?? '' }
+        )),
+      })
+      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
+      if (result.event) {
+        receiveRealtimeEvent(result.event)
+      }
+    } else if (response.selectedOptionKey) {
+      const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
         selected_option_key: response.selectedOptionKey,
       })
       replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
@@ -2844,7 +2843,7 @@ export function AgentChatPage({
         receiveRealtimeEvent(result.event)
       }
     } else if (response.freeText && response.freeText.trim().length > 0) {
-      const result = await respondToHumanInputRequest(activeAgentId, requestId, {
+      const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
         free_text: response.freeText.trim(),
       })
       replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)

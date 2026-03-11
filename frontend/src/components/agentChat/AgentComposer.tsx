@@ -110,10 +110,15 @@ type HumanInputComposerResponse = {
   freeText?: string
 }
 
+type HumanInputComposerBatchResponse = {
+  batchId: string
+  responses: HumanInputComposerResponse[]
+}
+
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[], meta?: ComposerSubmitMeta) => void | Promise<void>
   pendingHumanInputRequests?: PendingHumanInputRequest[]
-  onRespondHumanInput?: (response: HumanInputComposerResponse) => Promise<void>
+  onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
   disabled?: boolean
   disabledReason?: string | null
   autoFocus?: boolean
@@ -183,6 +188,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [isDragActive, setIsDragActive] = useState(false)
   const [activeHumanInputRequestId, setActiveHumanInputRequestId] = useState<string | null>(null)
   const [busyHumanInputRequestId, setBusyHumanInputRequestId] = useState<string | null>(null)
+  const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -416,13 +422,29 @@ export const AgentComposer = memo(function AgentComposer({
     if (!pendingHumanInputRequests.length) {
       setActiveHumanInputRequestId(null)
       setBusyHumanInputRequestId(null)
+      setDraftHumanInputResponses({})
       return
     }
     const hasActiveRequest = pendingHumanInputRequests.some((request) => request.id === activeHumanInputRequestId)
     if (!hasActiveRequest) {
-      setActiveHumanInputRequestId(pendingHumanInputRequests[0]?.id ?? null)
+      const latestBatchId = pendingHumanInputRequests[0]?.batchId
+      const latestBatchRequests = pendingHumanInputRequests
+        .filter((request) => request.batchId === latestBatchId)
+        .sort((left, right) => left.batchPosition - right.batchPosition)
+      setActiveHumanInputRequestId(latestBatchRequests[0]?.id ?? pendingHumanInputRequests[0]?.id ?? null)
     }
   }, [activeHumanInputRequestId, pendingHumanInputRequests])
+
+  useEffect(() => {
+    const pendingIds = new Set(pendingHumanInputRequests.map((request) => request.id))
+    setDraftHumanInputResponses((current) => {
+      const nextEntries = Object.entries(current).filter(([requestId]) => pendingIds.has(requestId))
+      if (nextEntries.length === Object.keys(current).length) {
+        return current
+      }
+      return Object.fromEntries(nextEntries)
+    })
+  }, [pendingHumanInputRequests])
 
   // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
   useEffect(() => {
@@ -462,6 +484,84 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [])
 
+  const activeHumanInputRequest =
+    pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
+    ?? null
+  const composerPlaceholder = activeHumanInputRequest
+    ? `Other option · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+    : `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+
+  const submitHumanInputResponse = useCallback(async (
+    request: PendingHumanInputRequest,
+    response: HumanInputComposerResponse,
+  ) => {
+    if (!onRespondHumanInput || disabled || isSending || busyHumanInputRequestId) {
+      return false
+    }
+
+    const batchRequests = pendingHumanInputRequests
+      .filter((candidate) => candidate.batchId === request.batchId)
+      .sort((left, right) => left.batchPosition - right.batchPosition)
+    const nextDrafts = {
+      ...draftHumanInputResponses,
+      [request.id]: response,
+    }
+
+    if (batchRequests.length > 1) {
+      const nextUnanswered = batchRequests.find((candidate) => !nextDrafts[candidate.id])
+      if (nextUnanswered) {
+        setDraftHumanInputResponses(nextDrafts)
+        setActiveHumanInputRequestId(nextUnanswered.id)
+        setBody('')
+        requestAnimationFrame(() => adjustTextareaHeight(true))
+        return true
+      }
+    }
+
+    try {
+      setBusyHumanInputRequestId(request.id)
+      if (batchRequests.length > 1) {
+        const responses = batchRequests
+          .map((candidate) => nextDrafts[candidate.id])
+          .filter((candidate): candidate is HumanInputComposerResponse => Boolean(candidate))
+        await onRespondHumanInput({
+          batchId: request.batchId,
+          responses,
+        })
+        setDraftHumanInputResponses((current) => {
+          const remaining = { ...current }
+          batchRequests.forEach((candidate) => {
+            delete remaining[candidate.id]
+          })
+          return remaining
+        })
+      } else {
+        await onRespondHumanInput(response)
+        setDraftHumanInputResponses((current) => {
+          if (!current[request.id]) {
+            return current
+          }
+          const remaining = { ...current }
+          delete remaining[request.id]
+          return remaining
+        })
+      }
+      setBody('')
+      requestAnimationFrame(() => adjustTextareaHeight(true))
+      return true
+    } finally {
+      setBusyHumanInputRequestId(null)
+    }
+  }, [
+    adjustTextareaHeight,
+    busyHumanInputRequestId,
+    disabled,
+    draftHumanInputResponses,
+    isSending,
+    onRespondHumanInput,
+    pendingHumanInputRequests,
+  ])
+
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
     if ((!trimmed && attachments.length === 0) || disabled || isSending) {
@@ -469,7 +569,15 @@ export const AgentComposer = memo(function AgentComposer({
     }
     const attachmentsSnapshot = attachments.slice()
     const activeRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null
-    const shouldSubmitAsHumanInput = Boolean(activeRequest && trimmed && attachmentsSnapshot.length === 0)
+    if (activeRequest && trimmed && attachmentsSnapshot.length === 0 && onRespondHumanInput) {
+      const submitted = await submitHumanInputResponse(activeRequest, {
+        requestId: activeRequest.id,
+        freeText: trimmed,
+      })
+      if (submitted) {
+        return
+      }
+    }
     if (onSubmit) {
       try {
         setIsSending(true)
@@ -479,11 +587,7 @@ export const AgentComposer = memo(function AgentComposer({
           fileInputRef.current.value = ''
         }
         requestAnimationFrame(() => adjustTextareaHeight(true))
-        await onSubmit(
-          trimmed,
-          attachmentsSnapshot,
-          shouldSubmitAsHumanInput ? { humanInputRequestId: activeRequest?.id ?? null } : undefined,
-        )
+        await onSubmit(trimmed, attachmentsSnapshot, undefined)
       } finally {
         setIsSending(false)
       }
@@ -502,28 +606,19 @@ export const AgentComposer = memo(function AgentComposer({
     body,
     disabled,
     isSending,
+    onRespondHumanInput,
     onSubmit,
     pendingHumanInputRequests,
+    submitHumanInputResponse,
   ])
 
-  const activeHumanInputRequest =
-    pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
-    ?? null
-  const composerPlaceholder = activeHumanInputRequest
-    ? `Other option · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
-    : `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
-
   const handleSelectHumanInputOption = useCallback(async (requestId: string, optionKey: string) => {
-    if (!onRespondHumanInput || disabled || isSending || busyHumanInputRequestId) {
+    const request = pendingHumanInputRequests.find((candidate) => candidate.id === requestId)
+    if (!request) {
       return
     }
-    try {
-      setBusyHumanInputRequestId(requestId)
-      await onRespondHumanInput({ requestId, selectedOptionKey: optionKey })
-    } finally {
-      setBusyHumanInputRequestId(null)
-    }
-  }, [busyHumanInputRequestId, disabled, isSending, onRespondHumanInput])
+    await submitHumanInputResponse(request, { requestId, selectedOptionKey: optionKey })
+  }, [pendingHumanInputRequests, submitHumanInputResponse])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

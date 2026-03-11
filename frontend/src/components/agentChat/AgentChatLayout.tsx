@@ -167,7 +167,11 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
   pendingHumanInputRequests?: PendingHumanInputRequest[]
-  onRespondHumanInputRequest?: (requestId: string, response: { selectedOptionKey?: string; freeText?: string }) => Promise<void>
+  onRespondHumanInputRequest?: (
+    response:
+      | { requestId: string; selectedOptionKey?: string; freeText?: string }
+      | { batchId: string; responses: Array<{ requestId: string; selectedOptionKey?: string; freeText?: string }> }
+  ) => Promise<void>
 }
 
 export function AgentChatLayout({
@@ -1055,12 +1059,7 @@ export function AgentChatLayout({
             <AgentComposer
               onSubmit={onSendMessage}
               pendingHumanInputRequests={pendingHumanInputRequests}
-              onRespondHumanInput={onRespondHumanInputRequest
-                ? async ({ requestId, selectedOptionKey, freeText }) => onRespondHumanInputRequest(requestId, {
-                    selectedOptionKey,
-                    freeText,
-                  })
-                : undefined}
+              onRespondHumanInput={onRespondHumanInputRequest}
               onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}

@@ -5,21 +5,22 @@ import json
 import re
 from typing import Any
 
+from django.db import transaction
 from django.utils import timezone
 from django.utils.html import escape
 from django.utils.text import slugify
 
-from api.agent.comms.adapters import ParsedMessage
-from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
-from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.models import (
     CommsChannel,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentConversationParticipant,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    build_web_agent_address,
 )
 
 HUMAN_INPUT_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
@@ -35,6 +36,16 @@ class HumanInputTarget:
     conversation: PersistentAgentConversation
 
 
+@dataclass(slots=True)
+class PreparedHumanInputResponse:
+    request: PersistentAgentHumanInputRequest
+    body: str
+    raw_payload: dict[str, Any]
+    selected_option_key: str
+    selected_option_title: str
+    free_text: str
+
+
 def _coerce_string(value: Any) -> str:
     return str(value or "").strip()
 
@@ -44,6 +55,39 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _get_or_create_endpoint(
+    *,
+    channel: str,
+    address: str,
+    owner_agent: PersistentAgent | None = None,
+) -> PersistentAgentCommsEndpoint:
+    endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=channel,
+        address=address,
+    )
+    if owner_agent is not None and endpoint.owner_agent_id != owner_agent.id:
+        endpoint.owner_agent = owner_agent
+        endpoint.save(update_fields=["owner_agent"])
+    return endpoint
+
+
+def _ensure_conversation_participants(
+    conversation: PersistentAgentConversation,
+    human_endpoint: PersistentAgentCommsEndpoint,
+    agent_endpoint: PersistentAgentCommsEndpoint,
+) -> None:
+    PersistentAgentConversationParticipant.objects.get_or_create(
+        conversation=conversation,
+        endpoint=human_endpoint,
+        defaults={"role": PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER},
+    )
+    PersistentAgentConversationParticipant.objects.get_or_create(
+        conversation=conversation,
+        endpoint=agent_endpoint,
+        defaults={"role": PersistentAgentConversationParticipant.ParticipantRole.AGENT},
+    )
 
 
 def build_option_payloads(raw_options: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -180,14 +224,10 @@ def _send_request_prompt(
 ) -> dict[str, Any]:
     channel = target.channel
     if channel == CommsChannel.WEB:
-        return execute_send_chat_message(
-            agent,
-            {
-                "body": _render_prompt_text(request_obj, compact=False, include_reference=False),
-                "to_address": target.address,
-                "will_continue_work": False,
-            },
-        )
+        return {
+            "status": "ok",
+            "delivery": "composer_panel",
+        }
     if channel == CommsChannel.SMS:
         return execute_send_sms(
             agent,
@@ -346,14 +386,36 @@ def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInput
 
 
 def list_pending_human_input_requests(agent: PersistentAgent) -> list[dict[str, Any]]:
-    requests = (
+    request_objects = list(
         PersistentAgentHumanInputRequest.objects.filter(
             agent=agent,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
         )
         .order_by("-created_at")
     )
-    return [serialize_pending_human_input_request(request_obj) for request_obj in requests]
+    ordered_for_batches = sorted(
+        request_objects,
+        key=lambda request: (
+            str(request.originating_step_id or request.id),
+            request.created_at or timezone.now(),
+            str(request.id),
+        ),
+    )
+    batch_members: dict[str, list[PersistentAgentHumanInputRequest]] = {}
+    for request_obj in ordered_for_batches:
+        batch_key = str(request_obj.originating_step_id or request_obj.id)
+        batch_members.setdefault(batch_key, []).append(request_obj)
+
+    serialized_requests: list[dict[str, Any]] = []
+    for request_obj in request_objects:
+        batch_key = str(request_obj.originating_step_id or request_obj.id)
+        requests_in_batch = batch_members.get(batch_key, [request_obj])
+        serialized = serialize_pending_human_input_request(request_obj)
+        serialized["batchId"] = batch_key
+        serialized["batchPosition"] = requests_in_batch.index(request_obj) + 1
+        serialized["batchSize"] = len(requests_in_batch)
+        serialized_requests.append(serialized)
+    return serialized_requests
 
 
 def serialize_human_input_tool_result(step, raw_result: Any) -> Any:
@@ -615,38 +677,215 @@ def build_human_input_response_message(
     }
 
 
+def _prepare_human_input_response(
+    request_obj: PersistentAgentHumanInputRequest,
+    *,
+    selected_option_key: str | None = None,
+    free_text: str | None = None,
+) -> PreparedHumanInputResponse:
+    body, raw_payload = build_human_input_response_message(
+        request_obj,
+        selected_option_key=selected_option_key,
+        free_text=free_text,
+    )
+    if selected_option_key:
+        options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
+        for option in options:
+            if _coerce_string(option.get("key")) == selected_option_key:
+                return PreparedHumanInputResponse(
+                    request=request_obj,
+                    body=body,
+                    raw_payload=raw_payload,
+                    selected_option_key=selected_option_key,
+                    selected_option_title=_coerce_string(option.get("title")),
+                    free_text="",
+                )
+        raise ValueError("Selected option key is not valid for this request.")
+
+    clean_text = _coerce_string(free_text)
+    if not clean_text:
+        raise ValueError("Free text response is required.")
+    return PreparedHumanInputResponse(
+        request=request_obj,
+        body=body,
+        raw_payload=raw_payload,
+        selected_option_key="",
+        selected_option_title="",
+        free_text=clean_text,
+    )
+
+
+def _resolve_agent_recipient_address(request_obj: PersistentAgentHumanInputRequest) -> str:
+    recipient_address = (
+        request_obj.requested_message.from_endpoint.address
+        if request_obj.requested_message_id and request_obj.requested_message and request_obj.requested_message.from_endpoint_id
+        else ""
+    )
+    if not recipient_address and request_obj.conversation.channel == CommsChannel.WEB:
+        return build_web_agent_address(request_obj.agent_id)
+    if recipient_address:
+        return recipient_address
+    return _coerce_string(
+        PersistentAgentCommsEndpoint.objects.filter(
+            owner_agent_id=request_obj.agent_id,
+            channel=request_obj.conversation.channel,
+        )
+        .order_by("-is_primary", "id")
+        .values_list("address", flat=True)
+        .first()
+    )
+
+
+def _build_batch_response_body(prepared_responses: list[PreparedHumanInputResponse]) -> str:
+    lines: list[str] = []
+    for index, prepared in enumerate(prepared_responses, start=1):
+        lines.append(f"Question: {prepared.request.question}")
+        lines.append(f"Answer: {prepared.body}")
+        if index < len(prepared_responses):
+            lines.append("")
+    return "\n".join(lines)
+
+
+def submit_human_input_responses_batch(
+    agent: PersistentAgent,
+    responses: list[dict[str, str]],
+) -> PersistentAgentMessage:
+    if not responses:
+        raise ValueError("At least one human input response is required.")
+
+    request_ids = [str(response.get("request_id") or "").strip() for response in responses]
+    if any(not request_id for request_id in request_ids):
+        raise ValueError("Each response must include request_id.")
+
+    request_objects = list(
+        PersistentAgentHumanInputRequest.objects.select_related(
+            "agent",
+            "conversation",
+            "requested_message__from_endpoint",
+        ).filter(
+            id__in=request_ids,
+            agent=agent,
+        )
+    )
+    requests_by_id = {str(request.id): request for request in request_objects}
+    if len(requests_by_id) != len(request_ids):
+        raise ValueError("One or more human input requests could not be found.")
+
+    prepared_responses: list[PreparedHumanInputResponse] = []
+    for response in responses:
+        request_id = str(response.get("request_id") or "").strip()
+        request_obj = requests_by_id[request_id]
+        if request_obj.status != PersistentAgentHumanInputRequest.Status.PENDING:
+            raise ValueError("This request is no longer pending.")
+        prepared_responses.append(
+            _prepare_human_input_response(
+                request_obj,
+                selected_option_key=_coerce_string(response.get("selected_option_key")) or None,
+                free_text=_coerce_string(response.get("free_text")) or None,
+            )
+        )
+
+    first_request = prepared_responses[0].request
+    if any(
+        prepared.request.conversation_id != first_request.conversation_id
+        or prepared.request.requested_via_channel != first_request.requested_via_channel
+        for prepared in prepared_responses[1:]
+    ):
+        raise ValueError("Batch responses must belong to the same conversation and channel.")
+
+    recipient_address = _resolve_agent_recipient_address(first_request)
+    if not recipient_address:
+        raise ValueError("Request is missing the agent recipient endpoint.")
+
+    body = (
+        prepared_responses[0].body
+        if len(prepared_responses) == 1
+        else _build_batch_response_body(prepared_responses)
+    )
+    raw_payload: dict[str, Any] = {
+        "source": "console_human_input_response_batch" if len(prepared_responses) > 1 else "console_human_input_response",
+        "human_input_request_ids": [str(prepared.request.id) for prepared in prepared_responses],
+        "human_input_responses": [
+            {
+                "request_id": str(prepared.request.id),
+                "selected_option_key": prepared.selected_option_key or None,
+                "selected_option_title": prepared.selected_option_title or None,
+                "free_text": prepared.free_text or None,
+            }
+            for prepared in prepared_responses
+        ],
+    }
+    if len(prepared_responses) == 1:
+        raw_payload.update(prepared_responses[0].raw_payload)
+
+    with transaction.atomic():
+        human_endpoint = _get_or_create_endpoint(
+            channel=first_request.conversation.channel,
+            address=first_request.conversation.address,
+        )
+        agent_endpoint = _get_or_create_endpoint(
+            channel=first_request.conversation.channel,
+            address=recipient_address,
+            owner_agent=agent,
+        )
+        _ensure_conversation_participants(first_request.conversation, human_endpoint, agent_endpoint)
+
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=human_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=first_request.conversation,
+            owner_agent=agent,
+            body=body,
+            raw_payload=raw_payload,
+        )
+
+        resolved_at = timezone.now()
+        for prepared in prepared_responses:
+            request_obj = prepared.request
+            request_obj.selected_option_key = prepared.selected_option_key
+            request_obj.selected_option_title = prepared.selected_option_title
+            request_obj.free_text = prepared.free_text
+            request_obj.raw_reply_text = prepared.body
+            request_obj.raw_reply_message = message
+            request_obj.resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.DIRECT
+            request_obj.resolved_at = resolved_at
+            request_obj.status = PersistentAgentHumanInputRequest.Status.ANSWERED
+            request_obj.save(
+                update_fields=[
+                    "selected_option_key",
+                    "selected_option_title",
+                    "free_text",
+                    "raw_reply_text",
+                    "raw_reply_message",
+                    "resolution_source",
+                    "resolved_at",
+                    "status",
+                    "updated_at",
+                ]
+            )
+
+        transaction.on_commit(
+            lambda: __import__("api.agent.tasks", fromlist=["process_agent_events_task"])
+            .process_agent_events_task.delay(str(agent.id))
+        )
+
+    return message
+
+
 def submit_human_input_response(
     request_obj: PersistentAgentHumanInputRequest,
     *,
     selected_option_key: str | None = None,
     free_text: str | None = None,
 ) -> PersistentAgentMessage:
-    body, raw_payload = build_human_input_response_message(
-        request_obj,
-        selected_option_key=selected_option_key,
-        free_text=free_text,
+    return submit_human_input_responses_batch(
+        request_obj.agent,
+        [
+            {
+                "request_id": str(request_obj.id),
+                "selected_option_key": selected_option_key or "",
+                "free_text": free_text or "",
+            }
+        ],
     )
-
-    recipient_address = (
-        request_obj.requested_message.from_endpoint.address
-        if request_obj.requested_message_id and request_obj.requested_message and request_obj.requested_message.from_endpoint_id
-        else ""
-    )
-    if not recipient_address:
-        raise ValueError("Request is missing the agent recipient endpoint.")
-
-    parsed = ParsedMessage(
-        sender=request_obj.conversation.address,
-        recipient=recipient_address,
-        subject=(
-            _coerce_string((request_obj.requested_message.raw_payload or {}).get("subject"))
-            if request_obj.requested_message_id and isinstance(request_obj.requested_message.raw_payload, dict)
-            else None
-        ),
-        body=body,
-        attachments=[],
-        raw_payload=raw_payload,
-        msg_channel=CommsChannel(request_obj.conversation.channel),
-    )
-    info = ingest_inbound_message(request_obj.conversation.channel, parsed, filespace_import_mode="sync")
-    return info.message

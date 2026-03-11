@@ -111,6 +111,9 @@ export type PendingHumanInputRequest = {
   referenceCode?: string | null
   activeConversationChannel?: string | null
   inputMode: PendingHumanInputRequestInputMode
+  batchId: string
+  batchPosition: number
+  batchSize: number
 }
 
 export type MessageEvent = {

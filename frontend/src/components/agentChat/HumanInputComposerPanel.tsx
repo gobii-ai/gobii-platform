@@ -85,7 +85,7 @@ export function HumanInputComposerPanel({
           <div className="flex shrink-0 items-center gap-2 text-sm text-slate-500">
             <button
               type="button"
-              className="inline-flex h-8 w-8 items-center justify-center border border-slate-200 bg-slate-50 text-slate-600 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
               onClick={() => onActiveRequestChange(requests[Math.max(0, activeIndex - 1)].id)}
               disabled={disabled || activeIndex === 0}
               aria-label="Previous question"
@@ -97,7 +97,7 @@ export function HumanInputComposerPanel({
             </span>
             <button
               type="button"
-              className="inline-flex h-8 w-8 items-center justify-center border border-slate-200 bg-slate-50 text-slate-600 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
               onClick={() => onActiveRequestChange(requests[Math.min(requests.length - 1, activeIndex + 1)].id)}
               disabled={disabled || activeIndex >= requests.length - 1}
               aria-label="Next question"

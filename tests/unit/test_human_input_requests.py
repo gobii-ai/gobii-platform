@@ -115,11 +115,7 @@ class HumanInputRequestTests(TestCase):
             ["question"],
         )
 
-    @patch("api.agent.comms.human_input_requests.execute_send_chat_message")
-    def test_execute_request_human_input_creates_free_text_request(self, mock_send_chat_message):
-        prompt_message = self._create_prompt_message("Need your input")
-        mock_send_chat_message.return_value = {"status": "ok", "message_id": str(prompt_message.id)}
-
+    def test_execute_request_human_input_creates_free_text_request(self):
         result = execute_request_human_input(
             self.agent,
             {
@@ -134,7 +130,7 @@ class HumanInputRequestTests(TestCase):
             request_obj.input_mode,
             PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
         )
-        self.assertEqual(request_obj.requested_message_id, prompt_message.id)
+        self.assertIsNone(request_obj.requested_message_id)
 
     def test_execute_request_human_input_rejects_more_than_six_options(self):
         result = execute_request_human_input(
@@ -151,15 +147,7 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("cannot exceed 6", result["message"])
 
-    @patch("api.agent.comms.human_input_requests.execute_send_chat_message")
-    def test_execute_request_human_input_creates_multiple_requests(self, mock_send_chat_message):
-        first_prompt = self._create_prompt_message("First prompt")
-        second_prompt = self._create_prompt_message("Second prompt")
-        mock_send_chat_message.side_effect = [
-            {"status": "ok", "message_id": str(first_prompt.id)},
-            {"status": "ok", "message_id": str(second_prompt.id)},
-        ]
-
+    def test_execute_request_human_input_creates_multiple_requests(self):
         result = execute_request_human_input(
             self.agent,
             {
@@ -182,6 +170,12 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(
             PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(),
             2,
+        )
+        self.assertFalse(
+            PersistentAgentHumanInputRequest.objects.filter(
+                agent=self.agent,
+                requested_message__isnull=False,
+            ).exists()
         )
 
     @patch("api.agent.comms.human_input_requests.execute_send_email")
@@ -480,15 +474,6 @@ class HumanInputRequestApiTests(TestCase):
             channel=CommsChannel.WEB,
             address=self.user_address,
         )
-        self.prompt_message = PersistentAgentMessage.objects.create(
-            is_outbound=True,
-            from_endpoint=self.agent_endpoint,
-            to_endpoint=self.user_endpoint,
-            conversation=self.conversation,
-            owner_agent=self.agent,
-            body="What should I do next?",
-            raw_payload={"source": "test"},
-        )
         self.request_obj = PersistentAgentHumanInputRequest.objects.create(
             agent=self.agent,
             conversation=self.conversation,
@@ -499,7 +484,6 @@ class HumanInputRequestApiTests(TestCase):
             ],
             input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
             requested_via_channel=CommsChannel.WEB,
-            requested_message=self.prompt_message,
         )
         self.client = Client()
         self.client.force_login(self.user)
@@ -518,6 +502,12 @@ class HumanInputRequestApiTests(TestCase):
             timeline_payload["pending_human_input_requests"][0]["referenceCode"],
             self.request_obj.reference_code,
         )
+        self.assertEqual(
+            timeline_payload["pending_human_input_requests"][0]["batchId"],
+            str(self.request_obj.id),
+        )
+        self.assertEqual(timeline_payload["pending_human_input_requests"][0]["batchPosition"], 1)
+        self.assertEqual(timeline_payload["pending_human_input_requests"][0]["batchSize"], 1)
 
         response = self.client.post(
             f"/console/api/agents/{self.agent.id}/human-input-requests/{self.request_obj.id}/respond/",
@@ -534,3 +524,67 @@ class HumanInputRequestApiTests(TestCase):
         self.request_obj.refresh_from_db()
         self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(self.request_obj.selected_option_key, "ship")
+
+    def test_batch_response_endpoint_submits_group_once(self):
+        from api.models import PersistentAgentStep
+
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect multiple answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do first?",
+            options_json=[
+                {"key": "ship", "title": "Ship it", "description": "Move forward now."},
+                {"key": "wait", "title": "Wait", "description": "Pause for more info."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do second?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.WEB,
+        )
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/human-input-requests/respond-batch/",
+            data=json.dumps(
+                {
+                    "responses": [
+                        {"request_id": str(first_request.id), "selected_option_key": "ship"},
+                        {"request_id": str(second_request.id), "free_text": "Follow up with a summary."},
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["event"]["kind"], "message")
+        self.assertEqual(
+            payload["event"]["message"]["bodyText"],
+            "Question: What should I do first?\n"
+            "Answer: Ship it\n\n"
+            "Question: What should I do second?\n"
+            "Answer: Follow up with a summary.",
+        )
+        self.assertEqual(len(payload["pending_human_input_requests"]), 1)
+        self.assertEqual(payload["pending_human_input_requests"][0]["id"], str(self.request_obj.id))
+
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(first_request.selected_option_key, "ship")
+        self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(second_request.free_text, "Follow up with a summary.")
+        self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
