@@ -2,7 +2,11 @@
 
 from typing import Any
 
-from api.agent.comms.human_input_requests import MAX_OPTION_COUNT, create_human_input_request
+from api.agent.comms.human_input_requests import (
+    MAX_OPTION_COUNT,
+    create_human_input_request,
+    create_human_input_requests_batch,
+)
 from api.models import PersistentAgent
 
 
@@ -22,6 +26,27 @@ def get_request_human_input_tool() -> dict[str, Any]:
             },
         },
         "required": ["title", "description"],
+    }
+    request_schema = {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Short title for the request shown prominently to the user.",
+            },
+            "question": {
+                "type": "string",
+                "description": "Primary question or prompt for the user.",
+            },
+            "options": {
+                "type": "array",
+                "items": option_schema,
+                "description": (
+                    "Optional list of user-facing choices. Omit or pass [] for a free-text-only request."
+                ),
+            },
+        },
+        "required": ["title", "question"],
     }
 
     return {
@@ -52,33 +77,30 @@ def get_request_human_input_tool() -> dict[str, Any]:
                             "Optional list of user-facing choices. Omit or pass [] for a free-text-only request."
                         ),
                     },
+                    "requests": {
+                        "type": "array",
+                        "items": request_schema,
+                        "description": (
+                            "Optional list of multiple input requests to ask in one tool call. "
+                            "When provided, omit the top-level title/question/options."
+                        ),
+                    },
                 },
-                "required": ["title", "question"],
             },
         },
     }
 
 
-def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
-    """Create and send a human input request."""
-
-    title = str(params.get("title") or "").strip()
-    question = str(params.get("question") or "").strip()
-    raw_options = params.get("options")
-
-    if not title or not question:
-        return {
-            "status": "error",
-            "message": "Missing required parameters: title and question.",
-        }
-
-    if raw_options is not None and not isinstance(raw_options, list):
-        return {
+def _normalize_request_options(raw_options: Any) -> tuple[list[dict[str, Any]] | None, dict[str, Any] | None]:
+    if raw_options is None:
+        return None, None
+    if not isinstance(raw_options, list):
+        return None, {
             "status": "error",
             "message": "Invalid parameter: options must be an array when provided.",
         }
     if raw_options and len(raw_options) > MAX_OPTION_COUNT:
-        return {
+        return None, {
             "status": "error",
             "message": f"Options cannot exceed {MAX_OPTION_COUNT} items.",
         }
@@ -86,14 +108,14 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     options: list[dict[str, Any]] = []
     for raw_option in raw_options or []:
         if not isinstance(raw_option, dict):
-            return {
+            return None, {
                 "status": "error",
                 "message": "Invalid option payload. Each option must be an object.",
             }
         option_title = str(raw_option.get("title") or "").strip()
         option_description = str(raw_option.get("description") or "").strip()
         if not option_title or not option_description:
-            return {
+            return None, {
                 "status": "error",
                 "message": "Each option must include title and description.",
             }
@@ -103,10 +125,62 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
                 "description": option_description,
             }
         )
+    return options, None
+
+
+def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
+    """Create and send one or more human input requests."""
+
+    raw_requests = params.get("requests")
+    if raw_requests is not None:
+        if not isinstance(raw_requests, list) or not raw_requests:
+            return {
+                "status": "error",
+                "message": "Invalid parameter: requests must be a non-empty array when provided.",
+            }
+
+        requests: list[dict[str, Any]] = []
+        for raw_request in raw_requests:
+            if not isinstance(raw_request, dict):
+                return {
+                    "status": "error",
+                    "message": "Each request must be an object.",
+                }
+            title = str(raw_request.get("title") or "").strip()
+            question = str(raw_request.get("question") or "").strip()
+            if not title or not question:
+                return {
+                    "status": "error",
+                    "message": "Each request must include title and question.",
+                }
+            options, error = _normalize_request_options(raw_request.get("options"))
+            if error:
+                return error
+            requests.append(
+                {
+                    "title": title,
+                    "question": question,
+                    "options": options or [],
+                }
+            )
+
+        return create_human_input_requests_batch(agent, requests=requests)
+
+    title = str(params.get("title") or "").strip()
+    question = str(params.get("question") or "").strip()
+    if not title or not question:
+        return {
+            "status": "error",
+            "message": "Missing required parameters: title and question.",
+        }
+
+    options, error = _normalize_request_options(params.get("options"))
+    if error:
+        return error
 
     return create_human_input_request(
         agent,
         title=title,
         question=question,
-        raw_options=options,
+        raw_options=options or [],
     )

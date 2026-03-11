@@ -119,7 +119,12 @@ def resolve_human_input_target(agent: PersistentAgent) -> HumanInputTarget | Non
     return None
 
 
-def _render_prompt_text(request_obj: PersistentAgentHumanInputRequest, *, compact: bool) -> str:
+def _render_prompt_text(
+    request_obj: PersistentAgentHumanInputRequest,
+    *,
+    compact: bool,
+    include_reference: bool,
+) -> str:
     lines = [request_obj.title.strip(), request_obj.question.strip()]
     options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
     if options:
@@ -141,7 +146,8 @@ def _render_prompt_text(request_obj: PersistentAgentHumanInputRequest, *, compac
     else:
         lines.append("")
         lines.append("Reply in your own words.")
-    lines.append(f"Ref: {request_obj.reference_code}")
+    if include_reference:
+        lines.append(f"Ref: {request_obj.reference_code}")
     return "\n".join(line for line in lines if line is not None)
 
 
@@ -178,7 +184,7 @@ def _send_request_prompt(
         return execute_send_chat_message(
             agent,
             {
-                "body": _render_prompt_text(request_obj, compact=False),
+                "body": _render_prompt_text(request_obj, compact=False, include_reference=False),
                 "to_address": target.address,
                 "will_continue_work": False,
             },
@@ -188,7 +194,7 @@ def _send_request_prompt(
             agent,
             {
                 "to_number": target.address,
-                "body": _render_prompt_text(request_obj, compact=True),
+                "body": _render_prompt_text(request_obj, compact=True, include_reference=True),
                 "will_continue_work": False,
             },
         )
@@ -205,20 +211,14 @@ def _send_request_prompt(
     return {"status": "error", "message": f"Unsupported channel '{channel}' for human input requests."}
 
 
-def create_human_input_request(
+def _create_human_input_request_for_target(
     agent: PersistentAgent,
+    target: HumanInputTarget,
     *,
     title: str,
     question: str,
     raw_options: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
-    target = resolve_human_input_target(agent)
-    if target is None:
-        return {
-            "status": "error",
-            "message": "No eligible human conversation is available to request input from.",
-        }
-
     options = build_option_payloads(raw_options)
     input_mode = (
         PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT
@@ -260,14 +260,80 @@ def create_human_input_request(
     }
 
 
+def create_human_input_request(
+    agent: PersistentAgent,
+    *,
+    title: str,
+    question: str,
+    raw_options: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    target = resolve_human_input_target(agent)
+    if target is None:
+        return {
+            "status": "error",
+            "message": "No eligible human conversation is available to request input from.",
+        }
+
+    return _create_human_input_request_for_target(
+        agent,
+        target,
+        title=title,
+        question=question,
+        raw_options=raw_options,
+    )
+
+
+def create_human_input_requests_batch(
+    agent: PersistentAgent,
+    *,
+    requests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    target = resolve_human_input_target(agent)
+    if target is None:
+        return {
+            "status": "error",
+            "message": "No eligible human conversation is available to request input from.",
+        }
+
+    created_requests: list[dict[str, Any]] = []
+    for request in requests:
+        result = _create_human_input_request_for_target(
+            agent,
+            target,
+            title=_coerce_string(request.get("title")),
+            question=_coerce_string(request.get("question")),
+            raw_options=request.get("options"),
+        )
+        status = _coerce_string(result.get("status")).lower()
+        if status not in HUMAN_INPUT_SUCCESS_STATUSES:
+            return result
+        created_requests.append(result)
+
+    return {
+        "status": "ok",
+        "message": f"{len(created_requests)} human input requests sent via {target.channel}.",
+        "request_ids": [result["request_id"] for result in created_requests if result.get("request_id")],
+        "requests": created_requests,
+        "requests_count": len(created_requests),
+        "active_conversation_channel": target.channel,
+        "auto_sleep_ok": True,
+    }
+
+
 def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> None:
     if not step or not isinstance(result, dict):
         return
+    request_ids: list[str] = []
     request_id = result.get("request_id")
-    if not request_id:
+    if request_id:
+        request_ids.append(str(request_id))
+    raw_request_ids = result.get("request_ids")
+    if isinstance(raw_request_ids, list):
+        request_ids.extend(str(value) for value in raw_request_ids if value)
+    if not request_ids:
         return
     PersistentAgentHumanInputRequest.objects.filter(
-        id=request_id,
+        id__in=request_ids,
         originating_step__isnull=True,
     ).update(originating_step=step, updated_at=timezone.now())
 
@@ -304,15 +370,14 @@ def serialize_human_input_tool_result(step, raw_result: Any) -> Any:
         return raw_result
 
     prefetched_requests = getattr(step, "_prefetched_objects_cache", {}).get("human_input_requests")
-    request_obj = prefetched_requests[0] if prefetched_requests else None
-    if request_obj is None:
-        request_obj = (
-            PersistentAgentHumanInputRequest.objects.filter(originating_step=step)
-            .order_by("-created_at")
-            .first()
+    request_objects = list(prefetched_requests) if prefetched_requests is not None else []
+    if not request_objects:
+        request_objects = list(
+            PersistentAgentHumanInputRequest.objects.filter(originating_step=step).order_by("-created_at")
         )
-    if request_obj is None:
+    if not request_objects:
         return raw_result
+    request_obj = request_objects[0]
 
     if isinstance(raw_result, dict):
         result_data = dict(raw_result)
@@ -342,6 +407,25 @@ def serialize_human_input_tool_result(step, raw_result: Any) -> Any:
             "resolution_source": request_obj.resolution_source or None,
         }
     )
+    if len(request_objects) > 1:
+        result_data["request_ids"] = [str(request.id) for request in request_objects]
+        result_data["requests_count"] = len(request_objects)
+        result_data["requests"] = [
+            {
+                "request_id": str(request.id),
+                "title": request.title,
+                "question": request.question,
+                "options": request.options_json if isinstance(request.options_json, list) else [],
+                "status": request.status,
+                "input_mode": request.input_mode,
+                "selected_option_key": request.selected_option_key or None,
+                "selected_option_title": request.selected_option_title or None,
+                "free_text": request.free_text or None,
+                "raw_reply_text": request.raw_reply_text or None,
+                "resolution_source": request.resolution_source or None,
+            }
+            for request in request_objects
+        ]
     return result_data
 
 

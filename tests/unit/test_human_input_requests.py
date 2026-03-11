@@ -108,8 +108,8 @@ class HumanInputRequestTests(TestCase):
         tool = get_request_human_input_tool()
         function = tool["function"]
         self.assertEqual(function["name"], "request_human_input")
-        self.assertEqual(function["parameters"]["required"], ["title", "question"])
         self.assertIn("options", function["parameters"]["properties"])
+        self.assertIn("requests", function["parameters"]["properties"])
 
     @patch("api.agent.comms.human_input_requests.execute_send_chat_message")
     def test_execute_request_human_input_creates_free_text_request(self, mock_send_chat_message):
@@ -148,6 +148,41 @@ class HumanInputRequestTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("cannot exceed 6", result["message"])
+
+    @patch("api.agent.comms.human_input_requests.execute_send_chat_message")
+    def test_execute_request_human_input_creates_multiple_requests(self, mock_send_chat_message):
+        first_prompt = self._create_prompt_message("First prompt")
+        second_prompt = self._create_prompt_message("Second prompt")
+        mock_send_chat_message.side_effect = [
+            {"status": "ok", "message_id": str(first_prompt.id)},
+            {"status": "ok", "message_id": str(second_prompt.id)},
+        ]
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {
+                        "title": "Question one",
+                        "question": "What should happen first?",
+                        "options": [{"title": "Ship", "description": "Move now."}],
+                    },
+                    {
+                        "title": "Question two",
+                        "question": "What should happen second?",
+                        "options": [],
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["requests_count"], 2)
+        self.assertEqual(len(result["request_ids"]), 2)
+        self.assertEqual(
+            PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(),
+            2,
+        )
 
     @patch("api.agent.comms.human_input_requests.execute_send_email")
     def test_create_human_input_request_renders_email_options(self, mock_send_email):
