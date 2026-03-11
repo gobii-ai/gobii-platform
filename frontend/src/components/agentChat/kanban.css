@@ -49,6 +49,7 @@
   width: 56px;
   height: 56px;
   flex-shrink: 0;
+  container-type: inline-size;
 }
 
 .kanban-ring-svg {
@@ -72,22 +73,23 @@
   align-items: center;
   justify-content: center;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .kanban-ring-done {
-  font-size: 1rem;
+  font-size: clamp(0.7rem, 24cqw, 1rem);
   font-weight: 700;
   color: rgb(var(--kanban-done));
 }
 
 .kanban-ring-divider {
-  font-size: 0.75rem;
+  font-size: clamp(0.55rem, 18cqw, 0.75rem);
   color: #94a3b8;
   margin: 0 1px;
 }
 
 .kanban-ring-total {
-  font-size: 0.75rem;
+  font-size: clamp(0.55rem, 18cqw, 0.75rem);
   font-weight: 500;
   color: #64748b;
 }
