@@ -2153,9 +2153,13 @@ export function AgentChatPage({
     }
   }, [initialLoading, switchingAgentId])
 
-  const billingStatus = addonsPayload?.status?.billing ?? rosterQuery.data?.billingStatus ?? null
-  const createAgentDisabledReason = billingStatus?.delinquent
-    ? resolveCreateAgentDisabledMessage(billingStatus.reason, billingStatus.actionable)
+  const selectedAgentBillingStatus = addonsPayload?.status?.billing ?? null
+  const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
+  const createAgentDisabledReason = currentContextBillingStatus?.delinquent
+    ? resolveCreateAgentDisabledMessage(
+      currentContextBillingStatus.reason,
+      currentContextBillingStatus.actionable,
+    )
     : null
 
   const handleSelectAgent = useCallback(
@@ -2536,21 +2540,27 @@ export function AgentChatPage({
     }
     return '/console/billing/'
   }, [effectiveContext])
-  const billingManageUrl = billingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
+  const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
+  const billingManageUrl = bannerBillingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
   const highPriorityBanner = useMemo(() => {
-    if (!billingStatus?.delinquent || !billingStatus?.actionable || !billingManageUrl) {
+    if (!bannerBillingStatus?.delinquent || !bannerBillingStatus?.actionable || !billingManageUrl) {
       return null
     }
     return {
       id: 'billing-delinquent',
       title: 'Billing issue needs attention',
-      message: `${resolveBillingAlertMessage(billingStatus.reason)} Visit billing to fix this and avoid disruption.`,
+      message: `${resolveBillingAlertMessage(bannerBillingStatus.reason)} Visit billing to fix this and avoid disruption.`,
       actionLabel: 'Open billing',
       actionHref: billingManageUrl,
       dismissible: false,
       tone: 'critical' as const,
     }
-  }, [billingManageUrl, billingStatus?.actionable, billingStatus?.delinquent, billingStatus?.reason])
+  }, [
+    bannerBillingStatus?.actionable,
+    bannerBillingStatus?.delinquent,
+    bannerBillingStatus?.reason,
+    billingManageUrl,
+  ])
 
   useEffect(() => {
     if (!isNewAgent || !createAgentDisabledReason || typeof window === 'undefined') {
