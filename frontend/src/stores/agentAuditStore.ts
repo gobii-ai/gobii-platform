@@ -51,7 +51,23 @@ function normalizeAuditEvent(event: AuditEvent): AuditEvent {
     return event
   }
 
-  const candidate = pickHtmlCandidate(event.body_html, event.body_text)
+  const explicitHtml = event.body_html?.trim()
+  if (explicitHtml) {
+    const sanitized = sanitizeHtml(explicitHtml)
+    if ((event.body_html ?? '') === sanitized) {
+      return event
+    }
+
+    return {
+      ...event,
+      body_html: sanitized,
+    }
+  }
+
+  const channel = event.channel?.toLowerCase()
+  const candidate = channel === 'web'
+    ? null
+    : pickHtmlCandidate(undefined, event.body_text)
   if (!candidate) {
     return event
   }
