@@ -6,6 +6,7 @@ import { I18nProvider } from 'react-aria-components'
 import { Loader2 } from 'lucide-react'
 import type { PersistentAgentsScreenProps } from './screens/PersistentAgentsScreen'
 import { initializeSubscriptionStore } from './stores/subscriptionStore'
+import { SimplifiedChatProvider } from './contexts/SimplifiedChatContext'
 import './index.css'
 import './styles/consoleShell.css'
 
@@ -46,6 +47,8 @@ if (shouldInitializeSubscriptionStore) {
   initializeSubscriptionStore(mountNode)
 }
 const isStaff = mountNode.dataset.isStaff === 'true'
+const simplifiedChatUi = mountNode.dataset.simplifiedChatUi === 'true'
+const simplifiedChatToggleAvailable = mountNode.dataset.simplifiedChatToggleAvailable === 'true'
 
 const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
@@ -106,23 +109,25 @@ switch (appName) {
       throw new Error('Agent identifier is required for the chat experience')
     }
     screen = (
-      <AgentChatPage
-        agentId={agentId}
-        agentName={agentName}
-        agentColor={agentColor}
-        agentAvatarUrl={agentAvatarUrl}
-        agentEmail={agentEmail}
-        agentSms={agentSms}
-        collaboratorInviteUrl={collaboratorInviteUrl}
-        isStaff={isStaff}
-        auditUrl={auditUrl}
-        auditUrlTemplate={auditUrlTemplate}
-        canManageCollaborators={canManageCollaborators}
-        isCollaborator={isCollaborator}
-        viewerUserId={viewerUserId}
-        viewerEmail={viewerEmail}
-        onClose={handleEmbeddedClose}
-      />
+      <SimplifiedChatProvider initialEnabled={simplifiedChatUi} toggleAvailable={simplifiedChatToggleAvailable}>
+        <AgentChatPage
+          agentId={agentId}
+          agentName={agentName}
+          agentColor={agentColor}
+          agentAvatarUrl={agentAvatarUrl}
+          agentEmail={agentEmail}
+          agentSms={agentSms}
+          collaboratorInviteUrl={collaboratorInviteUrl}
+          isStaff={isStaff}
+          auditUrl={auditUrl}
+          auditUrlTemplate={auditUrlTemplate}
+          canManageCollaborators={canManageCollaborators}
+          isCollaborator={isCollaborator}
+          viewerUserId={viewerUserId}
+          viewerEmail={viewerEmail}
+          onClose={handleEmbeddedClose}
+        />
+      </SimplifiedChatProvider>
     )
     break
   case 'agent-detail':

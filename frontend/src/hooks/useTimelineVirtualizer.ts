@@ -1,10 +1,13 @@
 import { useCallback } from 'react'
 import { useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
 
-import type { TimelineEvent } from '../types/agentChat'
+import type { SimplifiedTimelineItem } from './useSimplifiedTimeline'
 
 // Stable key for a virtual item — matches TimelineEventList's logic
-function stableEventKey(event: TimelineEvent): string {
+function stableEventKey(event: SimplifiedTimelineItem): string {
+  if (event.kind === 'collapsed-group') {
+    return `collapsed:${event.cursor}`
+  }
   if (event.kind === 'steps' && event.entries.length > 0) {
     return `cluster:${event.entries[0].id}`
   }
@@ -14,8 +17,12 @@ function stableEventKey(event: TimelineEvent): string {
 // Default size estimates per event kind (px).
 // Accuracy matters: the closer these are to actual measured heights, the less
 // the viewport jumps when items get measured by ResizeObserver.
-function estimateEventSize(event: TimelineEvent): number {
+function estimateEventSize(event: SimplifiedTimelineItem): number {
   switch (event.kind) {
+    case 'collapsed-group':
+      return 40
+    case 'inline-schedule':
+      return 56
     case 'message': {
       // chat-bubble: padding 16+16, author row ~28, line-height ~25px/line
       const body = event.message?.bodyText ?? ''
@@ -39,7 +46,7 @@ function estimateEventSize(event: TimelineEvent): number {
 }
 
 type UseTimelineVirtualizerOptions = {
-  events: TimelineEvent[]
+  events: SimplifiedTimelineItem[]
   scrollContainerRef: React.RefObject<HTMLElement | null>
   overscan?: number
 }

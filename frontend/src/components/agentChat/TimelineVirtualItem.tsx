@@ -2,10 +2,13 @@ import { memo } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { KanbanEventCard } from './KanbanEventCard'
-import type { TimelineEvent, ToolClusterEvent } from './types'
+import { CollapsedEventGroupCard } from './CollapsedEventGroupCard'
+import { InlineScheduleCard } from './InlineStatusCard'
+import type { ToolClusterEvent } from './types'
+import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 
 type TimelineVirtualItemProps = {
-  event: TimelineEvent
+  event: SimplifiedTimelineItem
   isLatestEvent: boolean
   agentFirstName: string
   agentColorHex?: string
@@ -25,6 +28,12 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   viewerEmail,
   suppressedThinkingCursor,
 }: TimelineVirtualItemProps) {
+  if (event.kind === 'collapsed-group') {
+    return <CollapsedEventGroupCard group={event} />
+  }
+  if (event.kind === 'inline-schedule') {
+    return <InlineScheduleCard entry={event.entry} />
+  }
   if (event.kind === 'message') {
     return (
       <MessageEventCard
@@ -46,9 +55,9 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
       entryCount: 1,
       collapsible: false,
       collapseThreshold: 3,
+      thinkingEntries: [event],
       earliestTimestamp: event.timestamp ?? null,
       latestTimestamp: event.timestamp ?? null,
-      thinkingEntries: [event],
     }
     return (
       <ToolClusterCard

@@ -127,6 +127,7 @@ from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.views import build_llm_intelligence_props
+from console.simplified_chat import resolve_simplified_chat_state
 from console.agent_addons import (
     _build_billing_status_payload,
     build_agent_addons_payload,
@@ -266,10 +267,13 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        simplified_chat_state = resolve_simplified_chat_state(request)
         return JsonResponse(
             {
                 "user_id": str(request.user.id),
                 "email": request.user.email,
+                "simplified_chat_ui": simplified_chat_state.enabled,
+                "simplified_chat_toggle_available": simplified_chat_state.toggle_available,
             }
         )
 

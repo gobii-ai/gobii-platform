@@ -311,6 +311,7 @@ class MCPToolManager:
         self._clients: Dict[str, Client] = {}
         self._server_cache: Dict[str, MCPServerRuntime] = {}
         self._tools_cache: Dict[str, List[MCPToolInfo]] = {}
+        self._tool_cache_fingerprints: Dict[str, str] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._initialized = False
         self._last_refresh_marker: Optional[datetime] = None
@@ -483,9 +484,11 @@ class MCPToolManager:
             except Exception:
                 logger.debug("Error closing MCP client for %s", config_id, exc_info=True)
         self._tools_cache.pop(config_id, None)
+        self._tool_cache_fingerprints.pop(config_id, None)
         prefix = f"{config_id}:"
         for slot_key in [key for key in self._tools_cache if key.startswith(prefix)]:
             self._tools_cache.pop(slot_key, None)
+            self._tool_cache_fingerprints.pop(slot_key, None)
 
     def _update_refresh_marker(self, runtime: MCPServerRuntime) -> None:
         marker = runtime.updated_at or timezone.now()
@@ -533,10 +536,22 @@ class MCPToolManager:
         uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
         needs_shared_client = require_client and not uses_per_agent_client
         if slot_key in self._tools_cache:
-            if not require_client or config_id in self._clients:
-                return True
-            if uses_per_agent_client:
-                return self._runtime_per_agent_client_ready(runtime)
+            if runtime.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
+                cache_fingerprint = self._build_tool_cache_fingerprint(runtime, pipedream_context)
+                cached_fingerprint = self._tool_cache_fingerprints.get(slot_key)
+                if cached_fingerprint and cached_fingerprint != cache_fingerprint:
+                    self._tools_cache.pop(slot_key, None)
+                    self._tool_cache_fingerprints.pop(slot_key, None)
+                else:
+                    if not require_client or config_id in self._clients:
+                        return True
+                    if uses_per_agent_client:
+                        return self._runtime_per_agent_client_ready(runtime)
+            else:
+                if not require_client or config_id in self._clients:
+                    return True
+                if uses_per_agent_client:
+                    return self._runtime_per_agent_client_ready(runtime)
         try:
             self._register_server(
                 runtime,
@@ -653,6 +668,7 @@ class MCPToolManager:
         owner_prefix = f":{build_owner_key(owner_scope, owner_id)}"
         for slot_key in [key for key in self._tools_cache if key.endswith(owner_prefix)]:
             self._tools_cache.pop(slot_key, None)
+            self._tool_cache_fingerprints.pop(slot_key, None)
 
     def prewarm_pipedream_owner_cache(
         self,
@@ -1120,6 +1136,7 @@ class MCPToolManager:
 
         slot_key = self._tool_cache_slot_key(server, pipedream_context)
         self._tools_cache[slot_key] = cached_tools
+        self._tool_cache_fingerprints[slot_key] = cache_fingerprint
         if sandbox_mode:
             self._clients.pop(server.config_id, None)
 
@@ -1239,6 +1256,7 @@ class MCPToolManager:
             )
         slot_key = self._tool_cache_slot_key(server, pipedream_context)
         self._tools_cache[slot_key] = tools
+        self._tool_cache_fingerprints[slot_key] = cache_fingerprint
         if tools:
             set_cached_mcp_tool_definitions(
                 server.config_id,
@@ -1960,6 +1978,7 @@ class MCPToolManager:
         self._server_cache.clear()
         self._clients.clear()
         self._tools_cache.clear()
+        self._tool_cache_fingerprints.clear()
         self._last_refresh_marker = None
         if self._loop and not self._loop.is_closed():
             self._loop.close()

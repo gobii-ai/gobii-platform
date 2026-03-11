@@ -3,6 +3,9 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import '../../styles/agentChatLegacy.css'
+import '../../styles/simplifiedChat.css'
+import { useSimplifiedChat } from '../../contexts/SimplifiedChatContext'
+import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
@@ -24,6 +27,7 @@ import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
+import { shouldShowStreamingThinking, shouldUseTypingIndicator } from './simplifiedChatPresentation'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
@@ -35,6 +39,7 @@ import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
+import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 
 type TaskQuotaInfo = {
   available: number
@@ -46,6 +51,7 @@ type TaskQuotaInfo = {
 const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 
 type AgentChatLayoutProps = AgentTimelineProps & {
+  displayEvents?: SimplifiedTimelineItem[]
   agentId?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
@@ -115,6 +121,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
+  onSimplifiedChatSelect?: (enabled: boolean) => void
+  simplifiedChatTogglePending?: boolean
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   onComposerFocus?: () => void
   autoScrollPinned?: boolean
@@ -154,6 +162,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
 export function AgentChatLayout({
   agentFirstName,
   events,
+  displayEvents,
   agentId,
   agentColorHex,
   agentAvatarUrl,
@@ -228,6 +237,8 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onShare,
+  onSimplifiedChatSelect,
+  simplifiedChatTogglePending = false,
   onSendMessage,
   onComposerFocus,
   autoScrollPinned = true,
@@ -258,6 +269,9 @@ export function AgentChatLayout({
   composerError = null,
   composerErrorShowUpgrade = false,
 }: AgentChatLayoutProps) {
+  const { enabled: simplifiedChat, toggleAvailable: simplifiedChatToggleAvailable } = useSimplifiedChat()
+  const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') {
       return true
@@ -506,7 +520,14 @@ export function AgentChatLayout({
   const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
   const showStreamingSlot = hasStreamingContent && isStreaming
   // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
-  const showStreamingThinking = isStreaming && Boolean(streaming?.reasoning?.trim()) && !hasStreamingContent && !hasMoreNewer
+  // In simplified mode, the typing indicator covers this state instead
+  const showStreamingThinking = shouldShowStreamingThinking({
+    enabled: simplifiedChat,
+    isStreaming,
+    hasReasoning: Boolean(streaming?.reasoning?.trim()),
+    hasStreamingContent,
+    hasMoreNewer: Boolean(hasMoreNewer),
+  })
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -549,7 +570,7 @@ export function AgentChatLayout({
     onSendMessage,
     promptCount: starterPromptCount,
   })
-  const hasTimelineEvents = events.length > 0
+  const hasTimelineEvents = timelineRenderEvents.length > 0
   const showJumpButton = !initialLoading
     && hasTimelineEvents
     && (
@@ -765,8 +786,12 @@ export function AgentChatLayout({
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
-	          onClose={onClose}
-	          onShare={onShare}
+          simplifiedChatEnabled={simplifiedChat}
+          simplifiedChatToggleAvailable={simplifiedChatToggleAvailable}
+          simplifiedChatTogglePending={simplifiedChatTogglePending}
+          onSimplifiedChatSelect={onSimplifiedChatSelect}
+          onClose={onClose}
+          onShare={onShare}
 	          sidebarCollapsed={sidebarCollapsed}
 	        >
             {showHighPriorityBanner && highPriorityBanner ? (
@@ -821,7 +846,7 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          <div ref={timelineRef} id="timeline-shell" className={simplifiedChat ? 'simplified-chat' : undefined} data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
@@ -850,13 +875,15 @@ export function AgentChatLayout({
                     style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}
                   >
                     {virtualizer.getVirtualItems().map((virtualItem) => {
-                      const event = events[virtualItem.index]
+                      const event = timelineRenderEvents[virtualItem.index]
                       if (!event) return null
-                      const isLatestEvent = virtualItem.index === events.length - 1
+                      const isLatestEvent = virtualItem.index === timelineRenderEvents.length - 1
                       return (
                         <div
                           key={virtualItem.key}
                           data-index={virtualItem.index}
+                          data-animate-entry={simplifiedChat && isLatestEvent ? 'true' : undefined}
+                          className={simplifiedChat ? 'simplified-chat-vitem' : undefined}
                           ref={virtualizer.measureElement}
                           style={{
                             position: 'absolute',
@@ -954,7 +981,17 @@ export function AgentChatLayout({
                 ) : null}
 
                 {shouldRenderResponseSkeleton ? (
-                  <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
+                  shouldUseTypingIndicator(simplifiedChat) ? (
+                    <TypingIndicator
+                      statusText={deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })}
+                      agentColorHex={agentColorHex || undefined}
+                      agentAvatarUrl={agentAvatarUrl}
+                      agentFirstName={agentFirstName}
+                      hidden={hideResponseSkeleton}
+                    />
+                  ) : (
+                    <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
+                  )
                 ) : null}
 
                 {showBottomSentinel ? (

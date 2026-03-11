@@ -6,8 +6,10 @@ import { createAgent, updateAgent } from '../api/agents'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
   updateUserPreferences,
+  parseBooleanPreference,
   parseFavoriteAgentIdsPreference,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
+  USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
 } from '../api/userPreferences'
 import type { ConsoleContext } from '../api/context'
@@ -33,6 +35,8 @@ import {
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
 } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
+import { useSimplifiedTimeline } from '../hooks/useSimplifiedTimeline'
+import { useSimplifiedChat } from '../contexts/SimplifiedChatContext'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
@@ -773,10 +777,19 @@ export function AgentChatPage({
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
 
+  // Simplified-chat mode collapses non-message events for the virtualizer
+  const {
+    enabled: simplifiedChat,
+    toggleAvailable: simplifiedChatToggleAvailable,
+    setEnabled: setSimplifiedChatEnabled,
+  } = useSimplifiedChat()
+  const [simplifiedChatUpdating, setSimplifiedChatUpdating] = useState(false)
+  const displayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
+
   // Set up virtualizer
   const scrollContainerRef = useRef<HTMLElement | null>(null)
   const virtualizer = useTimelineVirtualizer({
-    events: timelineEvents,
+    events: displayEvents,
     scrollContainerRef,
   })
 
@@ -1076,6 +1089,36 @@ export function AgentChatPage({
     },
     [favoriteAgentIds, updateFavoriteAgentIdsInRosterCache],
   )
+
+  const handleSelectSimplifiedChat = useCallback((nextValue: boolean) => {
+    if (!simplifiedChatToggleAvailable || simplifiedChatUpdating || nextValue === simplifiedChat) {
+      return
+    }
+
+    const previousValue = simplifiedChat
+    setSimplifiedChatEnabled(nextValue)
+    setSimplifiedChatUpdating(true)
+
+    void updateUserPreferences({
+      preferences: {
+        [USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED]: nextValue,
+      },
+    }).then((response) => {
+      const persistedValue = parseBooleanPreference(
+        response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED],
+      )
+      setSimplifiedChatEnabled(persistedValue)
+    }).catch(() => {
+      setSimplifiedChatEnabled(previousValue)
+    }).finally(() => {
+      setSimplifiedChatUpdating(false)
+    })
+  }, [
+    setSimplifiedChatEnabled,
+    simplifiedChat,
+    simplifiedChatToggleAvailable,
+    simplifiedChatUpdating,
+  ])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2943,6 +2986,8 @@ export function AgentChatPage({
         currentContext={effectiveContext}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
+        onSimplifiedChatSelect={simplifiedChatToggleAvailable ? handleSelectSimplifiedChat : undefined}
+        simplifiedChatTogglePending={simplifiedChatUpdating}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}
         dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}
@@ -2978,6 +3023,7 @@ export function AgentChatPage({
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
         events={timelineEvents}
+        displayEvents={displayEvents}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
