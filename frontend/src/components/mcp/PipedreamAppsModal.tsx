@@ -140,8 +140,8 @@ export function PipedreamAppsModal({
       footer={footer}
       widthClass="sm:max-w-4xl"
       icon={Sparkles}
-      iconBgClass="bg-cyan-100"
-      iconColorClass="text-cyan-700"
+      iconBgClass="bg-blue-100"
+      iconColorClass="text-blue-700"
     >
       <div className="space-y-5 p-1">
         {statusMessage && (
@@ -156,7 +156,7 @@ export function PipedreamAppsModal({
               <h3 className="text-sm font-semibold text-slate-900">Added apps</h3>
               <p className="text-xs text-slate-500">Included apps stay on automatically. Only the ones you added can be removed here.</p>
             </div>
-            <span className="rounded-full border border-cyan-200 px-2.5 py-1 text-xs font-semibold text-cyan-700">
+            <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
               {selectedSlugs.length} selected
             </span>
           </div>
@@ -166,7 +166,7 @@ export function PipedreamAppsModal({
                 <button
                   type="button"
                   key={app.slug}
-                  className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 transition hover:border-cyan-300 hover:text-cyan-700"
+                  className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 transition hover:border-blue-300 hover:text-blue-700"
                   onClick={() => handleRemove(app.slug)}
                   disabled={mutation.isPending}
                 >
@@ -177,7 +177,7 @@ export function PipedreamAppsModal({
               ))}
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-cyan-200 px-4 py-4 text-sm text-slate-600">
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-4 py-4 text-sm text-slate-600">
               No additional apps enabled yet.
             </div>
           )}
@@ -190,7 +190,7 @@ export function PipedreamAppsModal({
             </span>
             <input
               type="search"
-              className="w-full rounded-xl border border-cyan-200 py-3 pl-10 pr-3 text-sm text-slate-700 shadow-sm focus:border-cyan-400 focus:outline-none focus:ring-cyan-400"
+              className="w-full rounded-lg border border-slate-300 py-3 pl-10 pr-3 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
               placeholder="Search apps"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
@@ -199,27 +199,27 @@ export function PipedreamAppsModal({
           </label>
 
           {searchTerm.trim().length === 0 ? (
-            <div className="rounded-xl border border-cyan-100 px-4 py-4 text-sm text-slate-600">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-4 text-sm text-slate-600">
               Start typing to search available apps.
             </div>
           ) : searchQuery.isError ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
               {resolveErrorMessage(searchQuery.error, 'Unable to search apps.')}
             </div>
           ) : searchResults.length === 0 && !searchQuery.isFetching ? (
-            <div className="rounded-xl border border-cyan-100 px-4 py-4 text-sm text-slate-600">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-4 py-4 text-sm text-slate-600">
               No apps matched your search.
             </div>
           ) : (
-            <ul className="max-h-96 overflow-y-auto rounded-xl border border-cyan-100">
+            <ul className="max-h-96 overflow-y-auto rounded-lg border border-slate-200">
               {searchResults.map((app) => {
                 const isSelected = selectedSlugs.includes(app.slug)
                 const isPlatform = platformSlugSet.has(app.slug)
                 return (
-                  <li key={app.slug} className="border-b border-cyan-100/70 last:border-b-0">
+                  <li key={app.slug} className="border-b border-slate-200 last:border-b-0">
                     <button
                       type="button"
-                      className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition hover:bg-cyan-50/40"
+                      className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-50"
                       onClick={() => handleToggle(app.slug)}
                       disabled={mutation.isPending || isPlatform}
                     >
@@ -232,8 +232,8 @@ export function PipedreamAppsModal({
                               {app.slug}
                             </span>
                             {isPlatform && (
-                              <span className="rounded-full border border-emerald-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-                                Platform
+                              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                                Included
                               </span>
                             )}
                           </div>
@@ -243,7 +243,7 @@ export function PipedreamAppsModal({
                       <span
                         className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
                           isSelected || isPlatform
-                            ? 'border-cyan-200 text-cyan-700'
+                            ? 'border-blue-200 bg-blue-50 text-blue-700'
                             : 'border-slate-200 text-slate-500'
                         }`}
                       >
@@ -274,13 +274,13 @@ function AppIcon({ app }: { app: PipedreamAppSummary }) {
       <img
         src={app.iconUrl}
         alt=""
-        className="h-9 w-9 rounded-xl border border-cyan-100 object-cover"
+        className="h-9 w-9 rounded-lg border border-slate-200 bg-white object-cover"
         loading="lazy"
       />
     )
   }
   return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-100 bg-cyan-50 text-xs font-semibold uppercase text-cyan-700">
+    <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-xs font-semibold uppercase text-slate-700">
       {app.name.slice(0, 2)}
     </span>
   )

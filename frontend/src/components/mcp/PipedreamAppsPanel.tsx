@@ -45,19 +45,19 @@ export function PipedreamAppsPanel({
   return (
     <>
       <section className="gobii-card-base overflow-hidden">
-        <div className="flex flex-col gap-4 border-b border-cyan-100 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 border-b border-gray-200/70 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-700">
+            <div className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
               <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
               Apps
             </div>
             <div>
-              <h2 className="text-xl font-semibold text-slate-900">Additional apps</h2>
+              <h2 className="text-lg font-semibold text-gray-800">Additional apps</h2>
             </div>
           </div>
           <button
             type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-cyan-700 disabled:opacity-60"
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-blue-700 disabled:opacity-60"
             onClick={openModal}
             disabled={!settingsQuery.data || settingsQuery.isLoading}
           >
@@ -116,8 +116,8 @@ function AppColumn({
 }) {
   const accentClass =
     tone === 'platform'
-      ? 'border-emerald-200 text-emerald-700'
-      : 'border-cyan-200 text-cyan-700'
+      ? 'border-slate-200 bg-slate-50 text-slate-700'
+      : 'border-blue-200 bg-blue-50 text-blue-700'
 
   return (
     <div className="space-y-3">
@@ -130,15 +130,15 @@ function AppColumn({
           {apps.map((app) => (
             <span
               key={app.slug}
-              className={`inline-flex items-center gap-2 rounded-full border bg-white px-3 py-2 text-sm font-medium ${accentClass}`}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${accentClass}`}
             >
               <AppIcon app={app} />
-              <span className="text-slate-900">{app.name}</span>
+              <span className={tone === 'platform' ? 'text-slate-800' : 'text-blue-900'}>{app.name}</span>
             </span>
           ))}
         </div>
       ) : (
-        <div className="rounded-xl border border-dashed border-cyan-200 px-4 py-4 text-sm text-slate-600">
+        <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/60 px-4 py-4 text-sm text-slate-600">
           {emptyText}
         </div>
       )}
@@ -152,13 +152,13 @@ function AppIcon({ app }: { app: PipedreamAppSummary }) {
       <img
         src={app.iconUrl}
         alt=""
-        className="h-6 w-6 rounded-lg border border-cyan-100 object-cover"
+        className="h-6 w-6 rounded-lg border border-slate-200 bg-white object-cover"
         loading="lazy"
       />
     )
   }
   return (
-    <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-cyan-100 bg-cyan-50 text-[10px] font-semibold uppercase text-cyan-700">
+    <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-[10px] font-semibold uppercase text-slate-700">
       {app.name.slice(0, 2)}
     </span>
   )
