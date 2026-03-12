@@ -942,6 +942,37 @@ def _get_djstripe_charge_data(charge_id: str | None) -> dict[str, Any]:
     return _coerce_metadata_dict(getattr(charge, "stripe_data", None))
 
 
+def _merge_charge_failure_details(
+    charge_data: Mapping[str, Any],
+    *,
+    failure_message: Any | None,
+    failure_code: Any | None,
+    decline_code: Any | None,
+    failure_type: Any | None,
+) -> tuple[Any | None, Any | None, Any | None, Any | None]:
+    charge_outcome_data = _coerce_metadata_dict(_get_stripe_data_value(charge_data, "outcome"))
+    failure_message = _first_present(
+        failure_message,
+        _get_stripe_data_value(charge_data, "failure_message"),
+        _get_stripe_data_value(charge_outcome_data, "seller_message"),
+    )
+    failure_code = _first_present(
+        failure_code,
+        _get_stripe_data_value(charge_data, "failure_code"),
+    )
+    decline_code = _first_present(
+        decline_code,
+        _get_stripe_data_value(charge_outcome_data, "reason"),
+    )
+    failure_reason = _first_present(
+        failure_message,
+        decline_code,
+        failure_code,
+        failure_type,
+    )
+    return failure_message, failure_code, decline_code, failure_reason
+
+
 def _extract_invoice_failure_properties(
     payload: Mapping[str, Any],
     *,
@@ -987,57 +1018,38 @@ def _extract_invoice_failure_properties(
     if charge_id is None:
         charge_id = _extract_stripe_object_id(charge_data)
 
-    charge_outcome_data = _coerce_metadata_dict(_get_stripe_data_value(charge_data, "outcome"))
     payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(payment_error_data, "payment_method"))
     payment_method_types = _get_stripe_data_value(payment_intent_data, "payment_method_types")
     payment_method_type = _get_stripe_data_value(payment_method_data, "type")
     if payment_method_type in (None, "") and isinstance(payment_method_types, list) and payment_method_types:
         payment_method_type = payment_method_types[0]
 
-    failure_message = _first_present(
-        _get_stripe_data_value(payment_error_data, "message"),
-        _get_stripe_data_value(charge_data, "failure_message"),
-        _get_stripe_data_value(charge_outcome_data, "seller_message"),
-    )
-    failure_code = _first_present(
-        _get_stripe_data_value(payment_error_data, "code"),
-        _get_stripe_data_value(charge_data, "failure_code"),
-    )
-    decline_code = _first_present(
-        _get_stripe_data_value(payment_error_data, "decline_code"),
-        _get_stripe_data_value(charge_outcome_data, "reason"),
-    )
     failure_type = _get_stripe_data_value(payment_error_data, "type")
-    failure_reason = _first_present(
-        failure_message,
-        decline_code,
-        failure_code,
-        failure_type,
+    failure_message, failure_code, decline_code, failure_reason = _merge_charge_failure_details(
+        charge_data,
+        failure_message=_get_stripe_data_value(payment_error_data, "message"),
+        failure_code=_get_stripe_data_value(payment_error_data, "code"),
+        decline_code=_get_stripe_data_value(payment_error_data, "decline_code"),
+        failure_type=failure_type,
     )
 
     if allow_stripe_lookup and charge_id and not charge_data and not failure_reason:
         charge_data = _get_djstripe_charge_data(charge_id)
+        failure_message, failure_code, decline_code, failure_reason = _merge_charge_failure_details(
+            charge_data,
+            failure_message=failure_message,
+            failure_code=failure_code,
+            decline_code=decline_code,
+            failure_type=failure_type,
+        )
     if allow_stripe_lookup and charge_id and not charge_data and not failure_reason:
         charge_data = _retrieve_charge_data(charge_id)
-        charge_outcome_data = _coerce_metadata_dict(_get_stripe_data_value(charge_data, "outcome"))
-        failure_message = _first_present(
-            failure_message,
-            _get_stripe_data_value(charge_data, "failure_message"),
-            _get_stripe_data_value(charge_outcome_data, "seller_message"),
-        )
-        failure_code = _first_present(
-            failure_code,
-            _get_stripe_data_value(charge_data, "failure_code"),
-        )
-        decline_code = _first_present(
-            decline_code,
-            _get_stripe_data_value(charge_outcome_data, "reason"),
-        )
-        failure_reason = _first_present(
-            failure_message,
-            decline_code,
-            failure_code,
-            failure_type,
+        failure_message, failure_code, decline_code, failure_reason = _merge_charge_failure_details(
+            charge_data,
+            failure_message=failure_message,
+            failure_code=failure_code,
+            decline_code=decline_code,
+            failure_type=failure_type,
         )
 
     properties: dict[str, Any] = {}
