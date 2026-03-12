@@ -13,6 +13,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
     PersistentAgentWebSession,
@@ -139,6 +140,39 @@ class AgentTransferServiceTests(TestCase):
         self.assertIsNotNone(invite.accepted_at)
         self.process_events_mock.delay.assert_called_once_with(str(self.agent.id))
         self.process_events_mock.delay.reset_mock()
+
+    def test_accept_transfer_removes_peer_links_without_deleting_peer_history(self):
+        link = AgentPeerLink.objects.get(agent_a=self.agent, agent_b=self.peer_agent)
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.peer_agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer-{self.peer_agent.id}",
+            is_primary=True,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer-{self.peer_agent.id}",
+            is_peer_dm=True,
+            peer_link=link,
+        )
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=peer_endpoint,
+            conversation=conversation,
+            body="Transfer should preserve this history",
+            owner_agent=self.agent,
+            peer_agent=self.peer_agent,
+        )
+
+        invite = self._initiate(self.recipient.email)
+        AgentTransferService.accept_invite(invite, self.recipient)
+
+        self.assertFalse(AgentPeerLink.objects.filter(id=link.id).exists())
+        conversation.refresh_from_db()
+        self.assertIsNone(conversation.peer_link_id)
+        self.assertFalse(conversation.is_peer_dm)
+        self.assertTrue(PersistentAgentMessage.objects.filter(id=message.id).exists())
 
     def test_accept_transfer_syncs_email_display_name(self):
         recipient_browser = _create_browser(self.recipient, "Recipient Browser")

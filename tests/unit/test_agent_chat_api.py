@@ -13,6 +13,7 @@ from django.urls import reverse
 
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
+    AgentPeerLink,
     BrowserUseAgent,
     BrowserUseAgentTask,
     CommsChannel,
@@ -35,6 +36,7 @@ from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.web_sessions import start_web_session
 from console.agent_chat.kanban_events import persist_kanban_event
 from console.agent_chat.timeline import build_processing_snapshot
+from console.agent_chat.timeline import fetch_timeline_window
 from console.agent_chat.timeline import serialize_kanban_event
 from util.analytics import AnalyticsEvent
 
@@ -311,6 +313,61 @@ class AgentChatAPITests(TestCase):
 
         self.assertEqual(thinking_event.get("reasoning"), "Reasoned path")
         self.assertEqual(thinking_event.get("completionId"), str(completion.id))
+
+    @tag("batch_agent_chat")
+    def test_timeline_preserves_deleted_peer_agent_name_after_soft_delete(self):
+        peer_browser = BrowserUseAgent.objects.create(user=self.user, name="Peer Browser")
+        peer_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Deleted Peer Agent",
+            charter="Coordinate peer work",
+            browser_use_agent=peer_browser,
+        )
+        peer_link = AgentPeerLink.objects.create(
+            agent_a=self.agent,
+            agent_b=peer_agent,
+            created_by=self.user,
+        )
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer_agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer-{peer_agent.id}",
+            is_primary=True,
+        )
+        peer_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer-{peer_agent.id}",
+            is_peer_dm=True,
+            peer_link=peer_link,
+        )
+        peer_message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=peer_endpoint,
+            conversation=peer_conversation,
+            body="Historical peer DM",
+            owner_agent=self.agent,
+            peer_agent=peer_agent,
+        )
+
+        peer_agent.soft_delete()
+
+        self.assertFalse(AgentPeerLink.objects.filter(id=peer_link.id).exists())
+        peer_conversation.refresh_from_db()
+        self.assertIsNone(peer_conversation.peer_link_id)
+        self.assertFalse(peer_conversation.is_peer_dm)
+        self.assertTrue(PersistentAgentMessage.objects.filter(id=peer_message.id).exists())
+
+        peer_event = next(
+            event
+            for event in fetch_timeline_window(self.agent).events
+            if event.get("kind") == "message"
+            and event["message"].get("bodyText") == "Historical peer DM"
+        )
+
+        self.assertTrue(peer_event["message"].get("isPeer"))
+        self.assertEqual(peer_event["message"].get("peerAgent", {}).get("name"), peer_agent.name)
+        self.assertIsNone(peer_event["message"].get("peerLinkId"))
 
     @tag("batch_agent_chat")
     def test_timeline_includes_kanban_events(self):

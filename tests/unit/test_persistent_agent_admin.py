@@ -1,14 +1,19 @@
 from unittest.mock import patch
 
+from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.test import RequestFactory
 from django.test import Client, TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
+from api.admin import PersistentAgentAdmin
 from api.models import (
+    AgentPeerLink,
     BrowserUseAgent,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentMessage,
     PersistentAgentSystemMessage,
     PersistentAgentSystemMessageBroadcast,
@@ -19,6 +24,7 @@ from api.models import (
 class PersistentAgentAdminTests(TestCase):
     def setUp(self):
         self.client = Client()
+        self.request_factory = RequestFactory()
         User = get_user_model()
         self.admin_user = User.objects.create_superuser(
             username="admin@example.com",
@@ -254,6 +260,48 @@ class PersistentAgentAdminTests(TestCase):
         url = reverse("admin:api_persistentagent_change", args=[self.persistent_agent.pk])
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
+
+    def test_save_model_soft_delete_removes_peer_links_and_preserves_history(self):
+        peer_agent = self._create_agent(name="Admin Deleted Peer")
+        peer_link = AgentPeerLink.objects.create(
+            agent_a=self.persistent_agent,
+            agent_b=peer_agent,
+            created_by=self.admin_user,
+        )
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer_agent,
+            channel="other",
+            address=f"peer-{peer_agent.id}",
+            is_primary=True,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.persistent_agent,
+            channel="other",
+            address=f"peer-{peer_agent.id}",
+            is_peer_dm=True,
+            peer_link=peer_link,
+        )
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=peer_endpoint,
+            conversation=conversation,
+            body="Peer history survives admin delete",
+            owner_agent=self.persistent_agent,
+            peer_agent=peer_agent,
+        )
+        model_admin = PersistentAgentAdmin(PersistentAgent, admin.site)
+        request = self.request_factory.post("/")
+        request.user = self.admin_user
+        form = type("FormStub", (), {"changed_data": ["is_deleted"]})()
+
+        peer_agent.is_deleted = True
+        model_admin.save_model(request, peer_agent, form, change=True)
+
+        self.assertFalse(AgentPeerLink.objects.filter(id=peer_link.id).exists())
+        conversation.refresh_from_db()
+        self.assertIsNone(conversation.peer_link_id)
+        self.assertFalse(conversation.is_peer_dm)
+        self.assertTrue(PersistentAgentMessage.objects.filter(id=message.id).exists())
 
     def test_system_message_get_renders_form(self):
         url = reverse("admin:api_persistentagent_system_message", args=[self.persistent_agent.pk])

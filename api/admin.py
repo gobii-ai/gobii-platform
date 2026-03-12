@@ -2726,10 +2726,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
         super().save_model(request, obj, form, change)
         if should_release_endpoints:
-            obj.comms_endpoints.filter(owner_agent_id=obj.pk).update(
-                owner_agent=None,
-                is_primary=False,
-            )
+            obj.apply_persisted_soft_delete_side_effects()
 
     @admin.action(description="Soft-delete selected agents")
     def soft_delete_selected_agents(self, request, queryset):

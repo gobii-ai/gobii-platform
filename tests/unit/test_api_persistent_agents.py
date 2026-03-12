@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.test import Client, TestCase, tag
 
 from api.models import (
+    AgentPeerLink,
     BrowserUseAgent,
     BrowserUseAgentTask,
     CommsChannel,
@@ -559,6 +560,32 @@ class PersistentAgentAPITests(TestCase):
         endpoint.refresh_from_db()
         self.assertEqual(endpoint.owner_agent_id, agent.id)
         self.assertTrue(endpoint.is_primary)
+
+    def test_soft_delete_save_false_does_not_remove_peer_links(self):
+        browser_agent = create_browser_agent_without_proxy(self.user, "deferred-peer-link-browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Deferred Peer Link Agent',
+            charter='Automate product updates',
+            browser_use_agent=browser_agent,
+        )
+        peer_browser = create_browser_agent_without_proxy(self.user, "deferred-peer-browser")
+        peer_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Deferred Peer Agent",
+            charter="Keep linked",
+            browser_use_agent=peer_browser,
+        )
+        link = AgentPeerLink.objects.create(
+            agent_a=agent,
+            agent_b=peer_agent,
+            created_by=self.user,
+        )
+
+        changed = agent.soft_delete(save=False)
+
+        self.assertTrue(changed)
+        self.assertTrue(AgentPeerLink.objects.filter(id=link.id).exists())
 
     def test_message_submission_populates_timeline(self):
         payload = self._create_agent_via_api({'name': 'Timeline Agent'})

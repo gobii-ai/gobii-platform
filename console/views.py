@@ -109,8 +109,6 @@ from api.models import (
     IntelligenceTier,
     AgentEmailAccount,
     AgentPeerLink,
-    AgentCommPeerState,
-    PersistentAgentConversation,
     PersistentAgentConversationParticipant,
     PersistentAgentSmsEndpoint,
     PersistentAgentStep,
@@ -5560,17 +5558,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'is_enabled': link.is_enabled,
                     }
 
-                    AgentCommPeerState.objects.filter(link=link).delete()
-                    try:
-                        conversation = link.conversation
-                    except PersistentAgentConversation.DoesNotExist:
-                        conversation = None
-                    if conversation:
-                        conversation.peer_link = None
-                        conversation.is_peer_dm = False
-                        conversation.save(update_fields=['peer_link', 'is_peer_dm'])
-
-                    link.delete()
+                    link.remove_preserving_history()
 
                 _track_peer_link_event(
                     AnalyticsEvent.PERSISTENT_AGENT_PEER_UNLINKED,
