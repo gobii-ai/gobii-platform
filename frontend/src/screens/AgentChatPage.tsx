@@ -798,6 +798,16 @@ export function AgentChatPage({
   const firstVisibleIndex = virtualItems.length > 0 ? virtualItems[0].index : null
   useEffect(() => {
     if (
+      !didInitialScrollRef.current
+      || autoScrollPinned
+      || initialLoading
+      || isNewAgent
+      || switchingAgentId
+      || !timelineEvents.length
+    ) {
+      return
+    }
+    if (
       firstVisibleIndex !== null
       && firstVisibleIndex <= 2
       && timelineQuery.hasPreviousPage
@@ -808,6 +818,11 @@ export function AgentChatPage({
     }
   }, [
     firstVisibleIndex,
+    autoScrollPinned,
+    initialLoading,
+    isNewAgent,
+    switchingAgentId,
+    timelineEvents.length,
     timelineQuery.hasPreviousPage,
     timelineQuery.isFetchingPreviousPage,
     timelineQuery.isFetchPreviousPageError,
@@ -817,6 +832,7 @@ export function AgentChatPage({
   // Scroll position preservation when loading older pages
   const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
   const prevTotalSizeRef = useRef(0)
+  const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
   // Capture total size before older page arrives
   useEffect(() => {
     prevTotalSizeRef.current = virtualizer.getTotalSize()
@@ -824,6 +840,12 @@ export function AgentChatPage({
   })
   useLayoutEffect(() => {
     const pageCount = timelineQuery.data?.pages?.length ?? 0
+    if (prependTrackingAgentIdRef.current !== activeAgentId) {
+      prependTrackingAgentIdRef.current = activeAgentId
+      prevPageCountRef.current = pageCount
+      prevTotalSizeRef.current = virtualizer.getTotalSize()
+      return
+    }
     if (pageCount > prevPageCountRef.current && prevPageCountRef.current > 0) {
       const container = scrollContainerRef.current
       if (container) {
