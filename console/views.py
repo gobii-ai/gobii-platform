@@ -628,17 +628,6 @@ def _is_cta_pricing_cancel_text_under_btn_enabled(request: HttpRequest | None) -
     """Default to disabled until the rollout is explicitly enabled."""
     return is_waffle_flag_active(CTA_PRICING_CANCEL_TEXT_UNDER_BTN, request, default=False)
 
-
-def _is_cta_start_free_trial_enabled(request: HttpRequest | None) -> bool:
-    """Default to disabled until the rollout is explicitly enabled."""
-    return is_waffle_flag_active(CTA_START_FREE_TRIAL, request, default=False)
-    return is_waffle_flag_active(
-        PRICING_MODAL_ALMOST_FULL_SCREEN,
-        request,
-        default=True,
-    )
-
-
 def _is_cta_start_free_trial_enabled(request: HttpRequest | None) -> bool:
     """Default to disabled until the rollout is explicitly enabled."""
     return is_waffle_flag_active(CTA_START_FREE_TRIAL, request, default=False)
