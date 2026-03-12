@@ -40,11 +40,15 @@ from api.agent.tasks.process_events import process_agent_cron_trigger_task, _rem
 from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
+    Organization,
+    OrganizationMembership,
     ProxyServer,
     build_web_agent_address,
     build_web_user_address,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
+    PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentCronTrigger,
@@ -111,6 +115,84 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(self._admin_storage_patch.stop)
         self.addCleanup(self._print_patch.stop)
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
+
+    def _build_org_agent_web_interaction(self, *, org_slug: str, member_email: str, is_org_member: bool):
+        org = Organization.objects.create(
+            name=f"{org_slug} name",
+            slug=org_slug,
+            plan="free",
+            created_by=self.user,
+        )
+        billing = org.billing
+        billing.purchased_seats = 2 if is_org_member else 1
+        billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        andrew = User.objects.create_user(
+            username=f"{org_slug}-andrew",
+            email=member_email,
+            password="secret",
+            first_name="Andrew",
+            last_name="Christianson",
+        )
+        if is_org_member:
+            OrganizationMembership.objects.create(
+                org=org,
+                user=andrew,
+                role=OrganizationMembership.OrgRole.MEMBER,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            )
+
+        org_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name=f"{org_slug} browser agent",
+        )
+        org_agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=org,
+            name=f"{org_slug} prompt agent",
+            charter="Org prompt test",
+            browser_use_agent=org_browser_agent,
+        )
+        agent_web_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=org_agent,
+            channel="web",
+            address=build_web_agent_address(org_agent.id),
+        )
+        andrew_address = build_web_user_address(andrew.id, org_agent.id)
+        andrew_web_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="web",
+            address=andrew_address,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=org_agent,
+            channel="web",
+            address=andrew_address,
+        )
+        PersistentAgentConversationParticipant.objects.create(
+            conversation=conversation,
+            endpoint=agent_web_endpoint,
+            role=PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+        )
+        PersistentAgentConversationParticipant.objects.create(
+            conversation=conversation,
+            endpoint=andrew_web_endpoint,
+            role=PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=org_agent,
+            from_endpoint=andrew_web_endpoint,
+            to_endpoint=agent_web_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body="Hello from Andrew on web",
+            seq=f"{org_slug.upper().replace('-', '')[:9]}{int(timezone.now().timestamp() * 1_000_000):017d}"[:26],
+        )
+        return org_agent, andrew_address
 
     def test_message_metadata_in_prompt(self):
         """Test that message metadata (from, channel) is included in the prompt."""
@@ -297,6 +379,42 @@ class PromptContextBuilderTests(TestCase):
             "In shared chats, address the most recent inbound sender from unified history/recent contacts;",
             content,
         )
+
+    def test_user_endpoints_include_org_member_email_for_interacted_web_user(self):
+        org_agent, andrew_address = self._build_org_agent_web_interaction(
+            org_slug="prompt-org",
+            member_email="andrew@example.com",
+            is_org_member=True,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(org_agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("<user_endpoints>", content)
+        self.assertIn(f"- web: {andrew_address} - Andrew Christianson", content)
+        self.assertIn("- email: andrew@example.com - Andrew Christianson", content)
+
+    def test_user_endpoints_do_not_add_email_for_non_org_member_web_user(self):
+        org_agent, andrew_address = self._build_org_agent_web_interaction(
+            org_slug="prompt-org-missing-member",
+            member_email="andrew-nonmember@example.com",
+            is_org_member=False,
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(org_agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("<user_endpoints>", content)
+        self.assertIn(f"- web: {andrew_address} - Andrew Christianson", content)
+        self.assertNotIn("- email: andrew-nonmember@example.com - Andrew Christianson", content)
 
     def test_build_prompt_context_populates_messages_sqlite_table(self):
         PersistentAgentMessage.objects.create(
