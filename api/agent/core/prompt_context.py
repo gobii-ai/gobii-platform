@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 import zstandard as zstd
@@ -140,6 +140,13 @@ SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
 class _FileSnapshotBundle:
     has_filespace: bool
     records: List[FileSQLiteRecord]
+
+
+@dataclass(frozen=True)
+class _InteractedWebUserInfo:
+    user_id: int
+    display_name: str | None
+    email: str | None
 
 
 __all__ = [
@@ -2443,10 +2450,10 @@ def _build_user_display_name(user: Any) -> str | None:
     return None
 
 
-def _get_web_user_display_map(
+def _get_interacted_web_user_info_by_endpoint(
     agent: PersistentAgent,
     endpoints: Sequence[PersistentAgentCommsEndpoint],
-) -> dict[UUID, str]:
+) -> dict[UUID, _InteractedWebUserInfo]:
     endpoint_user_ids: dict[UUID, int] = {}
     for endpoint in endpoints:
         if endpoint.channel != CommsChannel.WEB:
@@ -2461,21 +2468,86 @@ def _get_web_user_display_map(
     if not endpoint_user_ids:
         return {}
 
+    org_member_user_ids: set[int] = set()
+    if agent.organization_id:
+        from api.models import OrganizationMembership
+
+        org_member_user_ids = set(
+            OrganizationMembership.objects.filter(
+                org=agent.organization,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                user_id__in=set(endpoint_user_ids.values()),
+            ).values_list("user_id", flat=True)
+        )
+
     User = get_user_model()
     users = User.objects.filter(id__in=set(endpoint_user_ids.values())).only(
         "id",
+        "email",
         "first_name",
         "last_name",
         "username",
     )
-    display_by_user_id = {
-        user.id: _build_user_display_name(user) for user in users
+    user_info_by_id = {
+        user.id: _InteractedWebUserInfo(
+            user_id=user.id,
+            display_name=_build_user_display_name(user),
+            email=((user.email or "").strip().lower() or None)
+            if user.id in org_member_user_ids
+            else None,
+        )
+        for user in users
     }
     return {
-        endpoint_id: display
+        endpoint_id: info
         for endpoint_id, user_id in endpoint_user_ids.items()
-        if (display := display_by_user_id.get(user_id))
+        if (info := user_info_by_id.get(user_id))
     }
+
+
+def _get_web_user_display_map(
+    agent: PersistentAgent,
+    endpoints: Sequence[PersistentAgentCommsEndpoint],
+) -> dict[UUID, str]:
+    return _build_web_user_display_map(
+        _get_interacted_web_user_info_by_endpoint(agent, endpoints)
+    )
+
+
+def _build_web_user_display_map(
+    interacted_user_info_by_endpoint: Mapping[UUID, _InteractedWebUserInfo],
+) -> dict[UUID, str]:
+    return {
+        endpoint_id: info.display_name
+        for endpoint_id, info in interacted_user_info_by_endpoint.items()
+        if info.display_name
+    }
+
+
+def _get_interacted_org_member_email_map(
+    agent: PersistentAgent,
+    endpoints: Sequence[PersistentAgentCommsEndpoint],
+) -> dict[str, str | None]:
+    return _build_interacted_org_member_email_map(
+        _get_interacted_web_user_info_by_endpoint(agent, endpoints)
+    )
+
+
+def _build_interacted_org_member_email_map(
+    interacted_user_info_by_endpoint: Mapping[UUID, _InteractedWebUserInfo],
+) -> dict[str, str | None]:
+    """Return org-member emails for web participants already seen in conversations."""
+    email_map: dict[str, str | None] = {}
+    seen_emails: set[str] = set()
+    for info in interacted_user_info_by_endpoint.values():
+        email = info.email
+        if not email:
+            continue
+        if email in seen_emails:
+            continue
+        seen_emails.add(email)
+        email_map[email] = info.display_name
+    return email_map
 
 
 def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str | None:
@@ -2533,11 +2605,14 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
         .order_by("channel", "address")
     )
 
-    if user_eps_qs:
-        user_eps = list(user_eps_qs)
-        web_user_display_map = _get_web_user_display_map(agent, user_eps)
+    user_eps = list(user_eps_qs)
+    if user_eps:
+        interacted_user_info_by_endpoint = _get_interacted_web_user_info_by_endpoint(agent, user_eps)
+        web_user_display_map = _build_web_user_display_map(interacted_user_info_by_endpoint)
+        interacted_org_member_emails = _build_interacted_org_member_email_map(interacted_user_info_by_endpoint)
         user_lines = ["These are the *USER'S* endpoints, i.e. the addresses you are sending messages *TO*."]
         pref_id = agent.preferred_contact_endpoint_id if agent.preferred_contact_endpoint else None
+        seen_user_endpoint_keys = {(ep.channel, ep.address) for ep in user_eps}
         for ep in user_eps:
             annotations = []
             if ep.id == pref_id:
@@ -2547,6 +2622,26 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
             if display_name:
                 suffix = f"{suffix} - {display_name}"
             user_lines.append(f"- {ep.channel}: {ep.address}{suffix}")
+
+        preferred_email_address = None
+        if (
+            agent.preferred_contact_endpoint
+            and agent.preferred_contact_endpoint.channel == CommsChannel.EMAIL
+        ):
+            preferred_email_address = agent.preferred_contact_endpoint.address
+
+        for email_address in sorted(interacted_org_member_emails.keys()):
+            key = (CommsChannel.EMAIL, email_address)
+            if key in seen_user_endpoint_keys:
+                continue
+            annotations = []
+            if preferred_email_address == email_address:
+                annotations.append("preferred")
+            suffix = f" ({', '.join(annotations)})" if annotations else ""
+            display_name = interacted_org_member_emails[email_address]
+            if display_name:
+                suffix = f"{suffix} - {display_name}"
+            user_lines.append(f"- {CommsChannel.EMAIL}: {email_address}{suffix}")
 
         contacts_group.section_text(
             "user_endpoints",

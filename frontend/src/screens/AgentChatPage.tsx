@@ -799,7 +799,6 @@ export function AgentChatPage({
   useEffect(() => {
     if (
       !didInitialScrollRef.current
-      || autoScrollPinned
       || initialLoading
       || isNewAgent
       || switchingAgentId
@@ -818,7 +817,6 @@ export function AgentChatPage({
     }
   }, [
     firstVisibleIndex,
-    autoScrollPinned,
     initialLoading,
     isNewAgent,
     switchingAgentId,
@@ -856,7 +854,7 @@ export function AgentChatPage({
         }
       }
     }
-  }, [timelineQuery.data?.pages?.length, virtualizer])
+  }, [activeAgentId, timelineQuery.data?.pages?.length, virtualizer])
 
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
