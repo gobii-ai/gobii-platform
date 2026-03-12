@@ -95,11 +95,31 @@ def is_trial_conversion_failure(
     subscription_status: str | None,
     attempt_count: int | None,
 ) -> bool:
+    if not is_trial_conversion_invoice(
+        billing_reason=billing_reason,
+        trial_end_dt=trial_end_dt,
+        line_period_start_dt=line_period_start_dt,
+        subscription_current_period_start_dt=subscription_current_period_start_dt,
+        subscription_status=subscription_status,
+    ):
+        return False
+    if attempt_count is not None and attempt_count > 1:
+        return False
+
+    return True
+
+
+def is_trial_conversion_invoice(
+    *,
+    billing_reason: str | None,
+    trial_end_dt: datetime | None,
+    line_period_start_dt: datetime | None,
+    subscription_current_period_start_dt: datetime | None,
+    subscription_status: str | None,
+) -> bool:
     if billing_reason != "subscription_cycle":
         return False
     if trial_end_dt is None:
-        return False
-    if attempt_count is not None and attempt_count > 1:
         return False
 
     normalized_status = _normalize_status(subscription_status)
