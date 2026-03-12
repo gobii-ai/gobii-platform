@@ -5714,10 +5714,15 @@ class PersistentAgent(models.Model):
                 pass
         return AgentColor.get_default_hex()
 
+    @property
+    def has_avatar(self) -> bool:
+        file_field = getattr(self, "avatar", None)
+        return bool(getattr(file_field, "name", None))
+
     def get_avatar_url(self) -> str | None:
         """Return a usable URL for the agent avatar, if set."""
         file_field = getattr(self, "avatar", None)
-        if not file_field or not getattr(file_field, "name", None) or not self.pk:
+        if not self.has_avatar or not self.pk:
             return None
         version = hashlib.sha256(file_field.name.encode("utf-8")).hexdigest()[:12]
         try:

@@ -39,6 +39,8 @@ def _acquire_avatar_enqueue_slot(
     """Atomically claim avatar enqueue slot if cooldown permits and request is not already current."""
     update_query = PersistentAgent.objects.filter(
         id=agent_id,
+    ).filter(
+        Q(avatar__isnull=True) | Q(avatar="")
     ).exclude(avatar_requested_hash=charter_hash)
     if cooldown_cutoff is not None:
         update_query = update_query.filter(
@@ -56,6 +58,21 @@ def prepare_visual_description(text: str, max_length: int = MAX_VISUAL_DESCRIPTI
     if max_length > 0 and len(normalized) > max_length:
         return normalized[:max_length].rstrip()
     return normalized
+
+
+def agent_needs_avatar_generation(
+    *,
+    agent: PersistentAgent,
+    charter_hash: str,
+    visual_description: str,
+) -> bool:
+    if not (agent.charter or "").strip():
+        return False
+    if agent.has_avatar:
+        return False
+    if not visual_description:
+        return False
+    return (agent.avatar_charter_hash or "") != charter_hash
 
 
 def build_avatar_prompt(*, agent: PersistentAgent, visual_description: str, charter: str) -> str:
@@ -140,8 +157,11 @@ def maybe_schedule_agent_avatar(
             )
             return False
 
-    # Treat matching hash as up-to-date even when avatar is intentionally cleared.
-    if (agent.avatar_charter_hash or "") == charter_hash:
+    if not agent_needs_avatar_generation(
+        agent=agent,
+        charter_hash=charter_hash,
+        visual_description=visual_description,
+    ):
         return False
 
     try:
@@ -173,6 +193,7 @@ def maybe_schedule_agent_avatar(
 
 
 __all__ = [
+    "agent_needs_avatar_generation",
     "build_avatar_prompt",
     "maybe_schedule_agent_avatar",
     "prepare_visual_description",
