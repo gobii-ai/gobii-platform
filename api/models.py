@@ -5790,7 +5790,6 @@ class PersistentAgent(models.Model):
     def soft_delete(self, *, deleted_at: datetime.datetime | None = None, save: bool = True) -> bool:
         timestamp = deleted_at or timezone.now()
         update_fields: list[str] = []
-        endpoints_released = False
         if self.is_active:
             self.is_active = False
             update_fields.append("is_active")
@@ -5808,14 +5807,21 @@ class PersistentAgent(models.Model):
             update_fields.append("deleted_at")
         if save and update_fields:
             self.save(update_fields=update_fields)
-        if save and self.pk:
-            # Release endpoint ownership so deleted agents do not reserve globally unique addresses.
-            released_count = self.comms_endpoints.filter(owner_agent_id=self.pk).update(
-                owner_agent=None,
-                is_primary=False,
-            )
-            endpoints_released = released_count > 0
-        return bool(update_fields) or endpoints_released
+        side_effects_applied = self.apply_persisted_soft_delete_side_effects() if save else False
+        return bool(update_fields) or side_effects_applied
+
+    def apply_persisted_soft_delete_side_effects(self) -> bool:
+        """Apply persisted soft-delete cleanup that should only run after the row is saved."""
+        if not self.pk:
+            return False
+
+        peer_links_removed = AgentPeerLink.remove_for_agent(self)
+        # Release endpoint ownership so deleted agents do not reserve globally unique addresses.
+        released_count = self.comms_endpoints.filter(owner_agent_id=self.pk).update(
+            owner_agent=None,
+            is_primary=False,
+        )
+        return peer_links_removed or released_count > 0
 
     def restore(self, *, save: bool = True) -> bool:
         if self.is_deleted:
@@ -8962,6 +8968,37 @@ class AgentPeerLink(models.Model):
         if agent.id == self.agent_b_id:
             return self.agent_a
         return None
+
+    def remove_preserving_history(self) -> None:
+        """Delete this peer link without deleting its historical conversation or messages."""
+        try:
+            conversation = self.conversation
+        except PersistentAgentConversation.DoesNotExist:
+            conversation = None
+
+        if conversation:
+            update_fields: list[str] = []
+            if conversation.peer_link_id is not None:
+                conversation.peer_link = None
+                update_fields.append("peer_link")
+            if conversation.is_peer_dm:
+                conversation.is_peer_dm = False
+                update_fields.append("is_peer_dm")
+            if update_fields:
+                conversation.save(update_fields=update_fields)
+
+        self.delete()
+
+    @classmethod
+    def remove_for_agent(cls, agent: "PersistentAgent") -> bool:
+        removed = False
+        links = list(
+            cls.objects.filter(Q(agent_a=agent) | Q(agent_b=agent)).select_related("conversation")
+        )
+        for link in links:
+            link.remove_preserving_history()
+            removed = True
+        return removed
 
     def clean(self):
         super().clean()

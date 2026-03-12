@@ -338,10 +338,10 @@ class AgentTransferService:
     @staticmethod
     def _cleanup_peer_links(agent: PersistentAgent, new_owner: User) -> None:
         links = AgentPeerLink.objects.filter(models.Q(agent_a=agent) | models.Q(agent_b=agent))
-        for link in links.select_related("agent_a", "agent_b"):
+        for link in links.select_related("agent_a", "agent_b", "conversation"):
             other = link.get_other_agent(agent)
             if not other or other.user_id != new_owner.id:
-                link.delete()
+                link.remove_preserving_history()
 
     @staticmethod
     def _expire_owner_sessions(agent: PersistentAgent, owner: User) -> None:
