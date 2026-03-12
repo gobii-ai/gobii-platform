@@ -9,6 +9,7 @@ CANONICAL_EVENT_MAP = {
     "CompleteRegistration": "CompleteRegistration",
     "StartTrial": "StartTrial",
     "Subscribe": "Subscribe",
+    "TrialConversionPaymentFailed": "TrialConversionPaymentFailed",
     "UpgradePlan": "UpgradePlan",
     "Lead": "Lead",
     "FeatureUsed": "FeatureUsed",

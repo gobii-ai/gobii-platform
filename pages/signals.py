@@ -42,6 +42,7 @@ import stripe
 from billing.addons import AddonEntitlementService
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
+    is_trial_conversion_charge,
     is_trial_cancel_scheduled,
     is_trial_conversion_failure,
     is_trial_conversion_invoice,
@@ -92,6 +93,8 @@ UTM_MAPPING = {
 }
 
 CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid')
+TRIAL_CONVERSION_PAYMENT_FAILED_EVENT = "TrialConversionPaymentFailed"
+AD_CAPI_PROVIDER_TARGETS = ["meta", "reddit", "tiktok"]
 
 
 def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
@@ -1700,6 +1703,7 @@ def handle_invoice_payment_failed(event, **kwargs):
                 attempt_count = int(attempt_count_raw) if attempt_count_raw is not None else None
             except (TypeError, ValueError):
                 attempt_count = None
+            final_attempt = _is_final_payment_attempt(payload)
 
             subscription_status = _get_stripe_data_value(subscription_data, "status")
             if subscription_status is None:
@@ -1708,6 +1712,13 @@ def handle_invoice_payment_failed(event, **kwargs):
                 subscription_status = subscription_status.strip().lower()
             else:
                 subscription_status = None
+
+            trial_conversion_charge = is_trial_conversion_charge(
+                billing_reason=billing_reason,
+                trial_end_dt=trial_end_dt,
+                line_period_start_dt=line_period_start_dt,
+                subscription_current_period_start_dt=subscription_current_period_start_dt,
+            )
 
             trial_conversion_invoice = is_trial_conversion_invoice(
                 billing_reason=billing_reason,
@@ -1738,16 +1749,53 @@ def handle_invoice_payment_failed(event, **kwargs):
                         stripe_event_id=str(getattr(event, "id", "")) or None,
                         subscription_status=subscription_status,
                         attempt_count=attempt_count,
-                        final_attempt=_is_final_payment_attempt(payload),
+                        final_attempt=final_attempt,
                         occurred_at=timezone.now(),
                         metadata=dict(properties),
                     ),
                 )
+
+            if trial_conversion_charge and final_attempt and owner_type == "user" and owner:
+                marketing_properties = {
+                    "plan": plan_value,
+                    "subscription_id": subscription_id,
+                    "stripe.invoice_id": payload.get("id"),
+                    "attempt_number": attempt_count,
+                    "final_attempt": final_attempt,
+                    "amount_due": properties.get("amount_due"),
+                    "currency": properties.get("currency"),
+                }
+                invoice_event_id = payload.get("id")
+                if invoice_event_id:
+                    marketing_properties["event_id"] = str(invoice_event_id).strip()
+                marketing_properties = {
+                    key: value
+                    for key, value in marketing_properties.items()
+                    if value not in (None, "")
+                }
+
+                metadata = _coerce_metadata_dict(subscription_data.get("metadata"))
+                if not metadata:
+                    metadata = _coerce_metadata_dict(payload.get("metadata"))
+
+                marketing_context = _build_marketing_context_from_user(owner)
+                checkout_source_url = metadata.get("checkout_source_url")
+                if checkout_source_url:
+                    marketing_context["page"] = {"url": checkout_source_url}
+
+                capi(
+                    user=owner,
+                    event_name=TRIAL_CONVERSION_PAYMENT_FAILED_EVENT,
+                    properties=marketing_properties,
+                    request=None,
+                    context=marketing_context,
+                    provider_targets=AD_CAPI_PROVIDER_TARGETS,
+                )
         except Exception:
-            # Intentionally broad: lifecycle emission is best-effort and must never
-            # interrupt the core Stripe webhook path for invoice payment failures.
+            # Intentionally broad: failure-side lifecycle and marketing signals are
+            # best-effort and must never interrupt the core Stripe webhook path.
             logger.exception(
-                "Failed to emit trial conversion failure lifecycle event for invoice %s",
+                "Failed to emit trial conversion failure signals for invoice %s",
                 payload.get("id"),
             )
 
