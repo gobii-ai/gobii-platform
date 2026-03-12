@@ -2151,7 +2151,6 @@ def get_user_plan_api(request):
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
             'cta_start_free_trial': cta_start_free_trial,
-            'cta_start_free_trial': cta_start_free_trial,
         })
     except Exception as e:
         return JsonResponse({
@@ -2163,7 +2162,6 @@ def get_user_plan_api(request):
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'cta_start_free_trial': cta_start_free_trial,
             'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
-            'cta_start_free_trial': cta_start_free_trial,
             'error': str(e),
         })
 
@@ -5806,7 +5804,6 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user)
         context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
         context["cta_pricing_cancel_text_under_btn"] = _is_cta_pricing_cancel_text_under_btn_enabled(self.request)
-        context["cta_start_free_trial"] = _is_cta_start_free_trial_enabled(self.request)
         context["cta_start_free_trial"] = _is_cta_start_free_trial_enabled(self.request)
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
