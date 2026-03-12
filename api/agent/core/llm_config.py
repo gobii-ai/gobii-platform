@@ -128,6 +128,7 @@ _TIER_RANK_CACHE_KEY = "intelligence_tier_ranks:v1"
 _DEFAULT_TIER_RANKS: Dict[str, int] = {
     tier.value: rank for tier, rank in TIER_ORDER.items()
 }
+_RUNTIME_TIER_OVERRIDE_ATTR = "_runtime_llm_tier_override"
 
 
 def invalidate_llm_tier_default_cache() -> None:
@@ -474,7 +475,66 @@ def get_credit_multiplier_for_tier(tier: AgentLLMTier | str) -> Decimal:
     return multipliers.get(tier_enum.value, _DEFAULT_TIER_MULTIPLIERS[tier_enum.value])
 
 
-def apply_tier_credit_multiplier(agent: Any, amount: Optional[Decimal]) -> Optional[Decimal]:
+def get_runtime_tier_override(agent: Any | None) -> AgentLLMTier | None:
+    """Return the in-memory runtime tier override for the current processing run."""
+
+    if agent is None:
+        return None
+    override = getattr(agent, _RUNTIME_TIER_OVERRIDE_ATTR, None)
+    if override in (None, ""):
+        return None
+    try:
+        return _normalize_tier_value(override)
+    except Exception:
+        logger.debug(
+            "Failed to normalize runtime tier override %s for agent %s",
+            override,
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return None
+
+
+def set_runtime_tier_override(agent: Any, tier: AgentLLMTier | str | Any) -> AgentLLMTier:
+    """Persist a runtime-only tier override on the in-memory agent object."""
+
+    normalized = _normalize_tier_value(tier)
+    setattr(agent, _RUNTIME_TIER_OVERRIDE_ATTR, normalized.value)
+    return normalized
+
+
+def clear_runtime_tier_override(agent: Any | None) -> None:
+    """Remove any runtime-only tier override from the agent object."""
+
+    if agent is None or not hasattr(agent, _RUNTIME_TIER_OVERRIDE_ATTR):
+        return
+    delattr(agent, _RUNTIME_TIER_OVERRIDE_ATTR)
+
+
+def get_next_lower_configured_tier(tier: AgentLLMTier | str | Any) -> AgentLLMTier:
+    """Return the next lower configured tier by live rank, clamped at standard."""
+
+    current = _normalize_tier_value(tier)
+    ranks = get_llm_tier_ranks()
+    current_rank = ranks.get(current.value, TIER_ORDER[current])
+
+    candidates: list[tuple[int, AgentLLMTier]] = []
+    for candidate in AgentLLMTier:
+        candidate_rank = ranks.get(candidate.value, TIER_ORDER[candidate])
+        if candidate_rank < current_rank:
+            candidates.append((candidate_rank, candidate))
+
+    if not candidates:
+        return AgentLLMTier.STANDARD
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def apply_tier_credit_multiplier(
+    agent: Any,
+    amount: Optional[Decimal],
+    *,
+    use_runtime_override: bool = True,
+) -> Optional[Decimal]:
     """Return ``amount`` scaled by the agent's tier multiplier."""
 
     if amount is None or agent is None:
@@ -485,7 +545,7 @@ def apply_tier_credit_multiplier(agent: Any, amount: Optional[Decimal]) -> Optio
         logger.debug("Unable to normalize credit amount %s for agent %s", amount, getattr(agent, "id", None))
         return amount
 
-    tier = get_agent_llm_tier(agent)
+    tier = get_agent_llm_tier(agent, use_runtime_override=use_runtime_override)
     if tier is AgentLLMTier.PREMIUM and _is_trial_discount_eligible(agent):
         tier = AgentLLMTier.STANDARD
     multiplier = get_credit_multiplier_for_tier(tier)
@@ -536,8 +596,8 @@ def _is_trial_discount_eligible(agent: Any | None) -> bool:
     return allowed == AgentLLMTier.STANDARD and _within_new_account_premium_window(owner)
 
 
-def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:
-    """Return the highest LLM tier the provided agent is eligible to use."""
+def get_agent_baseline_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:
+    """Return the saved effective tier without any runtime override applied."""
 
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
         return AgentLLMTier.STANDARD
@@ -579,6 +639,29 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
         preferred = AgentLLMTier.PREMIUM
 
     return _clamp_tier(preferred, allowed_tier)
+
+
+def get_agent_llm_tier(
+    agent: Any,
+    *,
+    is_first_loop: bool | None = None,
+    use_runtime_override: bool = True,
+) -> AgentLLMTier:
+    """Return the effective runtime tier, including any per-run override."""
+
+    baseline_tier = get_agent_baseline_llm_tier(agent, is_first_loop=is_first_loop)
+    if not use_runtime_override:
+        return baseline_tier
+
+    override = get_runtime_tier_override(agent)
+    if override is None:
+        return baseline_tier
+
+    baseline_rank = get_allowed_tier_rank(baseline_tier)
+    override_rank = get_allowed_tier_rank(override)
+    if override_rank > baseline_rank:
+        return baseline_tier
+    return override
 
 
 def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) -> bool:

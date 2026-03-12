@@ -2602,12 +2602,12 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
 
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
-    @patch("api.agent.core.event_processing.should_pause_for_burn_rate", return_value=False)
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
     @patch("api.agent.core.event_processing.get_redis_client")
     def test_run_agent_loop_queues_follow_up_when_max_iterations_reached(
         self,
         mock_get_redis,
-        _mock_pause,
+        _mock_burn_control,
         mock_get_pending_settings,
         mock_apply_async,
     ):
