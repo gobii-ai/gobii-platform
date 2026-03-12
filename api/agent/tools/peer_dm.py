@@ -5,6 +5,7 @@ import logging
 from typing import Any, Dict
 from uuid import UUID
 
+from ..files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
 from ..peer_comm import (
     PeerMessagingDuplicateError,
     PeerMessagingError,
@@ -45,6 +46,11 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": "The body of the message to send. Keep it brief and actionable.",
                     },
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of filespace paths or $[/path] variables from your default filespace to hand off to the peer agent.",
+                    },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
@@ -61,6 +67,7 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
     peer_agent_id_raw = params.get("peer_agent_id")
     message = params.get("message")
     will_continue = _should_continue_work(params)
+    attachment_paths = params.get("attachments")
 
     if not peer_agent_id_raw or not message:
         return {
@@ -95,10 +102,18 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
             "message": "Target agent not found or inaccessible.",
         }
 
+    try:
+        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
+    except AttachmentResolutionError as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+        }
+
     service = PeerMessagingService(agent, peer_agent)
 
     try:
-        result = service.send_message(message)
+        result = service.send_message(message, attachments=resolved_attachments)
     except PeerMessagingDuplicateError as exc:
         response = dict(exc.duplicate_response)
         return response

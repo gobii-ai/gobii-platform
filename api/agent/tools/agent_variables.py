@@ -237,7 +237,7 @@ def format_variables_for_prompt() -> str:
         return ""
 
     lines = [
-        "Available file variables (use $[name] in messages; for attachments, pass $[name] via the attachments param on send_* tools):"
+        "Available file variables (use $[name] in messages; for attachments, pass $[name] via the attachments param on send_chat_message/send_email/send_sms/send_agent_message):"
     ]
     for name in variables.keys():
         # Don't show value - just the variable name. This prevents LLM from copying URLs.

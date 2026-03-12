@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from urllib.parse import parse_qs, urlparse
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from allauth.account.models import EmailAddress
 from django.conf import settings
@@ -11,6 +11,9 @@ from django.core.files.base import ContentFile
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
 
+from api.agent.files.attachment_helpers import resolve_filespace_attachments
+from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
     AgentPeerLink,
@@ -613,6 +616,72 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(rendered_html.count(attachment_url), 1)
         self.assertEqual(rendered_html.count("src="), 1)
         self.assertEqual(rendered_html.count("<img"), 2)
+
+    @tag("batch_agent_chat")
+    def test_timeline_includes_peer_dm_attachment_refs_for_sender_and_recipient(self):
+        peer_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Peer Browser")
+        peer_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Peer Receiver",
+            charter="Handle incoming peer work",
+            browser_use_agent=peer_browser_agent,
+        )
+        AgentPeerLink.objects.create(
+            agent_a=self.agent,
+            agent_b=peer_agent,
+            created_by=self.user,
+        )
+
+        result = write_bytes_to_dir(
+            self.agent,
+            b"peer handoff",
+            "/handoffs/brief.txt",
+            "text/plain",
+        )
+        self.assertEqual(result["status"], "ok")
+        attachments = resolve_filespace_attachments(self.agent, ["/handoffs/brief.txt"])
+
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", lambda cb: cb()
+        ):
+            task_mock.delay = MagicMock()
+            PeerMessagingService(self.agent, peer_agent).send_message(
+                "Peer handoff with file",
+                attachments=attachments,
+            )
+
+        sender_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(sender_response.status_code, 200)
+        sender_payload = sender_response.json()
+        sender_event = next(
+            event
+            for event in sender_payload.get("events", [])
+            if event.get("kind") == "message"
+            and event["message"].get("bodyText") == "Peer handoff with file"
+            and event["message"].get("isOutbound")
+        )
+
+        sender_attachment = sender_event["message"]["attachments"][0]
+        self.assertEqual(sender_attachment["filename"], "brief.txt")
+        self.assertEqual(sender_attachment["filespacePath"], "/handoffs/brief.txt")
+        self.assertIn(f"/console/api/agents/{self.agent.id}/files/download/", sender_attachment["downloadUrl"])
+
+        recipient_response = self.client.get(f"/console/api/agents/{peer_agent.id}/timeline/")
+        self.assertEqual(recipient_response.status_code, 200)
+        recipient_payload = recipient_response.json()
+        recipient_event = next(
+            event
+            for event in recipient_payload.get("events", [])
+            if event.get("kind") == "message"
+            and event["message"].get("bodyText") == "Peer handoff with file"
+            and not event["message"].get("isOutbound")
+        )
+
+        recipient_attachment = recipient_event["message"]["attachments"][0]
+        expected_prefix = f"/Inbox/{sender_event['message']['timestamp'][:10]}/peer-Console_Tester/"
+        self.assertEqual(recipient_attachment["filename"], "brief.txt")
+        self.assertTrue(recipient_attachment["filespacePath"].startswith(expected_prefix))
+        self.assertIn(f"/console/api/agents/{peer_agent.id}/files/download/", recipient_attachment["downloadUrl"])
 
     @tag("batch_agent_chat")
     def test_plaintext_and_markdown_prefer_body_text(self):

@@ -4,25 +4,30 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence
 from uuid import UUID
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 
 from waffle import flag_is_active
 
 from observability import traced
 
+from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
+from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace, get_or_create_dir
 from api.agent.tools.outbound_duplicate_guard import detect_recent_duplicate_message
 from api.models import (
     AgentCommPeerState,
+    AgentFsNode,
     AgentPeerLink,
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentMessage,
+    PersistentAgentMessageAttachment,
 )
 
 logger = logging.getLogger(__name__)
@@ -110,12 +115,18 @@ class PeerMessagingService:
         return link
 
     @traced("Agent Peer DM Send")
-    def send_message(self, body: str) -> PeerSendResult:
+    def send_message(
+        self,
+        body: str,
+        *,
+        attachments: Sequence[ResolvedAttachment] | None = None,
+    ) -> PeerSendResult:
         """Send a peer DM, enforcing quotas and debouncing."""
         if not body or not body.strip():
             raise PeerMessagingError("Message body cannot be empty.")
 
         normalized_body = body.strip()
+        resolved_attachments = list(attachments or ())
         now = timezone.now()
 
         with transaction.atomic():
@@ -186,30 +197,46 @@ class PeerMessagingService:
                 "peer_link_id": str(self.link.id),
             }
 
-            # Outgoing record for the sending agent
-            PersistentAgentMessage.objects.create(
-                is_outbound=True,
-                from_endpoint=from_endpoint,
-                conversation=conversation,
-                owner_agent=self.agent,
-                peer_agent=self.peer_agent,
-                body=normalized_body,
-                raw_payload=outbound_payload,
-            )
+            copied_attachments: list[AgentFsNode] = []
+            try:
+                copied_attachments = self._copy_attachments_to_peer_filespace(
+                    resolved_attachments,
+                    timestamp=now,
+                )
 
-            # Incoming record for the receiving agent
-            inbound_message = PersistentAgentMessage.objects.create(
-                is_outbound=False,
-                from_endpoint=from_endpoint,
-                conversation=conversation,
-                owner_agent=self.peer_agent,
-                peer_agent=self.agent,
-                body=normalized_body,
-                raw_payload=inbound_payload,
-            )
+                # Outgoing record for the sending agent
+                outbound_message = PersistentAgentMessage.objects.create(
+                    is_outbound=True,
+                    from_endpoint=from_endpoint,
+                    conversation=conversation,
+                    owner_agent=self.agent,
+                    peer_agent=self.peer_agent,
+                    body=normalized_body,
+                    raw_payload=outbound_payload,
+                )
 
-            # Touch receiving agent for lifecycle bookkeeping
-            self._touch_peer_agent(now)
+                # Incoming record for the receiving agent
+                inbound_message = PersistentAgentMessage.objects.create(
+                    is_outbound=False,
+                    from_endpoint=from_endpoint,
+                    conversation=conversation,
+                    owner_agent=self.peer_agent,
+                    peer_agent=self.agent,
+                    body=normalized_body,
+                    raw_payload=inbound_payload,
+                )
+
+                if resolved_attachments:
+                    create_message_attachments(outbound_message, resolved_attachments)
+                if copied_attachments:
+                    self._create_inbound_attachment_rows(inbound_message, copied_attachments)
+
+                # Touch receiving agent for lifecycle bookkeeping
+                self._touch_peer_agent(now)
+            except Exception:
+                if copied_attachments:
+                    self._cleanup_copied_attachment_nodes(copied_attachments)
+                raise
 
             # Wake the receiving agent to process the inbound message
             transaction.on_commit(
@@ -230,6 +257,136 @@ class PeerMessagingService:
                 remaining_credits=state.credits_remaining,
                 window_reset_at=state.window_reset_at,
             )
+
+    def _copy_attachments_to_peer_filespace(
+        self,
+        attachments: Sequence[ResolvedAttachment],
+        *,
+        timestamp: datetime,
+    ) -> list[AgentFsNode]:
+        if not attachments:
+            return []
+
+        filespace = get_or_create_default_filespace(self.peer_agent)
+        inbox_dir = self._get_or_create_dir_with_retry(filespace, None, "Inbox")
+        date_dir = self._get_or_create_dir_with_retry(filespace, inbox_dir, timestamp.date().isoformat())
+        peer_dir = self._get_or_create_dir_with_retry(filespace, date_dir, self._peer_inbox_dir_name())
+
+        copied_nodes: list[AgentFsNode] = []
+        try:
+            for attachment in attachments:
+                copied_nodes.append(
+                    self._copy_attachment_node(
+                        attachment=attachment,
+                        filespace_dir=peer_dir,
+                    )
+                )
+        except (FileNotFoundError, OSError, IntegrityError, ValueError) as exc:
+            self._cleanup_copied_attachment_nodes(copied_nodes)
+            raise PeerMessagingError(
+                "Failed to copy peer attachments into the recipient filespace.",
+            ) from exc
+
+        return copied_nodes
+
+    def _copy_attachment_node(
+        self,
+        *,
+        attachment: ResolvedAttachment,
+        filespace_dir: AgentFsNode,
+    ) -> AgentFsNode:
+        node: AgentFsNode | None = None
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            node = AgentFsNode(
+                filespace=filespace_dir.filespace,
+                parent=filespace_dir,
+                node_type=AgentFsNode.NodeType.FILE,
+                name=dedupe_name(filespace_dir.filespace, filespace_dir, attachment.filename),
+                created_by_agent=self.peer_agent,
+                mime_type=attachment.content_type,
+                checksum_sha256=attachment.node.checksum_sha256 or "",
+            )
+            try:
+                with transaction.atomic():
+                    node.save()
+                break
+            except IntegrityError:
+                if attempt == max_attempts - 1:
+                    raise
+
+        source_file = getattr(attachment.node, "content", None)
+        if not source_file or not getattr(source_file, "name", None):
+            raise ValueError("Attachment source content is unavailable.")
+
+        try:
+            with source_file.storage.open(source_file.name, "rb") as stored_file:
+                node.content.save(node.name, stored_file, save=True)
+        except (FileNotFoundError, OSError):
+            self._cleanup_copied_attachment_nodes([node])
+            raise
+        node.refresh_from_db()
+        return node
+
+    def _create_inbound_attachment_rows(
+        self,
+        message: PersistentAgentMessage,
+        attachments: Sequence[AgentFsNode],
+    ) -> None:
+        for node in attachments:
+            PersistentAgentMessageAttachment.objects.create(
+                message=message,
+                file="",
+                content_type=node.mime_type or "application/octet-stream",
+                file_size=int(node.size_bytes or 0),
+                filename=node.name,
+                filespace_node=node,
+            )
+
+    def _peer_inbox_dir_name(self) -> str:
+        safe_name = get_valid_filename((self.agent.name or "").strip()) or str(self.agent.id)
+        prefix = "peer-"
+        max_length = int(AgentFsNode._meta.get_field("name").max_length or 255)
+        return f"{prefix}{safe_name[: max_length - len(prefix)]}"
+
+    @staticmethod
+    def _get_or_create_dir_with_retry(filespace, parent, name: str) -> AgentFsNode:
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                return get_or_create_dir(filespace, parent, name)
+            except IntegrityError:
+                existing = (
+                    AgentFsNode.objects.alive()
+                    .filter(
+                        filespace=filespace,
+                        parent=parent,
+                        name=name,
+                        node_type=AgentFsNode.NodeType.DIR,
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    return existing
+                if attempt == max_attempts - 1:
+                    raise
+        raise RuntimeError("Directory creation retry loop exited unexpectedly.")
+
+    @staticmethod
+    def _cleanup_copied_attachment_nodes(nodes: Sequence[AgentFsNode | None]) -> None:
+        for node in nodes:
+            if node is None:
+                continue
+            content_name = getattr(getattr(node, "content", None), "name", None)
+            if content_name:
+                try:
+                    node.content.storage.delete(content_name)
+                except OSError:
+                    logger.warning(
+                        "Failed cleaning up copied peer attachment blob for node %s",
+                        node.id,
+                        exc_info=True,
+                    )
 
     def _lock_state(self, now) -> AgentCommPeerState:
         state, created = AgentCommPeerState.objects.select_for_update().get_or_create(

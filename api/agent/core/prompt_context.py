@@ -3539,7 +3539,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
     else:
         patterns = (
             "(1) More work? Include a tool call. "
-            "(2) Need to reply? send_chat_message/send_email/send_sms. "
+            "(2) Need to reply? send_chat_message/send_email/send_sms/send_agent_message. "
             "(3) Done? sleep_until_next_trigger."
         )
     return (
@@ -3664,7 +3664,7 @@ def _get_system_instruction(
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
             "- Peer agents: `send_agent_message()`\n\n"
-            "For file attachments, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms; "
+            "For file attachments, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms/send_agent_message; "
             "do not paste file paths into the message body unless you want them shown as text.\n\n"
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
@@ -3690,7 +3690,7 @@ def _get_system_instruction(
             "Use send_chat_message for web chat - it broadcasts to all active web chat users for this agent (owners and collaborators) regardless of send address, "
             "and send_email/send_sms/send_agent_message for other channels. "
             "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most recently active non-web channel from unified history/recent contacts. "
-            "To attach files, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms; "
+            "To attach files, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms/send_agent_message; "
             "do not paste file paths into message text unless you want them shown. "
             "Focus on tool calls—text alone is not delivered.\n\n"
         )
