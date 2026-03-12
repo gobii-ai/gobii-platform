@@ -74,6 +74,7 @@ export function SubscriptionUpgradePlans({
     trialDaysByPlan,
     trialEligible,
     pricingModalAlmostFullScreen,
+    ctaPricingCancelTextUnderBtn,
     ctaStartFreeTrial,
   } = useSubscriptionStore()
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
@@ -148,6 +149,14 @@ export function SubscriptionUpgradePlans({
                     : subscribeLabel
                 )
               : (allowDowngrade ? `Select ${plan.name}` : subscribeLabel)
+            const trialCancelText = (
+              ctaPricingCancelTextUnderBtn
+              && canUpgrade
+              && useTrialCopy
+              && trialDays > 0
+            )
+              ? `Cancel anytime during the ${trialDays}-day trial`
+              : null
 
             return (
               <div
@@ -236,6 +245,11 @@ export function SubscriptionUpgradePlans({
                         {plan.name}
                       </span>
                     )}
+                    {trialCancelText ? (
+                      <p className="mt-2 text-center text-xs text-slate-500">
+                        {trialCancelText}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               </div>

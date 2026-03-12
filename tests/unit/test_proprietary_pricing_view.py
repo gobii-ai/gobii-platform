@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
+from waffle.testutils import override_flag
 
 from constants.plans import PlanNames
 
@@ -27,6 +28,60 @@ class PricingPageCtaCopyTests(TestCase):
         }
         self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Start 7-day Free Trial")
         self.assertEqual(plans[PlanNames.SCALE]["cta"], "Start 14-day Free Trial")
+        self.assertIsNone(plans[PlanNames.STARTUP]["trial_cancel_text"])
+        self.assertIsNone(plans[PlanNames.SCALE]["trial_cancel_text"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_unauthenticated_pricing_uses_generic_trial_cta_when_flag_enabled(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag("cta_start_free_trial", active=True):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Start Free Trial")
+        self.assertEqual(plans[PlanNames.SCALE]["cta"], "Start Free Trial")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_unauthenticated_pricing_renders_trial_cancel_text_when_flag_enabled(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag("cta_pricing_cancel_text_under_btn", active=True):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(
+            plans[PlanNames.STARTUP]["trial_cancel_text"],
+            "Cancel anytime during the 7-day trial",
+        )
+        self.assertEqual(
+            plans[PlanNames.SCALE]["trial_cancel_text"],
+            "Cancel anytime during the 14-day trial",
+        )
+        self.assertContains(response, "Cancel anytime during the 7-day trial")
+        self.assertContains(response, "Cancel anytime during the 14-day trial")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.customer_has_any_individual_subscription", return_value=True)
@@ -62,3 +117,5 @@ class PricingPageCtaCopyTests(TestCase):
         }
         self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Subscribe to Pro")
         self.assertEqual(plans[PlanNames.SCALE]["cta"], "Subscribe to Scale")
+        self.assertIsNone(plans[PlanNames.STARTUP]["trial_cancel_text"])
+        self.assertIsNone(plans[PlanNames.SCALE]["trial_cancel_text"])

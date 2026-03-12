@@ -126,6 +126,9 @@
               bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:text-blue-600
               {% endif %}">{{ plan.cta }}</a>
           {% endif %}
+          {% if plan.trial_cancel_text %}
+            <p class="mt-2 text-center text-xs text-slate-500">{{ plan.trial_cancel_text }}</p>
+          {% endif %}
         </div>
         {% endfor %}
       </div>

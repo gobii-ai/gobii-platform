@@ -19,10 +19,11 @@ FISH_COLLATERAL = "fish_collateral"
 # Controls whether the pricing upgrade modal renders in an almost full-screen layout.
 PRICING_MODAL_ALMOST_FULL_SCREEN = "pricing_modal_almost_full_screen"
 
+# Controls whether pricing trial CTA buttons show cancellation reassurance beneath the button.
+CTA_PRICING_CANCEL_TEXT_UNDER_BTN = "cta_pricing_cancel_text_under_btn"
+
 # Controls whether pricing trial CTA buttons omit the explicit day count.
 CTA_START_FREE_TRIAL = "cta_start_free_trial"
-
-
 
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
