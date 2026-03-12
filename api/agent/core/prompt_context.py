@@ -1516,7 +1516,7 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     )
     scaled_threshold = burn_threshold
     try:
-        result = apply_tier_credit_multiplier(agent, burn_threshold)
+        result = apply_tier_credit_multiplier(agent, burn_threshold, use_runtime_override=False)
     except InvalidOperation:
         logger.debug(
             "Failed to apply tier multiplier to burn-rate threshold for agent %s",

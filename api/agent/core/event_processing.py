@@ -47,6 +47,7 @@ from .burn_control import (
     burn_cooldown_key,
     burn_follow_up_key,
     has_recent_user_message,
+    maybe_step_down_runtime_tier_for_burn_rate,
     should_pause_for_burn_rate,
 )
 from .processing_flags import (
@@ -86,6 +87,7 @@ from util.tool_costs import (
 from util.constants.task_constants import TASKS_UNLIMITED
 from .llm_config import (
     apply_tier_credit_multiplier,
+    clear_runtime_tier_override,
     get_llm_config_with_failover,
     LLMNotConfiguredError,
     is_llm_bootstrap_required,
@@ -3114,6 +3116,7 @@ def _run_agent_loop(
     logger.info("Starting agent loop for agent %s", agent.id)
     # Clear agent variables from any previous processing cycle
     clear_variables()
+    clear_runtime_tier_override(agent)
     span.set_attribute("burn.cooldown_seconds", BURN_RATE_COOLDOWN_SECONDS)
     max_runtime_seconds = int(getattr(settings, "AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS", 0))
     run_started_at = time.monotonic()
@@ -3187,635 +3190,677 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
     web_session_activation_retry_used = False
 
-    for i in range(max_remaining):
-        had_active_web_session_at_start = has_active_web_session(agent)
-        iteration_tools = _gate_send_chat_tool_for_session(
-            tools,
-            agent,
-            has_active_web_session_now=had_active_web_session_at_start,
-        )
-        if _should_abort_for_deleted_agent(
-            agent,
-            budget_ctx=budget_ctx,
-            heartbeat=heartbeat,
-            span=span,
-            check_context="iteration_start",
-        ):
-            return cumulative_token_usage
-        if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
-            logger.warning(
-                "Agent %s loop aborted after %d seconds (max=%d).",
-                agent.id,
-                int(time.monotonic() - run_started_at),
-                max_runtime_seconds,
+    try:
+        for i in range(max_remaining):
+            had_active_web_session_at_start = has_active_web_session(agent)
+            iteration_tools = _gate_send_chat_tool_for_session(
+                tools,
+                agent,
+                has_active_web_session_now=had_active_web_session_at_start,
             )
-            span.add_event("Agent loop aborted - runtime limit")
-            if heartbeat:
-                heartbeat.touch("runtime_limit")
-            try:
-                PersistentAgentStep.objects.create(
-                    agent=agent,
-                    description=(
-                        "Processing halted: runtime limit reached. "
-                        "Will resume on the next trigger."
-                    ),
-                )
-            except DatabaseError:
-                logger.debug(
-                    "Failed to persist runtime limit step for agent %s",
-                    agent.id,
-                    exc_info=True,
-                )
-            pending_settings = get_pending_drain_settings(settings)
-            enqueue_pending_agent(
-                agent.id,
-                ttl=pending_settings.pending_set_ttl_seconds,
-            )
-            _schedule_pending_drain(
-                delay_seconds=pending_settings.pending_drain_delay_seconds,
-                schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
-                span=span,
-            )
-            span.add_event("Runtime limit follow-up queued")
-            _attempt_cycle_close_for_sleep(agent, budget_ctx)
-            return cumulative_token_usage
-        with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
-            iter_span = trace.get_current_span()
-            iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
-            if heartbeat:
-                heartbeat.touch("iteration_start")
-            if lock_extender:
-                lock_extender.maybe_extend()
-            try:
-                daily_state = get_agent_daily_credit_state(agent)
-            except Exception:
-                logger.warning(
-                    "Failed to refresh daily credit state for agent %s during loop; continuing without update.",
-                    agent.id,
-                    exc_info=True,
-                )
-                daily_state = credit_snapshot["daily_state"] if credit_snapshot else None
-
-            if credit_snapshot is not None:
-                credit_snapshot["daily_state"] = daily_state
-
-            if should_pause_for_burn_rate(
+            if _should_abort_for_deleted_agent(
                 agent,
                 budget_ctx=budget_ctx,
-                span=iter_span,
-                daily_state=daily_state,
-                redis_client=redis_client,
-                follow_up_task=burn_follow_up_task,
+                heartbeat=heartbeat,
+                span=span,
+                check_context="iteration_start",
             ):
-                logger.info(
-                    "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
-                    agent.id,
-                    i + 1,
-                )
                 return cumulative_token_usage
-
-            # Atomically consume one global step; exit if budget exhausted
-            if budget_ctx is not None:
-                consumed, new_used = AgentBudgetManager.try_consume_step(
-                    agent_id=budget_ctx.agent_id, max_steps=budget_ctx.max_steps
-                )
-                iter_span.set_attribute("budget.consumed", consumed)
-                iter_span.set_attribute("budget.steps_used", new_used)
-                if not consumed:
-                    logger.info("Agent %s step budget exhausted.", agent.id)
-                    try:
-                        AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
-                    except Exception:
-                        logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
-                    return cumulative_token_usage
-
-            config_snapshot = seed_sqlite_agent_config(agent)
-            kanban_snapshot = seed_sqlite_kanban(agent)
-            skills_snapshot = seed_sqlite_skills(agent)
-            current_notice = continuation_notice
-            continuation_notice = None
-            history, fitted_token_count, prompt_archive_id = build_prompt_context(
-                agent,
-                current_iteration=i + 1,
-                max_iterations=MAX_AGENT_LOOP_ITERATIONS,
-                reasoning_only_streak=reasoning_only_streak,
-                is_first_run=is_first_run,
-                daily_credit_state=daily_state,
-                continuation_notice=current_notice,
-                routing_profile=get_current_eval_routing_profile(),
-            )
-            prompt_archive_attached = False
-
-            def _attach_prompt_archive(step: PersistentAgentStep) -> None:
-                nonlocal prompt_archive_attached
-                if not prompt_archive_id or prompt_archive_attached:
-                    return
-                try:
-                    updated = PersistentAgentPromptArchive.objects.filter(
-                        id=prompt_archive_id,
-                        step__isnull=True,
-                    ).update(step=step)
-                    if updated:
-                        prompt_archive_attached = True
-                except Exception:
-                    logger.exception(
-                        "Failed to link prompt archive %s to step %s",
-                        prompt_archive_id,
-                        getattr(step, "id", None),
-                    )
-
-            def _token_usage_fields(token_usage: Optional[dict], response: Any) -> dict:
-                """Return sanitized token usage values for step creation."""
-                return completion_kwargs_from_usage(
-                    token_usage,
-                    completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
-                    response=response,
-                )
-
-            # Use the fitted token count from promptree for LLM selection
-            # This fixes the bug where we were using joined message token count
-            # which could exceed thresholds even when fitted content was under limits
-            logger.debug(
-                "Using fitted token count %d for agent %s LLM selection",
-                fitted_token_count,
-                agent.id
-            )
-
-            # Select provider tiers based on the fitted token count
-            prefer_low_latency = had_active_web_session_at_start
-            try:
-                failover_configs = get_llm_config_with_failover(
-                    agent_id=str(agent.id),
-                    token_count=fitted_token_count,
-                    agent=agent,
-                    is_first_loop=is_first_run,
-                    routing_profile=get_current_eval_routing_profile(),
-                    prefer_low_latency=prefer_low_latency,
-                )
-            except LLMNotConfiguredError:
+            if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
                 logger.warning(
-                    "Agent %s loop aborted – LLM configuration missing mid-run.",
+                    "Agent %s loop aborted after %d seconds (max=%d).",
                     agent.id,
+                    int(time.monotonic() - run_started_at),
+                    max_runtime_seconds,
                 )
-                span.add_event("Agent loop aborted - llm bootstrap required")
-                break
-
-            preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
-            if prefer_low_latency:
-                preferred_config = _filter_preferred_config_for_low_latency(
-                    preferred_config,
-                    failover_configs,
-                    agent_id=str(agent.id),
-                )
-            stream_broadcaster = None
-            try:
-                stream_target = resolve_web_stream_target(agent)
-                if stream_target:
-                    stream_broadcaster = WebStreamBroadcaster(stream_target)
-            except Exception:
-                logger.debug("Failed to resolve web stream target for agent %s", agent.id, exc_info=True)
-
-            try:
-                response, token_usage = _completion_with_failover(
-                    messages=history,
-                    tools=iteration_tools,
-                    failover_configs=failover_configs,
-                    agent_id=str(agent.id),
-                    safety_identifier=agent.user.id if agent.user else None,
-                    preferred_config=preferred_config,
-                    stream_broadcaster=stream_broadcaster,
-                )
+                span.add_event("Agent loop aborted - runtime limit")
                 if heartbeat:
-                    heartbeat.touch("llm_response")
-
-                # Accumulate token usage
-                if token_usage:
-                    cumulative_token_usage["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
-                    cumulative_token_usage["completion_tokens"] += token_usage.get("completion_tokens", 0)
-                    cumulative_token_usage["total_tokens"] += token_usage.get("total_tokens", 0)
-                    cumulative_token_usage["cached_tokens"] += token_usage.get("cached_tokens", 0)
-                    # Keep the last model and provider
-                    cumulative_token_usage["model"] = token_usage.get("model")
-                    cumulative_token_usage["provider"] = token_usage.get("provider")
-                    logger.info(
-                        "LLM usage: model=%s provider=%s pt=%s ct=%s tt=%s",
-                        token_usage.get("model"),
-                        token_usage.get("provider"),
-                        token_usage.get("prompt_tokens"),
-                        token_usage.get("completion_tokens"),
-                        token_usage.get("total_tokens"),
-                    )
-
-            except Exception as e:
-                current_span = trace.get_current_span()
-                mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
-                logger.exception("LLM call failed for agent %s with all providers", agent.id)
-                break
-
-            thinking_content = extract_reasoning_content(response)
-            msg = response.choices[0].message
-            token_usage_fields = _token_usage_fields(token_usage, response)
-            completion: Optional[PersistentAgentCompletion] = None
-
-            def _ensure_completion() -> PersistentAgentCompletion:
-                nonlocal completion
-                if completion is None:
-                    completion = PersistentAgentCompletion.objects.create(
+                    heartbeat.touch("runtime_limit")
+                try:
+                    PersistentAgentStep.objects.create(
                         agent=agent,
-                        eval_run_id=eval_run_id,
-                        thinking_content=thinking_content,
-                        **token_usage_fields,
+                        description=(
+                            "Processing halted: runtime limit reached. "
+                            "Will resume on the next trigger."
+                        ),
                     )
-                return completion
-
-            # Persist completion immediately so token usage isn't lost if execution exits early
-            _ensure_completion()
-
-            web_session_activated_post_completion = (
-                not had_active_web_session_at_start and has_active_web_session(agent)
-            )
-            if web_session_activated_post_completion:
-                if _should_retry_after_post_completion_web_session_activation(
-                    agent,
-                    run_sequence_number=run_sequence_number,
-                    iteration_index=i + 1,
-                    max_remaining=max_remaining,
-                    retry_used=web_session_activation_retry_used,
-                ):
-                    web_session_activation_retry_used = True
-                    continuation_notice = (
-                        "Web chat became active mid-run; rerunning once with updated tool availability."
-                    )
-                    continue
-
-            def _attach_completion(step_kwargs: dict) -> None:
-                completion_obj = _ensure_completion()
-                step_kwargs["completion"] = completion_obj
-
-            def _persist_reasoning_step(reasoning_source: Optional[str]) -> None:
-                reasoning_text = (reasoning_source or "").strip()
-                if not reasoning_text:
-                    return
-                step_kwargs = {
-                    "agent": agent,
-                    "description": f"{INTERNAL_REASONING_PREFIX} {reasoning_text}",
-                }
-                _attach_completion(step_kwargs)
-                step = PersistentAgentStep.objects.create(**step_kwargs)
-                _attach_prompt_archive(step)
-
-            def _apply_agent_config_updates() -> bool:
-                config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
-                if not config_apply.errors:
-                    return False
-                for error in config_apply.errors:
-                    try:
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": f"Agent config update failed: {error}",
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                    except Exception:
-                        logger.debug(
-                            "Failed to persist config update error step for agent %s",
-                            agent.id,
-                            exc_info=True,
-                        )
-                return True
-
-            def _apply_kanban_updates() -> tuple[bool, Optional["KanbanBoardSnapshot"]]:
-                """Apply kanban updates and return (had_errors, snapshot)."""
-                from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot
-                kanban_apply = apply_sqlite_kanban_updates(agent, kanban_snapshot)
-
-                # Broadcast kanban changes to timeline if any
-                if kanban_apply.changes and kanban_apply.snapshot:
-                    try:
-                        broadcast_kanban_changes(agent, kanban_apply.changes, kanban_apply.snapshot)
-                    except Exception:
-                        logger.debug(
-                            "Failed to broadcast kanban changes for agent %s",
-                            agent.id,
-                            exc_info=True,
-                        )
-
-                if not kanban_apply.errors:
-                    return False, kanban_apply.snapshot
-                for error in kanban_apply.errors:
-                    try:
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": f"Kanban update failed: {error}",
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                    except Exception:
-                        logger.debug(
-                            "Failed to persist kanban update error step for agent %s",
-                            agent.id,
-                            exc_info=True,
-                        )
-                return True, kanban_apply.snapshot
-
-            def _apply_skill_updates() -> tuple[bool, bool]:
-                """Apply skill updates and return (had_errors, changed)."""
-                skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
-
-                if not skill_apply.errors:
-                    return False, bool(skill_apply.changed)
-
-                for error in skill_apply.errors:
-                    try:
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": f"Skill update failed: {error}",
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                    except Exception:
-                        logger.debug(
-                            "Failed to persist skill update error step for agent %s",
-                            agent.id,
-                            exc_info=True,
-                        )
-                return True, bool(skill_apply.changed)
-
-            def _apply_runtime_updates() -> bool:
-                # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
-                # In that mode, reconciliation has no SQLite state to diff against.
-                if not get_sqlite_db_path():
+                except DatabaseError:
                     logger.debug(
-                        "Agent %s: skipping runtime SQLite reconciliation (no db path).",
+                        "Failed to persist runtime limit step for agent %s",
                         agent.id,
+                        exc_info=True,
                     )
-                    return False
-                config_errors = _apply_agent_config_updates()
-                kanban_errors, _ = _apply_kanban_updates()
-                skill_errors, skills_changed = _apply_skill_updates()
-                if skills_changed:
-                    nonlocal tools
-                    tools = get_agent_tools(agent)
-                return config_errors or kanban_errors or skill_errors
-
-            msg_content = _extract_message_content(msg)
-            raw_message_text = (msg_content or "").strip()
-            message_text, has_canonical_continuation = _strip_canonical_continuation_phrase(
-                raw_message_text
-            )
-
-            raw_tool_calls = _normalize_tool_calls(msg)
-            raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
-            has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
-            has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)
-            has_other_tool_calls = any(
-                name and name != "sleep_until_next_trigger" for name in raw_tool_names
-            )
-
-            implied_send = False
-            tool_calls = list(raw_tool_calls)
-            implied_stop_after_send = False  # Track if implied send should force stop
-            implied_send_message_text = ""
-            if message_text and not has_explicit_send:
-                # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
-                # This is safer—agent won't keep running unexpectedly.
-                has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
-                has_open_kanban_work = _has_open_kanban_work(agent)
-                implied_will_continue = _should_imply_continue(
-                    has_canonical_continuation=has_canonical_continuation,
-                    has_other_tool_calls=has_other_tool_calls,
-                    has_explicit_sleep=has_explicit_sleep,
-                    has_open_kanban_work=has_open_kanban_work,
-                    has_natural_continuation_signal=has_natural_continuation_signal,
+                pending_settings = get_pending_drain_settings(settings)
+                enqueue_pending_agent(
+                    agent.id,
+                    ttl=pending_settings.pending_set_ttl_seconds,
                 )
-                if (
-                    implied_will_continue
-                    and has_open_kanban_work
-                    and has_natural_continuation_signal
-                    and not has_canonical_continuation
-                    and not has_other_tool_calls
+                _schedule_pending_drain(
+                    delay_seconds=pending_settings.pending_drain_delay_seconds,
+                    schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
+                    span=span,
+                )
+                span.add_event("Runtime limit follow-up queued")
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                return cumulative_token_usage
+            with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
+                iter_span = trace.get_current_span()
+                iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
+                if heartbeat:
+                    heartbeat.touch("iteration_start")
+                if lock_extender:
+                    lock_extender.maybe_extend()
+                try:
+                    daily_state = get_agent_daily_credit_state(agent)
+                except Exception:
+                    logger.warning(
+                        "Failed to refresh daily credit state for agent %s during loop; continuing without update.",
+                        agent.id,
+                        exc_info=True,
+                    )
+                    daily_state = credit_snapshot["daily_state"] if credit_snapshot else None
+
+                if credit_snapshot is not None:
+                    credit_snapshot["daily_state"] = daily_state
+
+                if should_pause_for_burn_rate(
+                    agent,
+                    budget_ctx=budget_ctx,
+                    span=iter_span,
+                    daily_state=daily_state,
+                    redis_client=redis_client,
+                    follow_up_task=burn_follow_up_task,
                 ):
                     logger.info(
-                        "Agent %s: implied send continuing due to open kanban work + continuation signal.",
+                        "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
                         agent.id,
+                        i + 1,
                     )
-                implied_call, implied_error = _build_implied_send_tool_call(
+                    return cumulative_token_usage
+
+                maybe_step_down_runtime_tier_for_burn_rate(
                     agent,
-                    message_text,
-                    will_continue_work=implied_will_continue,
+                    daily_state=daily_state,
+                    span=iter_span,
                 )
-                if implied_call:
-                    implied_send = True
-                    implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
-                    implied_send_message_text = message_text
-                    tool_calls = [implied_call] + tool_calls
-                    logger.info(
-                        "Agent %s: treating message content as implied %s send.",
-                        agent.id,
-                        implied_call.get("function", {}).get("name"),
+
+                # Atomically consume one global step; exit if budget exhausted
+                if budget_ctx is not None:
+                    consumed, new_used = AgentBudgetManager.try_consume_step(
+                        agent_id=budget_ctx.agent_id, max_steps=budget_ctx.max_steps
                     )
-                else:
-                    logger.warning(
-                        "Agent %s: implied send unavailable (%s)",
-                        agent.id,
-                        implied_error or "unknown error",
-                    )
-                    try:
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": (
-                                "Message delivery requires explicit send tools when no active web chat session. "
-                                "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
-                                "recently active non-web communication channel from unified history/recent contacts."
-                            ),
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                    except Exception:
-                        logger.debug("Failed to persist implied-send correction step", exc_info=True)
-                    # Don't continue here - still execute any other tool calls that were returned
-
-            reasoning_source = thinking_content
-            if not reasoning_source and not implied_send:
-                reasoning_source = msg_content
-
-            _persist_reasoning_step(reasoning_source)
-
-            if not tool_calls:
-                if _apply_runtime_updates():
-                    reasoning_only_streak = 0
-                    continue
-                if not message_text and not thinking_content:
-                    # Truly empty response (no text, no thinking, no tools) = agent is done
-                    # Log kanban state to help diagnose premature termination
-                    kanban_state = "unknown"
-                    try:
-                        from .prompt_context import get_kanban_snapshot
-                        snap = get_kanban_snapshot(agent)
-                        if snap:
-                            kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
-                    except Exception:
-                        pass
-                    logger.info(
-                        "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping. "
-                        "Kanban at termination: %s. Raw msg_content type=%s, len=%s",
-                        agent.id,
-                        kanban_state,
-                        type(msg_content).__name__,
-                        len(msg_content) if msg_content else 0,
-                    )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
-                # Message or thinking content but no tools - increment streak.
-                # Thinking-only models (e.g., DeepSeek) put responses in thinking blocks;
-                # don't auto-sleep just because message_text is empty.
-                reasoning_only_streak += 1
-
-                # Check for continuation signals like "let me", "I'll", "I'm going to"
-                # in message or thinking content - gives agent one extra pass.
-                has_continuation = _has_continuation_signal(raw_message_text) or _has_continuation_signal(thinking_content or "")
-                effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
-
-                if reasoning_only_streak >= effective_limit:
-                    # Log kanban state to help diagnose premature termination
-                    kanban_state = "unknown"
-                    try:
-                        from .prompt_context import get_kanban_snapshot
-                        snap = get_kanban_snapshot(agent)
-                        if snap:
-                            kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
-                            if snap.todo_count > 0 or snap.doing_count > 0:
-                                logger.warning(
-                                    "Agent %s: auto-sleeping with unfinished kanban work! %s",
-                                    agent.id,
-                                    kanban_state,
-                                )
-                    except Exception:
-                        pass
-                    logger.info(
-                        "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping. "
-                        "Kanban: %s. Last message preview: %.100s",
-                        agent.id,
-                        reasoning_only_streak,
-                        effective_limit,
-                        kanban_state,
-                        message_text or thinking_content or "(none)",
-                    )
-                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                    return cumulative_token_usage
-                continue
-
-            reasoning_only_streak = 0
-
-            # Log high-level summary of tool calls
-            try:
-                logger.info(
-                    "Agent %s: model returned %d tool_call(s)",
-                    agent.id,
-                    len(tool_calls) if isinstance(tool_calls, list) else 0,
-                )
-                for idx, call in enumerate(list(tool_calls) or [], start=1):
-                    try:
-                        fn_name = _get_tool_call_name(call)
-                        raw_args = _get_tool_call_arguments(call) or ""
-                        call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
-                        arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
-                        logger.info(
-                            "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
-                            agent.id,
-                            idx,
-                            call_id or "<none>",
-                            fn_name or "<unknown>",
-                            arg_preview,
-                            "…" if raw_args and len(raw_args) > len(arg_preview) else "",
-                        )
-                    except Exception:
-                        logger.info("Agent %s: failed to log one tool_call entry", agent.id)
-            except Exception:
-                logger.debug("Tool call summary logging failed", exc_info=True)
-
-            executed_calls = 0
-            followup_required = False
-            last_explicit_continue: Optional[bool] = None  # Final explicit will_continue_work in batch
-            allow_inferred_message_continue = inferred_message_continue_streak == 0
-            inferred_continue_call_tokens: set[str] = set()
-            inferred_message_continue_this_iteration = False
-            executed_non_message_action = False
-            try:
-                tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
-                has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
-                actionable_calls_total = sum(
-                    1 for name in tool_names if name != "sleep_until_next_trigger"
-                )
-                has_user_facing_message = any(
-                    name in MESSAGE_TOOL_NAMES for name in tool_names if name
-                )
-            except Exception:
-                # Defensive fallback: assume we have actionable work so the agent keeps processing
-                has_non_sleep_calls = True
-                actionable_calls_total = len(tool_calls or []) if tool_calls else 0
-                has_user_facing_message = False
-            message_delivery_ok = False
-            all_calls_sleep = not has_non_sleep_calls
-
-            for idx, call in enumerate(tool_calls, start=1):
-                with tracer.start_as_current_span("Execute Tool") as tool_span:
-                    if _should_abort_for_deleted_agent(
-                        agent,
-                        budget_ctx=budget_ctx,
-                        heartbeat=heartbeat,
-                        span=tool_span,
-                        check_context="tool_batch",
-                    ):
+                    iter_span.set_attribute("budget.consumed", consumed)
+                    iter_span.set_attribute("budget.steps_used", new_used)
+                    if not consumed:
+                        logger.info("Agent %s step budget exhausted.", agent.id)
+                        try:
+                            AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
+                        except Exception:
+                            logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                         return cumulative_token_usage
-                    if lock_extender:
-                        lock_extender.maybe_extend()
-                    tool_span.set_attribute("persistent_agent.id", str(agent.id))
-                    tool_name = _get_tool_call_name(call)
-                    if not tool_name:
-                        logger.warning(
-                            "Agent %s: received tool call without a function name; skipping and requesting resend.",
+
+                config_snapshot = seed_sqlite_agent_config(agent)
+                kanban_snapshot = seed_sqlite_kanban(agent)
+                skills_snapshot = seed_sqlite_skills(agent)
+                current_notice = continuation_notice
+                continuation_notice = None
+                history, fitted_token_count, prompt_archive_id = build_prompt_context(
+                    agent,
+                    current_iteration=i + 1,
+                    max_iterations=MAX_AGENT_LOOP_ITERATIONS,
+                    reasoning_only_streak=reasoning_only_streak,
+                    is_first_run=is_first_run,
+                    daily_credit_state=daily_state,
+                    continuation_notice=current_notice,
+                    routing_profile=get_current_eval_routing_profile(),
+                )
+                prompt_archive_attached = False
+
+                def _attach_prompt_archive(step: PersistentAgentStep) -> None:
+                    nonlocal prompt_archive_attached
+                    if not prompt_archive_id or prompt_archive_attached:
+                        return
+                    try:
+                        updated = PersistentAgentPromptArchive.objects.filter(
+                            id=prompt_archive_id,
+                            step__isnull=True,
+                        ).update(step=step)
+                        if updated:
+                            prompt_archive_attached = True
+                    except Exception:
+                        logger.exception(
+                            "Failed to link prompt archive %s to step %s",
+                            prompt_archive_id,
+                            getattr(step, "id", None),
+                        )
+
+                def _token_usage_fields(token_usage: Optional[dict], response: Any) -> dict:
+                    """Return sanitized token usage values for step creation."""
+                    return completion_kwargs_from_usage(
+                        token_usage,
+                        completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+                        response=response,
+                    )
+
+                # Use the fitted token count from promptree for LLM selection
+                # This fixes the bug where we were using joined message token count
+                # which could exceed thresholds even when fitted content was under limits
+                logger.debug(
+                    "Using fitted token count %d for agent %s LLM selection",
+                    fitted_token_count,
+                    agent.id
+                )
+
+                # Select provider tiers based on the fitted token count
+                prefer_low_latency = had_active_web_session_at_start
+                try:
+                    failover_configs = get_llm_config_with_failover(
+                        agent_id=str(agent.id),
+                        token_count=fitted_token_count,
+                        agent=agent,
+                        is_first_loop=is_first_run,
+                        routing_profile=get_current_eval_routing_profile(),
+                        prefer_low_latency=prefer_low_latency,
+                    )
+                except LLMNotConfiguredError:
+                    logger.warning(
+                        "Agent %s loop aborted – LLM configuration missing mid-run.",
+                        agent.id,
+                    )
+                    span.add_event("Agent loop aborted - llm bootstrap required")
+                    break
+
+                preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
+                if prefer_low_latency:
+                    preferred_config = _filter_preferred_config_for_low_latency(
+                        preferred_config,
+                        failover_configs,
+                        agent_id=str(agent.id),
+                    )
+                stream_broadcaster = None
+                try:
+                    stream_target = resolve_web_stream_target(agent)
+                    if stream_target:
+                        stream_broadcaster = WebStreamBroadcaster(stream_target)
+                except Exception:
+                    logger.debug("Failed to resolve web stream target for agent %s", agent.id, exc_info=True)
+
+                try:
+                    response, token_usage = _completion_with_failover(
+                        messages=history,
+                        tools=iteration_tools,
+                        failover_configs=failover_configs,
+                        agent_id=str(agent.id),
+                        safety_identifier=agent.user.id if agent.user else None,
+                        preferred_config=preferred_config,
+                        stream_broadcaster=stream_broadcaster,
+                    )
+                    if heartbeat:
+                        heartbeat.touch("llm_response")
+
+                    # Accumulate token usage
+                    if token_usage:
+                        cumulative_token_usage["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
+                        cumulative_token_usage["completion_tokens"] += token_usage.get("completion_tokens", 0)
+                        cumulative_token_usage["total_tokens"] += token_usage.get("total_tokens", 0)
+                        cumulative_token_usage["cached_tokens"] += token_usage.get("cached_tokens", 0)
+                        # Keep the last model and provider
+                        cumulative_token_usage["model"] = token_usage.get("model")
+                        cumulative_token_usage["provider"] = token_usage.get("provider")
+                        logger.info(
+                            "LLM usage: model=%s provider=%s pt=%s ct=%s tt=%s",
+                            token_usage.get("model"),
+                            token_usage.get("provider"),
+                            token_usage.get("prompt_tokens"),
+                            token_usage.get("completion_tokens"),
+                            token_usage.get("total_tokens"),
+                        )
+
+                except Exception as e:
+                    current_span = trace.get_current_span()
+                    mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
+                    logger.exception("LLM call failed for agent %s with all providers", agent.id)
+                    break
+
+                thinking_content = extract_reasoning_content(response)
+                msg = response.choices[0].message
+                token_usage_fields = _token_usage_fields(token_usage, response)
+                completion: Optional[PersistentAgentCompletion] = None
+
+                def _ensure_completion() -> PersistentAgentCompletion:
+                    nonlocal completion
+                    if completion is None:
+                        completion = PersistentAgentCompletion.objects.create(
+                            agent=agent,
+                            eval_run_id=eval_run_id,
+                            thinking_content=thinking_content,
+                            **token_usage_fields,
+                        )
+                    return completion
+
+                # Persist completion immediately so token usage isn't lost if execution exits early
+                _ensure_completion()
+
+                web_session_activated_post_completion = (
+                    not had_active_web_session_at_start and has_active_web_session(agent)
+                )
+                if web_session_activated_post_completion:
+                    if _should_retry_after_post_completion_web_session_activation(
+                        agent,
+                        run_sequence_number=run_sequence_number,
+                        iteration_index=i + 1,
+                        max_remaining=max_remaining,
+                        retry_used=web_session_activation_retry_used,
+                    ):
+                        web_session_activation_retry_used = True
+                        continuation_notice = (
+                            "Web chat became active mid-run; rerunning once with updated tool availability."
+                        )
+                        continue
+
+                def _attach_completion(step_kwargs: dict) -> None:
+                    completion_obj = _ensure_completion()
+                    step_kwargs["completion"] = completion_obj
+
+                def _persist_reasoning_step(reasoning_source: Optional[str]) -> None:
+                    reasoning_text = (reasoning_source or "").strip()
+                    if not reasoning_text:
+                        return
+                    step_kwargs = {
+                        "agent": agent,
+                        "description": f"{INTERNAL_REASONING_PREFIX} {reasoning_text}",
+                    }
+                    _attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    _attach_prompt_archive(step)
+
+                def _apply_agent_config_updates() -> bool:
+                    config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
+                    if not config_apply.errors:
+                        return False
+                    for error in config_apply.errors:
+                        try:
+                            step_kwargs = {
+                                "agent": agent,
+                                "description": f"Agent config update failed: {error}",
+                            }
+                            _attach_completion(step_kwargs)
+                            step = PersistentAgentStep.objects.create(**step_kwargs)
+                            _attach_prompt_archive(step)
+                        except Exception:
+                            logger.debug(
+                                "Failed to persist config update error step for agent %s",
+                                agent.id,
+                                exc_info=True,
+                            )
+                    return True
+
+                def _apply_kanban_updates() -> tuple[bool, Optional["KanbanBoardSnapshot"]]:
+                    """Apply kanban updates and return (had_errors, snapshot)."""
+                    from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot
+                    kanban_apply = apply_sqlite_kanban_updates(agent, kanban_snapshot)
+
+                    # Broadcast kanban changes to timeline if any
+                    if kanban_apply.changes and kanban_apply.snapshot:
+                        try:
+                            broadcast_kanban_changes(agent, kanban_apply.changes, kanban_apply.snapshot)
+                        except Exception:
+                            logger.debug(
+                                "Failed to broadcast kanban changes for agent %s",
+                                agent.id,
+                                exc_info=True,
+                            )
+
+                    if not kanban_apply.errors:
+                        return False, kanban_apply.snapshot
+                    for error in kanban_apply.errors:
+                        try:
+                            step_kwargs = {
+                                "agent": agent,
+                                "description": f"Kanban update failed: {error}",
+                            }
+                            _attach_completion(step_kwargs)
+                            step = PersistentAgentStep.objects.create(**step_kwargs)
+                            _attach_prompt_archive(step)
+                        except Exception:
+                            logger.debug(
+                                "Failed to persist kanban update error step for agent %s",
+                                agent.id,
+                                exc_info=True,
+                            )
+                    return True, kanban_apply.snapshot
+
+                def _apply_skill_updates() -> tuple[bool, bool]:
+                    """Apply skill updates and return (had_errors, changed)."""
+                    skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
+
+                    if not skill_apply.errors:
+                        return False, bool(skill_apply.changed)
+
+                    for error in skill_apply.errors:
+                        try:
+                            step_kwargs = {
+                                "agent": agent,
+                                "description": f"Skill update failed: {error}",
+                            }
+                            _attach_completion(step_kwargs)
+                            step = PersistentAgentStep.objects.create(**step_kwargs)
+                            _attach_prompt_archive(step)
+                        except Exception:
+                            logger.debug(
+                                "Failed to persist skill update error step for agent %s",
+                                agent.id,
+                                exc_info=True,
+                            )
+                    return True, bool(skill_apply.changed)
+
+                def _apply_runtime_updates() -> bool:
+                    # Some unit tests call _run_agent_loop directly without agent_sqlite_db().
+                    # In that mode, reconciliation has no SQLite state to diff against.
+                    if not get_sqlite_db_path():
+                        logger.debug(
+                            "Agent %s: skipping runtime SQLite reconciliation (no db path).",
                             agent.id,
+                        )
+                        return False
+                    config_errors = _apply_agent_config_updates()
+                    kanban_errors, _ = _apply_kanban_updates()
+                    skill_errors, skills_changed = _apply_skill_updates()
+                    if skills_changed:
+                        nonlocal tools
+                        tools = get_agent_tools(agent)
+                    return config_errors or kanban_errors or skill_errors
+
+                msg_content = _extract_message_content(msg)
+                raw_message_text = (msg_content or "").strip()
+                message_text, has_canonical_continuation = _strip_canonical_continuation_phrase(
+                    raw_message_text
+                )
+
+                raw_tool_calls = _normalize_tool_calls(msg)
+                raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
+                has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
+                has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)
+                has_other_tool_calls = any(
+                    name and name != "sleep_until_next_trigger" for name in raw_tool_names
+                )
+
+                implied_send = False
+                tool_calls = list(raw_tool_calls)
+                implied_stop_after_send = False  # Track if implied send should force stop
+                implied_send_message_text = ""
+                if message_text and not has_explicit_send:
+                    # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
+                    # This is safer—agent won't keep running unexpectedly.
+                    has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
+                    has_open_kanban_work = _has_open_kanban_work(agent)
+                    implied_will_continue = _should_imply_continue(
+                        has_canonical_continuation=has_canonical_continuation,
+                        has_other_tool_calls=has_other_tool_calls,
+                        has_explicit_sleep=has_explicit_sleep,
+                        has_open_kanban_work=has_open_kanban_work,
+                        has_natural_continuation_signal=has_natural_continuation_signal,
+                    )
+                    if (
+                        implied_will_continue
+                        and has_open_kanban_work
+                        and has_natural_continuation_signal
+                        and not has_canonical_continuation
+                        and not has_other_tool_calls
+                    ):
+                        logger.info(
+                            "Agent %s: implied send continuing due to open kanban work + continuation signal.",
+                            agent.id,
+                        )
+                    implied_call, implied_error = _build_implied_send_tool_call(
+                        agent,
+                        message_text,
+                        will_continue_work=implied_will_continue,
+                    )
+                    if implied_call:
+                        implied_send = True
+                        implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
+                        implied_send_message_text = message_text
+                        tool_calls = [implied_call] + tool_calls
+                        logger.info(
+                            "Agent %s: treating message content as implied %s send.",
+                            agent.id,
+                            implied_call.get("function", {}).get("name"),
+                        )
+                    else:
+                        logger.warning(
+                            "Agent %s: implied send unavailable (%s)",
+                            agent.id,
+                            implied_error or "unknown error",
                         )
                         try:
                             step_kwargs = {
                                 "agent": agent,
                                 "description": (
-                                    "Tool call error: missing function name. "
-                                    "Re-send the SAME tool call with a valid 'name' and JSON arguments."
+                                    "Message delivery requires explicit send tools when no active web chat session. "
+                                    "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
+                                    "recently active non-web communication channel from unified history/recent contacts."
                                 ),
                             }
                             _attach_completion(step_kwargs)
                             step = PersistentAgentStep.objects.create(**step_kwargs)
                             _attach_prompt_archive(step)
+                        except Exception:
+                            logger.debug("Failed to persist implied-send correction step", exc_info=True)
+                        # Don't continue here - still execute any other tool calls that were returned
+
+                reasoning_source = thinking_content
+                if not reasoning_source and not implied_send:
+                    reasoning_source = msg_content
+
+                _persist_reasoning_step(reasoning_source)
+
+                if not tool_calls:
+                    if _apply_runtime_updates():
+                        reasoning_only_streak = 0
+                        continue
+                    if not message_text and not thinking_content:
+                        # Truly empty response (no text, no thinking, no tools) = agent is done
+                        # Log kanban state to help diagnose premature termination
+                        kanban_state = "unknown"
+                        try:
+                            from .prompt_context import get_kanban_snapshot
+                            snap = get_kanban_snapshot(agent)
+                            if snap:
+                                kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                        except Exception:
+                            pass
+                        logger.info(
+                            "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping. "
+                            "Kanban at termination: %s. Raw msg_content type=%s, len=%s",
+                            agent.id,
+                            kanban_state,
+                            type(msg_content).__name__,
+                            len(msg_content) if msg_content else 0,
+                        )
+                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                        return cumulative_token_usage
+                    # Message or thinking content but no tools - increment streak.
+                    # Thinking-only models (e.g., DeepSeek) put responses in thinking blocks;
+                    # don't auto-sleep just because message_text is empty.
+                    reasoning_only_streak += 1
+
+                    # Check for continuation signals like "let me", "I'll", "I'm going to"
+                    # in message or thinking content - gives agent one extra pass.
+                    has_continuation = _has_continuation_signal(raw_message_text) or _has_continuation_signal(thinking_content or "")
+                    effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
+
+                    if reasoning_only_streak >= effective_limit:
+                        # Log kanban state to help diagnose premature termination
+                        kanban_state = "unknown"
+                        try:
+                            from .prompt_context import get_kanban_snapshot
+                            snap = get_kanban_snapshot(agent)
+                            if snap:
+                                kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                                if snap.todo_count > 0 or snap.doing_count > 0:
+                                    logger.warning(
+                                        "Agent %s: auto-sleeping with unfinished kanban work! %s",
+                                        agent.id,
+                                        kanban_state,
+                                    )
+                        except Exception:
+                            pass
+                        logger.info(
+                            "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping. "
+                            "Kanban: %s. Last message preview: %.100s",
+                            agent.id,
+                            reasoning_only_streak,
+                            effective_limit,
+                            kanban_state,
+                            message_text or thinking_content or "(none)",
+                        )
+                        _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                        return cumulative_token_usage
+                    continue
+
+                reasoning_only_streak = 0
+
+                # Log high-level summary of tool calls
+                try:
+                    logger.info(
+                        "Agent %s: model returned %d tool_call(s)",
+                        agent.id,
+                        len(tool_calls) if isinstance(tool_calls, list) else 0,
+                    )
+                    for idx, call in enumerate(list(tool_calls) or [], start=1):
+                        try:
+                            fn_name = _get_tool_call_name(call)
+                            raw_args = _get_tool_call_arguments(call) or ""
+                            call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
+                            arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
                             logger.info(
-                                "Agent %s: added correction step_id=%s for missing tool name",
+                                "Agent %s: tool_call %d: id=%s name=%s args=%s%s",
                                 agent.id,
-                                getattr(step, "id", None),
+                                idx,
+                                call_id or "<none>",
+                                fn_name or "<unknown>",
+                                arg_preview,
+                                "…" if raw_args and len(raw_args) > len(arg_preview) else "",
                             )
                         except Exception:
-                            logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
-                        followup_required = True
-                        break
-                    if heartbeat:
-                        heartbeat.touch("tool_call")
-                    tool_span.set_attribute("tool.name", tool_name)
-                    logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
+                            logger.info("Agent %s: failed to log one tool_call entry", agent.id)
+                except Exception:
+                    logger.debug("Tool call summary logging failed", exc_info=True)
 
-                    if tool_name == "sleep_until_next_trigger":
-                        # Ignore sleep tool if there are other actionable tools in this batch
-                        if has_non_sleep_calls:
-                            logger.info(
-                                "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
+                executed_calls = 0
+                followup_required = False
+                last_explicit_continue: Optional[bool] = None  # Final explicit will_continue_work in batch
+                allow_inferred_message_continue = inferred_message_continue_streak == 0
+                inferred_continue_call_tokens: set[str] = set()
+                inferred_message_continue_this_iteration = False
+                executed_non_message_action = False
+                try:
+                    tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
+                    has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
+                    actionable_calls_total = sum(
+                        1 for name in tool_names if name != "sleep_until_next_trigger"
+                    )
+                    has_user_facing_message = any(
+                        name in MESSAGE_TOOL_NAMES for name in tool_names if name
+                    )
+                except Exception:
+                    # Defensive fallback: assume we have actionable work so the agent keeps processing
+                    has_non_sleep_calls = True
+                    actionable_calls_total = len(tool_calls or []) if tool_calls else 0
+                    has_user_facing_message = False
+                message_delivery_ok = False
+                all_calls_sleep = not has_non_sleep_calls
+
+                for idx, call in enumerate(tool_calls, start=1):
+                    with tracer.start_as_current_span("Execute Tool") as tool_span:
+                        if _should_abort_for_deleted_agent(
+                            agent,
+                            budget_ctx=budget_ctx,
+                            heartbeat=heartbeat,
+                            span=tool_span,
+                            check_context="tool_batch",
+                        ):
+                            return cumulative_token_usage
+                        if lock_extender:
+                            lock_extender.maybe_extend()
+                        tool_span.set_attribute("persistent_agent.id", str(agent.id))
+                        tool_name = _get_tool_call_name(call)
+                        if not tool_name:
+                            logger.warning(
+                                "Agent %s: received tool call without a function name; skipping and requesting resend.",
                                 agent.id,
                             )
-                            # Do not consume credits or record a step for ignored sleep
+                            try:
+                                step_kwargs = {
+                                    "agent": agent,
+                                    "description": (
+                                        "Tool call error: missing function name. "
+                                        "Re-send the SAME tool call with a valid 'name' and JSON arguments."
+                                    ),
+                                }
+                                _attach_completion(step_kwargs)
+                                step = PersistentAgentStep.objects.create(**step_kwargs)
+                                _attach_prompt_archive(step)
+                                logger.info(
+                                    "Agent %s: added correction step_id=%s for missing tool name",
+                                    agent.id,
+                                    getattr(step, "id", None),
+                                )
+                            except Exception:
+                                logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
+                            followup_required = True
+                            break
+                        if heartbeat:
+                            heartbeat.touch("tool_call")
+                        tool_span.set_attribute("tool.name", tool_name)
+                        logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
+
+                        if tool_name == "sleep_until_next_trigger":
+                            # Ignore sleep tool if there are other actionable tools in this batch
+                            if has_non_sleep_calls:
+                                logger.info(
+                                    "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
+                                    agent.id,
+                                )
+                                # Do not consume credits or record a step for ignored sleep
+                                continue
+                            # All tool calls are sleep; consume credits once per call and record step
+                            credit_info = _ensure_credit_for_tool(
+                                agent,
+                                tool_name,
+                                span=tool_span,
+                                credit_snapshot=credit_snapshot,
+                            )
+                            if not credit_info:
+                                return cumulative_token_usage
+                            credits_consumed = credit_info.get("cost")
+                            consumed_credit = credit_info.get("credit")
+                            # Create sleep step with token usage if available
+                            step_kwargs = {
+                                "agent": agent,
+                                "description": "Decided to sleep until next trigger.",
+                                "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                                "task_credit": consumed_credit,
+                            }
+                            _attach_completion(step_kwargs)
+                            step = PersistentAgentStep.objects.create(**step_kwargs)
+                            _attach_prompt_archive(step)
+                            logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
                             continue
-                        # All tool calls are sleep; consume credits once per call and record step
+
+                        all_calls_sleep = False
+                        if not _enforce_tool_rate_limit(
+                            agent,
+                            tool_name,
+                            span=tool_span,
+                            attach_completion=_attach_completion,
+                            attach_prompt_archive=_attach_prompt_archive,
+                        ):
+                            followup_required = True
+                            continue
+
+                        # Ensure credit is available and consume just-in-time for actionable tools
                         credit_info = _ensure_credit_for_tool(
                             agent,
                             tool_name,
@@ -3823,437 +3868,404 @@ def _run_agent_loop(
                             credit_snapshot=credit_snapshot,
                         )
                         if not credit_info:
+                            # Credit insufficient or consumption failed; halt processing
                             return cumulative_token_usage
                         credits_consumed = credit_info.get("cost")
                         consumed_credit = credit_info.get("credit")
-                        # Create sleep step with token usage if available
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": "Decided to sleep until next trigger.",
-                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                            "task_credit": consumed_credit,
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                        logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
-                        continue
-
-                    all_calls_sleep = False
-                    if not _enforce_tool_rate_limit(
-                        agent,
-                        tool_name,
-                        span=tool_span,
-                        attach_completion=_attach_completion,
-                        attach_prompt_archive=_attach_prompt_archive,
-                    ):
-                        followup_required = True
-                        continue
-
-                    # Ensure credit is available and consume just-in-time for actionable tools
-                    credit_info = _ensure_credit_for_tool(
-                        agent,
-                        tool_name,
-                        span=tool_span,
-                        credit_snapshot=credit_snapshot,
-                    )
-                    if not credit_info:
-                        # Credit insufficient or consumption failed; halt processing
-                        return cumulative_token_usage
-                    credits_consumed = credit_info.get("cost")
-                    consumed_credit = credit_info.get("credit")
-                    try:
-                        raw_args = _get_tool_call_arguments(call)
-                        if isinstance(raw_args, dict):
-                            tool_params = raw_args
-                            raw_args = json.dumps(raw_args)
-                        else:
-                            raw_args = raw_args or ""
-                            tool_params = json.loads(raw_args)
-                        tool_params = _normalize_tool_params_unicode_escapes(tool_params)
-                    except Exception:
-                        # Simple recovery: record a correction instruction and retry next iteration.
-                        preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
-                        logger.warning(
-                            "Agent %s: invalid JSON for tool %s; prompting model to resend valid arguments (preview=%s%s)",
-                            agent.id,
-                            tool_name,
-                            preview,
-                            "…" if raw_args and len(raw_args) > len(preview) else "",
-                        )
                         try:
-                            step_text = (
-                                f"Tool call error: arguments for {tool_name} were not valid JSON. "
-                                "Re-send the SAME tool call immediately with valid JSON only. "
-                                "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
-                            )
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": step_text,
-                                "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                                "task_credit": consumed_credit,
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                            logger.info(
-                                "Agent %s: added correction step_id=%s to request a retried tool call",
-                                agent.id,
-                                getattr(step, 'id', None),
-                            )
+                            raw_args = _get_tool_call_arguments(call)
+                            if isinstance(raw_args, dict):
+                                tool_params = raw_args
+                                raw_args = json.dumps(raw_args)
+                            else:
+                                raw_args = raw_args or ""
+                                tool_params = json.loads(raw_args)
+                            tool_params = _normalize_tool_params_unicode_escapes(tool_params)
                         except Exception:
-                            logger.debug("Failed to persist correction step", exc_info=True)
-                        # Abort remaining tool calls this iteration; retry next loop
-                        followup_required = True
-                        break
-                    call_id = getattr(call, "id", None)
-                    if not call_id and isinstance(call, dict):
-                        call_id = call.get("id")
-                    call_token = str(call_id or f"idx-{idx}")
-                    if tool_name in MESSAGE_TOOL_NAMES:
-                        body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
-                        explicit_continue_hint = _coerce_optional_bool(tool_params.get("will_continue_work"))
-                        if body_key and isinstance(tool_params.get(body_key), str):
-                            cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
-                                tool_params[body_key]
-                            )
-                            if found_phrase:
-                                tool_params[body_key] = cleaned_body
-                                tool_params["will_continue_work"] = True
-                            elif (
-                                explicit_continue_hint is None
-                                and allow_inferred_message_continue
-                                and _should_infer_message_tool_continuation(cleaned_body)
-                            ):
-                                tool_params["will_continue_work"] = True
-                                inferred_continue_call_tokens.add(call_token)
-                                logger.info(
-                                    "Agent %s: inferred will_continue_work=true for %s based on progress-update language.",
-                                    agent.id,
-                                    tool_name,
-                                )
-                            elif (
-                                explicit_continue_hint is None
-                                and not allow_inferred_message_continue
-                                and _should_infer_message_tool_continuation(cleaned_body)
-                            ):
-                                logger.info(
-                                    "Agent %s: suppressing inferred continuation for %s to avoid progress-message loops without work tools.",
-                                    agent.id,
-                                    tool_name,
-                                )
-                        # Explicit message tools still default to STOP when the flag is omitted.
-                        # We only auto-continue on strong progress-update language.
-                    tool_span.set_attribute("tool.params", json.dumps(tool_params))
-                    logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
-
-                    # Substitute $[var] placeholders in tool parameters (unless tool opts out)
-                    if should_skip_auto_substitution(tool_name):
-                        exec_params = tool_params  # Tool handles substitution itself
-                    else:
-                        exec_params = _substitute_variables_in_params(tool_params)
-                    if tool_name == "sqlite_batch":
-                        exec_params = dict(exec_params)  # copy already-substituted params
-                        exec_params["_has_user_facing_message"] = has_user_facing_message
-
-                    # Ensure a fresh DB connection before tool execution and subsequent ORM writes
-                    close_old_connections()
-
-                    pending_step = _create_pending_tool_call_step(
-                        agent=agent,
-                        tool_name=tool_name,
-                        tool_params=tool_params,
-                        credits_consumed=credits_consumed,
-                        consumed_credit=consumed_credit,
-                        attach_completion=_attach_completion,
-                        attach_prompt_archive=_attach_prompt_archive,
-                    )
-
-                    logger.info("Agent %s: executing %s now", agent.id, tool_name)
-
-                    tool_started_at = time.monotonic()
-                    tool_duration_ms: Optional[int] = None
-                    try:
-                        # Check for eval mock before real execution (mock_config passed via BudgetContext)
-                        mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
-                        mock_result = mock_config.get(tool_name) if mock_config else None
-                        if mock_result is not None:
-                            logger.info(
-                                "Agent %s: using mock for %s (eval_run_id=%s)",
+                            # Simple recovery: record a correction instruction and retry next iteration.
+                            preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
+                            logger.warning(
+                                "Agent %s: invalid JSON for tool %s; prompting model to resend valid arguments (preview=%s%s)",
                                 agent.id,
                                 tool_name,
-                                eval_run_id,
+                                preview,
+                                "…" if raw_args and len(raw_args) > len(preview) else "",
                             )
-                            result = mock_result
-                        elif tool_name == "spawn_web_task":
-                            # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
-                            result = execute_spawn_web_task(agent, exec_params)
-                        elif tool_name == "send_email":
-                            result = execute_send_email(agent, exec_params)
-                        elif tool_name == "send_sms":
-                            result = execute_send_sms(agent, exec_params)
-                        elif tool_name == "send_chat_message":
-                            result = execute_send_chat_message(agent, exec_params)
-                        elif tool_name == "send_agent_message":
-                            result = execute_send_agent_message(agent, exec_params)
-                        elif tool_name == "send_webhook_event":
-                            result = execute_send_webhook_event(agent, exec_params)
-                        elif tool_name == "update_schedule":
-                            result = execute_update_schedule(agent, exec_params)
-                        elif tool_name == "update_charter":
-                            result = execute_update_charter(agent, exec_params)
-                        elif tool_name == "secure_credentials_request":
-                            result = execute_secure_credentials_request(agent, exec_params)
-                        elif tool_name == "enable_database":
-                            result = execute_enable_database(agent, exec_params)
-                            before_count = len(tools)
-                            tools = get_agent_tools(agent)
-                            after_count = len(tools)
-                            logger.info(
-                                "Agent %s: refreshed tools after enable_database (before=%d after=%d)",
-                                agent.id,
-                                before_count,
-                                after_count,
-                            )
-                        elif tool_name == "request_contact_permission":
-                            result = execute_request_contact_permission(agent, exec_params)
-                        elif tool_name == "spawn_agent":
-                            result = execute_spawn_agent(agent, exec_params)
-                        elif tool_name == "search_tools":
-                            result = execute_search_tools(agent, exec_params)
-                            # After search_tools auto-enables relevant tools, refresh tool definitions
-                            before_count = len(tools)
-                            tools = get_agent_tools(agent)
-                            after_count = len(tools)
-                            logger.info(
-                                "Agent %s: refreshed tools after search_tools (before=%d after=%d)",
-                                agent.id,
-                                before_count,
-                                after_count,
-                            )
+                            try:
+                                step_text = (
+                                    f"Tool call error: arguments for {tool_name} were not valid JSON. "
+                                    "Re-send the SAME tool call immediately with valid JSON only. "
+                                    "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
+                                )
+                                step_kwargs = {
+                                    "agent": agent,
+                                    "description": step_text,
+                                    "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                                    "task_credit": consumed_credit,
+                                }
+                                _attach_completion(step_kwargs)
+                                step = PersistentAgentStep.objects.create(**step_kwargs)
+                                _attach_prompt_archive(step)
+                                logger.info(
+                                    "Agent %s: added correction step_id=%s to request a retried tool call",
+                                    agent.id,
+                                    getattr(step, 'id', None),
+                                )
+                            except Exception:
+                                logger.debug("Failed to persist correction step", exc_info=True)
+                            # Abort remaining tool calls this iteration; retry next loop
+                            followup_required = True
+                            break
+                        call_id = getattr(call, "id", None)
+                        if not call_id and isinstance(call, dict):
+                            call_id = call.get("id")
+                        call_token = str(call_id or f"idx-{idx}")
+                        if tool_name in MESSAGE_TOOL_NAMES:
+                            body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+                            explicit_continue_hint = _coerce_optional_bool(tool_params.get("will_continue_work"))
+                            if body_key and isinstance(tool_params.get(body_key), str):
+                                cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
+                                    tool_params[body_key]
+                                )
+                                if found_phrase:
+                                    tool_params[body_key] = cleaned_body
+                                    tool_params["will_continue_work"] = True
+                                elif (
+                                    explicit_continue_hint is None
+                                    and allow_inferred_message_continue
+                                    and _should_infer_message_tool_continuation(cleaned_body)
+                                ):
+                                    tool_params["will_continue_work"] = True
+                                    inferred_continue_call_tokens.add(call_token)
+                                    logger.info(
+                                        "Agent %s: inferred will_continue_work=true for %s based on progress-update language.",
+                                        agent.id,
+                                        tool_name,
+                                    )
+                                elif (
+                                    explicit_continue_hint is None
+                                    and not allow_inferred_message_continue
+                                    and _should_infer_message_tool_continuation(cleaned_body)
+                                ):
+                                    logger.info(
+                                        "Agent %s: suppressing inferred continuation for %s to avoid progress-message loops without work tools.",
+                                        agent.id,
+                                        tool_name,
+                                    )
+                            # Explicit message tools still default to STOP when the flag is omitted.
+                            # We only auto-continue on strong progress-update language.
+                        tool_span.set_attribute("tool.params", json.dumps(tool_params))
+                        logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
+
+                        # Substitute $[var] placeholders in tool parameters (unless tool opts out)
+                        if should_skip_auto_substitution(tool_name):
+                            exec_params = tool_params  # Tool handles substitution itself
                         else:
-                            # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
-                            result = execute_enabled_tool(agent, tool_name, exec_params)
-                    except Exception as exc:
-                        mark_span_failed_with_exception(tool_span, exc, f"Tool {tool_name} failed")
-                        logger.exception(
-                            "Agent %s: tool %s failed (call_id=%s)",
-                            agent.id,
-                            tool_name,
-                            call_id or "<none>",
-                        )
-                        result = _build_safe_error_payload(
-                            f"Tool execution failed: {exc}",
-                            error_type=type(exc).__name__,
-                            retryable=_infer_retryable_from_text(str(exc)),
-                        )
-                    finally:
-                        tool_duration_ms = int(round((time.monotonic() - tool_started_at) * 1000))
+                            exec_params = _substitute_variables_in_params(tool_params)
+                        if tool_name == "sqlite_batch":
+                            exec_params = dict(exec_params)  # copy already-substituted params
+                            exec_params["_has_user_facing_message"] = has_user_facing_message
 
-                    if _is_error_status(result):
-                        result = _normalize_error_result(result)
+                        # Ensure a fresh DB connection before tool execution and subsequent ORM writes
+                        close_old_connections()
 
-                    try:
-                        result_content = json.dumps(result)
-                    except (TypeError, ValueError):
-                        try:
-                            result_content = json.dumps(result, default=str)
-                        except Exception as exc:
-                            logger.exception(
-                                "Agent %s: failed to serialize tool result for %s (call_id=%s)",
-                                agent.id,
-                                tool_name,
-                                call_id or "<none>",
-                            )
-                            result = _build_safe_error_payload(
-                                "Tool result serialization failed.",
-                                error_type=type(exc).__name__,
-                                retryable=False,
-                            )
-                            result_content = json.dumps(result)
-                    # Log result summary
-                    try:
-                        status = result.get("status") if isinstance(result, dict) else None
-                    except Exception:
-                        status = None
-                    try:
-                        tool_span.set_attribute("tool.status", str(status or ""))
-                    except Exception:
-                        pass
-                    result_preview = result_content[:RESULT_LOG_MAX_CHARS]
-                    logger.info(
-                        "Agent %s: %s completed status=%s result=%s%s",
-                        agent.id,
-                        tool_name,
-                        status or "",
-                        result_preview,
-                        "…" if len(result_content) > len(result_preview) else "",
-                    )
-                    if tool_name in MESSAGE_TOOL_NAMES:
-                        status_label = str(status or "").lower()
-                        if status_label in MESSAGE_SUCCESS_STATUSES:
-                            message_delivery_ok = True
-
-                    is_error_status = _is_error_status(result)
-                    tool_status = "error" if is_error_status else "complete"
-
-                    # Guard ORM writes against stale connections; retry once on OperationalError
-                    close_old_connections()
-                    if pending_step is not None:
-                        _finalize_pending_tool_call_step(
-                            step=pending_step,
-                            tool_name=tool_name,
-                            tool_params=tool_params,
-                            result_content=result_content,
-                            execution_duration_ms=tool_duration_ms,
-                            status=tool_status,
-                        )
-                        step = pending_step
-                    else:
-                        step = _persist_tool_call_step(
+                        pending_step = _create_pending_tool_call_step(
                             agent=agent,
                             tool_name=tool_name,
                             tool_params=tool_params,
-                            result_content=result_content,
-                            execution_duration_ms=tool_duration_ms,
-                            status=tool_status,
                             credits_consumed=credits_consumed,
                             consumed_credit=consumed_credit,
                             attach_completion=_attach_completion,
                             attach_prompt_archive=_attach_prompt_archive,
                         )
-                    allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
-                    tool_had_error = is_error_status
-                    tool_had_warning = _is_warning_status(result)
-                    explicit_continue = None
-                    if isinstance(tool_params, dict):
-                        explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
-                        if explicit_continue is not None:
-                            last_explicit_continue = explicit_continue
-                        if explicit_continue is True and call_token in inferred_continue_call_tokens:
-                            inferred_message_continue_this_iteration = True
 
-                    if tool_had_error or tool_had_warning:
-                        followup_required = True
-                    elif explicit_continue is None and not allow_auto_sleep:
-                        followup_required = True
+                        logger.info("Agent %s: executing %s now", agent.id, tool_name)
 
-                    executed_calls += 1
-                    if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
-                        executed_non_message_action = True
+                        tool_started_at = time.monotonic()
+                        tool_duration_ms: Optional[int] = None
+                        try:
+                            # Check for eval mock before real execution (mock_config passed via BudgetContext)
+                            mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
+                            mock_result = mock_config.get(tool_name) if mock_config else None
+                            if mock_result is not None:
+                                logger.info(
+                                    "Agent %s: using mock for %s (eval_run_id=%s)",
+                                    agent.id,
+                                    tool_name,
+                                    eval_run_id,
+                                )
+                                result = mock_result
+                            elif tool_name == "spawn_web_task":
+                                # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
+                                result = execute_spawn_web_task(agent, exec_params)
+                            elif tool_name == "send_email":
+                                result = execute_send_email(agent, exec_params)
+                            elif tool_name == "send_sms":
+                                result = execute_send_sms(agent, exec_params)
+                            elif tool_name == "send_chat_message":
+                                result = execute_send_chat_message(agent, exec_params)
+                            elif tool_name == "send_agent_message":
+                                result = execute_send_agent_message(agent, exec_params)
+                            elif tool_name == "send_webhook_event":
+                                result = execute_send_webhook_event(agent, exec_params)
+                            elif tool_name == "update_schedule":
+                                result = execute_update_schedule(agent, exec_params)
+                            elif tool_name == "update_charter":
+                                result = execute_update_charter(agent, exec_params)
+                            elif tool_name == "secure_credentials_request":
+                                result = execute_secure_credentials_request(agent, exec_params)
+                            elif tool_name == "enable_database":
+                                result = execute_enable_database(agent, exec_params)
+                                before_count = len(tools)
+                                tools = get_agent_tools(agent)
+                                after_count = len(tools)
+                                logger.info(
+                                    "Agent %s: refreshed tools after enable_database (before=%d after=%d)",
+                                    agent.id,
+                                    before_count,
+                                    after_count,
+                                )
+                            elif tool_name == "request_contact_permission":
+                                result = execute_request_contact_permission(agent, exec_params)
+                            elif tool_name == "spawn_agent":
+                                result = execute_spawn_agent(agent, exec_params)
+                            elif tool_name == "search_tools":
+                                result = execute_search_tools(agent, exec_params)
+                                # After search_tools auto-enables relevant tools, refresh tool definitions
+                                before_count = len(tools)
+                                tools = get_agent_tools(agent)
+                                after_count = len(tools)
+                                logger.info(
+                                    "Agent %s: refreshed tools after search_tools (before=%d after=%d)",
+                                    agent.id,
+                                    before_count,
+                                    after_count,
+                                )
+                            else:
+                                # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
+                                result = execute_enabled_tool(agent, tool_name, exec_params)
+                        except Exception as exc:
+                            mark_span_failed_with_exception(tool_span, exc, f"Tool {tool_name} failed")
+                            logger.exception(
+                                "Agent %s: tool %s failed (call_id=%s)",
+                                agent.id,
+                                tool_name,
+                                call_id or "<none>",
+                            )
+                            result = _build_safe_error_payload(
+                                f"Tool execution failed: {exc}",
+                                error_type=type(exc).__name__,
+                                retryable=_infer_retryable_from_text(str(exc)),
+                            )
+                        finally:
+                            tool_duration_ms = int(round((time.monotonic() - tool_started_at) * 1000))
 
-            if _apply_runtime_updates():
-                followup_required = True
+                        if _is_error_status(result):
+                            result = _normalize_error_result(result)
 
-            if executed_non_message_action:
-                inferred_message_continue_streak = 0
-            elif inferred_message_continue_this_iteration:
-                inferred_message_continue_streak += 1
-            else:
-                inferred_message_continue_streak = 0
+                        try:
+                            result_content = json.dumps(result)
+                        except (TypeError, ValueError):
+                            try:
+                                result_content = json.dumps(result, default=str)
+                            except Exception as exc:
+                                logger.exception(
+                                    "Agent %s: failed to serialize tool result for %s (call_id=%s)",
+                                    agent.id,
+                                    tool_name,
+                                    call_id or "<none>",
+                                )
+                                result = _build_safe_error_payload(
+                                    "Tool result serialization failed.",
+                                    error_type=type(exc).__name__,
+                                    retryable=False,
+                                )
+                                result_content = json.dumps(result)
+                        # Log result summary
+                        try:
+                            status = result.get("status") if isinstance(result, dict) else None
+                        except Exception:
+                            status = None
+                        try:
+                            tool_span.set_attribute("tool.status", str(status or ""))
+                        except Exception:
+                            pass
+                        result_preview = result_content[:RESULT_LOG_MAX_CHARS]
+                        logger.info(
+                            "Agent %s: %s completed status=%s result=%s%s",
+                            agent.id,
+                            tool_name,
+                            status or "",
+                            result_preview,
+                            "…" if len(result_content) > len(result_preview) else "",
+                        )
+                        if tool_name in MESSAGE_TOOL_NAMES:
+                            status_label = str(status or "").lower()
+                            if status_label in MESSAGE_SUCCESS_STATUSES:
+                                message_delivery_ok = True
 
-            if all_calls_sleep:
-                logger.info("Agent %s is sleeping.", agent.id)
-                _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                return cumulative_token_usage
-            elif not followup_required and last_explicit_continue is False:
-                logger.info(
-                    "Agent %s: tool batch ended with explicit stop; auto-sleeping.",
-                    agent.id,
-                )
-                _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                return cumulative_token_usage
-            # Implied send without continuation phrase = agent is done, force stop
-            elif (
-                implied_stop_after_send
-                and message_delivery_ok
-                and not followup_required
-                and last_explicit_continue is None
-            ):
-                # Re-check against persisted kanban/message state before stopping.
-                # This prevents premature sleep when initial implied-continuation inference
-                # was too conservative but the delivered text clearly signals ongoing work.
-                if (
-                    implied_send_message_text
-                    and _has_open_kanban_work(agent)
-                    and _has_continuation_signal(implied_send_message_text)
-                ):
+                        is_error_status = _is_error_status(result)
+                        tool_status = "error" if is_error_status else "complete"
+
+                        # Guard ORM writes against stale connections; retry once on OperationalError
+                        close_old_connections()
+                        if pending_step is not None:
+                            _finalize_pending_tool_call_step(
+                                step=pending_step,
+                                tool_name=tool_name,
+                                tool_params=tool_params,
+                                result_content=result_content,
+                                execution_duration_ms=tool_duration_ms,
+                                status=tool_status,
+                            )
+                            step = pending_step
+                        else:
+                            step = _persist_tool_call_step(
+                                agent=agent,
+                                tool_name=tool_name,
+                                tool_params=tool_params,
+                                result_content=result_content,
+                                execution_duration_ms=tool_duration_ms,
+                                status=tool_status,
+                                credits_consumed=credits_consumed,
+                                consumed_credit=consumed_credit,
+                                attach_completion=_attach_completion,
+                                attach_prompt_archive=_attach_prompt_archive,
+                            )
+                        allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
+                        tool_had_error = is_error_status
+                        tool_had_warning = _is_warning_status(result)
+                        explicit_continue = None
+                        if isinstance(tool_params, dict):
+                            explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+                            if explicit_continue is not None:
+                                last_explicit_continue = explicit_continue
+                            if explicit_continue is True and call_token in inferred_continue_call_tokens:
+                                inferred_message_continue_this_iteration = True
+
+                        if tool_had_error or tool_had_warning:
+                            followup_required = True
+                        elif explicit_continue is None and not allow_auto_sleep:
+                            followup_required = True
+
+                        executed_calls += 1
+                        if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
+                            executed_non_message_action = True
+
+                if _apply_runtime_updates():
+                    followup_required = True
+
+                if executed_non_message_action:
+                    inferred_message_continue_streak = 0
+                elif inferred_message_continue_this_iteration:
+                    inferred_message_continue_streak += 1
+                else:
+                    inferred_message_continue_streak = 0
+
+                if all_calls_sleep:
+                    logger.info("Agent %s is sleeping.", agent.id)
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+                elif not followup_required and last_explicit_continue is False:
                     logger.info(
-                        "Agent %s: implied send stop overridden due to open kanban work + continuation signal.",
+                        "Agent %s: tool batch ended with explicit stop; auto-sleeping.",
                         agent.id,
                     )
-                    continue
-                logger.info(
-                    "Agent %s: implied send without continuation phrase; auto-sleeping.",
-                    agent.id,
-                )
-                _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                return cumulative_token_usage
-            elif (
-                not followup_required
-                and last_explicit_continue is None
-                and executed_calls > 0
-                and executed_calls >= actionable_calls_total
-            ):
-                logger.info(
-                    "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
-                    agent.id,
-                )
-                _attempt_cycle_close_for_sleep(agent, budget_ctx)
-                return cumulative_token_usage
-            elif not followup_required and last_explicit_continue is True:
-                logger.info(
-                    "Agent %s: tools returned auto_sleep_ok but agent explicitly requested continuation; continuing.",
-                    agent.id,
-                )
-            else:
-                logger.info(
-                    "Agent %s: executed %d/%d tool_call(s) this iteration",
-                    agent.id,
-                    executed_calls,
-                    len(tool_calls),
-                )
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+                # Implied send without continuation phrase = agent is done, force stop
+                elif (
+                    implied_stop_after_send
+                    and message_delivery_ok
+                    and not followup_required
+                    and last_explicit_continue is None
+                ):
+                    # Re-check against persisted kanban/message state before stopping.
+                    # This prevents premature sleep when initial implied-continuation inference
+                    # was too conservative but the delivered text clearly signals ongoing work.
+                    if (
+                        implied_send_message_text
+                        and _has_open_kanban_work(agent)
+                        and _has_continuation_signal(implied_send_message_text)
+                    ):
+                        logger.info(
+                            "Agent %s: implied send stop overridden due to open kanban work + continuation signal.",
+                            agent.id,
+                        )
+                        continue
+                    logger.info(
+                        "Agent %s: implied send without continuation phrase; auto-sleeping.",
+                        agent.id,
+                    )
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+                elif (
+                    not followup_required
+                    and last_explicit_continue is None
+                    and executed_calls > 0
+                    and executed_calls >= actionable_calls_total
+                ):
+                    logger.info(
+                        "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
+                        agent.id,
+                    )
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+                elif not followup_required and last_explicit_continue is True:
+                    logger.info(
+                        "Agent %s: tools returned auto_sleep_ok but agent explicitly requested continuation; continuing.",
+                        agent.id,
+                    )
+                else:
+                    logger.info(
+                        "Agent %s: executed %d/%d tool_call(s) this iteration",
+                        agent.id,
+                        executed_calls,
+                        len(tool_calls),
+                    )
 
-    else:
-        logger.warning("Agent %s reached max iterations.", agent.id)
-        span.add_event("Agent loop aborted - max iterations")
-        if heartbeat:
-            heartbeat.touch("max_iterations")
-        try:
-            PersistentAgentStep.objects.create(
-                agent=agent,
-                description=(
-                    "Processing paused: max iterations reached. "
-                    "Will resume shortly."
-                ),
+        else:
+            logger.warning("Agent %s reached max iterations.", agent.id)
+            span.add_event("Agent loop aborted - max iterations")
+            if heartbeat:
+                heartbeat.touch("max_iterations")
+            try:
+                PersistentAgentStep.objects.create(
+                    agent=agent,
+                    description=(
+                        "Processing paused: max iterations reached. "
+                        "Will resume shortly."
+                    ),
+                )
+            except DatabaseError:
+                logger.debug(
+                    "Failed to persist max-iterations step for agent %s",
+                    agent.id,
+                    exc_info=True,
+                )
+            pending_settings = get_pending_drain_settings(settings)
+            delay_seconds = max(
+                int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
+                int(pending_settings.pending_drain_delay_seconds),
             )
-        except DatabaseError:
-            logger.debug(
-                "Failed to persist max-iterations step for agent %s",
-                agent.id,
-                exc_info=True,
-            )
-        pending_settings = get_pending_drain_settings(settings)
-        delay_seconds = max(
-            int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
-            int(pending_settings.pending_drain_delay_seconds),
-        )
-        try:
-            from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
+            try:
+                from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
-            # Avoid globally throttling the pending-drain scheduler when a single agent
-            # hits its iteration cap; resume this agent directly after a cooldown.
-            process_agent_events_task.apply_async(
-                args=[str(agent.id)],
-                countdown=delay_seconds,
-            )
-            span.add_event("Max iterations follow-up scheduled")
-        except Exception:
-            logger.debug(
-                "Failed to schedule max-iterations follow-up for agent %s",
-                agent.id,
-                exc_info=True,
-            )
-        _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                # Avoid globally throttling the pending-drain scheduler when a single agent
+                # hits its iteration cap; resume this agent directly after a cooldown.
+                process_agent_events_task.apply_async(
+                    args=[str(agent.id)],
+                    countdown=delay_seconds,
+                )
+                span.add_event("Max iterations follow-up scheduled")
+            except Exception:
+                logger.debug(
+                    "Failed to schedule max-iterations follow-up for agent %s",
+                    agent.id,
+                    exc_info=True,
+                )
+            _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
-    return cumulative_token_usage
+        return cumulative_token_usage
+    finally:
+        clear_runtime_tier_override(agent)

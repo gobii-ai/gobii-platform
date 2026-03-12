@@ -25,6 +25,17 @@ import uuid
 from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.constants.task_constants import TASKS_UNLIMITED
 from api.agent.core.event_processing import _ensure_credit_for_tool
+from api.agent.core.llm_config import (
+    AgentLLMTier,
+    apply_tier_credit_multiplier,
+    clear_runtime_tier_override,
+    get_agent_baseline_llm_tier,
+    get_agent_llm_tier,
+    get_credit_multiplier_for_tier,
+    get_next_lower_configured_tier,
+    get_runtime_tier_override,
+    set_runtime_tier_override,
+)
 from api.agent.core.prompt_context import (
     add_budget_awareness_sections,
     compute_burn_rate,
@@ -33,6 +44,7 @@ from api.agent.core.prompt_context import (
 from constants.plans import PlanNames
 from api.agent.core import event_processing as ep
 from api.agent.core import burn_control as bc
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 class _DummySpan:
@@ -677,7 +689,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         with patch(
             "api.agent.core.prompt_context.apply_tier_credit_multiplier",
-            side_effect=lambda _agent, threshold: threshold,
+            side_effect=lambda _agent, threshold, **_kwargs: threshold,
         ), patch(
             "api.agent.core.prompt_context.get_daily_credit_settings_for_owner",
             return_value=MagicMock(
@@ -1146,6 +1158,157 @@ class PersistentAgentToolCreditTests(TestCase):
         follow_up_task.apply_async.assert_called_once()
         self.assertTrue(fake_store.get(bc.burn_cooldown_key(self.agent.id)))
         self.assertTrue(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
+            ).exists()
+        )
+
+    def test_runtime_tier_step_down_activates_once_with_recent_user_message(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+        }
+
+        try:
+            with override_settings(GOBII_PROPRIETARY_MODE=True), \
+                 patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
+                 patch("api.agent.core.burn_control.has_recent_user_message", return_value=True), \
+                 patch("api.agent.core.burn_control.Analytics.track_event") as track_event_mock:
+                stepped = bc.maybe_step_down_runtime_tier_for_burn_rate(
+                    self.agent,
+                    daily_state=burn_state,
+                    span=_DummySpan(),
+                )
+                stepped_again = bc.maybe_step_down_runtime_tier_for_burn_rate(
+                    self.agent,
+                    daily_state=burn_state,
+                    span=_DummySpan(),
+                )
+
+                self.assertTrue(stepped)
+                self.assertFalse(stepped_again)
+                self.assertEqual(get_agent_baseline_llm_tier(self.agent), AgentLLMTier.ULTRA_MAX)
+                self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.ULTRA)
+                self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.ULTRA)
+                self.assertFalse(
+                    PersistentAgentSystemStep.objects.filter(
+                        step__agent=self.agent,
+                        code=PersistentAgentSystemStep.Code.BURN_RATE_TIER_STEP_DOWN,
+                    ).exists()
+                )
+                self.assertFalse(
+                    PersistentAgentStep.objects.filter(
+                        agent=self.agent,
+                        description__contains="baseline_tier=ultra_max;runtime_tier=ultra",
+                    ).exists()
+                )
+                track_event_mock.assert_called_once()
+                self.assertEqual(
+                    track_event_mock.call_args.kwargs["event"],
+                    AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN,
+                )
+        finally:
+            clear_runtime_tier_override(self.agent)
+
+    def test_runtime_tier_override_does_not_change_daily_burn_threshold(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
+
+        try:
+            with override_settings(GOBII_PROPRIETARY_MODE=True), \
+                 patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
+                 patch(
+                     "api.agent.core.prompt_context.get_daily_credit_settings_for_owner",
+                     return_value=MagicMock(
+                         burn_rate_window_minutes=60,
+                         burn_rate_threshold_per_hour=Decimal("4"),
+                         offpeak_burn_rate_threshold_per_hour=Decimal("4"),
+                     ),
+                 ), \
+                 patch(
+                     "api.agent.core.prompt_context.compute_burn_rate",
+                     return_value={
+                         "burn_rate_per_hour": Decimal("1"),
+                         "window_minutes": 60,
+                     },
+                 ):
+                set_runtime_tier = get_next_lower_configured_tier(get_agent_baseline_llm_tier(self.agent))
+                self.assertEqual(set_runtime_tier, AgentLLMTier.ULTRA)
+                set_runtime_tier_override(self.agent, set_runtime_tier)
+
+                state = get_agent_daily_credit_state(self.agent)
+                baseline_threshold = apply_tier_credit_multiplier(
+                    self.agent,
+                    Decimal("4"),
+                    use_runtime_override=False,
+                )
+                runtime_threshold = apply_tier_credit_multiplier(self.agent, Decimal("4"))
+
+                self.assertEqual(state["burn_rate_threshold_per_hour"], baseline_threshold)
+                self.assertNotEqual(runtime_threshold, baseline_threshold)
+        finally:
+            clear_runtime_tier_override(self.agent)
+
+    def test_run_loop_uses_downgraded_runtime_tier_after_burn_step_down(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+        }
+        response = MagicMock()
+        response.choices = [
+            MagicMock(message=MagicMock(content="Done for now", tool_calls=[], function_call=None))
+        ]
+        token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+        }
+        observed = {}
+
+        def capture_failover(*_args, **_kwargs):
+            observed["routing_tier"] = get_agent_llm_tier(self.agent)
+            observed["runtime_multiplier"] = get_credit_multiplier_for_tier(observed["routing_tier"])
+            return [{}]
+
+        with override_settings(GOBII_PROPRIETARY_MODE=True), \
+             patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
+             patch("api.agent.core.burn_control.has_recent_user_message", return_value=True), \
+             patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), \
+             patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
+             patch("api.agent.core.event_processing.build_prompt_context", return_value=([], 0, None)), \
+             patch("api.agent.core.event_processing.get_llm_config_with_failover", side_effect=capture_failover), \
+             patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
+            usage = ep._run_agent_loop(
+                self.agent,
+                is_first_run=False,
+                credit_snapshot=None,
+                run_sequence_number=1,
+            )
+
+        self.assertEqual(usage["total_tokens"], 0)
+        self.assertEqual(observed["routing_tier"], AgentLLMTier.ULTRA)
+        self.assertEqual(get_runtime_tier_override(self.agent), None)
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                code=PersistentAgentSystemStep.Code.BURN_RATE_TIER_STEP_DOWN,
+            ).exists()
+        )
+        self.assertFalse(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="baseline_tier=ultra_max;runtime_tier=ultra",
+            ).exists()
+        )
+        self.assertFalse(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
                 code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,

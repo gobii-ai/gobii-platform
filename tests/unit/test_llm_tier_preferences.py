@@ -11,9 +11,14 @@ from api.agent.core.llm_config import (
     AgentLLMTier,
     _plan_supports_paid_tiers,
     apply_tier_credit_multiplier,
+    clear_runtime_tier_override,
+    get_agent_baseline_llm_tier,
     get_agent_llm_tier,
+    get_credit_multiplier_for_tier,
+    get_next_lower_configured_tier,
     get_system_default_tier,
     resolve_preferred_tier_for_owner,
+    set_runtime_tier_override,
 )
 from api.models import (
     BrowserUseAgent,
@@ -70,6 +75,51 @@ class AgentTierPreferenceTests(TestCase):
         self.user.quota.max_intelligence_tier = AgentLLMTier.STANDARD.value
         self.user.quota.save(update_fields=["max_intelligence_tier"])
         self.assertEqual(get_agent_llm_tier(self.agent, is_first_loop=True), AgentLLMTier.STANDARD)
+
+    def test_next_lower_configured_tier_follows_live_ladder(self):
+        self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.ULTRA_MAX), AgentLLMTier.ULTRA)
+        self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.ULTRA), AgentLLMTier.MAX)
+        self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.MAX), AgentLLMTier.PREMIUM)
+        self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.PREMIUM), AgentLLMTier.STANDARD)
+        self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.STANDARD), AgentLLMTier.STANDARD)
+
+    def test_runtime_override_changes_runtime_tier_and_billing_but_not_baseline(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
+
+        try:
+            with patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}):
+                baseline_tier = get_agent_baseline_llm_tier(self.agent)
+                self.assertEqual(baseline_tier, AgentLLMTier.ULTRA_MAX)
+
+                runtime_tier = set_runtime_tier_override(self.agent, AgentLLMTier.ULTRA)
+                self.assertEqual(runtime_tier, AgentLLMTier.ULTRA)
+                self.assertEqual(get_agent_baseline_llm_tier(self.agent), AgentLLMTier.ULTRA_MAX)
+                self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.ULTRA)
+
+                baseline_cost = apply_tier_credit_multiplier(
+                    self.agent,
+                    Decimal("1.000"),
+                    use_runtime_override=False,
+                )
+                runtime_cost = apply_tier_credit_multiplier(self.agent, Decimal("1.000"))
+                self.assertEqual(
+                    baseline_cost,
+                    (Decimal("1.000") * get_credit_multiplier_for_tier(AgentLLMTier.ULTRA_MAX)).quantize(
+                        Decimal("0.001")
+                    ),
+                )
+                self.assertEqual(
+                    runtime_cost,
+                    (Decimal("1.000") * get_credit_multiplier_for_tier(AgentLLMTier.ULTRA)).quantize(
+                        Decimal("0.001")
+                    ),
+                )
+        finally:
+            clear_runtime_tier_override(self.agent)
+
+        with patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}):
+            self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.ULTRA_MAX)
 
 
 @tag("batch_llm_intelligence")
