@@ -4007,7 +4007,7 @@
 
 .tool-cluster-detail-host {
   width: 100%;
-  margin-top: 0.65rem;
+  margin-top: var(--timeline-row-gap);
 }
 
 .tool-cluster-separate-list {
@@ -4334,13 +4334,8 @@
 }
 
 .tool-chip-detail--kanban .tool-chip-detail-header {
-  margin-bottom: 0.65rem;
+  margin-bottom: var(--timeline-row-gap);
   padding: 0 0.25rem;
-}
-
-.tool-cluster-detail-host {
-  width: 100%;
-  margin-top: 0.65rem;
 }
 
 .tool-cluster-detail-host[hidden] {
