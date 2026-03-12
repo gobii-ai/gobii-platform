@@ -282,7 +282,6 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(payload.get("pricing_modal_almost_full_screen"))
         self.assertFalse(payload.get("cta_pricing_cancel_text_under_btn"))
         self.assertFalse(payload.get("cta_start_free_trial"))
-        self.assertFalse(payload.get("cta_start_free_trial"))
         mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
@@ -485,7 +484,6 @@ class ConsoleViewsTest(TestCase):
         self.assertContains(response, 'data-pricing-modal-almost-full-screen="true"')
         self.assertContains(response, 'data-cta-start-free-trial="false"')
         self.assertContains(response, 'data-cta-pricing-cancel-text-under-btn="false"')
-        self.assertContains(response, 'data-cta-start-free-trial="false"')
         self.assertContains(response, 'data-is-staff="false"')
         mock_customer_has_any_individual_subscription.assert_not_called()
 
