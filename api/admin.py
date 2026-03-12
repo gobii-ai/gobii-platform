@@ -3370,6 +3370,7 @@ class PersistentAgentSkillAdmin(admin.ModelAdmin):
     )
     raw_id_fields = ("agent",)
     ordering = ("name", "-version", "-updated_at")
+    list_select_related = ("agent",)
 
 
 @admin.register(PersistentAgentCommsEndpoint)
