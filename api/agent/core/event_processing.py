@@ -90,7 +90,6 @@ from .llm_config import (
     LLMNotConfiguredError,
     is_llm_bootstrap_required,
 )
-from .kanban_state import get_kanban_state
 from api.agent.events import publish_agent_event, AgentEventType
 from api.agent.comms.message_service import send_owner_daily_credit_hard_limit_notice
 from api.evals.execution import get_current_eval_routing_profile
@@ -332,7 +331,11 @@ def _has_continuation_signal(text: str) -> bool:
 
 def _has_open_kanban_work(agent: PersistentAgent) -> bool:
     """Return True when kanban still has todo/doing work for the agent."""
-    return get_kanban_state(agent).has_open_work
+    KanbanCard = apps.get_model("api", "PersistentAgentKanbanCard")
+    return KanbanCard.objects.filter(
+        assigned_agent=agent,
+        status__in=("todo", "doing"),
+    ).exists()
 
 
 def _remove_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
@@ -3577,71 +3580,64 @@ def _run_agent_loop(
             implied_stop_after_send = False  # Track if implied send should force stop
             implied_send_message_text = ""
             if message_text and not has_explicit_send:
-                kanban_state = get_kanban_state(agent)
-                if kanban_state.is_work_complete:
+                # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
+                # This is safer—agent won't keep running unexpectedly.
+                has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
+                has_open_kanban_work = _has_open_kanban_work(agent)
+                implied_will_continue = _should_imply_continue(
+                    has_canonical_continuation=has_canonical_continuation,
+                    has_other_tool_calls=has_other_tool_calls,
+                    has_explicit_sleep=has_explicit_sleep,
+                    has_open_kanban_work=has_open_kanban_work,
+                    has_natural_continuation_signal=has_natural_continuation_signal,
+                )
+                if (
+                    implied_will_continue
+                    and has_open_kanban_work
+                    and has_natural_continuation_signal
+                    and not has_canonical_continuation
+                    and not has_other_tool_calls
+                ):
                     logger.info(
-                        "Agent %s: suppressing implied send because kanban work is already complete.",
+                        "Agent %s: implied send continuing due to open kanban work + continuation signal.",
                         agent.id,
                     )
+                implied_call, implied_error = _build_implied_send_tool_call(
+                    agent,
+                    message_text,
+                    will_continue_work=implied_will_continue,
+                )
+                if implied_call:
+                    implied_send = True
+                    implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
+                    implied_send_message_text = message_text
+                    tool_calls = [implied_call] + tool_calls
+                    logger.info(
+                        "Agent %s: treating message content as implied %s send.",
+                        agent.id,
+                        implied_call.get("function", {}).get("name"),
+                    )
                 else:
-                    # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
-                    # This is safer—agent won't keep running unexpectedly.
-                    has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
-                    has_open_kanban_work = kanban_state.has_open_work
-                    implied_will_continue = _should_imply_continue(
-                        has_canonical_continuation=has_canonical_continuation,
-                        has_other_tool_calls=has_other_tool_calls,
-                        has_explicit_sleep=has_explicit_sleep,
-                        has_open_kanban_work=has_open_kanban_work,
-                        has_natural_continuation_signal=has_natural_continuation_signal,
+                    logger.warning(
+                        "Agent %s: implied send unavailable (%s)",
+                        agent.id,
+                        implied_error or "unknown error",
                     )
-                    if (
-                        implied_will_continue
-                        and has_open_kanban_work
-                        and has_natural_continuation_signal
-                        and not has_canonical_continuation
-                        and not has_other_tool_calls
-                    ):
-                        logger.info(
-                            "Agent %s: implied send continuing due to open kanban work + continuation signal.",
-                            agent.id,
-                        )
-                    implied_call, implied_error = _build_implied_send_tool_call(
-                        agent,
-                        message_text,
-                        will_continue_work=implied_will_continue,
-                    )
-                    if implied_call:
-                        implied_send = True
-                        implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
-                        implied_send_message_text = message_text
-                        tool_calls = [implied_call] + tool_calls
-                        logger.info(
-                            "Agent %s: treating message content as implied %s send.",
-                            agent.id,
-                            implied_call.get("function", {}).get("name"),
-                        )
-                    else:
-                        logger.warning(
-                            "Agent %s: implied send unavailable (%s)",
-                            agent.id,
-                            implied_error or "unknown error",
-                        )
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": (
-                                    "Message delivery requires explicit send tools when no active web chat session. "
-                                    "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
-                                    "recently active non-web communication channel from unified history/recent contacts."
-                                ),
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug("Failed to persist implied-send correction step", exc_info=True)
-                        # Don't continue here - still execute any other tool calls that were returned
+                    try:
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": (
+                                "Message delivery requires explicit send tools when no active web chat session. "
+                                "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
+                                "recently active non-web communication channel from unified history/recent contacts."
+                            ),
+                        }
+                        _attach_completion(step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
+                    except Exception:
+                        logger.debug("Failed to persist implied-send correction step", exc_info=True)
+                    # Don't continue here - still execute any other tool calls that were returned
 
             reasoning_source = thinking_content
             if not reasoning_source and not implied_send:

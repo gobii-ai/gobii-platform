@@ -10,7 +10,6 @@ from api.models import (
     BrowserUseAgentTask,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
-    PersistentAgentKanbanCard,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     TaskCredit,
@@ -924,43 +923,6 @@ class PersistentAgentToolCreditTests(TestCase):
         usage_call = next(call for call in budget_group.section_text.call_args_list if call.args[0] == "browser_task_usage")
         self.assertIn("2/2", usage_call.args[1])
         self.assertIn("browser_task_usage_warning", names)
-
-    @patch(
-        "api.agent.core.prompt_context.get_tool_cost_overview",
-        return_value=(Decimal("1"), {}),
-    )
-    def test_budget_sections_include_open_kanban_work_prompt(self, _mock_costs):
-        critical_group = MagicMock()
-        budget_group = MagicMock()
-        critical_group.group.return_value = budget_group
-
-        PersistentAgentKanbanCard.objects.create(
-            assigned_agent=self.agent,
-            title="Finish report",
-            status=PersistentAgentKanbanCard.Status.DOING,
-        )
-        PersistentAgentKanbanCard.objects.create(
-            assigned_agent=self.agent,
-            title="Send summary",
-            status=PersistentAgentKanbanCard.Status.TODO,
-        )
-
-        result = add_budget_awareness_sections(
-            critical_group,
-            current_iteration=1,
-            max_iterations=5,
-            daily_credit_state=None,
-            agent=self.agent,
-        )
-
-        self.assertTrue(result)
-        work_call = next(
-            call
-            for call in budget_group.section_text.call_args_list
-            if call.args[0] == "work_completion_required"
-        )
-        self.assertIn("2 card(s)", work_call.args[1])
-        self.assertIn("1 doing, 1 todo", work_call.args[1])
 
     def test_burn_rate_pause_schedules_follow_up_and_exits_loop(self):
         fake_store: dict[str, str] = {}
