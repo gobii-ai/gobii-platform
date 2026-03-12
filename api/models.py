@@ -5721,7 +5721,7 @@ class PersistentAgent(models.Model):
 
     def get_avatar_url(self) -> str | None:
         """Return a usable URL for the agent avatar, if set."""
-        file_field = getattr(self, "avatar", None)
+        file_field = self.avatar
         if not self.has_avatar or not self.pk:
             return None
         version = hashlib.sha256(file_field.name.encode("utf-8")).hexdigest()[:12]

@@ -41,6 +41,14 @@ def _safe_decimal(value: Optional[float]) -> Optional[Decimal]:
         return None
 
 
+def _first_decimal(*values: Any) -> Optional[Decimal]:
+    for value in values:
+        decimal_value = _safe_decimal(value)
+        if decimal_value is not None:
+            return decimal_value
+    return None
+
+
 def usage_attribute(usage: Any, attr: str, default: Optional[Any] = None) -> Any:
     if usage is None:
         return default
@@ -190,23 +198,23 @@ def _extract_direct_cost_breakdown(
             continue
 
         if input_total is None:
-            input_total = _safe_decimal(
-                usage_attribute(cost_details, "upstream_inference_prompt_cost")
-                or usage_attribute(cost_details, "prompt_cost")
-                or usage_attribute(cost_details, "input_cost_total")
+            input_total = _first_decimal(
+                usage_attribute(cost_details, "upstream_inference_prompt_cost"),
+                usage_attribute(cost_details, "prompt_cost"),
+                usage_attribute(cost_details, "input_cost_total"),
             )
         if output_cost is None:
-            output_cost = _safe_decimal(
-                usage_attribute(cost_details, "upstream_inference_completions_cost")
-                or usage_attribute(cost_details, "upstream_inference_completion_cost")
-                or usage_attribute(cost_details, "completion_cost")
-                or usage_attribute(cost_details, "output_cost")
+            output_cost = _first_decimal(
+                usage_attribute(cost_details, "upstream_inference_completions_cost"),
+                usage_attribute(cost_details, "upstream_inference_completion_cost"),
+                usage_attribute(cost_details, "completion_cost"),
+                usage_attribute(cost_details, "output_cost"),
             )
         if total_cost is None:
-            total_cost = _safe_decimal(
-                usage_attribute(cost_details, "upstream_inference_cost")
-                or usage_attribute(cost_details, "total_cost")
-                or usage_attribute(cost_details, "cost")
+            total_cost = _first_decimal(
+                usage_attribute(cost_details, "upstream_inference_cost"),
+                usage_attribute(cost_details, "total_cost"),
+                usage_attribute(cost_details, "cost"),
             )
 
     if total_cost is None:
@@ -224,15 +232,28 @@ def _extract_direct_cost_breakdown(
     direct_costs: dict[str, Decimal] = {}
     if input_total is not None:
         direct_costs["input_cost_total"] = _quantize_cost(input_total)
-        cached_tokens = coerce_int(token_usage.get("cached_tokens"))
-        if cached_tokens <= 0:
-            direct_costs["input_cost_uncached"] = _quantize_cost(input_total)
-            direct_costs["input_cost_cached"] = _quantize_cost(Decimal("0"))
     if output_cost is not None:
         direct_costs["output_cost"] = _quantize_cost(output_cost)
     if total_cost is not None:
         direct_costs["total_cost"] = _quantize_cost(total_cost)
     return direct_costs
+
+
+def _merge_direct_cost_fields(
+    token_usage: dict[str, Any],
+    direct_cost_fields: dict[str, Decimal],
+) -> dict[str, Decimal]:
+    merged_costs = dict(direct_cost_fields)
+    if "input_cost_total" not in merged_costs:
+        return merged_costs
+    if "input_cost_uncached" in merged_costs or "input_cost_cached" in merged_costs:
+        return merged_costs
+    if coerce_int(token_usage.get("cached_tokens")) > 0:
+        return merged_costs
+
+    merged_costs["input_cost_uncached"] = merged_costs["input_cost_total"]
+    merged_costs["input_cost_cached"] = _quantize_cost(Decimal("0"))
+    return merged_costs
 
 
 def extract_token_usage(
@@ -268,9 +289,9 @@ def extract_token_usage(
         usage=usage,
         token_usage=token_usage,
     )
-    if direct_cost_fields:
-        token_usage.update(direct_cost_fields)
     if not usage:
+        if direct_cost_fields:
+            token_usage.update(_merge_direct_cost_fields(token_usage, direct_cost_fields))
         return token_usage, None
 
     prompt_tokens = usage_attribute(usage, "prompt_tokens")
@@ -294,6 +315,8 @@ def extract_token_usage(
     cost_fields = direct_cost_fields
     if not cost_fields:
         cost_fields = compute_cost_breakdown(token_usage, usage)
+    else:
+        cost_fields = _merge_direct_cost_fields(token_usage, cost_fields)
     if cost_fields:
         token_usage.update(cost_fields)
 
