@@ -9736,7 +9736,6 @@ class PersistentAgentSystemStep(models.Model):
         PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
         SYSTEM_DIRECTIVE = "SYSTEM_DIRECTIVE", "System Directive"
         BURN_RATE_COOLDOWN = "BURN_RATE_COOLDOWN", "Burn Rate Cooldown"
-        BURN_RATE_TIER_STEP_DOWN = "BURN_RATE_TIER_STEP_DOWN", "Burn Rate Tier Step Down"
         RATE_LIMIT = "RATE_LIMIT", "Rate Limit"
         # Add more system-generated step codes here as needed.
 

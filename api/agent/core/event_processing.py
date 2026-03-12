@@ -44,11 +44,11 @@ from .budget import (
 from .burn_control import (
     BURN_RATE_COOLDOWN_SECONDS,
     BURN_RATE_USER_INACTIVITY_MINUTES,
+    BurnRateAction,
     burn_cooldown_key,
     burn_follow_up_key,
+    handle_burn_rate_limit,
     has_recent_user_message,
-    maybe_step_down_runtime_tier_for_burn_rate,
-    should_pause_for_burn_rate,
 )
 from .processing_flags import (
     claim_pending_drain_slot,
@@ -3263,26 +3263,21 @@ def _run_agent_loop(
                 if credit_snapshot is not None:
                     credit_snapshot["daily_state"] = daily_state
 
-                if should_pause_for_burn_rate(
+                burn_rate_action = handle_burn_rate_limit(
                     agent,
                     budget_ctx=budget_ctx,
                     span=iter_span,
                     daily_state=daily_state,
                     redis_client=redis_client,
                     follow_up_task=burn_follow_up_task,
-                ):
+                )
+                if burn_rate_action == BurnRateAction.PAUSED:
                     logger.info(
                         "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
                         agent.id,
                         i + 1,
                     )
                     return cumulative_token_usage
-
-                maybe_step_down_runtime_tier_for_burn_rate(
-                    agent,
-                    daily_state=daily_state,
-                    span=iter_span,
-                )
 
                 # Atomically consume one global step; exit if budget exhausted
                 if budget_ctx is not None:

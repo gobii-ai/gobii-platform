@@ -1195,10 +1195,7 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.ULTRA)
                 self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.ULTRA)
                 self.assertFalse(
-                    PersistentAgentSystemStep.objects.filter(
-                        step__agent=self.agent,
-                        code=PersistentAgentSystemStep.Code.BURN_RATE_TIER_STEP_DOWN,
-                    ).exists()
+                    PersistentAgentSystemStep.objects.filter(step__agent=self.agent).exists()
                 )
                 self.assertFalse(
                     PersistentAgentStep.objects.filter(
@@ -1297,10 +1294,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(observed["routing_tier"], AgentLLMTier.ULTRA)
         self.assertEqual(get_runtime_tier_override(self.agent), None)
         self.assertFalse(
-            PersistentAgentSystemStep.objects.filter(
-                step__agent=self.agent,
-                code=PersistentAgentSystemStep.Code.BURN_RATE_TIER_STEP_DOWN,
-            ).exists()
+            PersistentAgentSystemStep.objects.filter(step__agent=self.agent).exists()
         )
         self.assertFalse(
             PersistentAgentStep.objects.filter(
