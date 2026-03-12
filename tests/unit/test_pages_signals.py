@@ -2278,8 +2278,57 @@ class PaymentFailedSignalTests(TestCase):
         self.assertEqual(props["event_id"], payload["id"])
         self.assertEqual(props["attempt_number"], 2)
         self.assertTrue(props["final_attempt"])
+        self.assertEqual(props["value"], 25.0)
         self.assertEqual(props["amount_due"], 25.0)
         self.assertEqual(props["currency"], "USD")
+
+    def test_invoice_payment_failed_still_emits_trial_conversion_failure_capi_when_lifecycle_emit_fails(self):
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        payload = _build_invoice_payload(
+            customer_id="cus_user",
+            subscription_id="sub_user",
+            attempt_count=1,
+            next_payment_attempt=None,
+            auto_advance=False,
+            amount_due=2500,
+            billing_reason="subscription_cycle",
+        )
+        payload["lines"]["data"][0]["period"] = {
+            "start": int(trial_end.timestamp()),
+            "end": int((trial_end + timedelta(days=30)).timestamp()),
+        }
+        event = _build_djstripe_event(payload, event_type="invoice.payment_failed", event_id="evt_trial_both")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user", subscriber=self.user),
+            subscription=SimpleNamespace(
+                id="sub_user",
+                stripe_data={
+                    "status": "past_due",
+                    "trial_end": str(trial_end),
+                    "current_period_start": str(trial_end),
+                },
+            ),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.Analytics.track_event_anonymous"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.emit_billing_lifecycle_event", side_effect=RuntimeError("boom")), \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_invoice_payment_failed(event)
+
+        mock_capi.assert_called_once()
+        self.assertEqual(
+            mock_capi.call_args.kwargs["event_name"],
+            "TrialConversionPaymentFailed",
+        )
 
     def test_invoice_payment_failed_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-fail", email="org-fail@example.com", password="pw")

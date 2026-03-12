@@ -136,3 +136,35 @@ class RedditPayloadTests(SimpleTestCase):
         self.assertEqual(event["type"], {"tracking_type": "PURCHASE"})
         self.assertEqual(event["metadata"]["value"], 30.0)
         self.assertEqual(event["metadata"]["currency"], "USD")
+
+    def test_custom_trial_conversion_failure_event_preserves_value(self):
+        provider = RedditCAPI(pixel_id="acct123", token="token456")
+        evt = {
+            "event_name": "TrialConversionPaymentFailed",
+            "event_time": 1_700_000_000,
+            "event_id": "evt-trial-fail-1",
+            "properties": {
+                "value": 25.0,
+                "amount_due": 25.0,
+                "currency": "USD",
+            },
+            "ids": {},
+            "network": {},
+            "utm": {},
+            "consent": True,
+        }
+
+        with patch("marketing_events.providers.reddit.post_json") as mock_post:
+            mock_post.return_value = {}
+            provider.send(evt)
+
+        mock_post.assert_called_once()
+        _, kwargs = mock_post.call_args
+        event = kwargs["json"]["data"]["events"][0]
+        self.assertEqual(
+            event["type"],
+            {"tracking_type": "CUSTOM", "custom_event_name": "TrialConversionPaymentFailed"},
+        )
+        self.assertEqual(event["metadata"]["value"], 25.0)
+        self.assertEqual(event["metadata"]["currency"], "USD")
+        self.assertNotIn("amount_due", event["metadata"])
