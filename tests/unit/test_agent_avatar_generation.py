@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
@@ -161,6 +162,22 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertEqual(agent.avatar_charter_hash, charter_hash)
         self.assertEqual(agent.avatar_requested_hash, "")
 
+    def test_generate_agent_avatar_task_skips_when_avatar_already_exists(self):
+        agent = self._create_agent()
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.visual_description = "A confident operator with sharp features and a tailored charcoal shirt."
+        agent.avatar_requested_hash = charter_hash
+        agent.avatar.save("existing-avatar.png", ContentFile(b"existing-avatar"), save=False)
+        agent.save(update_fields=["visual_description", "avatar_requested_hash", "avatar"])
+
+        with patch("api.agent.tasks.agent_avatar._generate_avatar_image") as mocked_image_generation:
+            generate_agent_avatar_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.avatar_requested_hash, "")
+        self.assertTrue(agent.avatar)
+        mocked_image_generation.assert_not_called()
+
     def test_generate_agent_avatar_task_skips_when_charter_changes(self):
         agent = self._create_agent()
         old_hash = compute_charter_hash(agent.charter)
@@ -230,6 +247,33 @@ class AgentAvatarGenerationTests(TestCase):
             "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
         ) as mocked_delay:
             scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+
+    def test_maybe_schedule_agent_avatar_skips_when_avatar_already_exists(self):
+        agent = self._prepare_visual_ready_agent()
+        agent.avatar.save("existing-avatar.png", ContentFile(b"avatar-bytes"), save=False)
+        agent.save(update_fields=["avatar"])
+
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+
+    def test_maybe_schedule_agent_avatar_skips_when_avatar_was_saved_after_agent_loaded(self):
+        current_agent = self._prepare_visual_ready_agent()
+        stale_agent = PersistentAgent.objects.get(id=current_agent.id)
+        current_agent.avatar.save("existing-avatar.png", ContentFile(b"avatar-bytes"), save=False)
+        current_agent.save(update_fields=["avatar"])
+
+        with patch("api.agent.avatar.is_avatar_image_generation_configured", return_value=True), patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_delay:
+            scheduled = maybe_schedule_agent_avatar(stale_agent)
 
         self.assertFalse(scheduled)
         mocked_delay.assert_not_called()

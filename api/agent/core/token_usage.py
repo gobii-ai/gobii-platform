@@ -2,7 +2,7 @@
 
 import json
 import logging
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from numbers import Number
 from typing import Any, Optional, Tuple
 
@@ -35,7 +35,18 @@ def _quantize_cost(value: Decimal) -> Decimal:
 def _safe_decimal(value: Optional[float]) -> Optional[Decimal]:
     if value is None:
         return None
-    return Decimal(str(value))
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _first_decimal(*values: Any) -> Optional[Decimal]:
+    for value in values:
+        decimal_value = _safe_decimal(value)
+        if decimal_value is not None:
+            return decimal_value
+    return None
 
 
 def usage_attribute(usage: Any, attr: str, default: Optional[Any] = None) -> Any:
@@ -159,6 +170,92 @@ def compute_cost_breakdown(token_usage: Optional[dict], raw_usage: Optional[Any]
     }
 
 
+def _extract_direct_cost_breakdown(
+    response: Any,
+    *,
+    usage: Optional[Any],
+    token_usage: dict[str, Any],
+) -> dict:
+    containers: list[Any] = []
+    if usage is not None:
+        containers.append(usage)
+
+    model_extra = getattr(response, "model_extra", None)
+    if isinstance(response, dict):
+        model_extra = response.get("model_extra")
+    if model_extra is not None:
+        containers.append(model_extra)
+
+    containers.append(response)
+
+    input_total: Optional[Decimal] = None
+    output_cost: Optional[Decimal] = None
+    total_cost: Optional[Decimal] = None
+
+    for container in containers:
+        cost_details = usage_attribute(container, "cost_details")
+        if cost_details is None:
+            continue
+
+        if input_total is None:
+            input_total = _first_decimal(
+                usage_attribute(cost_details, "upstream_inference_prompt_cost"),
+                usage_attribute(cost_details, "prompt_cost"),
+                usage_attribute(cost_details, "input_cost_total"),
+            )
+        if output_cost is None:
+            output_cost = _first_decimal(
+                usage_attribute(cost_details, "upstream_inference_completions_cost"),
+                usage_attribute(cost_details, "upstream_inference_completion_cost"),
+                usage_attribute(cost_details, "completion_cost"),
+                usage_attribute(cost_details, "output_cost"),
+            )
+        if total_cost is None:
+            total_cost = _first_decimal(
+                usage_attribute(cost_details, "upstream_inference_cost"),
+                usage_attribute(cost_details, "total_cost"),
+                usage_attribute(cost_details, "cost"),
+            )
+
+    if total_cost is None:
+        for container in containers:
+            total_cost = _safe_decimal(usage_attribute(container, "cost"))
+            if total_cost is not None:
+                break
+
+    if total_cost is None and input_total is not None and output_cost is not None:
+        total_cost = input_total + output_cost
+
+    if input_total is None and output_cost is None and total_cost is None:
+        return {}
+
+    direct_costs: dict[str, Decimal] = {}
+    if input_total is not None:
+        direct_costs["input_cost_total"] = _quantize_cost(input_total)
+    if output_cost is not None:
+        direct_costs["output_cost"] = _quantize_cost(output_cost)
+    if total_cost is not None:
+        direct_costs["total_cost"] = _quantize_cost(total_cost)
+    return direct_costs
+
+
+def _merge_direct_cost_fields(
+    token_usage: dict[str, Any],
+    direct_cost_fields: dict[str, Decimal],
+) -> dict[str, Decimal]:
+    merged_costs = dict(direct_cost_fields)
+    if "input_cost_total" not in merged_costs:
+        return merged_costs
+    if "input_cost_uncached" in merged_costs or "input_cost_cached" in merged_costs:
+        return merged_costs
+    if coerce_int(token_usage.get("cached_tokens")) > 0:
+        return merged_costs
+
+    merged_costs["input_cost_uncached"] = merged_costs["input_cost_total"]
+    merged_costs["input_cost_cached"] = _quantize_cost(Decimal("0"))
+    return merged_costs
+
+
 def extract_token_usage(
     response: Any,
     *,
@@ -187,7 +284,14 @@ def extract_token_usage(
         resolved_provider = usage_attribute(usage, "provider")
 
     token_usage: dict[str, Any] = {"model": resolved_model, "provider": resolved_provider}
+    direct_cost_fields = _extract_direct_cost_breakdown(
+        response,
+        usage=usage,
+        token_usage=token_usage,
+    )
     if not usage:
+        if direct_cost_fields:
+            token_usage.update(_merge_direct_cost_fields(token_usage, direct_cost_fields))
         return token_usage, None
 
     prompt_tokens = usage_attribute(usage, "prompt_tokens")
@@ -208,7 +312,11 @@ def extract_token_usage(
         if cached_tokens is not None:
             token_usage["cached_tokens"] = coerce_int(cached_tokens)
 
-    cost_fields = compute_cost_breakdown(token_usage, usage)
+    cost_fields = direct_cost_fields
+    if not cost_fields:
+        cost_fields = compute_cost_breakdown(token_usage, usage)
+    else:
+        cost_fields = _merge_direct_cost_fields(token_usage, cost_fields)
     if cost_fields:
         token_usage.update(cost_fields)
 

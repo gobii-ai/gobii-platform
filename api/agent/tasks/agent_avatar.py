@@ -11,6 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from api.agent.avatar import (
+    agent_needs_avatar_generation,
     build_avatar_prompt,
     maybe_schedule_agent_avatar,
     prepare_visual_description,
@@ -399,6 +400,15 @@ def generate_agent_avatar_task(
             "Agent %s missing visual description before avatar generation; queued prerequisite",
             agent.id,
         )
+        return
+
+    if not agent_needs_avatar_generation(
+        agent=agent,
+        charter_hash=current_hash,
+        visual_description=visual_description,
+    ):
+        _clear_avatar_requested_hash(agent.id, charter_hash)
+        logger.debug("Agent %s does not need avatar generation; skipping", agent.id)
         return
 
     prompt = build_avatar_prompt(

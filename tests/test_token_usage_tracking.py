@@ -1,6 +1,7 @@
 """Test token usage tracking in persistent agent steps."""
 import json
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
@@ -586,6 +587,156 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.llm_model, "provider/model")
         self.assertEqual(completion.llm_provider, "provider")
         self.assertEqual(completion.thinking_content, "Reasoned path")
+
+    def test_log_agent_completion_uses_provider_cost_details_for_image_response(self):
+        response = SimpleNamespace(
+            id="gen-1773326030-Au4NBreqdciXufByuLEJ",
+            model="google/gemini-3-pro-image-preview-20251120",
+            provider="Google AI Studio",
+            request_duration_ms=23588,
+            usage=SimpleNamespace(
+                prompt_tokens=490,
+                completion_tokens=1632,
+                total_tokens=2122,
+                cost=0,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            ),
+            cost_details={
+                "upstream_inference_cost": 0.139712,
+                "upstream_inference_prompt_cost": 0.00098,
+                "upstream_inference_completions_cost": 0.138732,
+            },
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        content=None,
+                        reasoning_content="Image reasoning",
+                    )
+                )
+            ],
+        )
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_model, "google/gemini-3-pro-image-preview-20251120")
+        self.assertEqual(completion.llm_provider, "Google AI Studio")
+        self.assertEqual(completion.input_cost_total, Decimal("0.000980"))
+        self.assertEqual(completion.input_cost_uncached, Decimal("0.000980"))
+        self.assertEqual(completion.input_cost_cached, Decimal("0.000000"))
+        self.assertEqual(completion.output_cost, Decimal("0.138732"))
+        self.assertEqual(completion.total_cost, Decimal("0.139712"))
+
+    def test_log_agent_completion_uses_provider_cost_details_without_usage_payload(self):
+        response = SimpleNamespace(
+            id="gen-no-usage",
+            model="google/gemini-3-pro-image-preview-20251120",
+            provider="Google AI Studio",
+            request_duration_ms=1200,
+            cost_details={
+                "upstream_inference_cost": 0.050000,
+                "upstream_inference_prompt_cost": 0.010000,
+                "upstream_inference_completions_cost": 0.040000,
+            },
+            choices=[],
+        )
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_model, "google/gemini-3-pro-image-preview-20251120")
+        self.assertEqual(completion.llm_provider, "Google AI Studio")
+        self.assertIsNone(completion.prompt_tokens)
+        self.assertIsNone(completion.completion_tokens)
+        self.assertEqual(completion.input_cost_total, Decimal("0.010000"))
+        self.assertEqual(completion.output_cost, Decimal("0.040000"))
+        self.assertEqual(completion.total_cost, Decimal("0.050000"))
+
+    def test_log_agent_completion_preserves_zero_valued_direct_cost_fields(self):
+        response = SimpleNamespace(
+            id="gen-zero-cost",
+            model="google/gemini-3-pro-image-preview-20251120",
+            provider="Google AI Studio",
+            usage=SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=0,
+                total_tokens=100,
+                cost=0,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=0),
+            ),
+            cost_details={
+                "upstream_inference_cost": 0,
+                "upstream_inference_prompt_cost": 0,
+                "upstream_inference_completions_cost": 0,
+            },
+            choices=[],
+        )
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+        ).latest("created_at")
+        self.assertEqual(completion.input_cost_total, Decimal("0.000000"))
+        self.assertEqual(completion.input_cost_uncached, Decimal("0.000000"))
+        self.assertEqual(completion.input_cost_cached, Decimal("0.000000"))
+        self.assertEqual(completion.output_cost, Decimal("0.000000"))
+        self.assertEqual(completion.total_cost, Decimal("0.000000"))
+
+    def test_log_agent_completion_does_not_assume_uncached_split_when_cached_tokens_exist(self):
+        response = SimpleNamespace(
+            id="gen-cached-cost",
+            model="google/gemini-3-pro-image-preview-20251120",
+            provider="Google AI Studio",
+            usage=SimpleNamespace(
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                cost=0.030000,
+                prompt_tokens_details=SimpleNamespace(cached_tokens=25),
+            ),
+            cost_details={
+                "upstream_inference_cost": 0.030000,
+                "upstream_inference_prompt_cost": 0.010000,
+                "upstream_inference_completions_cost": 0.020000,
+            },
+            choices=[],
+        )
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.IMAGE_GENERATION,
+        ).latest("created_at")
+        self.assertEqual(completion.input_cost_total, Decimal("0.010000"))
+        self.assertIsNone(completion.input_cost_uncached)
+        self.assertIsNone(completion.input_cost_cached)
+        self.assertEqual(completion.output_cost, Decimal("0.020000"))
+        self.assertEqual(completion.total_cost, Decimal("0.030000"))
 
     @patch("api.models.PersistentAgentCompletion.objects.create", side_effect=RuntimeError("db down"))
     def test_log_agent_completion_warns_on_failure(self, mock_create):
