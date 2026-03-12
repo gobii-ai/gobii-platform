@@ -334,6 +334,84 @@ def pause_for_burn_rate(
             )
 
 
+def _step_down_runtime_tier(
+    agent: PersistentAgent,
+    *,
+    burn_rate: Decimal,
+    burn_threshold: Decimal,
+    burn_window: Optional[int],
+    span=None,
+) -> bool:
+    """Apply a runtime tier downgrade when recent user activity makes pausing undesirable."""
+
+    if get_runtime_tier_override(agent) is not None:
+        return False
+
+    baseline_tier = get_agent_baseline_llm_tier(agent)
+    runtime_tier = get_next_lower_configured_tier(baseline_tier)
+    if runtime_tier == baseline_tier:
+        return False
+
+    set_runtime_tier_override(agent, runtime_tier)
+    baseline_multiplier = get_credit_multiplier_for_tier(baseline_tier)
+    runtime_multiplier = get_credit_multiplier_for_tier(runtime_tier)
+
+    try:
+        analytics_props: dict[str, str] = {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name,
+            "baseline_tier": baseline_tier.value,
+            "runtime_tier": runtime_tier.value,
+            "baseline_multiplier": str(baseline_multiplier),
+            "runtime_multiplier": str(runtime_multiplier),
+            "burn_rate_per_hour": str(burn_rate),
+            "burn_rate_threshold_per_hour": str(burn_threshold),
+        }
+        if burn_window is not None:
+            analytics_props["burn_rate_window_minutes"] = str(burn_window)
+        props_with_org = Analytics.with_org_properties(
+            analytics_props,
+            organization=getattr(agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=getattr(getattr(agent, "user", None), "id", None),
+            event=AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN,
+            source=AnalyticsSource.AGENT,
+            properties=props_with_org,
+        )
+    except Exception:
+        logger.debug(
+            "Failed to emit runtime tier step-down analytics for agent %s",
+            agent.id,
+            exc_info=True,
+        )
+
+    if span is not None:
+        try:
+            span.add_event("Burn-rate runtime tier step-down activated")
+            span.set_attribute("burn_rate.runtime_tier_step_down", True)
+            span.set_attribute("burn_rate.runtime_tier_from", baseline_tier.value)
+            span.set_attribute("burn_rate.runtime_tier_to", runtime_tier.value)
+            span.set_attribute("burn_rate.value", float(burn_rate))
+            span.set_attribute("burn_rate.threshold", float(burn_threshold))
+        except Exception:
+            logger.debug(
+                "Failed to set runtime tier step-down span attributes for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+
+    logger.info(
+        "Agent %s runtime tier stepped down from %s to %s due to burn rate %s > %s with recent user input.",
+        agent.id,
+        baseline_tier.value,
+        runtime_tier.value,
+        burn_rate,
+        burn_threshold,
+    )
+    return True
+
+
 def handle_burn_rate_limit(
     agent: PersistentAgent,
     *,
@@ -368,72 +446,15 @@ def handle_burn_rate_limit(
     burn_rate, burn_threshold, burn_window = metrics
 
     if has_recent_user_message(agent.id, window_minutes=BURN_RATE_USER_INACTIVITY_MINUTES):
-        if get_runtime_tier_override(agent) is not None:
-            return BurnRateAction.NONE
-
-        baseline_tier = get_agent_baseline_llm_tier(agent)
-        runtime_tier = get_next_lower_configured_tier(baseline_tier)
-        if runtime_tier == baseline_tier:
-            return BurnRateAction.NONE
-
-        set_runtime_tier_override(agent, runtime_tier)
-        baseline_multiplier = get_credit_multiplier_for_tier(baseline_tier)
-        runtime_multiplier = get_credit_multiplier_for_tier(runtime_tier)
-
-        try:
-            analytics_props: dict[str, str] = {
-                "agent_id": str(agent.id),
-                "agent_name": agent.name,
-                "baseline_tier": baseline_tier.value,
-                "runtime_tier": runtime_tier.value,
-                "baseline_multiplier": str(baseline_multiplier),
-                "runtime_multiplier": str(runtime_multiplier),
-                "burn_rate_per_hour": str(burn_rate),
-                "burn_rate_threshold_per_hour": str(burn_threshold),
-            }
-            if burn_window is not None:
-                analytics_props["burn_rate_window_minutes"] = str(burn_window)
-            props_with_org = Analytics.with_org_properties(
-                analytics_props,
-                organization=getattr(agent, "organization", None),
-            )
-            Analytics.track_event(
-                user_id=getattr(getattr(agent, "user", None), "id", None),
-                event=AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN,
-                source=AnalyticsSource.AGENT,
-                properties=props_with_org,
-            )
-        except Exception:
-            logger.debug(
-                "Failed to emit runtime tier step-down analytics for agent %s",
-                agent.id,
-                exc_info=True,
-            )
-
-        if span is not None:
-            try:
-                span.add_event("Burn-rate runtime tier step-down activated")
-                span.set_attribute("burn_rate.runtime_tier_step_down", True)
-                span.set_attribute("burn_rate.runtime_tier_from", baseline_tier.value)
-                span.set_attribute("burn_rate.runtime_tier_to", runtime_tier.value)
-                span.set_attribute("burn_rate.value", float(burn_rate))
-                span.set_attribute("burn_rate.threshold", float(burn_threshold))
-            except Exception:
-                logger.debug(
-                    "Failed to set runtime tier step-down span attributes for agent %s",
-                    agent.id,
-                    exc_info=True,
-                )
-
-        logger.info(
-            "Agent %s runtime tier stepped down from %s to %s due to burn rate %s > %s with recent user input.",
-            agent.id,
-            baseline_tier.value,
-            runtime_tier.value,
-            burn_rate,
-            burn_threshold,
-        )
-        return BurnRateAction.STEPPED_DOWN
+        if _step_down_runtime_tier(
+            agent,
+            burn_rate=burn_rate,
+            burn_threshold=burn_threshold,
+            burn_window=burn_window,
+            span=span,
+        ):
+            return BurnRateAction.STEPPED_DOWN
+        return BurnRateAction.NONE
 
     # If a cooldown is already in place, do not schedule another.
     try:
