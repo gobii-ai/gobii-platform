@@ -167,6 +167,51 @@ class PeerMessagingServiceTests(TestCase):
         inbound_names = sorted(inbound.attachments.values_list("filename", flat=True))
         self.assertEqual(inbound_names, ["report (2).txt", "report.txt"])
 
+    def test_send_message_retries_directory_creation_after_race(self):
+        from api.agent.peer_comm import get_or_create_dir as original_get_or_create_dir
+
+        self._create_sender_attachment("/reports/race.txt", b"race")
+        attachments = resolve_filespace_attachments(self.agent_a, ["/reports/race.txt"])
+        original_helper = "api.agent.peer_comm.get_or_create_dir"
+        peer_dir_name = self.service._peer_inbox_dir_name()
+        failed_names: set[str] = set()
+
+        def flaky_get_or_create_dir(filespace, parent, name):
+            if name == peer_dir_name and name not in failed_names:
+                failed_names.add(name)
+                original_get_or_create_dir(filespace, parent, name)
+                from django.db import IntegrityError
+
+                raise IntegrityError("simulated race")
+            return original_get_or_create_dir(filespace, parent, name)
+
+        with patch(original_helper, side_effect=flaky_get_or_create_dir), patch(
+            "api.agent.tasks.process_agent_events_task"
+        ) as task_mock, patch("api.agent.peer_comm.transaction.on_commit", lambda cb: cb()):
+            task_mock.delay = MagicMock()
+            result = self.service.send_message("Race-safe send", attachments=attachments)
+
+        self.assertEqual(result.status, "ok")
+
+    def test_send_message_truncates_peer_inbox_directory_name_to_node_limit(self):
+        self.agent_a.name = "A" * 255
+        self.agent_a.save(update_fields=["name"])
+        self._create_sender_attachment("/reports/long-name.txt", b"long")
+        attachments = resolve_filespace_attachments(self.agent_a, ["/reports/long-name.txt"])
+
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit", lambda cb: cb()
+        ):
+            task_mock.delay = MagicMock()
+            result = self.service.send_message("Long-name send", attachments=attachments)
+
+        self.assertEqual(result.status, "ok")
+        inbound = PersistentAgentMessage.objects.get(owner_agent=self.agent_b, is_outbound=False)
+        copied_node = inbound.attachments.get().filespace_node
+        self.assertIsNotNone(copied_node)
+        self.assertLessEqual(len(copied_node.parent.name), 255)
+        self.assertTrue(copied_node.parent.name.startswith("peer-"))
+
     def test_send_message_cleans_up_copied_blobs_when_later_step_fails(self):
         self._create_sender_attachment("/reports/failure.txt", b"cleanup")
         attachments = resolve_filespace_attachments(self.agent_a, ["/reports/failure.txt"])

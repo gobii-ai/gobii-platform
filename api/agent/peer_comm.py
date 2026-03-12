@@ -268,23 +268,21 @@ class PeerMessagingService:
             return []
 
         filespace = get_or_create_default_filespace(self.peer_agent)
-        inbox_dir = get_or_create_dir(filespace, None, "Inbox")
-        date_dir = get_or_create_dir(filespace, inbox_dir, timestamp.date().isoformat())
-        peer_dir = get_or_create_dir(filespace, date_dir, self._peer_inbox_dir_name())
+        inbox_dir = self._get_or_create_dir_with_retry(filespace, None, "Inbox")
+        date_dir = self._get_or_create_dir_with_retry(filespace, inbox_dir, timestamp.date().isoformat())
+        peer_dir = self._get_or_create_dir_with_retry(filespace, date_dir, self._peer_inbox_dir_name())
 
         copied_nodes: list[AgentFsNode] = []
-        current_node: AgentFsNode | None = None
         try:
             for attachment in attachments:
-                current_node = self._copy_attachment_node(
-                    attachment=attachment,
-                    filespace_dir=peer_dir,
+                copied_nodes.append(
+                    self._copy_attachment_node(
+                        attachment=attachment,
+                        filespace_dir=peer_dir,
+                    )
                 )
-                copied_nodes.append(current_node)
-                current_node = None
         except (FileNotFoundError, OSError, IntegrityError, ValueError) as exc:
             self._cleanup_copied_attachment_nodes(copied_nodes)
-            self._cleanup_copied_attachment_nodes([current_node] if current_node else [])
             raise PeerMessagingError(
                 "Failed to copy peer attachments into the recipient filespace.",
             ) from exc
@@ -318,11 +316,15 @@ class PeerMessagingService:
                     raise
 
         source_file = getattr(attachment.node, "content", None)
-        if node is None or not source_file or not getattr(source_file, "name", None):
+        if not source_file or not getattr(source_file, "name", None):
             raise ValueError("Attachment source content is unavailable.")
 
-        with source_file.storage.open(source_file.name, "rb") as stored_file:
-            node.content.save(node.name, stored_file, save=True)
+        try:
+            with source_file.storage.open(source_file.name, "rb") as stored_file:
+                node.content.save(node.name, stored_file, save=True)
+        except (FileNotFoundError, OSError):
+            self._cleanup_copied_attachment_nodes([node])
+            raise
         node.refresh_from_db()
         return node
 
@@ -343,7 +345,32 @@ class PeerMessagingService:
 
     def _peer_inbox_dir_name(self) -> str:
         safe_name = get_valid_filename((self.agent.name or "").strip()) or str(self.agent.id)
-        return f"peer-{safe_name}"
+        prefix = "peer-"
+        max_length = int(AgentFsNode._meta.get_field("name").max_length or 255)
+        return f"{prefix}{safe_name[: max_length - len(prefix)]}"
+
+    @staticmethod
+    def _get_or_create_dir_with_retry(filespace, parent, name: str) -> AgentFsNode:
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                return get_or_create_dir(filespace, parent, name)
+            except IntegrityError:
+                existing = (
+                    AgentFsNode.objects.alive()
+                    .filter(
+                        filespace=filespace,
+                        parent=parent,
+                        name=name,
+                        node_type=AgentFsNode.NodeType.DIR,
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    return existing
+                if attempt == max_attempts - 1:
+                    raise
+        raise RuntimeError("Directory creation retry loop exited unexpectedly.")
 
     @staticmethod
     def _cleanup_copied_attachment_nodes(nodes: Sequence[AgentFsNode | None]) -> None:
