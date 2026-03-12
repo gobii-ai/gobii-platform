@@ -2049,6 +2049,62 @@ class PaymentFailedSignalTests(TestCase):
         self.assertEqual(props["decline_code"], "try_again_later")
         self.assertEqual(props["payment_method_type"], "card")
 
+    def test_invoice_payment_failed_prefers_djstripe_charge_for_reason_when_webhook_has_only_ids(self):
+        payload = _build_invoice_payload(
+            customer_id="cus_user",
+            subscription_id="sub_user",
+            payment_intent="pi_local_charge_fail",
+        )
+        payload["charge"] = "ch_local_charge_fail"
+        event = _build_djstripe_event(payload, event_type="invoice.payment_failed")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user", subscriber=self.user),
+            subscription=SimpleNamespace(id="sub_user"),
+            number=payload["number"],
+        )
+
+        payment_intent_obj = {
+            "id": "pi_local_charge_fail",
+            "latest_charge": "ch_local_charge_fail",
+            "payment_method_types": ["card"],
+        }
+        charge_obj = {
+            "id": "ch_local_charge_fail",
+            "failure_code": "card_declined",
+            "failure_message": "Your card has insufficient funds.",
+            "outcome": {"reason": "insufficient_funds"},
+        }
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals._get_djstripe_payment_intent_data", return_value=payment_intent_obj) as mock_local_pi, \
+            patch("pages.signals._get_djstripe_charge_data", return_value=charge_obj) as mock_local_charge, \
+            patch("pages.signals.stripe.PaymentIntent.retrieve") as mock_pi_retrieve, \
+            patch("pages.signals.stripe.Charge.retrieve") as mock_charge_retrieve, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous, \
+            patch("pages.signals.get_plan_by_product_id", return_value=None):
+
+            handle_invoice_payment_failed(event)
+
+        mock_track_anonymous.assert_not_called()
+        mock_track_event.assert_called_once()
+        mock_local_pi.assert_called_once_with("pi_local_charge_fail")
+        mock_local_charge.assert_called_once_with("ch_local_charge_fail")
+        mock_pi_retrieve.assert_not_called()
+        mock_charge_retrieve.assert_not_called()
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["stripe.payment_intent_id"], "pi_local_charge_fail")
+        self.assertEqual(props["stripe.charge_id"], "ch_local_charge_fail")
+        self.assertEqual(props["failure_reason"], "Your card has insufficient funds.")
+        self.assertEqual(props["failure_message"], "Your card has insufficient funds.")
+        self.assertEqual(props["failure_code"], "card_declined")
+        self.assertEqual(props["decline_code"], "insufficient_funds")
+        self.assertEqual(props["payment_method_type"], "card")
+
     def test_invoice_payment_failed_tracks_with_fallback_properties_when_enrichment_fails(self):
         payload = _build_invoice_payload(
             customer_id="cus_user",
