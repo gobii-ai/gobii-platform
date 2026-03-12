@@ -87,10 +87,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 return f"Start {days}-day Free Trial"
             return f"Subscribe to {label}"
 
-        def _trial_cancel_text(days: int, cta_text: str) -> str | None:
+        def _trial_cancel_text(days: int) -> str | None:
             if not cta_pricing_cancel_text_under_btn:
                 return None
-            if days <= 0 or not cta_text.startswith("Start "):
+            if not trial_eligible or days <= 0:
                 return None
             return f"Cancel anytime during the {days}-day trial"
 
@@ -208,7 +208,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "disabled": False,
                 "cta_disabled": startup_cta_disabled,
                 "current_plan": startup_current,
-                "trial_cancel_text": _trial_cancel_text(startup_trial_days, startup_cta_text),
+                "trial_cancel_text": _trial_cancel_text(startup_trial_days),
                 "features": startup_features,
                 "cta": startup_cta_text,
                 "cta_url": reverse("proprietary:startup_checkout") if not startup_cta_disabled else "",
@@ -225,7 +225,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "badge": "Best value",
                 "cta_disabled": scale_cta_disabled,
                 "current_plan": scale_current,
-                "trial_cancel_text": _trial_cancel_text(scale_trial_days, scale_cta_text),
+                "trial_cancel_text": _trial_cancel_text(scale_trial_days),
                 "features": scale_features,
                 "cta": scale_cta_text,
                 "cta_url": reverse("proprietary:scale_checkout") if not scale_cta_disabled else "",

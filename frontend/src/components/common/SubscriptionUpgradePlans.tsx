@@ -152,8 +152,8 @@ export function SubscriptionUpgradePlans({
             const trialCancelText = (
               ctaPricingCancelTextUnderBtn
               && canUpgrade
+              && useTrialCopy
               && trialDays > 0
-              && ctaLabel.startsWith('Start ')
             )
               ? `Cancel anytime during the ${trialDays}-day trial`
               : null
