@@ -458,9 +458,8 @@ from constants.feature_flags import (
     CTA_START_FREE_TRIAL,
     ORGANIZATIONS,
     PRICING_MODAL_ALMOST_FULL_SCREEN,
+    SIMPLIFIED_CHAT_UI,
 )
-from constants.feature_flags import CTA_START_FREE_TRIAL, ORGANIZATIONS, PRICING_MODAL_ALMOST_FULL_SCREEN
-from constants.feature_flags import CTA_START_FREE_TRIAL, ORGANIZATIONS, PRICING_MODAL_ALMOST_FULL_SCREEN, SIMPLIFIED_CHAT_UI
 from constants.grant_types import GrantTypeChoices
 from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
 from constants.stripe import (
@@ -2120,7 +2119,6 @@ def get_user_plan_api(request):
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
     cta_start_free_trial = _is_cta_start_free_trial_enabled(request)
     cta_pricing_cancel_text_under_btn = _is_cta_pricing_cancel_text_under_btn_enabled(request)
-    cta_start_free_trial = _is_cta_start_free_trial_enabled(request)
 
     try:
         plan = reconcile_user_plan_from_stripe(request.user)
