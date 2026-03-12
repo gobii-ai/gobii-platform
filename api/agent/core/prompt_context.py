@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 import zstandard as zstd
@@ -2492,7 +2492,7 @@ def _get_interacted_web_user_info_by_endpoint(
         user.id: _InteractedWebUserInfo(
             user_id=user.id,
             display_name=_build_user_display_name(user),
-            email=((getattr(user, "email", "") or "").strip().lower() or None)
+            email=((user.email or "").strip().lower() or None)
             if user.id in org_member_user_ids
             else None,
         )
@@ -2509,9 +2509,17 @@ def _get_web_user_display_map(
     agent: PersistentAgent,
     endpoints: Sequence[PersistentAgentCommsEndpoint],
 ) -> dict[UUID, str]:
+    return _build_web_user_display_map(
+        _get_interacted_web_user_info_by_endpoint(agent, endpoints)
+    )
+
+
+def _build_web_user_display_map(
+    interacted_user_info_by_endpoint: Mapping[UUID, _InteractedWebUserInfo],
+) -> dict[UUID, str]:
     return {
         endpoint_id: info.display_name
-        for endpoint_id, info in _get_interacted_web_user_info_by_endpoint(agent, endpoints).items()
+        for endpoint_id, info in interacted_user_info_by_endpoint.items()
         if info.display_name
     }
 
@@ -2520,10 +2528,18 @@ def _get_interacted_org_member_email_map(
     agent: PersistentAgent,
     endpoints: Sequence[PersistentAgentCommsEndpoint],
 ) -> dict[str, str | None]:
+    return _build_interacted_org_member_email_map(
+        _get_interacted_web_user_info_by_endpoint(agent, endpoints)
+    )
+
+
+def _build_interacted_org_member_email_map(
+    interacted_user_info_by_endpoint: Mapping[UUID, _InteractedWebUserInfo],
+) -> dict[str, str | None]:
     """Return org-member emails for web participants already seen in conversations."""
     email_map: dict[str, str | None] = {}
     seen_emails: set[str] = set()
-    for info in _get_interacted_web_user_info_by_endpoint(agent, endpoints).values():
+    for info in interacted_user_info_by_endpoint.values():
         email = info.email
         if not email:
             continue
@@ -2591,8 +2607,9 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
 
     user_eps = list(user_eps_qs)
     if user_eps:
-        web_user_display_map = _get_web_user_display_map(agent, user_eps)
-        interacted_org_member_emails = _get_interacted_org_member_email_map(agent, user_eps)
+        interacted_user_info_by_endpoint = _get_interacted_web_user_info_by_endpoint(agent, user_eps)
+        web_user_display_map = _build_web_user_display_map(interacted_user_info_by_endpoint)
+        interacted_org_member_emails = _build_interacted_org_member_email_map(interacted_user_info_by_endpoint)
         user_lines = ["These are the *USER'S* endpoints, i.e. the addresses you are sending messages *TO*."]
         pref_id = agent.preferred_contact_endpoint_id if agent.preferred_contact_endpoint else None
         seen_user_endpoint_keys = {(ep.channel, ep.address) for ep in user_eps}
