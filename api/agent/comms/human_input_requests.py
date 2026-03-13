@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 from django.utils.html import escape
 from django.utils.text import slugify
@@ -16,8 +16,6 @@ from django.utils.text import slugify
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
-from api.agent.tools.email_sender import execute_send_email
-from api.agent.tools.sms_sender import execute_send_sms
 from api.models import (
     CommsChannel,
     PersistentAgent,
@@ -30,13 +28,14 @@ from api.models import (
     build_web_agent_address,
 )
 
-HUMAN_INPUT_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 REFERENCE_CODE_RE = re.compile(r"\b(HIR-[A-Z0-9]{6})\b", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
 MAX_OPTION_COUNT = 6
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
 HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD = 0.8
+HUMAN_INPUT_RELAY_MODE_PANEL_ONLY = "panel_only"
+HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED = "explicit_send_required"
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +89,36 @@ def _truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: max(0, limit - 3)].rstrip() + "..."
+
+
+def _build_option_line(option: dict[str, Any], *, index: int, compact: bool) -> str:
+    title = _coerce_string(option.get("title"))
+    description = _coerce_string(option.get("description"))
+    line = f"{index}. {title}"
+    if description:
+        detail = _truncate(description, 72) if compact else description
+        line += f" - {detail}"
+    return line
+
+
+def _build_request_lines(
+    request_obj: PersistentAgentHumanInputRequest,
+    *,
+    compact: bool,
+    question_number: int | None = None,
+    option_indent: str = "",
+) -> list[str]:
+    question_prefix = f"{question_number}. " if question_number is not None else ""
+    lines = [f"{question_prefix}{request_obj.question.strip()}"]
+    options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
+    if options:
+        for index, option in enumerate(options, start=1):
+            lines.append(f"{option_indent}{_build_option_line(option, index=index, compact=compact)}")
+        reply_hint = "Reply with the option number, the option title, or your own words."
+    else:
+        reply_hint = "Reply in your own words."
+    lines.append(f"{option_indent}{reply_hint}".rstrip())
+    return lines
 
 
 def _get_or_create_endpoint(
@@ -298,34 +327,11 @@ def _render_prompt_text(
     *,
     compact: bool,
 ) -> str:
-    lines = [request_obj.question.strip()]
-    options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
-    if options:
-        lines.append("")
-        for index, option in enumerate(options, start=1):
-            title = _coerce_string(option.get("title"))
-            description = _coerce_string(option.get("description"))
-            if compact:
-                entry = f"{index}. {title}"
-                if description:
-                    entry += f" - {_truncate(description, 72)}"
-            else:
-                entry = f"{index}. {title}"
-                if description:
-                    entry += f" - {description}"
-            lines.append(entry)
-        lines.append("")
-        lines.append("Reply with the number, the option title, or your own words.")
-    else:
-        lines.append("")
-        lines.append("Reply in your own words.")
-    return "\n".join(line for line in lines if line is not None)
+    return "\n".join(_build_request_lines(request_obj, compact=compact))
 
 
 def _render_prompt_html(request_obj: PersistentAgentHumanInputRequest) -> str:
-    parts = [
-        f"<p>{escape(request_obj.question)}</p>",
-    ]
+    parts = [f"<p>{escape(request_obj.question)}</p>"]
     options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
     if options:
         parts.append("<ol>")
@@ -337,43 +343,168 @@ def _render_prompt_html(request_obj: PersistentAgentHumanInputRequest) -> str:
             else:
                 parts.append(f"<li><strong>{title}</strong></li>")
         parts.append("</ol>")
-        parts.append("<p>Reply with the number, the option title, or your own words.</p>")
+        parts.append("<p>Reply with the option number, the option title, or your own words.</p>")
     else:
         parts.append("<p>Reply in your own words.</p>")
     return "".join(parts)
 
 
-def _send_request_prompt(
-    agent: PersistentAgent,
-    request_obj: PersistentAgentHumanInputRequest,
+def _render_batch_prompt_text(
+    request_objects: list[PersistentAgentHumanInputRequest],
+    *,
+    compact: bool,
+) -> str:
+    lines = [
+        "Please answer each question below.",
+        "Reply with one answer per line using the matching question number, for example:",
+        "1. <your answer>",
+        "2. <your answer>",
+    ]
+    for index, request_obj in enumerate(request_objects, start=1):
+        lines.append("")
+        lines.extend(
+            _build_request_lines(
+                request_obj,
+                compact=compact,
+                question_number=index,
+                option_indent="   ",
+            )
+        )
+    return "\n".join(lines)
+
+
+def _render_batch_prompt_html(request_objects: list[PersistentAgentHumanInputRequest]) -> str:
+    parts = [
+        "<p>Please answer each question below.</p>",
+        "<p>Reply with one answer per line using the matching question number, for example:<br>1. &lt;your answer&gt;<br>2. &lt;your answer&gt;</p>",
+        "<ol>",
+    ]
+    for request_obj in request_objects:
+        parts.append(f"<li><p>{escape(request_obj.question)}</p>")
+        options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
+        if options:
+            parts.append("<ol>")
+            for option in options:
+                title = escape(_coerce_string(option.get("title")))
+                description = escape(_coerce_string(option.get("description")))
+                if description:
+                    parts.append(f"<li><strong>{title}</strong><br>{description}</li>")
+                else:
+                    parts.append(f"<li><strong>{title}</strong></li>")
+            parts.append("</ol>")
+            parts.append("<p>Reply with the option number, the option title, or your own words.</p>")
+        else:
+            parts.append("<p>Reply in your own words.</p>")
+        parts.append("</li>")
+    parts.append("</ol>")
+    return "".join(parts)
+
+
+def _build_email_subject(request_objects: list[PersistentAgentHumanInputRequest]) -> str:
+    if len(request_objects) == 1:
+        return _truncate(f"Quick question: {request_objects[0].question}", 120)
+
+    first_question = _coerce_string(request_objects[0].question)
+    remaining_count = max(0, len(request_objects) - 1)
+    suffix = f" (+{remaining_count} more)" if remaining_count else ""
+    return _truncate(f"Quick questions: {first_question}{suffix}", 120)
+
+
+def _build_relay_payload(
+    request_objects: list[PersistentAgentHumanInputRequest],
     target: HumanInputTarget,
-) -> dict[str, Any]:
-    channel = target.channel
-    if channel == CommsChannel.WEB:
-        return {
-            "status": "ok",
-            "delivery": "composer_panel",
+) -> tuple[str, dict[str, Any]]:
+    ordered_requests = _order_requests_for_batch(request_objects)
+    if target.channel == CommsChannel.WEB:
+        return HUMAN_INPUT_RELAY_MODE_PANEL_ONLY, {
+            "kind": "panel",
+            "ui_surface": "human_input_composer_panel",
+            "message": "This request is already visible in the web chat composer panel.",
         }
-    if channel == CommsChannel.SMS:
-        return execute_send_sms(
-            agent,
-            {
-                "to_number": target.address,
-                "body": _render_prompt_text(request_obj, compact=True),
-                "will_continue_work": False,
-            },
+
+    if target.channel == CommsChannel.EMAIL:
+        body_text = (
+            _render_prompt_text(ordered_requests[0], compact=False)
+            if len(ordered_requests) == 1
+            else _render_batch_prompt_text(ordered_requests, compact=False)
         )
-    if channel == CommsChannel.EMAIL:
-        return execute_send_email(
-            agent,
-            {
-                "to_address": target.address,
-                "subject": _truncate(f"Quick question: {request_obj.question}", 120),
-                "mobile_first_html": _render_prompt_html(request_obj),
-                "will_continue_work": False,
-            },
+        mobile_first_html = (
+            _render_prompt_html(ordered_requests[0])
+            if len(ordered_requests) == 1
+            else _render_batch_prompt_html(ordered_requests)
         )
-    return {"status": "error", "message": f"Unsupported channel '{channel}' for human input requests."}
+        return HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED, {
+            "kind": "send_email",
+            "tool_name": "send_email",
+            "to_address": target.address,
+            "subject": _build_email_subject(ordered_requests),
+            "mobile_first_html": mobile_first_html,
+            "body_text": body_text,
+        }
+
+    if target.channel == CommsChannel.SMS:
+        body = (
+            _render_prompt_text(ordered_requests[0], compact=True)
+            if len(ordered_requests) == 1
+            else _render_batch_prompt_text(ordered_requests, compact=True)
+        )
+        return HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED, {
+            "kind": "send_sms",
+            "tool_name": "send_sms",
+            "to_number": target.address,
+            "body": body,
+        }
+
+    raise ValueError(f"Unsupported channel '{target.channel}' for human input requests.")
+
+
+def _build_request_result(
+    request_objects: list[PersistentAgentHumanInputRequest],
+    target: HumanInputTarget,
+    *,
+    status: str = "ok",
+    message: str | None = None,
+    partial_success: bool = False,
+) -> dict[str, Any]:
+    ordered_requests = _order_requests_for_batch(request_objects)
+    relay_mode, relay_payload = _build_relay_payload(ordered_requests, target)
+    request_ids = [str(request_obj.id) for request_obj in ordered_requests]
+    request_count = len(request_ids)
+
+    if message is None:
+        if relay_mode == HUMAN_INPUT_RELAY_MODE_PANEL_ONLY:
+            message = (
+                "Created 1 human input request. It is visible in the web chat composer panel."
+                if request_count == 1
+                else f"Created {request_count} human input requests. They are visible in the web chat composer panel."
+            )
+        else:
+            tool_name = relay_payload.get("tool_name") or "send tool"
+            message = (
+                f"Created 1 human input request for {target.channel}. Use {tool_name} with relay_payload to deliver it."
+                if request_count == 1
+                else (
+                    f"Created {request_count} human input requests for {target.channel}. "
+                    f"Use {tool_name} with relay_payload to deliver them."
+                )
+            )
+
+    result = {
+        "status": status,
+        "message": message,
+        "request_id": request_ids[0] if request_ids else None,
+        "request_ids": request_ids,
+        "requests_count": request_count,
+        "target_channel": target.channel,
+        "target_address": target.address,
+        "relay_mode": relay_mode,
+        "relay_payload": relay_payload,
+    }
+    if partial_success:
+        result["partial_success"] = True
+    if status == "ok" and relay_mode == HUMAN_INPUT_RELAY_MODE_PANEL_ONLY:
+        result["auto_sleep_ok"] = True
+    return result
 
 
 def _create_human_input_request_for_target(
@@ -383,44 +514,36 @@ def _create_human_input_request_for_target(
     question: str,
     raw_options: list[dict[str, Any]] | None,
     recipient: HumanInputRecipient | None = None,
-) -> dict[str, Any]:
+) -> tuple[PersistentAgentHumanInputRequest | None, dict[str, Any] | None]:
     options = build_option_payloads(raw_options)
     input_mode = (
         PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT
         if options
         else PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY
     )
-    request_obj = PersistentAgentHumanInputRequest.objects.create(
-        agent=agent,
-        conversation=target.conversation,
-        question=question,
-        options_json=options,
-        input_mode=input_mode,
-        recipient_channel=recipient.channel if recipient else "",
-        recipient_address=recipient.address if recipient else "",
-        requested_via_channel=target.channel,
-    )
+    try:
+        request_obj = PersistentAgentHumanInputRequest.objects.create(
+            agent=agent,
+            conversation=target.conversation,
+            question=question,
+            options_json=options,
+            input_mode=input_mode,
+            recipient_channel=recipient.channel if recipient else "",
+            recipient_address=recipient.address if recipient else "",
+            requested_via_channel=target.channel,
+        )
+    except DatabaseError as exc:
+        logger.exception(
+            "Failed creating human input request for agent %s on channel %s",
+            agent.id,
+            target.channel,
+        )
+        return None, {
+            "status": "error",
+            "message": f"Failed to create human input request: {exc}",
+        }
 
-    send_result = _send_request_prompt(agent, request_obj, target)
-    status = str(send_result.get("status") or "").lower()
-    if status not in HUMAN_INPUT_SUCCESS_STATUSES:
-        request_obj.delete()
-        return send_result
-
-    message_id = send_result.get("message_id")
-    if message_id:
-        message = PersistentAgentMessage.objects.filter(pk=message_id).first()
-        if message is not None:
-            request_obj.requested_message = message
-            request_obj.save(update_fields=["requested_message", "updated_at"])
-
-    return {
-        "status": "ok",
-        "message": f"Human input request sent via {target.channel}.",
-        "request_id": str(request_obj.id),
-        "request_ids": [str(request_obj.id)],
-        "auto_sleep_ok": True,
-    }
+    return request_obj, None
 
 
 def create_human_input_request(
@@ -446,13 +569,21 @@ def create_human_input_request(
                 "message": "No eligible human conversation is available to request input from.",
             }
 
-    return _create_human_input_request_for_target(
+    request_obj, create_error = _create_human_input_request_for_target(
         agent,
         target,
         question=question,
         raw_options=raw_options,
         recipient=normalized_recipient,
     )
+    if create_error:
+        return create_error
+    if request_obj is None:
+        return {
+            "status": "error",
+            "message": "Failed to create human input request.",
+        }
+    return _build_request_result([request_obj], target)
 
 
 def create_human_input_requests_batch(
@@ -477,43 +608,47 @@ def create_human_input_requests_batch(
                 "message": "No eligible human conversation is available to request input from.",
             }
 
-    created_requests: list[dict[str, Any]] = []
+    created_requests: list[PersistentAgentHumanInputRequest] = []
     for request in requests:
-        result = _create_human_input_request_for_target(
+        request_obj, create_error = _create_human_input_request_for_target(
             agent,
             target,
             question=_coerce_string(request.get("question")),
             raw_options=request.get("options"),
             recipient=normalized_recipient,
         )
-        status = _coerce_string(result.get("status")).lower()
-        if status not in HUMAN_INPUT_SUCCESS_STATUSES:
+        if create_error:
             if created_requests:
-                created_request_ids = [
-                    result["request_id"] for result in created_requests if result.get("request_id")
-                ]
-                failure_message = _coerce_string(result.get("message")) or "A later request failed to send."
-                return {
-                    "status": "error",
-                    "message": (
-                        f"Sent {len(created_request_ids)} of {len(requests)} human input requests via "
-                        f"{target.channel} before a later request failed. {failure_message}"
+                failure_message = _coerce_string(create_error.get("message")) or "A later request failed to be created."
+                return _build_request_result(
+                    created_requests,
+                    target,
+                    status="error",
+                    message=(
+                        f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed. "
+                        f"{failure_message}"
                     ),
-                    "request_id": created_request_ids[0],
-                    "request_ids": created_request_ids,
-                    "partial_success": True,
-                    "auto_sleep_ok": False,
-                }
-            return result
-        created_requests.append(result)
+                    partial_success=True,
+                )
+            return create_error
+        if request_obj is None:
+            if created_requests:
+                return _build_request_result(
+                    created_requests,
+                    target,
+                    status="error",
+                    message=(
+                        f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed."
+                    ),
+                    partial_success=True,
+                )
+            return {
+                "status": "error",
+                "message": "Failed to create human input request batch.",
+            }
+        created_requests.append(request_obj)
 
-    return {
-        "status": "ok",
-        "message": f"{len(created_requests)} human input requests sent via {target.channel}.",
-        "request_id": created_requests[0]["request_id"] if created_requests else None,
-        "request_ids": [result["request_id"] for result in created_requests if result.get("request_id")],
-        "auto_sleep_ok": True,
-    }
+    return _build_request_result(created_requests, target)
 
 
 def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> None:

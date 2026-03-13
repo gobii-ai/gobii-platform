@@ -2,6 +2,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.test import Client, TestCase, override_settings, tag
 import litellm
 
@@ -308,6 +309,12 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertNotIn("reference_code", result)
         self.assertEqual(result["request_ids"], [result["request_id"]])
+        self.assertEqual(result["requests_count"], 1)
+        self.assertEqual(result["target_channel"], CommsChannel.WEB)
+        self.assertEqual(result["target_address"], self.user_address)
+        self.assertEqual(result["relay_mode"], "panel_only")
+        self.assertTrue(result["auto_sleep_ok"])
+        self.assertEqual(result["relay_payload"]["kind"], "panel")
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
         self.assertEqual(
             request_obj.input_mode,
@@ -353,6 +360,9 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["request_id"], result["request_ids"][0])
         self.assertEqual(len(result["request_ids"]), 2)
+        self.assertEqual(result["requests_count"], 2)
+        self.assertEqual(result["relay_mode"], "panel_only")
+        self.assertTrue(result["auto_sleep_ok"])
         self.assertEqual(
             PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(),
             2,
@@ -364,15 +374,13 @@ class HumanInputRequestTests(TestCase):
             ).exists()
         )
 
-    @patch("api.agent.comms.human_input_requests.execute_send_email")
-    def test_execute_request_human_input_targets_explicit_recipient(self, mock_send_email):
+    def test_execute_request_human_input_targets_explicit_recipient(self):
         collaborator = get_user_model().objects.create_user(
             username="recipient-collaborator",
             email="recipient-collaborator@example.com",
             password="password123",
         )
         AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
-        mock_send_email.return_value = {"status": "ok"}
 
         result = execute_request_human_input(
             self.agent,
@@ -386,17 +394,22 @@ class HumanInputRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["target_channel"], CommsChannel.EMAIL)
+        self.assertEqual(result["target_address"], collaborator.email)
+        self.assertEqual(result["relay_mode"], "explicit_send_required")
+        self.assertFalse(result.get("auto_sleep_ok", False))
+        self.assertEqual(result["relay_payload"]["tool_name"], "send_email")
+        self.assertEqual(result["relay_payload"]["to_address"], collaborator.email)
+        self.assertIn("Who should review this?", result["relay_payload"]["mobile_first_html"])
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
         self.assertEqual(request_obj.conversation.channel, CommsChannel.EMAIL)
         self.assertEqual(request_obj.conversation.address, collaborator.email)
         self.assertEqual(request_obj.recipient_channel, CommsChannel.EMAIL)
         self.assertEqual(request_obj.recipient_address, collaborator.email)
         self.assertNotEqual(request_obj.conversation_id, self.conversation.id)
+        self.assertIsNone(request_obj.requested_message_id)
 
-    @patch("api.agent.comms.human_input_requests.execute_send_email")
-    def test_execute_request_human_input_batch_applies_top_level_recipient(self, mock_send_email):
-        mock_send_email.return_value = {"status": "ok"}
-
+    def test_execute_request_human_input_batch_applies_top_level_recipient(self):
         result = execute_request_human_input(
             self.agent,
             {
@@ -412,6 +425,12 @@ class HumanInputRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["requests_count"], 2)
+        self.assertEqual(result["relay_mode"], "explicit_send_required")
+        self.assertEqual(result["relay_payload"]["tool_name"], "send_email")
+        self.assertIn("What should happen first?", result["relay_payload"]["body_text"])
+        self.assertIn("What should happen second?", result["relay_payload"]["body_text"])
+        self.assertIn("1. <your answer>", result["relay_payload"]["body_text"])
         request_objects = list(
             PersistentAgentHumanInputRequest.objects.filter(id__in=result["request_ids"]).order_by("created_at")
         )
@@ -420,41 +439,47 @@ class HumanInputRequestTests(TestCase):
         self.assertTrue(all(request_obj.conversation.address == self.user.email for request_obj in request_objects))
         self.assertTrue(all(request_obj.recipient_channel == CommsChannel.EMAIL for request_obj in request_objects))
         self.assertTrue(all(request_obj.recipient_address == self.user.email for request_obj in request_objects))
+        self.assertTrue(all(request_obj.requested_message_id is None for request_obj in request_objects))
 
-    @patch("api.agent.comms.human_input_requests.execute_send_email")
-    def test_batch_request_returns_partial_success_details_when_later_send_fails(self, mock_send_email):
-        mock_send_email.side_effect = [
-            {"status": "ok"},
-            {"status": "error", "message": "Mailbox is unavailable."},
-        ]
+    def test_batch_request_returns_partial_success_details_when_later_create_fails(self):
+        original_create = PersistentAgentHumanInputRequest.objects.create
+        create_attempts = {"count": 0}
 
-        result = execute_request_human_input(
-            self.agent,
-            {
-                "recipient": {
-                    "channel": CommsChannel.EMAIL,
-                    "address": self.user.email,
+        def flaky_create(*args, **kwargs):
+            create_attempts["count"] += 1
+            if create_attempts["count"] == 2:
+                raise DatabaseError("Database is unavailable.")
+            return original_create(*args, **kwargs)
+
+        with patch.object(PersistentAgentHumanInputRequest.objects, "create", side_effect=flaky_create):
+            result = execute_request_human_input(
+                self.agent,
+                {
+                    "recipient": {
+                        "channel": CommsChannel.EMAIL,
+                        "address": self.user.email,
+                    },
+                    "requests": [
+                        {"question": "What should happen first?"},
+                        {"question": "What should happen second?"},
+                    ],
                 },
-                "requests": [
-                    {"question": "What should happen first?"},
-                    {"question": "What should happen second?"},
-                ],
-            },
-        )
+            )
 
         self.assertEqual(result["status"], "error")
         self.assertTrue(result["partial_success"])
         self.assertEqual(len(result["request_ids"]), 1)
         self.assertEqual(result["request_id"], result["request_ids"][0])
-        self.assertIn("Sent 1 of 2 human input requests", result["message"])
-        self.assertIn("Mailbox is unavailable.", result["message"])
+        self.assertEqual(result["relay_mode"], "explicit_send_required")
+        self.assertEqual(result["relay_payload"]["tool_name"], "send_email")
+        self.assertIn("Created 1 of 2 human input requests", result["message"])
+        self.assertIn("Database is unavailable.", result["message"])
         self.assertEqual(
             PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(),
             1,
         )
 
-    @patch("api.agent.comms.human_input_requests.execute_send_email")
-    def test_create_human_input_request_renders_email_options(self, mock_send_email):
+    def test_create_human_input_request_renders_email_options(self):
         email_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.EMAIL,
@@ -478,18 +503,7 @@ class HumanInputRequestTests(TestCase):
             body="Please email me",
             raw_payload={"subject": "Planning"},
         )
-        prompt_message = PersistentAgentMessage.objects.create(
-            is_outbound=True,
-            from_endpoint=email_agent_endpoint,
-            to_endpoint=email_user_endpoint,
-            conversation=email_conversation,
-            owner_agent=self.agent,
-            body="<p>Prompt</p>",
-            raw_payload={"subject": "Quick question"},
-        )
-        mock_send_email.return_value = {"status": "ok", "message_id": str(prompt_message.id)}
-
-        create_human_input_request(
+        result = create_human_input_request(
             self.agent,
             question="How should I send this?",
             raw_options=[
@@ -498,17 +512,19 @@ class HumanInputRequestTests(TestCase):
             ],
         )
 
-        self.assertTrue(mock_send_email.called)
-        params = mock_send_email.call_args.args[1]
+        params = result["relay_payload"]
+        self.assertEqual(result["relay_mode"], "explicit_send_required")
         self.assertEqual(params["to_address"], "person@example.com")
         self.assertIn("Quick question: How should I send this?", params["subject"])
-        self.assertIn("Reply with the number, the option title, or your own words.", params["mobile_first_html"])
+        self.assertIn("Reply with the option number, the option title, or your own words.", params["mobile_first_html"])
         self.assertIn("Short summary", params["mobile_first_html"])
         self.assertIn("Detailed memo", params["mobile_first_html"])
         self.assertNotIn("Ref:", params["mobile_first_html"])
+        self.assertIsNone(
+            PersistentAgentHumanInputRequest.objects.get(id=result["request_id"]).requested_message_id
+        )
 
-    @patch("api.agent.comms.human_input_requests.execute_send_sms")
-    def test_create_human_input_request_renders_sms_without_reference(self, mock_send_sms):
+    def test_create_human_input_request_renders_sms_without_reference(self):
         sms_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.SMS,
@@ -532,18 +548,16 @@ class HumanInputRequestTests(TestCase):
             body="Please text me",
             raw_payload={"source": "test"},
         )
-        mock_send_sms.return_value = {"status": "ok"}
-
-        create_human_input_request(
+        result = create_human_input_request(
             self.agent,
             question="How should I send this?",
             raw_options=[{"title": "Short summary", "description": "A concise update."}],
         )
 
-        self.assertTrue(mock_send_sms.called)
-        params = mock_send_sms.call_args.args[1]
+        params = result["relay_payload"]
         self.assertIn("How should I send this?", params["body"])
         self.assertNotIn("Ref:", params["body"])
+        self.assertIn("Reply with the option number, the option title, or your own words.", params["body"])
 
     def test_resolve_request_by_option_number(self):
         request_obj = self._create_request(

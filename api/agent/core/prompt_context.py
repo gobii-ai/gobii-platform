@@ -3694,6 +3694,8 @@ def _get_system_instruction(
             "## Delivery & Response Behavior\n\n"
             "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
+            "request_human_input only creates a tracked request. For web chat it appears in the composer panel; "
+            "for email/SMS it returns relay_payload that you must send with send_email/send_sms if you want the user to see it. "
             "Use send_chat_message for web chat - it broadcasts to all active web chat users for this agent (owners and collaborators) regardless of send address, "
             "and send_email/send_sms/send_agent_message for other channels. "
             "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most recently active non-web channel from unified history/recent contacts. "

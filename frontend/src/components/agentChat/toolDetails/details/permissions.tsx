@@ -55,6 +55,17 @@ type HumanInputOptionDetail = {
   description: string | null
 }
 
+type HumanInputRelayPayloadDetail = {
+  kind: string | null
+  toolName: string | null
+  toAddress: string | null
+  toNumber: string | null
+  subject: string | null
+  body: string | null
+  bodyText: string | null
+  message: string | null
+}
+
 function normalizeCredential(value: unknown): CredentialDetail | null {
   if (!isRecord(value)) return null
   const nameValue = value['name']
@@ -79,6 +90,27 @@ function normalizeHumanInputOption(value: unknown): HumanInputOptionDetail | nul
   return { key, title, description }
 }
 
+function normalizeHumanInputRelayPayload(value: unknown): HumanInputRelayPayloadDetail | null {
+  if (!isRecord(value)) return null
+  const kindValue = value['kind']
+  const toolNameValue = value['tool_name'] ?? value['toolName']
+  const toAddressValue = value['to_address'] ?? value['toAddress']
+  const toNumberValue = value['to_number'] ?? value['toNumber']
+  const subjectValue = value['subject']
+  const bodyValue = value['body']
+  const bodyTextValue = value['body_text'] ?? value['bodyText']
+  const messageValue = value['message']
+  const kind = typeof kindValue === 'string' && kindValue.trim().length ? kindValue : null
+  const toolName = typeof toolNameValue === 'string' && toolNameValue.trim().length ? toolNameValue : null
+  const toAddress = typeof toAddressValue === 'string' && toAddressValue.trim().length ? toAddressValue : null
+  const toNumber = typeof toNumberValue === 'string' && toNumberValue.trim().length ? toNumberValue : null
+  const subject = typeof subjectValue === 'string' && subjectValue.trim().length ? subjectValue : null
+  const body = typeof bodyValue === 'string' && bodyValue.trim().length ? bodyValue : null
+  const bodyText = typeof bodyTextValue === 'string' && bodyTextValue.trim().length ? bodyTextValue : null
+  const message = typeof messageValue === 'string' && messageValue.trim().length ? messageValue : null
+  return { kind, toolName, toAddress, toNumber, subject, body, bodyText, message }
+}
+
 export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
   const params = (entry.parameters as Record<string, unknown>) || {}
   const question = typeof params['question'] === 'string' ? params['question'] : null
@@ -91,6 +123,25 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
   const result = parseResultObject(entry.result)
   const statusValue = typeof result?.['status'] === 'string' ? (result['status'] as string) : null
   const messageValue = typeof result?.['message'] === 'string' ? (result['message'] as string) : null
+  const relayMode =
+    typeof result?.['relay_mode'] === 'string'
+      ? (result['relay_mode'] as string)
+      : typeof result?.['relayMode'] === 'string'
+        ? (result['relayMode'] as string)
+        : null
+  const targetChannel =
+    typeof result?.['target_channel'] === 'string'
+      ? (result['target_channel'] as string)
+      : typeof result?.['targetChannel'] === 'string'
+        ? (result['targetChannel'] as string)
+        : null
+  const targetAddress =
+    typeof result?.['target_address'] === 'string'
+      ? (result['target_address'] as string)
+      : typeof result?.['targetAddress'] === 'string'
+        ? (result['targetAddress'] as string)
+        : null
+  const relayPayload = normalizeHumanInputRelayPayload(result?.['relay_payload'] ?? result?.['relayPayload'])
   const referenceCode =
     typeof result?.['reference_code'] === 'string'
       ? (result['reference_code'] as string)
@@ -123,11 +174,21 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
       : typeof result?.['rawReplyText'] === 'string'
         ? (result['rawReplyText'] as string)
         : null
+  const relayModeLabel =
+    relayMode === 'panel_only'
+      ? 'Visible in web panel'
+      : relayMode === 'explicit_send_required'
+        ? `Needs ${relayPayload?.toolName || 'explicit send'}`
+        : null
+  const relayPreview = relayPayload?.bodyText || relayPayload?.body || relayPayload?.message || null
 
   const infoItems: Array<{ label: string; value: ReactNode } | null> = [
     statusValue ? { label: 'Status', value: statusValue.toUpperCase() } : null,
     referenceCode ? { label: 'Reference', value: referenceCode } : null,
     { label: 'Mode', value: inputMode === 'free_text_only' ? 'Free text only' : 'Options + free text' },
+    relayModeLabel ? { label: 'Relay', value: relayModeLabel } : null,
+    targetChannel ? { label: 'Channel', value: formatChannelLabel(targetChannel) || targetChannel } : null,
+    targetAddress ? { label: 'Recipient', value: targetAddress } : null,
     selectedOptionTitle ? { label: 'Selected option', value: selectedOptionTitle } : null,
   ]
 
@@ -167,6 +228,24 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
       {rawReply && rawReply !== freeText ? (
         <Section title="Raw reply">
           <p className="whitespace-pre-line text-slate-700">{rawReply}</p>
+        </Section>
+      ) : null}
+      {relayPayload && !selectedOptionTitle && !freeText ? (
+        <Section title="Relay guidance">
+          <div className="space-y-3">
+            {relayPayload.subject ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Subject</p>
+                <p className="mt-1 whitespace-pre-line text-slate-700">{relayPayload.subject}</p>
+              </div>
+            ) : null}
+            {relayPreview ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Preview</p>
+                <p className="mt-1 whitespace-pre-line text-slate-700">{relayPreview}</p>
+              </div>
+            ) : null}
+          </div>
         </Section>
       ) : null}
     </div>

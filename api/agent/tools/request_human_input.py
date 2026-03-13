@@ -65,10 +65,12 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Ask the user for input. Use this when you need the human to pick an option, "
+                "Create a tracked human-input request when you need the human to pick an option, "
                 "answer a question, or provide open-ended feedback. If you pass options, the user "
                 "can choose one OR reply in their own words. If you omit options, the user will "
-                "reply with free text only. Keep questions concise and make sure it is only the question without extra fluff."
+                "reply with free text only. For web chat, the request appears in the console composer panel. "
+                "For email or SMS, this tool returns relay_payload guidance that you must send with send_email or send_sms. "
+                "Keep questions concise and make sure it is only the question without extra fluff."
             ),
             "parameters": {
                 "type": "object",
@@ -172,7 +174,7 @@ def _normalize_recipient(raw_recipient: Any) -> tuple[dict[str, str] | None, dic
 
 
 def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
-    """Create and send one or more human input requests."""
+    """Create one or more tracked human input requests."""
 
     recipient, recipient_error = _normalize_recipient(params.get("recipient"))
     if recipient_error:

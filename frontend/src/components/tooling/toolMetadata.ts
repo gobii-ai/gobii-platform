@@ -592,6 +592,10 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const question = coerceString(parameters?.['question']) || coerceString(result?.['question'])
       const batchRequests = Array.isArray(parameters?.['requests']) ? parameters?.['requests'] as unknown[] : []
       const status = coerceString(result?.['status'])?.toLowerCase()
+      const relayMode = coerceString(result?.['relay_mode']) || coerceString(result?.['relayMode'])
+      const targetChannel = coerceString(result?.['target_channel']) || coerceString(result?.['targetChannel'])
+      const relayPayload = parseResultObject(result?.['relay_payload'] ?? result?.['relayPayload'])
+      const relayToolName = coerceString(relayPayload?.['tool_name']) || coerceString(relayPayload?.['toolName'])
       const inputMode = coerceString(result?.['input_mode']) || coerceString(result?.['inputMode'])
       const optionsRaw = parameters?.['options']
       const optionCount = Array.isArray(optionsRaw) ? optionsRaw.length : 0
@@ -604,6 +608,18 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         caption = question ? `Answered: ${truncate(question, 40)}` : 'Answer received'
       } else if (requestCount > 1 && status === 'answered') {
         caption = `Answered ${requestCount} questions`
+      } else if (relayMode === 'explicit_send_required' && requestCount > 1) {
+        caption = targetChannel
+          ? `Relay ${requestCount} questions via ${targetChannel}`
+          : `Relay ${requestCount} questions`
+      } else if (relayMode === 'explicit_send_required') {
+        caption = targetChannel
+          ? `Relay via ${targetChannel}`
+          : 'Relay required'
+      } else if (relayMode === 'panel_only' && requestCount > 1) {
+        caption = `Awaiting ${requestCount} questions`
+      } else if (relayMode === 'panel_only') {
+        caption = 'Visible in web panel'
       } else if (requestCount > 1) {
         caption = `Awaiting ${requestCount} questions`
       } else if (optionCount > 0) {
@@ -619,6 +635,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const summaryParts: string[] = []
       if (referenceCode) {
         summaryParts.push(`Ref ${referenceCode}`)
+      }
+      if (relayMode === 'panel_only') {
+        summaryParts.push('Web panel')
+      } else if (relayMode === 'explicit_send_required' && relayToolName) {
+        summaryParts.push(`Use ${relayToolName}`)
+      }
+      if (targetChannel) {
+        summaryParts.push(targetChannel)
       }
       if (optionCount > 0) {
         summaryParts.push(`${optionCount} option${optionCount === 1 ? '' : 's'}`)
