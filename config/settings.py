@@ -91,11 +91,6 @@ PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED = env.bool(
     "PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED",
     default=False,
 )
-# Allow inbound human-input replies to use an LLM to match ambiguous pending requests.
-HUMAN_INPUT_LLM_MATCHING_ENABLED = env.bool(
-    "HUMAN_INPUT_LLM_MATCHING_ENABLED",
-    default=False,
-)
 # Enable insights system (contextual info during agent processing)
 INSIGHTS_ENABLED = env.bool("INSIGHTS_ENABLED", default=True)
 # Allow solutions partners to access billing pages

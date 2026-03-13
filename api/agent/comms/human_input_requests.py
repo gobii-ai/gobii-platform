@@ -7,7 +7,6 @@ import json
 import re
 from typing import Any
 
-from django.conf import settings
 from django.db import DatabaseError, transaction
 from django.utils import timezone
 from django.utils.html import escape
@@ -1221,8 +1220,6 @@ def _resolve_requests_with_llm(
     *,
     body_text: str,
 ) -> list[ResolvedHumanInputResponse]:
-    if not settings.HUMAN_INPUT_LLM_MATCHING_ENABLED:
-        return []
     if len(request_objects) < 2:
         return []
     if not body_text:
@@ -1481,7 +1478,7 @@ def resolve_human_input_request_for_message(
                 direct_request_id=direct_request_id,
             )
         ]
-    elif settings.HUMAN_INPUT_LLM_MATCHING_ENABLED:
+    else:
         sender_scoped_candidates = _get_sender_scoped_pending_requests(message)
         resolved_requests = _resolve_requests_with_llm(
             message,
@@ -1501,45 +1498,6 @@ def resolve_human_input_request_for_message(
                 body_text=body_text,
                 allow_single_fallback=True,
             )
-    else:
-        same_conversation_candidates = _get_authorized_pending_requests_for_conversation(message)
-        batch_resolutions = _resolve_requests_with_safe_fallback(
-            same_conversation_candidates,
-            body_text=body_text,
-            allow_single_fallback=False,
-        )
-        if batch_resolutions:
-            resolved_requests = batch_resolutions
-        elif same_conversation_candidates:
-            resolved_requests = [
-                _resolve_request_response(
-                    same_conversation_candidates[0],
-                    body_text=body_text,
-                )
-            ]
-        else:
-            authorized_candidates = _get_authorized_pending_requests_for_message(message)
-            resolved_requests = _resolve_requests_with_safe_fallback(
-                authorized_candidates,
-                body_text=body_text,
-                allow_single_fallback=True,
-            )
-            if not resolved_requests and message.conversation.channel in {CommsChannel.EMAIL, CommsChannel.SMS}:
-                unambiguous_batch = _get_unambiguous_authorized_batch_for_message(message)
-                if unambiguous_batch:
-                    batch_resolutions = _resolve_batch_requests_from_body(
-                        unambiguous_batch,
-                        body_text=body_text,
-                    )
-                    if batch_resolutions:
-                        resolved_requests = batch_resolutions
-                    else:
-                        resolved_requests = [
-                            _resolve_request_response(
-                                unambiguous_batch[0],
-                                body_text=body_text,
-                            )
-                        ]
 
     if not resolved_requests:
         return None

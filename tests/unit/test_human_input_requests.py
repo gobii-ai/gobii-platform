@@ -658,9 +658,17 @@ class HumanInputRequestTests(TestCase):
         resolved.refresh_from_db()
         self.assertEqual(resolved.free_text, "Mention the risks and the launch date.")
 
-    def test_latest_open_request_is_fallback_when_ambiguous(self):
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_ambiguous_requests_stay_pending_when_llm_returns_no_match(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
         older = self._create_request(question="Old question?")
         newer = self._create_request(question="New question?")
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = make_completion_response(content="no tool call")
         reply = PersistentAgentMessage.objects.create(
             is_outbound=False,
             from_endpoint=self.user_endpoint,
@@ -673,11 +681,11 @@ class HumanInputRequestTests(TestCase):
 
         resolved = resolve_human_input_request_for_message(reply)
 
-        self.assertEqual(resolved.id, newer.id)
+        self.assertIsNone(resolved)
         older.refresh_from_db()
         newer.refresh_from_db()
         self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.PENDING)
-        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
     def test_omitted_recipient_request_can_be_resolved_by_collaborator(self):
         collaborator = get_user_model().objects.create_user(
@@ -802,7 +810,6 @@ class HumanInputRequestTests(TestCase):
         request_obj.refresh_from_db()
         self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")
     def test_llm_resolves_non_latest_same_conversation_request(
@@ -853,7 +860,6 @@ class HumanInputRequestTests(TestCase):
             {"type": "function", "function": {"name": "resolve_human_input_requests"}},
         )
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")
     def test_llm_resolves_multiple_requests_with_mixed_option_and_text(
@@ -914,7 +920,6 @@ class HumanInputRequestTests(TestCase):
             PersistentAgentHumanInputRequest.ResolutionSource.LLM_EXTRACTION,
         )
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")
     def test_llm_only_applies_matches_meeting_confidence_threshold(
@@ -959,7 +964,6 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(high_confidence_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(low_confidence_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
     def test_direct_request_id_bypasses_llm(self, _mock_run_completion):
         direct_request = self._create_request(
@@ -994,7 +998,6 @@ class HumanInputRequestTests(TestCase):
         )
         self.assertEqual(other_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")
     def test_conflicting_llm_matches_resolve_nothing(
@@ -1039,7 +1042,6 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")
     def test_llm_failures_fall_back_without_accidental_resolution(
@@ -1083,7 +1085,6 @@ class HumanInputRequestTests(TestCase):
                 self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
                 self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
     def test_wrong_sender_cross_channel_does_not_trigger_llm_matching(self, _mock_run_completion):
         request_obj = self._create_request(question="What's our next foodie destination?")
@@ -1099,7 +1100,6 @@ class HumanInputRequestTests(TestCase):
         request_obj.refresh_from_db()
         self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
     def test_llm_path_rejects_unauthorized_sender_for_explicit_recipient_request(self, _mock_run_completion):
         collaborator = get_user_model().objects.create_user(
@@ -1134,7 +1134,6 @@ class HumanInputRequestTests(TestCase):
         request_obj.refresh_from_db()
         self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
     def test_llm_path_rejects_unauthorized_sender_for_internal_only_request(self, _mock_run_completion):
         self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
@@ -1197,9 +1196,17 @@ class HumanInputRequestTests(TestCase):
         request_obj.refresh_from_db()
         self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    def test_cross_channel_reply_does_not_resolve_when_multiple_batches_are_open_without_reference(self):
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_cross_channel_reply_does_not_resolve_when_multiple_batches_are_open(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
         first_request = self._create_request(question="First question?")
         second_request = self._create_request(question="Second question?")
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = make_completion_response(content="no tool call")
         reply = self._create_cross_channel_message(
             channel=CommsChannel.EMAIL,
             body="Take the metro",
@@ -1213,7 +1220,13 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    def test_email_reply_resolves_web_batch_from_numbered_answers(self):
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_email_reply_resolves_web_batch_from_numbered_answers(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
         from api.models import PersistentAgentStep
 
         step = PersistentAgentStep.objects.create(
@@ -1221,6 +1234,8 @@ class HumanInputRequestTests(TestCase):
             description="Cross-channel batch",
             credits_cost=0,
         )
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = make_completion_response(content="no tool call")
         first_request = self._create_request(
             question="What's our next foodie destination?",
             options=[
@@ -1251,7 +1266,13 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
         self.assertEqual(list_pending_human_input_requests(self.agent), [])
 
-    def test_partial_cross_channel_batch_reply_leaves_unanswered_requests_pending(self):
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_partial_cross_channel_batch_reply_leaves_unanswered_requests_pending(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
         from api.models import PersistentAgentStep
 
         step = PersistentAgentStep.objects.create(
@@ -1259,6 +1280,8 @@ class HumanInputRequestTests(TestCase):
             description="Partial SMS batch",
             credits_cost=0,
         )
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = make_completion_response(content="no tool call")
         first_request = self._create_request(
             question="What's our next foodie destination?",
             options=[],
@@ -1288,7 +1311,13 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(second_request.free_text, "Take the metro")
 
-    def test_batch_reply_from_collaborator_respects_internal_only_authorization(self):
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_batch_reply_from_collaborator_respects_internal_only_authorization(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
         from api.models import PersistentAgentStep
 
         collaborator = get_user_model().objects.create_user(
@@ -1296,6 +1325,8 @@ class HumanInputRequestTests(TestCase):
             email="batch-collaborator@example.com",
             password="password123",
         )
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = make_completion_response(content="no tool call")
         AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
