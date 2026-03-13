@@ -108,14 +108,11 @@ def _handle_trial_ended_non_renewal(sender, payload, **_kwargs) -> None:
 
 def _handle_trial_conversion_failed(sender, payload, **_kwargs) -> None:
     """
-    This is called when a trial payment fails and enters Past Due state. User has not cancelled, though
-    """
-    _track_event(
-        payload=payload,
-        event=AnalyticsEvent.BILLING_TRIAL_PAYMENT_FAILURE,
-        event_name=TRIAL_CONVERSION_FAILED,
-    )
+    This is called when a trial payment fails and enters Past Due state. User has not cancelled, though.
 
+    Analytics for invoice failures are emitted directly from the Stripe webhook path so
+    we do not duplicate them here.
+    """
     if _billing_pause_switch_enabled(
         OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED,
         event_name=TRIAL_CONVERSION_FAILED,

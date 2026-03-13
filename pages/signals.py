@@ -10,14 +10,14 @@ from urllib.parse import unquote
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
-from django.db import transaction
+from django.db import transaction, DatabaseError
 from django.apps import apps
 from django.contrib.auth import get_user_model
 
 from allauth.account.signals import email_confirmed, user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
 
-from djstripe.models import Subscription, Customer, Invoice
+from djstripe.models import Subscription, Customer, Invoice, PaymentIntent, Charge
 from djstripe.event_handlers import djstripe_receiver
 from observability import traced, trace
 
@@ -44,6 +44,7 @@ from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
     is_trial_cancel_scheduled,
     is_trial_conversion_failure,
+    is_trial_conversion_invoice,
     is_trial_ended_non_renewal,
 )
 from billing.lifecycle_signals import (
@@ -544,6 +545,7 @@ def _build_invoice_properties(
     subscription_id: str | None,
     plan_value: str | None,
     lines: list[Mapping[str, Any]],
+    allow_failure_detail_lookup: bool = False,
 ) -> dict[str, Any]:
     attempt_count = payload.get("attempt_count")
     attempted_flag = _coerce_bool(payload.get("attempted"))
@@ -602,7 +604,80 @@ def _build_invoice_properties(
     if price_ids:
         properties["line_price_ids"] = price_ids
 
+    properties.update(
+        _extract_invoice_failure_properties(
+            payload,
+            allow_stripe_lookup=allow_failure_detail_lookup,
+        )
+    )
+
     return {k: v for k, v in properties.items() if v not in (None, "")}
+
+
+def _build_invoice_properties_fallback(
+    payload: Mapping[str, Any],
+    invoice: Invoice | None,
+    *,
+    customer_id: str | None,
+    subscription_id: str | None,
+    plan_value: str | None,
+) -> dict[str, Any]:
+    """Return a minimal analytics payload when full invoice enrichment fails."""
+    properties = {
+        "stripe.invoice_id": payload.get("id") or getattr(invoice, "id", None),
+        "stripe.invoice_number": payload.get("number") or getattr(invoice, "number", None),
+        "stripe.customer_id": customer_id,
+        "stripe.subscription_id": subscription_id,
+        "billing_reason": payload.get("billing_reason"),
+        "collection_method": payload.get("collection_method"),
+        "livemode": bool(payload.get("livemode")),
+        "amount_due": _amount_major_units(payload.get("amount_due"), payload.get("total")),
+        "amount_paid": _amount_major_units(payload.get("amount_paid")),
+        "currency": _normalize_currency_code(payload.get("currency")),
+        "attempt_number": payload.get("attempt_count"),
+        "final_attempt": _is_final_payment_attempt(payload),
+        "status": payload.get("status"),
+        "customer_email": payload.get("customer_email"),
+        "customer_name": payload.get("customer_name"),
+        "plan": plan_value,
+    }
+    return {key: value for key, value in properties.items() if value not in (None, "")}
+
+
+def _safe_build_invoice_properties(
+    payload: Mapping[str, Any],
+    invoice: Invoice | None,
+    *,
+    customer_id: str | None,
+    subscription_id: str | None,
+    plan_value: str | None,
+    lines: list[Mapping[str, Any]],
+    allow_failure_detail_lookup: bool = False,
+) -> dict[str, Any]:
+    """Build invoice analytics properties without allowing enrichment failures to break webhooks."""
+    try:
+        return _build_invoice_properties(
+            payload,
+            invoice,
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+            plan_value=plan_value,
+            lines=lines,
+            allow_failure_detail_lookup=allow_failure_detail_lookup,
+        )
+    except Exception:
+        # Best-effort analytics must never break billing webhook processing.
+        logger.exception(
+            "Failed to build full invoice analytics properties for invoice %s; using fallback payload",
+            payload.get("id"),
+        )
+        return _build_invoice_properties_fallback(
+            payload,
+            invoice,
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+            plan_value=plan_value,
+        )
 
 
 def _safe_client_ip(request) -> str | None:
@@ -759,7 +834,7 @@ def _extract_plan_value_from_subscription(source: Mapping[str, Any] | None) -> s
 
 
 def _coerce_metadata_dict(candidate: Any) -> dict[str, Any]:
-    """Best effort conversion of Stripe metadata containers to plain dicts."""
+    """Best effort conversion of Stripe object-like mappings to plain dicts."""
     if not candidate:
         return {}
     if isinstance(candidate, Mapping):
@@ -781,6 +856,221 @@ def _coerce_metadata_dict(candidate: Any) -> dict[str, Any]:
                 except Exception:
                     continue
         return result
+
+
+def _extract_stripe_object_id(candidate: Any) -> str | None:
+    if candidate in (None, ""):
+        return None
+    if isinstance(candidate, str):
+        stripped = candidate.strip()
+        return stripped or None
+    object_id = _get_stripe_data_value(candidate, "id")
+    if isinstance(object_id, str):
+        stripped = object_id.strip()
+        return stripped or None
+    return None
+
+
+def _first_present(*candidates: Any) -> Any | None:
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return candidate
+    return None
+
+
+def _retrieve_payment_intent_data(payment_intent_id: str | None) -> dict[str, Any]:
+    if not payment_intent_id:
+        return {}
+    try:
+        payment_intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+    except stripe.error.StripeError:
+        logger.info(
+            "Unable to retrieve Stripe payment intent %s for failure analytics",
+            payment_intent_id,
+            exc_info=True,
+        )
+        return {}
+    return _coerce_metadata_dict(payment_intent)
+
+
+def _get_djstripe_payment_intent_data(payment_intent_id: str | None) -> dict[str, Any]:
+    if not payment_intent_id:
+        return {}
+    try:
+        payment_intent = PaymentIntent.objects.filter(id=payment_intent_id).first()
+    except DatabaseError:
+        logger.info(
+            "Unable to load dj-stripe payment intent %s for failure analytics",
+            payment_intent_id,
+            exc_info=True,
+        )
+        return {}
+    if not payment_intent:
+        return {}
+    return _coerce_metadata_dict(getattr(payment_intent, "stripe_data", None))
+
+
+def _retrieve_charge_data(charge_id: str | None) -> dict[str, Any]:
+    if not charge_id:
+        return {}
+    try:
+        charge = stripe.Charge.retrieve(charge_id)
+    except stripe.error.StripeError:
+        logger.info(
+            "Unable to retrieve Stripe charge %s for failure analytics",
+            charge_id,
+            exc_info=True,
+        )
+        return {}
+    return _coerce_metadata_dict(charge)
+
+
+def _get_djstripe_charge_data(charge_id: str | None) -> dict[str, Any]:
+    if not charge_id:
+        return {}
+    try:
+        charge = Charge.objects.filter(id=charge_id).first()
+    except DatabaseError:
+        logger.info(
+            "Unable to load dj-stripe charge %s for failure analytics",
+            charge_id,
+            exc_info=True,
+        )
+        return {}
+    if not charge:
+        return {}
+    return _coerce_metadata_dict(getattr(charge, "stripe_data", None))
+
+
+def _merge_charge_failure_details(
+    charge_data: Mapping[str, Any],
+    *,
+    failure_message: Any | None,
+    failure_code: Any | None,
+    decline_code: Any | None,
+    failure_type: Any | None,
+) -> tuple[Any | None, Any | None, Any | None, Any | None]:
+    charge_outcome_data = _coerce_metadata_dict(_get_stripe_data_value(charge_data, "outcome"))
+    failure_message = _first_present(
+        failure_message,
+        _get_stripe_data_value(charge_data, "failure_message"),
+        _get_stripe_data_value(charge_outcome_data, "seller_message"),
+    )
+    failure_code = _first_present(
+        failure_code,
+        _get_stripe_data_value(charge_data, "failure_code"),
+    )
+    decline_code = _first_present(
+        decline_code,
+        _get_stripe_data_value(charge_outcome_data, "reason"),
+    )
+    failure_reason = _first_present(
+        failure_message,
+        decline_code,
+        failure_code,
+        failure_type,
+    )
+    return failure_message, failure_code, decline_code, failure_reason
+
+
+def _extract_invoice_failure_properties(
+    payload: Mapping[str, Any],
+    *,
+    allow_stripe_lookup: bool = False,
+) -> dict[str, Any]:
+    payment_intent_data = _coerce_metadata_dict(payload.get("payment_intent"))
+    payment_intent_id = _extract_stripe_object_id(payload.get("payment_intent"))
+    payment_error_data: dict[str, Any] = {}
+    charge_data: dict[str, Any] = {}
+    charge_id = _extract_stripe_object_id(payload.get("charge"))
+
+    payments = _coerce_metadata_dict(payload.get("payments"))
+    payment_entries = payments.get("data") or []
+    if isinstance(payment_entries, list):
+        for payment_entry in payment_entries:
+            payment_entry_data = _coerce_metadata_dict(payment_entry)
+            payment_data = _coerce_metadata_dict(payment_entry_data.get("payment"))
+            if not payment_data:
+                continue
+
+            if payment_intent_id is None:
+                payment_intent_id = _extract_stripe_object_id(payment_data.get("payment_intent"))
+            if not payment_intent_data:
+                payment_intent_data = _coerce_metadata_dict(payment_data.get("payment_intent"))
+            if charge_id is None:
+                charge_id = _extract_stripe_object_id(payment_data.get("charge"))
+            if not charge_data:
+                charge_data = _coerce_metadata_dict(payment_data.get("charge"))
+
+    if allow_stripe_lookup and payment_intent_id and not payment_intent_data:
+        payment_intent_data = _get_djstripe_payment_intent_data(payment_intent_id)
+    if allow_stripe_lookup and payment_intent_id and not payment_intent_data:
+        payment_intent_data = _retrieve_payment_intent_data(payment_intent_id)
+
+    if not payment_error_data and payment_intent_data:
+        payment_error_data = _coerce_metadata_dict(_get_stripe_data_value(payment_intent_data, "last_payment_error"))
+    if charge_id is None:
+        charge_id = _extract_stripe_object_id(_get_stripe_data_value(payment_error_data, "charge"))
+    if not charge_data and payment_intent_data:
+        charge_data = _coerce_metadata_dict(_get_stripe_data_value(payment_intent_data, "latest_charge"))
+    if charge_id is None:
+        charge_id = _extract_stripe_object_id(_get_stripe_data_value(payment_intent_data, "latest_charge"))
+    if charge_id is None:
+        charge_id = _extract_stripe_object_id(charge_data)
+
+    payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(payment_error_data, "payment_method"))
+    payment_method_types = _get_stripe_data_value(payment_intent_data, "payment_method_types")
+    payment_method_type = _get_stripe_data_value(payment_method_data, "type")
+    if payment_method_type in (None, "") and isinstance(payment_method_types, list) and payment_method_types:
+        payment_method_type = payment_method_types[0]
+
+    failure_type = _get_stripe_data_value(payment_error_data, "type")
+    failure_message, failure_code, decline_code, failure_reason = _merge_charge_failure_details(
+        charge_data,
+        failure_message=_get_stripe_data_value(payment_error_data, "message"),
+        failure_code=_get_stripe_data_value(payment_error_data, "code"),
+        decline_code=_get_stripe_data_value(payment_error_data, "decline_code"),
+        failure_type=failure_type,
+    )
+
+    if allow_stripe_lookup and charge_id and not charge_data and not failure_reason:
+        charge_data = _get_djstripe_charge_data(charge_id)
+        failure_message, failure_code, decline_code, failure_reason = _merge_charge_failure_details(
+            charge_data,
+            failure_message=failure_message,
+            failure_code=failure_code,
+            decline_code=decline_code,
+            failure_type=failure_type,
+        )
+    if allow_stripe_lookup and charge_id and not charge_data and not failure_reason:
+        charge_data = _retrieve_charge_data(charge_id)
+        failure_message, failure_code, decline_code, failure_reason = _merge_charge_failure_details(
+            charge_data,
+            failure_message=failure_message,
+            failure_code=failure_code,
+            decline_code=decline_code,
+            failure_type=failure_type,
+        )
+
+    properties: dict[str, Any] = {}
+    if payment_intent_id:
+        properties["stripe.payment_intent_id"] = payment_intent_id
+    if charge_id:
+        properties["stripe.charge_id"] = charge_id
+    if failure_reason:
+        properties["failure_reason"] = failure_reason
+    if failure_message:
+        properties["failure_message"] = failure_message
+    if failure_code:
+        properties["failure_code"] = failure_code
+    if decline_code:
+        properties["decline_code"] = decline_code
+    if failure_type:
+        properties["failure_type"] = failure_type
+    if payment_method_type:
+        properties["payment_method_type"] = payment_method_type
+
+    return properties
 
 
 def _get_subscription_items_data(source: Any) -> list:
@@ -1370,14 +1660,21 @@ def handle_invoice_payment_failed(event, **kwargs):
         lines = _invoice_lines(payload)
         plan_value = _extract_plan_from_lines(lines)
 
-        properties = _build_invoice_properties(
+        properties = _safe_build_invoice_properties(
             payload,
             invoice,
             customer_id=customer_id,
             subscription_id=subscription_id,
             plan_value=plan_value,
             lines=lines,
+            allow_failure_detail_lookup=True,
         )
+        properties = Analytics.with_org_properties(
+            properties,
+            organization=owner if owner_type == "organization" else None,
+            organization_flag=owner_type == "organization",
+        )
+        properties.setdefault("trial_conversion_invoice", False)
 
         try:
             subscription_obj = getattr(invoice, "subscription", None) if invoice else None
@@ -1412,6 +1709,15 @@ def handle_invoice_payment_failed(event, **kwargs):
             else:
                 subscription_status = None
 
+            trial_conversion_invoice = is_trial_conversion_invoice(
+                billing_reason=billing_reason,
+                trial_end_dt=trial_end_dt,
+                line_period_start_dt=line_period_start_dt,
+                subscription_current_period_start_dt=subscription_current_period_start_dt,
+                subscription_status=subscription_status,
+            )
+            properties["trial_conversion_invoice"] = trial_conversion_invoice
+
             if owner and owner_type and is_trial_conversion_failure(
                 billing_reason=billing_reason,
                 trial_end_dt=trial_end_dt,
@@ -1434,6 +1740,7 @@ def handle_invoice_payment_failed(event, **kwargs):
                         attempt_count=attempt_count,
                         final_attempt=_is_final_payment_attempt(payload),
                         occurred_at=timezone.now(),
+                        metadata=dict(properties),
                     ),
                 )
         except Exception:
@@ -1443,12 +1750,6 @@ def handle_invoice_payment_failed(event, **kwargs):
                 "Failed to emit trial conversion failure lifecycle event for invoice %s",
                 payload.get("id"),
             )
-
-        properties = Analytics.with_org_properties(
-            properties,
-            organization=owner if owner_type == "organization" else None,
-            organization_flag=owner_type == "organization",
-        )
 
         try:
             if owner_type == "user" and owner:
@@ -1537,7 +1838,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
         lines = _invoice_lines(payload)
         plan_value = _extract_plan_from_lines(lines)
 
-        properties = _build_invoice_properties(
+        properties = _safe_build_invoice_properties(
             payload,
             invoice,
             customer_id=customer_id,

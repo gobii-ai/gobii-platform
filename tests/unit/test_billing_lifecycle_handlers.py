@@ -73,15 +73,23 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
                 subscription_id="sub_fail",
                 invoice_id="in_fail",
                 attempt_count=1,
+                metadata={
+                    "stripe.customer_id": "cus_fail",
+                    "amount_due": 25.0,
+                    "currency": "USD",
+                    "plan": "startup",
+                    "failure_reason": "The card was declined.",
+                    "failure_code": "card_declined",
+                    "decline_code": "do_not_honor",
+                    "payment_method_type": "card",
+                    "organization": True,
+                    "organization_id": "org-1",
+                    "organization_name": "Acme Org",
+                },
             ),
         )
 
-        mock_track_event.assert_called_once()
-        kwargs = mock_track_event.call_args.kwargs
-        self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_TRIAL_PAYMENT_FAILURE)
-        self.assertEqual(kwargs["user_id"], 7)
-        self.assertEqual(kwargs["properties"]["stripe.invoice_id"], "in_fail")
-        self.assertEqual(kwargs["properties"]["attempt_number"], 1)
+        mock_track_event.assert_not_called()
         mock_switch.assert_called_once_with(OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED)
         mock_pause_owner.assert_called_once()
 
@@ -106,7 +114,7 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
             ),
         )
 
-        mock_track_event.assert_called_once()
+        mock_track_event.assert_not_called()
         mock_switch.assert_called_once_with(OWNER_EXECUTION_PAUSE_ON_TRIAL_CONVERSION_FAILED)
         mock_pause_owner.assert_not_called()
 

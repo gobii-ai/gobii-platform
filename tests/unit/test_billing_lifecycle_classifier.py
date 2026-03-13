@@ -6,6 +6,7 @@ from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
     is_trial_cancel_scheduled,
     is_trial_conversion_failure,
+    is_trial_conversion_invoice,
     is_trial_ended_non_renewal,
 )
 
@@ -58,6 +59,20 @@ class BillingLifecycleClassifierTests(SimpleTestCase):
         )
 
         self.assertFalse(result)
+
+    def test_trial_conversion_invoice_true_when_attempt_count_would_be_retry(self):
+        trial_end_dt = datetime(2025, 9, 8, 8, 0, 0, tzinfo=dt_timezone.utc)
+        line_period_start_dt = datetime(2025, 9, 8, 8, 0, 0, tzinfo=dt_timezone.utc)
+
+        result = is_trial_conversion_invoice(
+            billing_reason="subscription_cycle",
+            trial_end_dt=trial_end_dt,
+            line_period_start_dt=line_period_start_dt,
+            subscription_current_period_start_dt=None,
+            subscription_status="past_due",
+        )
+
+        self.assertTrue(result)
 
     def test_trial_conversion_failure_false_when_not_subscription_cycle(self):
         trial_end_dt = datetime(2025, 9, 8, 8, 0, 0, tzinfo=dt_timezone.utc)
