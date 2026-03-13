@@ -70,8 +70,24 @@ export function HumanInputComposerPanel({
     return null
   }
 
-  const activeRequest = requests.find((request) => request.id === activeRequestId) ?? requests[0]
-  const activeIndex = Math.max(0, requests.findIndex((request) => request.id === activeRequest.id))
+  const batchOrder = new Map<string, number>()
+  requests.forEach((request, index) => {
+    if (!batchOrder.has(request.batchId)) {
+      batchOrder.set(request.batchId, index)
+    }
+  })
+
+  const orderedRequests = [...requests].sort((left, right) => {
+    const leftBatchOrder = batchOrder.get(left.batchId) ?? 0
+    const rightBatchOrder = batchOrder.get(right.batchId) ?? 0
+    if (leftBatchOrder !== rightBatchOrder) {
+      return leftBatchOrder - rightBatchOrder
+    }
+    return left.batchPosition - right.batchPosition
+  })
+
+  const activeRequest = orderedRequests.find((request) => request.id === activeRequestId) ?? orderedRequests[0]
+  const activeIndex = Math.max(0, orderedRequests.findIndex((request) => request.id === activeRequest.id))
   const isFreeTextOnly = activeRequest.inputMode === 'free_text_only' || activeRequest.options.length === 0
   const activeDraft = draftResponses[activeRequest.id]
 
@@ -84,25 +100,25 @@ export function HumanInputComposerPanel({
         <p className="min-w-0 flex-1 whitespace-pre-line text-[0.95rem] font-semibold leading-6 tracking-[-0.02em] text-slate-900">
           {activeRequest.question}
         </p>
-        {requests.length > 1 ? (
+        {orderedRequests.length > 1 ? (
           <div className="flex shrink-0 items-center gap-1.5 text-sm text-slate-500">
             <button
               type="button"
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
-              onClick={() => onActiveRequestChange(requests[Math.max(0, activeIndex - 1)].id)}
+              onClick={() => onActiveRequestChange(orderedRequests[Math.max(0, activeIndex - 1)].id)}
               disabled={disabled || activeIndex === 0}
               aria-label="Previous question"
             >
               <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
             <span className="min-w-[3.25rem] text-center text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
-              {activeIndex + 1} of {requests.length}
+              {activeIndex + 1} of {orderedRequests.length}
             </span>
             <button
               type="button"
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
-              onClick={() => onActiveRequestChange(requests[Math.min(requests.length - 1, activeIndex + 1)].id)}
-              disabled={disabled || activeIndex >= requests.length - 1}
+              onClick={() => onActiveRequestChange(orderedRequests[Math.min(orderedRequests.length - 1, activeIndex + 1)].id)}
+              disabled={disabled || activeIndex >= orderedRequests.length - 1}
               aria-label="Next question"
             >
               <ChevronRight className="h-4 w-4" aria-hidden="true" />

@@ -419,6 +419,22 @@ export const AgentComposer = memo(function AgentComposer({
   }, [adjustTextareaHeight])
 
   useEffect(() => {
+    const node = textareaRef.current
+    if (!node || typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(() => {
+      adjustTextareaHeight(true)
+    })
+    observer.observe(node)
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [adjustTextareaHeight])
+
+  useEffect(() => {
     if (!pendingHumanInputRequests.length) {
       setActiveHumanInputRequestId(null)
       setBusyHumanInputRequestId(null)
@@ -504,6 +520,22 @@ export const AgentComposer = memo(function AgentComposer({
   const composerPlaceholder = disabledReason || (activeHumanInputRequest
     ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
     : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      adjustTextareaHeight(true)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    activeHumanInputRequestId,
+    adjustTextareaHeight,
+    composerPlaceholder,
+    pendingHumanInputRequests.length,
+    resolvedWorkingExpanded,
+  ])
 
   const submitHumanInputResponse = useCallback(async (
     request: PendingHumanInputRequest,
