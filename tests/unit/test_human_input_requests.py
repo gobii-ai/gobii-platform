@@ -658,33 +658,6 @@ class HumanInputRequestTests(TestCase):
         resolved.refresh_from_db()
         self.assertEqual(resolved.free_text, "Mention the risks and the launch date.")
 
-    def test_reference_code_targets_older_request(self):
-        older = self._create_request(
-            question="Old question?",
-            options=[{"key": "yes", "title": "Yes", "description": "Proceed"}],
-        )
-        newer = self._create_request(
-            question="New question?",
-            options=[{"key": "no", "title": "No", "description": "Stop"}],
-        )
-        reply = PersistentAgentMessage.objects.create(
-            is_outbound=False,
-            from_endpoint=self.user_endpoint,
-            to_endpoint=self.agent_endpoint,
-            conversation=self.conversation,
-            owner_agent=self.agent,
-            body=f"{older.reference_code} Yes",
-            raw_payload={"source": "test"},
-        )
-
-        resolved = resolve_human_input_request_for_message(reply)
-
-        self.assertEqual(resolved.id, older.id)
-        older.refresh_from_db()
-        newer.refresh_from_db()
-        self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
-        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
-
     def test_latest_open_request_is_fallback_when_ambiguous(self):
         older = self._create_request(question="Old question?")
         newer = self._create_request(question="New question?")
@@ -821,39 +794,6 @@ class HumanInputRequestTests(TestCase):
                 "human_input_selected_option_key": "yes",
                 "human_input_selected_option_title": "Yes",
             },
-        )
-
-        resolved = resolve_human_input_request_for_message(reply)
-
-        self.assertIsNone(resolved)
-        request_obj.refresh_from_db()
-        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
-
-    def test_reference_code_fails_for_unauthorized_explicit_recipient(self):
-        collaborator = get_user_model().objects.create_user(
-            username="explicit-ref-collaborator",
-            email="explicit-ref-collaborator@example.com",
-            password="password123",
-        )
-        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
-        result = create_human_input_request(
-            self.agent,
-            question="Should we approve this launch?",
-            raw_options=[{"title": "Yes", "description": "Approve it."}],
-            recipient={
-                "channel": CommsChannel.WEB,
-                "address": build_web_user_address(collaborator.id, self.agent.id),
-            },
-        )
-        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
-        reply = PersistentAgentMessage.objects.create(
-            is_outbound=False,
-            from_endpoint=self.user_endpoint,
-            to_endpoint=self.agent_endpoint,
-            conversation=self.conversation,
-            owner_agent=self.agent,
-            body=f"{request_obj.reference_code} Yes",
-            raw_payload={"source": "test"},
         )
 
         resolved = resolve_human_input_request_for_message(reply)
@@ -1053,32 +993,6 @@ class HumanInputRequestTests(TestCase):
             PersistentAgentHumanInputRequest.ResolutionSource.DIRECT,
         )
         self.assertEqual(other_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
-
-    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
-    @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
-    def test_reference_code_bypasses_llm(self, _mock_run_completion):
-        older = self._create_request(
-            question="Should we deploy this week?",
-            options=[{"key": "yes", "title": "Yes", "description": "Deploy this week."}],
-        )
-        newer = self._create_request(question="Who should handle QA?")
-        reply = PersistentAgentMessage.objects.create(
-            is_outbound=False,
-            from_endpoint=self.user_endpoint,
-            to_endpoint=self.agent_endpoint,
-            conversation=self.conversation,
-            owner_agent=self.agent,
-            body=f"{older.reference_code} Yes",
-            raw_payload={"source": "test"},
-        )
-
-        resolved = resolve_human_input_request_for_message(reply)
-
-        self.assertEqual(resolved.id, older.id)
-        older.refresh_from_db()
-        newer.refresh_from_db()
-        self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
-        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
     @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
@@ -1299,26 +1213,6 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
 
-    def test_email_reply_reference_code_resolves_correct_web_request_across_channels(self):
-        older = self._create_request(
-            question="Older question?",
-            options=[{"key": "sushi", "title": "Sushi", "description": "Fresh fish."}],
-        )
-        newer = self._create_request(question="Newer question?")
-        reply = self._create_cross_channel_message(
-            channel=CommsChannel.EMAIL,
-            body=f"{older.reference_code} Sushi",
-        )
-
-        resolved = resolve_human_input_request_for_message(reply)
-
-        self.assertEqual(resolved.id, older.id)
-        older.refresh_from_db()
-        newer.refresh_from_db()
-        self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
-        self.assertEqual(older.selected_option_key, "sushi")
-        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
-
     def test_email_reply_resolves_web_batch_from_numbered_answers(self):
         from api.models import PersistentAgentStep
 
@@ -1452,7 +1346,7 @@ class HumanInputRequestTests(TestCase):
         block = _get_recent_human_input_responses_block(self.agent)
 
         self.assertIn("Recent human input responses:", block)
-        self.assertIn(request_obj.reference_code, block)
+        self.assertIn("What is the status?", block)
         self.assertIn("Ship it tomorrow.", block)
 
     def test_serialize_step_entry_uses_live_request_state(self):

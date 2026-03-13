@@ -142,12 +142,6 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
         ? (result['targetAddress'] as string)
         : null
   const relayPayload = normalizeHumanInputRelayPayload(result?.['relay_payload'] ?? result?.['relayPayload'])
-  const referenceCode =
-    typeof result?.['reference_code'] === 'string'
-      ? (result['reference_code'] as string)
-      : typeof result?.['referenceCode'] === 'string'
-        ? (result['referenceCode'] as string)
-        : null
   const inputMode =
     typeof result?.['input_mode'] === 'string'
       ? (result['input_mode'] as string)
@@ -184,7 +178,6 @@ export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
 
   const infoItems: Array<{ label: string; value: ReactNode } | null> = [
     statusValue ? { label: 'Status', value: statusValue.toUpperCase() } : null,
-    referenceCode ? { label: 'Reference', value: referenceCode } : null,
     { label: 'Mode', value: inputMode === 'free_text_only' ? 'Free text only' : 'Options + free text' },
     relayModeLabel ? { label: 'Relay', value: relayModeLabel } : null,
     targetChannel ? { label: 'Channel', value: formatChannelLabel(targetChannel) || targetChannel } : null,

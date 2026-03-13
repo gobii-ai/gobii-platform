@@ -5536,7 +5536,7 @@ def _get_recent_human_input_responses_block(agent: PersistentAgent) -> str:
 
     lines = ["Recent human input responses:"]
     for response in responses:
-        lines.append(f"- [{response.reference_code}] {response.question}")
+        lines.append(f"- {response.question}")
         lines.append(f"  Input mode: {response.input_mode}")
         if response.selected_option_key:
             lines.append(

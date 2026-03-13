@@ -601,7 +601,6 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const optionCount = Array.isArray(optionsRaw) ? optionsRaw.length : 0
       const requestCountRaw = result?.['requests_count']
       const requestCount = typeof requestCountRaw === 'number' ? requestCountRaw : batchRequests.length
-      const referenceCode = coerceString(result?.['reference_code']) || coerceString(result?.['referenceCode'])
 
       let caption: string | null = null
       if (status === 'answered' && requestCount <= 1) {
@@ -633,9 +632,6 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       }
 
       const summaryParts: string[] = []
-      if (referenceCode) {
-        summaryParts.push(`Ref ${referenceCode}`)
-      }
       if (relayMode === 'panel_only') {
         summaryParts.push('Web panel')
       } else if (relayMode === 'explicit_send_required' && relayToolName) {

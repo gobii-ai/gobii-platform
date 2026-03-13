@@ -29,7 +29,6 @@ from api.models import (
 )
 
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
-REFERENCE_CODE_RE = re.compile(r"\b(HIR-[A-Z0-9]{6})\b", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
 MAX_OPTION_COUNT = 6
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
@@ -783,23 +782,6 @@ def _normalize_text_for_match(value: str) -> str:
     return normalized
 
 
-def _extract_reference_code(text: str) -> str | None:
-    match = REFERENCE_CODE_RE.search(text or "")
-    if not match:
-        return None
-    return match.group(1).upper()
-
-
-def _strip_reference_code(text: str, reference_code: str | None) -> str:
-    if not text:
-        return ""
-    if not reference_code:
-        return text.strip()
-    stripped = re.sub(re.escape(reference_code), "", text, flags=re.IGNORECASE)
-    stripped = re.sub(r"^[\[\]\(\)\:\-\s]+", "", stripped)
-    return stripped.strip()
-
-
 def _match_option_by_number(
     request_obj: PersistentAgentHumanInputRequest,
     body_text: str,
@@ -1199,7 +1181,6 @@ def _build_human_input_matching_payload(
                 "input_mode": request_obj.input_mode,
                 "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
                 "created_at": request_obj.created_at.isoformat() if request_obj.created_at else None,
-                "reference_code": request_obj.reference_code,
                 "batch_position": batch_position,
                 "batch_size": len(batch_requests),
             }
@@ -1318,7 +1299,6 @@ def _resolve_requests_with_safe_fallback(
     request_objects: list[PersistentAgentHumanInputRequest],
     *,
     body_text: str,
-    reference_code: str | None = None,
     allow_single_fallback: bool,
 ) -> list[ResolvedHumanInputResponse]:
     if not request_objects:
@@ -1329,7 +1309,6 @@ def _resolve_requests_with_safe_fallback(
             _resolve_request_response(
                 request_objects[0],
                 body_text=body_text,
-                reference_code=reference_code,
             )
         ]
 
@@ -1340,7 +1319,6 @@ def _resolve_requests_with_safe_fallback(
     batch_resolutions = _resolve_batch_requests_from_body(
         single_batch,
         body_text=body_text,
-        reference_code=reference_code,
     )
     if batch_resolutions:
         return batch_resolutions
@@ -1355,9 +1333,8 @@ def _resolve_request_response(
     direct_option_key: str = "",
     direct_option_title: str = "",
     direct_request_id: str | None = None,
-    reference_code: str | None = None,
 ) -> ResolvedHumanInputResponse:
-    cleaned_body = _strip_reference_code(body_text, reference_code)
+    cleaned_body = _coerce_string(body_text)
     selected_option_key = ""
     selected_option_title = ""
     free_text = ""
@@ -1370,24 +1347,18 @@ def _resolve_request_response(
     elif request_obj.input_mode == PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT:
         matched_by_number = _match_option_by_number(request_obj, cleaned_body)
         matched_by_title = _match_option_by_title(request_obj, cleaned_body)
-        if reference_code:
-            resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.REFERENCE_CODE
         if matched_by_number:
             selected_option_key, selected_option_title = matched_by_number
-            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.OPTION_NUMBER
+            resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.OPTION_NUMBER
         elif matched_by_title:
             selected_option_key, selected_option_title = matched_by_title
-            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.OPTION_TITLE
+            resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.OPTION_TITLE
         else:
             free_text = cleaned_body
-            resolution_source = resolution_source or PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
+            resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
     else:
         free_text = cleaned_body
-        resolution_source = (
-            PersistentAgentHumanInputRequest.ResolutionSource.REFERENCE_CODE
-            if reference_code
-            else PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
-        )
+        resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.FREE_TEXT
 
     return ResolvedHumanInputResponse(
         request=request_obj,
@@ -1433,10 +1404,9 @@ def _resolve_batch_requests_from_body(
     requests: list[PersistentAgentHumanInputRequest],
     *,
     body_text: str,
-    reference_code: str | None = None,
 ) -> list[ResolvedHumanInputResponse]:
     ordered_requests = _order_requests_for_batch(requests)
-    numbered_answers = _extract_numbered_batch_answers(_strip_reference_code(body_text, reference_code))
+    numbered_answers = _extract_numbered_batch_answers(body_text)
     if numbered_answers:
         resolved_by_request_id: dict[str, ResolvedHumanInputResponse] = {}
         for question_number, answer_body in numbered_answers:
@@ -1446,7 +1416,6 @@ def _resolve_batch_requests_from_body(
             resolved_by_request_id[str(target_request.id)] = _resolve_request_response(
                 target_request,
                 body_text=answer_body,
-                reference_code=reference_code,
             )
         if resolved_by_request_id:
             return [
@@ -1455,13 +1424,12 @@ def _resolve_batch_requests_from_body(
                 if str(request.id) in resolved_by_request_id
             ]
 
-    paragraph_answers = _split_paragraph_batch_answers(_strip_reference_code(body_text, reference_code))
+    paragraph_answers = _split_paragraph_batch_answers(body_text)
     if len(paragraph_answers) == len(ordered_requests) and len(paragraph_answers) > 1:
         return [
             _resolve_request_response(
                 request_obj,
                 body_text=answer_body,
-                reference_code=reference_code,
             )
             for request_obj, answer_body in zip(ordered_requests, paragraph_answers)
         ]
@@ -1487,24 +1455,6 @@ def _get_authorized_pending_request_by_id(
     return request_obj
 
 
-def _get_authorized_pending_request_by_reference(
-    message: PersistentAgentMessage,
-    reference_code: str,
-) -> PersistentAgentHumanInputRequest | None:
-    request_obj = (
-        PersistentAgentHumanInputRequest.objects.select_related("agent", "conversation")
-        .filter(
-            agent_id=message.owner_agent_id,
-            reference_code=reference_code,
-            status=PersistentAgentHumanInputRequest.Status.PENDING,
-        )
-        .first()
-    )
-    if request_obj is None or not _sender_is_authorized_for_request(request_obj, message):
-        return None
-    return request_obj
-
-
 def resolve_human_input_request_for_message(
     message: PersistentAgentMessage,
 ) -> PersistentAgentHumanInputRequest | None:
@@ -1516,7 +1466,6 @@ def resolve_human_input_request_for_message(
     direct_option_key = _coerce_string(raw_payload.get("human_input_selected_option_key"))
     direct_option_title = _coerce_string(raw_payload.get("human_input_selected_option_title"))
     body_text = _coerce_string(message.body)
-    reference_code = _extract_reference_code(body_text)
     resolved_requests: list[ResolvedHumanInputResponse] = []
 
     if direct_request_id:
@@ -1530,33 +1479,8 @@ def resolve_human_input_request_for_message(
                 direct_option_key=direct_option_key,
                 direct_option_title=direct_option_title,
                 direct_request_id=direct_request_id,
-                reference_code=reference_code,
             )
         ]
-    elif reference_code:
-        referenced_request = _get_authorized_pending_request_by_reference(message, reference_code)
-        if referenced_request is None:
-            return None
-        referenced_batch = [
-            request_obj
-            for request_obj in _get_pending_batch_for_request(referenced_request)
-            if _sender_is_authorized_for_request(request_obj, message)
-        ]
-        batch_resolutions = _resolve_batch_requests_from_body(
-            referenced_batch,
-            body_text=body_text,
-            reference_code=reference_code,
-        )
-        if batch_resolutions:
-            resolved_requests = batch_resolutions
-        else:
-            resolved_requests = [
-                _resolve_request_response(
-                    referenced_request,
-                    body_text=body_text,
-                    reference_code=reference_code,
-                )
-            ]
     elif settings.HUMAN_INPUT_LLM_MATCHING_ENABLED:
         sender_scoped_candidates = _get_sender_scoped_pending_requests(message)
         resolved_requests = _resolve_requests_with_llm(
@@ -1569,14 +1493,12 @@ def resolve_human_input_request_for_message(
             resolved_requests = _resolve_requests_with_safe_fallback(
                 same_conversation_candidates,
                 body_text=body_text,
-                reference_code=reference_code,
                 allow_single_fallback=True,
             )
         if not resolved_requests:
             resolved_requests = _resolve_requests_with_safe_fallback(
                 sender_scoped_candidates,
                 body_text=body_text,
-                reference_code=reference_code,
                 allow_single_fallback=True,
             )
     else:
@@ -1584,7 +1506,6 @@ def resolve_human_input_request_for_message(
         batch_resolutions = _resolve_requests_with_safe_fallback(
             same_conversation_candidates,
             body_text=body_text,
-            reference_code=reference_code,
             allow_single_fallback=False,
         )
         if batch_resolutions:
@@ -1594,7 +1515,6 @@ def resolve_human_input_request_for_message(
                 _resolve_request_response(
                     same_conversation_candidates[0],
                     body_text=body_text,
-                    reference_code=reference_code,
                 )
             ]
         else:
@@ -1602,7 +1522,6 @@ def resolve_human_input_request_for_message(
             resolved_requests = _resolve_requests_with_safe_fallback(
                 authorized_candidates,
                 body_text=body_text,
-                reference_code=reference_code,
                 allow_single_fallback=True,
             )
             if not resolved_requests and message.conversation.channel in {CommsChannel.EMAIL, CommsChannel.SMS}:
@@ -1611,7 +1530,6 @@ def resolve_human_input_request_for_message(
                     batch_resolutions = _resolve_batch_requests_from_body(
                         unambiguous_batch,
                         body_text=body_text,
-                        reference_code=reference_code,
                     )
                     if batch_resolutions:
                         resolved_requests = batch_resolutions
@@ -1620,7 +1538,6 @@ def resolve_human_input_request_for_message(
                             _resolve_request_response(
                                 unambiguous_batch[0],
                                 body_text=body_text,
-                                reference_code=reference_code,
                             )
                         ]
 

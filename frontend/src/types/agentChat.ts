@@ -108,7 +108,6 @@ export type PendingHumanInputRequest = {
   options: HumanInputOption[]
   createdAt?: string | null
   status: PendingHumanInputRequestStatus
-  referenceCode?: string | null
   activeConversationChannel?: string | null
   inputMode: PendingHumanInputRequestInputMode
   batchId: string

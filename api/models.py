@@ -9347,7 +9347,6 @@ class PersistentAgentHumanInputRequest(models.Model):
         EXPIRED = "expired", "Expired"
 
     class ResolutionSource(models.TextChoices):
-        REFERENCE_CODE = "reference_code", "Reference code"
         OPTION_NUMBER = "option_number", "Option number"
         OPTION_TITLE = "option_title", "Option title"
         FREE_TEXT = "free_text", "Free text"
@@ -9390,7 +9389,6 @@ class PersistentAgentHumanInputRequest(models.Model):
         blank=True,
         help_text="Normalized explicit recipient address when set.",
     )
-    reference_code = models.CharField(max_length=16, unique=True, editable=False)
     status = models.CharField(
         max_length=16,
         choices=Status.choices,
@@ -9433,17 +9431,7 @@ class PersistentAgentHumanInputRequest(models.Model):
         ]
 
     def __str__(self) -> str:
-        return f"HumanInputRequest<{self.reference_code}:{self.status}>"
-
-    def save(self, *args, **kwargs):
-        if not self.reference_code:
-            alphabet = string.ascii_uppercase + string.digits
-            while True:
-                candidate = "HIR-" + "".join(secrets.choice(alphabet) for _ in range(6))
-                if not PersistentAgentHumanInputRequest.objects.filter(reference_code=candidate).exists():
-                    self.reference_code = candidate
-                    break
-        return super().save(*args, **kwargs)
+        return f"HumanInputRequest<{self.id}:{self.status}>"
 
 
 class PersistentAgentEmailFooter(models.Model):

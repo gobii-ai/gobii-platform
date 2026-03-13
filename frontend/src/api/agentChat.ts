@@ -69,8 +69,6 @@ type PendingHumanInputRequestWire = {
   createdAt?: unknown
   created_at?: unknown
   status?: unknown
-  referenceCode?: unknown
-  reference_code?: unknown
   activeConversationChannel?: unknown
   active_conversation_channel?: unknown
   inputMode?: unknown
@@ -166,7 +164,6 @@ function normalizePendingHumanInputRequest(raw: unknown): PendingHumanInputReque
     options,
     createdAt: asNonEmptyString(request.createdAt) ?? asNonEmptyString(request.created_at),
     status,
-    referenceCode: asNonEmptyString(request.referenceCode) ?? asNonEmptyString(request.reference_code),
     activeConversationChannel:
       asNonEmptyString(request.activeConversationChannel)
       ?? asNonEmptyString(request.active_conversation_channel),
