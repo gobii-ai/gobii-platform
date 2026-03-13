@@ -1778,9 +1778,13 @@ def handle_invoice_payment_failed(event, **kwargs):
                     "amount_due": failed_amount,
                     "currency": properties.get("currency"),
                 }
-                invoice_event_id = payload.get("id")
-                if invoice_event_id:
-                    marketing_properties["event_id"] = str(invoice_event_id).strip()
+                marketing_event_id = str(getattr(event, "id", "") or "").strip()
+                if not marketing_event_id:
+                    invoice_id = str(payload.get("id", "") or "").strip()
+                    attempt_suffix = str(attempt_count) if attempt_count is not None else ""
+                    marketing_event_id = ":".join(part for part in (invoice_id, attempt_suffix) if part)
+                if marketing_event_id:
+                    marketing_properties["event_id"] = marketing_event_id
                 marketing_properties = {
                     key: value
                     for key, value in marketing_properties.items()
