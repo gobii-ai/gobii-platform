@@ -27,22 +27,26 @@
 
 .collapsed-event-group {
   appearance: none;
-  border: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
+  border: 0;
   margin: 4px auto;
   padding: 4px 12px;
   border-radius: 9999px;
-  background: var(--color-slate-100, #f1f5f9);
+  background: color-mix(in srgb, var(--color-blue-500, #3b82f6) 9%, white);
+  color: var(--color-blue-800, #1e3a8a);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.16);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
   width: fit-content;
 }
 
 .collapsed-event-group:hover {
-  background: var(--color-slate-200, #e2e8f0);
+  background: color-mix(in srgb, var(--color-blue-500, #3b82f6) 13%, white);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.22);
+  transform: translateY(-1px);
 }
 
 .collapsed-event-group:focus-visible {
@@ -53,14 +57,61 @@
 .collapsed-event-group__label {
   font-size: 0.75rem;
   line-height: 1rem;
-  color: var(--color-slate-500, #64748b);
-  font-weight: 500;
+  color: currentColor;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .collapsed-event-group__chevron {
-  color: var(--color-slate-400, #94a3b8);
+  color: currentColor;
   flex-shrink: 0;
+  transition: transform 0.16s ease;
+}
+
+.collapsed-event-group__chevron[data-expanded='true'] {
+  transform: rotate(90deg);
+}
+
+.collapsed-activity-cluster {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.collapsed-activity-cluster__body {
+  width: min(820px, 100%);
+  border-radius: 1.25rem;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.98), rgba(234, 247, 255, 0.95));
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.12);
+  overflow: hidden;
+}
+
+.collapsed-activity-cluster__footer {
+  display: flex;
+  justify-content: center;
+  padding: 0.25rem 1rem 1rem;
+}
+
+.collapsed-activity-cluster__view-all {
+  appearance: none;
+  border: 0;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--color-sky-500, #0ea5e9) 12%, white);
+  color: var(--color-sky-900, #0c4a6e);
+  box-shadow: inset 0 0 0 1px rgba(14, 116, 144, 0.14);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.collapsed-activity-cluster__view-all:hover,
+.collapsed-activity-cluster__view-all:focus-visible {
+  background: color-mix(in srgb, var(--color-sky-500, #0ea5e9) 18%, white);
+  transform: translateY(-1px);
 }
 
 /* ---- Inline Status Cards (charter, schedule, compact kanban) ---- */

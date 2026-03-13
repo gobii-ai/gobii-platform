@@ -18,10 +18,6 @@ export function shouldShowStreamingThinking(args: {
   return !args.enabled && args.isStreaming && args.hasReasoning && !args.hasStreamingContent && !args.hasMoreNewer
 }
 
-export function shouldUseTypingIndicator(enabled: boolean): boolean {
-  return enabled
-}
-
 export function getSimplifiedChatViewOptions(): SimplifiedChatViewOption[] {
   return [
     {
