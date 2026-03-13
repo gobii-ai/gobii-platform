@@ -17,6 +17,7 @@ type UseStarterPromptsParams = {
   isWorkingNow: boolean
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   promptCount?: number
+  hasPendingHumanInput: boolean
 }
 
 type UseStarterPromptsResult = {
@@ -34,6 +35,7 @@ export function useStarterPrompts({
   isWorkingNow,
   onSendMessage,
   promptCount = 3,
+  hasPendingHumanInput,
 }: UseStarterPromptsParams): UseStarterPromptsResult {
   const [starterPromptSubmitting, setStarterPromptSubmitting] = useState(false)
   const [backendPrompts, setBackendPrompts] = useState<StarterPrompt[] | null>(null)
@@ -68,7 +70,8 @@ export function useStarterPrompts({
     && hasAgentMessage
     && !initialLoading
     && !spawnIntentLoading
-    && !isWorkingNow,
+    && !isWorkingNow
+    && !hasPendingHumanInput
   )
 
   useEffect(() => {
@@ -125,6 +128,7 @@ export function useStarterPrompts({
     && !spawnIntentLoading
     && !isWorkingNow
     && onSendMessage
+    && !hasPendingHumanInput
   )
   const showStarterPromptLoading = Boolean(
     canShowStarterPrompts

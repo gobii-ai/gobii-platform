@@ -585,6 +585,7 @@ export function AgentChatLayout({
     isWorkingNow,
     onSendMessage,
     promptCount: starterPromptCount,
+    hasPendingHumanInput: pendingHumanInputRequests.length > 0,
   })
   const hasTimelineEvents = timelineRenderEvents.length > 0
   const showJumpButton = !initialLoading
@@ -965,7 +966,7 @@ export function AgentChatLayout({
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}
-                {starterPromptsLoading || starterPrompts.length > 0 ? (
+                {pendingHumanInputRequests.length === 0 && (starterPromptsLoading || starterPrompts.length > 0) ? (
                   <StarterPromptSuggestions
                     prompts={starterPrompts}
                     loading={starterPromptsLoading}
