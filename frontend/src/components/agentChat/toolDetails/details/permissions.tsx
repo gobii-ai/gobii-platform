@@ -55,15 +55,9 @@ type HumanInputOptionDetail = {
   description: string | null
 }
 
-type HumanInputRelayPayloadDetail = {
-  kind: string | null
-  toolName: string | null
-  toAddress: string | null
-  toNumber: string | null
-  subject: string | null
-  body: string | null
-  bodyText: string | null
-  message: string | null
+type HumanInputRequestDetail = {
+  question: string | null
+  options: HumanInputOptionDetail[]
 }
 
 function normalizeCredential(value: unknown): CredentialDetail | null {
@@ -90,155 +84,72 @@ function normalizeHumanInputOption(value: unknown): HumanInputOptionDetail | nul
   return { key, title, description }
 }
 
-function normalizeHumanInputRelayPayload(value: unknown): HumanInputRelayPayloadDetail | null {
+function normalizeHumanInputRequest(value: unknown): HumanInputRequestDetail | null {
   if (!isRecord(value)) return null
-  const kindValue = value['kind']
-  const toolNameValue = value['tool_name'] ?? value['toolName']
-  const toAddressValue = value['to_address'] ?? value['toAddress']
-  const toNumberValue = value['to_number'] ?? value['toNumber']
-  const subjectValue = value['subject']
-  const bodyValue = value['body']
-  const bodyTextValue = value['body_text'] ?? value['bodyText']
-  const messageValue = value['message']
-  const kind = typeof kindValue === 'string' && kindValue.trim().length ? kindValue : null
-  const toolName = typeof toolNameValue === 'string' && toolNameValue.trim().length ? toolNameValue : null
-  const toAddress = typeof toAddressValue === 'string' && toAddressValue.trim().length ? toAddressValue : null
-  const toNumber = typeof toNumberValue === 'string' && toNumberValue.trim().length ? toNumberValue : null
-  const subject = typeof subjectValue === 'string' && subjectValue.trim().length ? subjectValue : null
-  const body = typeof bodyValue === 'string' && bodyValue.trim().length ? bodyValue : null
-  const bodyText = typeof bodyTextValue === 'string' && bodyTextValue.trim().length ? bodyTextValue : null
-  const message = typeof messageValue === 'string' && messageValue.trim().length ? messageValue : null
-  return { kind, toolName, toAddress, toNumber, subject, body, bodyText, message }
+  const questionValue = value['question']
+  const question = typeof questionValue === 'string' && questionValue.trim().length ? questionValue : null
+  const optionsValue = value['options']
+  const options = Array.isArray(optionsValue)
+    ? (optionsValue.map(normalizeHumanInputOption).filter(Boolean) as HumanInputOptionDetail[])
+    : []
+  if (!question) return null
+  return { question, options }
 }
 
 export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
   const params = (entry.parameters as Record<string, unknown>) || {}
-  const question = typeof params['question'] === 'string' ? params['question'] : null
-  const requestsRaw = Array.isArray(params['requests']) ? params['requests'] : []
-  const optionsRaw = params['options']
-  const options = Array.isArray(optionsRaw)
-    ? (optionsRaw.map(normalizeHumanInputOption).filter(Boolean) as HumanInputOptionDetail[])
+  const singleQuestion = typeof params['question'] === 'string' ? params['question'] : null
+  const singleOptionsRaw = params['options']
+  const singleOptions = Array.isArray(singleOptionsRaw)
+    ? (singleOptionsRaw.map(normalizeHumanInputOption).filter(Boolean) as HumanInputOptionDetail[])
     : []
+  const batchRequestsRaw = Array.isArray(params['requests']) ? params['requests'] : []
+  const requests = batchRequestsRaw.length
+    ? (batchRequestsRaw.map(normalizeHumanInputRequest).filter(Boolean) as HumanInputRequestDetail[])
+    : singleQuestion
+      ? [{ question: singleQuestion, options: singleOptions }]
+      : []
 
   const result = parseResultObject(entry.result)
-  const statusValue = typeof result?.['status'] === 'string' ? (result['status'] as string) : null
-  const messageValue = typeof result?.['message'] === 'string' ? (result['message'] as string) : null
-  const relayMode =
-    typeof result?.['relay_mode'] === 'string'
-      ? (result['relay_mode'] as string)
-      : typeof result?.['relayMode'] === 'string'
-        ? (result['relayMode'] as string)
-        : null
   const targetChannel =
     typeof result?.['target_channel'] === 'string'
       ? (result['target_channel'] as string)
       : typeof result?.['targetChannel'] === 'string'
         ? (result['targetChannel'] as string)
         : null
-  const targetAddress =
-    typeof result?.['target_address'] === 'string'
-      ? (result['target_address'] as string)
-      : typeof result?.['targetAddress'] === 'string'
-        ? (result['targetAddress'] as string)
-        : null
-  const relayPayload = normalizeHumanInputRelayPayload(result?.['relay_payload'] ?? result?.['relayPayload'])
-  const inputMode =
-    typeof result?.['input_mode'] === 'string'
-      ? (result['input_mode'] as string)
-      : typeof result?.['inputMode'] === 'string'
-        ? (result['inputMode'] as string)
-        : options.length > 0
-          ? 'options_plus_text'
-          : 'free_text_only'
-  const selectedOptionTitle =
-    typeof result?.['selected_option_title'] === 'string'
-      ? (result['selected_option_title'] as string)
-      : typeof result?.['selectedOptionTitle'] === 'string'
-        ? (result['selectedOptionTitle'] as string)
-        : null
-  const freeText =
-    typeof result?.['free_text'] === 'string'
-      ? (result['free_text'] as string)
-      : typeof result?.['freeText'] === 'string'
-        ? (result['freeText'] as string)
-        : null
-  const rawReply =
-    typeof result?.['raw_reply_text'] === 'string'
-      ? (result['raw_reply_text'] as string)
-      : typeof result?.['rawReplyText'] === 'string'
-        ? (result['rawReplyText'] as string)
-        : null
-  const relayModeLabel =
-    relayMode === 'panel_only'
-      ? 'Visible in web panel'
-      : relayMode === 'explicit_send_required'
-        ? `Needs ${relayPayload?.toolName || 'explicit send'}`
-        : null
-  const relayPreview = relayPayload?.bodyText || relayPayload?.body || relayPayload?.message || null
 
   const infoItems: Array<{ label: string; value: ReactNode } | null> = [
-    statusValue ? { label: 'Status', value: statusValue.toUpperCase() } : null,
-    { label: 'Mode', value: inputMode === 'free_text_only' ? 'Free text only' : 'Options + free text' },
-    relayModeLabel ? { label: 'Relay', value: relayModeLabel } : null,
     targetChannel ? { label: 'Channel', value: formatChannelLabel(targetChannel) || targetChannel } : null,
-    targetAddress ? { label: 'Recipient', value: targetAddress } : null,
-    selectedOptionTitle ? { label: 'Selected option', value: selectedOptionTitle } : null,
   ]
-
-  const introText = isNonEmptyString(messageValue)
-    ? messageValue
-    : question
-      ? question
-      : requestsRaw.length > 1
-        ? `${requestsRaw.length} questions requested`
-      : entry.summary || entry.caption || null
 
   return (
     <div className="space-y-4 text-sm text-slate-600">
-      {introText ? <p className="whitespace-pre-line text-slate-700">{introText}</p> : null}
       <KeyValueList items={infoItems} />
-      {options.length > 0 ? (
-        <Section title={`Option${options.length === 1 ? '' : 's'}`}>
+      {requests.length ? (
+        <Section title={`Question${requests.length === 1 ? '' : 's'}`}>
           <ol className="space-y-3">
-            {options.map((option, index) => (
-              <li key={option.key || `human-input-option-${index}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
-                <p className="font-semibold text-slate-800">
-                  {index + 1}. {option.title || `Option ${index + 1}`}
+            {requests.map((request, requestIndex) => (
+              <li key={`human-input-request-${requestIndex}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                <p className="whitespace-pre-line font-semibold text-slate-800">
+                  {requests.length > 1 ? `${requestIndex + 1}. ` : ''}{request.question}
                 </p>
-                {option.description ? (
-                  <p className="mt-1 whitespace-pre-line text-slate-600">{option.description}</p>
+                {request.options.length ? (
+                  <ol className="mt-3 space-y-3">
+                    {request.options.map((option, optionIndex) => (
+                      <li key={option.key || `human-input-option-${requestIndex}-${optionIndex}`}>
+                        <p className="font-semibold text-slate-800">
+                          {optionIndex + 1}. {option.title || `Option ${optionIndex + 1}`}
+                        </p>
+                        {option.description ? (
+                          <p className="mt-1 whitespace-pre-line text-slate-600">{option.description}</p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
                 ) : null}
               </li>
             ))}
           </ol>
-        </Section>
-      ) : null}
-      {freeText ? (
-        <Section title="Captured free-text answer">
-          <p className="whitespace-pre-line text-slate-700">{freeText}</p>
-        </Section>
-      ) : null}
-      {rawReply && rawReply !== freeText ? (
-        <Section title="Raw reply">
-          <p className="whitespace-pre-line text-slate-700">{rawReply}</p>
-        </Section>
-      ) : null}
-      {relayPayload && !selectedOptionTitle && !freeText ? (
-        <Section title="Relay guidance">
-          <div className="space-y-3">
-            {relayPayload.subject ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Subject</p>
-                <p className="mt-1 whitespace-pre-line text-slate-700">{relayPayload.subject}</p>
-              </div>
-            ) : null}
-            {relayPreview ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Preview</p>
-                <p className="mt-1 whitespace-pre-line text-slate-700">{relayPreview}</p>
-              </div>
-            ) : null}
-          </div>
         </Section>
       ) : null}
     </div>

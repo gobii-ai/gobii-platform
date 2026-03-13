@@ -591,64 +591,15 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const result = parseResultObject(entry.result)
       const question = coerceString(parameters?.['question']) || coerceString(result?.['question'])
       const batchRequests = Array.isArray(parameters?.['requests']) ? parameters?.['requests'] as unknown[] : []
-      const status = coerceString(result?.['status'])?.toLowerCase()
-      const relayMode = coerceString(result?.['relay_mode']) || coerceString(result?.['relayMode'])
-      const targetChannel = coerceString(result?.['target_channel']) || coerceString(result?.['targetChannel'])
-      const relayPayload = parseResultObject(result?.['relay_payload'] ?? result?.['relayPayload'])
-      const relayToolName = coerceString(relayPayload?.['tool_name']) || coerceString(relayPayload?.['toolName'])
-      const inputMode = coerceString(result?.['input_mode']) || coerceString(result?.['inputMode'])
-      const optionsRaw = parameters?.['options']
-      const optionCount = Array.isArray(optionsRaw) ? optionsRaw.length : 0
-      const requestCountRaw = result?.['requests_count']
-      const requestCount = typeof requestCountRaw === 'number' ? requestCountRaw : batchRequests.length
-
-      let caption: string | null = null
-      if (status === 'answered' && requestCount <= 1) {
-        caption = question ? `Answered: ${truncate(question, 40)}` : 'Answer received'
-      } else if (requestCount > 1 && status === 'answered') {
-        caption = `Answered ${requestCount} questions`
-      } else if (relayMode === 'explicit_send_required' && requestCount > 1) {
-        caption = targetChannel
-          ? `Relay ${requestCount} questions via ${targetChannel}`
-          : `Relay ${requestCount} questions`
-      } else if (relayMode === 'explicit_send_required') {
-        caption = targetChannel
-          ? `Relay via ${targetChannel}`
-          : 'Relay required'
-      } else if (relayMode === 'panel_only' && requestCount > 1) {
-        caption = `Awaiting ${requestCount} questions`
-      } else if (relayMode === 'panel_only') {
-        caption = 'Visible in web panel'
-      } else if (requestCount > 1) {
-        caption = `Awaiting ${requestCount} questions`
-      } else if (optionCount > 0) {
-        caption = question
-          ? `Awaiting choice: ${truncate(question, 40)}`
-          : `Awaiting ${optionCount} option${optionCount === 1 ? '' : 's'}`
-      } else if ((inputMode || '').toLowerCase() === 'free_text_only') {
-        caption = question ? `Awaiting reply: ${truncate(question, 42)}` : 'Awaiting free-text reply'
-      } else if (question) {
-        caption = truncate(question, 48)
-      }
-
-      const summaryParts: string[] = []
-      if (relayMode === 'panel_only') {
-        summaryParts.push('Web panel')
-      } else if (relayMode === 'explicit_send_required' && relayToolName) {
-        summaryParts.push(`Use ${relayToolName}`)
-      }
-      if (targetChannel) {
-        summaryParts.push(targetChannel)
-      }
-      if (optionCount > 0) {
-        summaryParts.push(`${optionCount} option${optionCount === 1 ? '' : 's'}`)
-      } else if ((inputMode || '').toLowerCase() === 'free_text_only') {
-        summaryParts.push('Free text')
-      }
+      const requestQuestions = batchRequests
+        .map((request) => (request && typeof request === 'object' ? coerceString((request as Record<string, unknown>)['question']) : null))
+        .filter((value): value is string => Boolean(value))
+      const questions = requestQuestions.length ? requestQuestions : (question ? [question] : [])
+      const caption = questions[0] ? truncate(questions[0], 72) : null
 
       return {
         caption: caption ?? entry.caption ?? 'Human input request',
-        summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+        summary: null,
       }
     },
   },

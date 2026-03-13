@@ -416,8 +416,6 @@ def _build_relay_payload(
     if target.channel == CommsChannel.WEB:
         return HUMAN_INPUT_RELAY_MODE_PANEL_ONLY, {
             "kind": "panel",
-            "ui_surface": "human_input_composer_panel",
-            "message": "This request is already visible in the web chat composer panel.",
         }
 
     if target.channel == CommsChannel.EMAIL:
