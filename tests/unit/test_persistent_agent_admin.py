@@ -15,6 +15,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentMessage,
+    PersistentAgentSkill,
     PersistentAgentSystemMessage,
     PersistentAgentSystemMessageBroadcast,
 )
@@ -123,6 +124,15 @@ class PersistentAgentAdminTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_delay.assert_called_once_with(str(inactive_agent.id))
+
+    def test_persistent_agent_admin_includes_skill_inline(self):
+        model_admin = admin.site._registry[PersistentAgent]
+        inline_models = {inline.model for inline in model_admin.inlines}
+
+        self.assertIn(PersistentAgentSkill, inline_models)
+
+    def test_persistent_agent_skill_admin_is_registered(self):
+        self.assertIn(PersistentAgentSkill, admin.site._registry)
 
     def test_trigger_processing_skips_expired_agents_when_requested(self):
         expired_agent = self._create_agent(

@@ -43,7 +43,7 @@ from .models import (
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
-    PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
+    PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSkill, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
@@ -2361,6 +2361,17 @@ class PersistentAgentCommsEndpointInline(admin.TabularInline):
         return True
 
 
+class PersistentAgentSkillInline(admin.TabularInline):
+    """Inline for viewing/editing persistent agent skills."""
+
+    model = PersistentAgentSkill
+    extra = 0
+    fields = ("name", "version", "description", "tools", "updated_at")
+    readonly_fields = ("updated_at",)
+    ordering = ("name", "-version", "-updated_at")
+    show_change_link = True
+
+
 class CommsAllowlistEntryInline(admin.TabularInline):
     """Inline to manage manual allowlist entries for an agent."""
     model = CommsAllowlistEntry
@@ -2566,6 +2577,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     actions = ("soft_delete_selected_agents", "undelete_selected_agents")
     inlines = [
         PersistentAgentCommsEndpointInline,
+        PersistentAgentSkillInline,
         PersistentAgentWebhookInline,
         CommsAllowlistEntryInline,
         AgentMessageInline,
@@ -3341,6 +3353,22 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 'opts': self.model._meta,
             }
             return TemplateResponse(request, "admin/api/persistentagent/simulate_sms.html", context)
+
+@admin.register(PersistentAgentSkill)
+class PersistentAgentSkillAdmin(admin.ModelAdmin):
+    list_display = ("name", "version", "agent", "updated_at", "created_at")
+    list_filter = ("created_at", "updated_at")
+    search_fields = (
+        "name",
+        "description",
+        "instructions",
+        "agent__name",
+        "agent__user__email",
+    )
+    raw_id_fields = ("agent",)
+    ordering = ("name", "-version", "-updated_at")
+    list_select_related = ("agent",)
+
 
 @admin.register(PersistentAgentCommsEndpoint)
 class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
