@@ -7,6 +7,14 @@ import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ActivityEntryList } from './ActivityEntryList'
 import type { ToolEntryDisplay } from './tooling/types'
 
+function isMobileViewport() {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  return window.innerWidth < 768
+}
+
 type ToolClusterTimelineOverlayProps = {
   open: boolean
   overlayId: string
@@ -26,26 +34,23 @@ export function ToolClusterTimelineOverlay({
   initialOpenEntryId = null,
   onClose,
 }: ToolClusterTimelineOverlayProps) {
-  const [isMobile, setIsMobile] = useState(() => {
-    if (typeof window === 'undefined') {
-      return false
-    }
-    return window.innerWidth < 768
-  })
+  const [, setIsMobile] = useState(isMobileViewport)
   const titleId = useMemo(() => `tool-cluster-timeline-title-${slugify(overlayId)}`, [overlayId])
   const dialogId = useMemo(() => `tool-cluster-timeline-dialog-${slugify(overlayId)}`, [overlayId])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (!open || typeof window === 'undefined') {
       return undefined
     }
+
     const handleResize = () => {
-      setIsMobile(window.innerWidth < 768)
+      setIsMobile(isMobileViewport())
     }
+
     handleResize()
     window.addEventListener('resize', handleResize)
     return () => window.removeEventListener('resize', handleResize)
-  }, [])
+  }, [open])
 
   useEffect(() => {
     if (!open) {
@@ -71,13 +76,14 @@ export function ToolClusterTimelineOverlay({
     return null
   }
 
+  const shouldUseMobileSheet = isMobileViewport()
   const overlayBody = (
     <div className="tool-cluster-timeline-body">
       <ActivityEntryList entries={entries} initialOpenEntryId={initialOpenEntryId} />
     </div>
   )
 
-  if (isMobile) {
+  if (shouldUseMobileSheet) {
     return (
       <AgentChatMobileSheet
         open={open}
