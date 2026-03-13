@@ -1,8 +1,9 @@
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
+import litellm
 
 from api.agent.comms.human_input_requests import (
     create_human_input_request,
@@ -16,8 +17,12 @@ from api.agent.tools.request_human_input import (
     get_request_human_input_tool,
 )
 from api.models import (
+    AgentCollaborator,
     BrowserUseAgent,
+    CommsAllowlistEntry,
     CommsChannel,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
@@ -27,6 +32,26 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
 )
+from tests.utils.token_usage import make_completion_response
+
+
+def _make_tool_call_completion_response(payload: dict) -> MagicMock:
+    tool_call = {
+        "id": "call_1",
+        "type": "function",
+        "function": {
+            "name": "resolve_human_input_requests",
+            "arguments": json.dumps(payload),
+        },
+    }
+    message = MagicMock()
+    message.content = ""
+    setattr(message, "tool_calls", [tool_call])
+    choice = MagicMock()
+    choice.message = message
+    response = MagicMock()
+    response.choices = [choice]
+    return response
 
 
 @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
@@ -74,13 +99,33 @@ class HumanInputRequestTests(TestCase):
             raw_payload={"source": "test"},
         )
 
-    def _create_prompt_message(self, body: str = "Prompt") -> PersistentAgentMessage:
+    def _create_prompt_message(
+        self,
+        body: str = "Prompt",
+        *,
+        agent: PersistentAgent | None = None,
+        conversation: PersistentAgentConversation | None = None,
+    ) -> PersistentAgentMessage:
+        target_agent = agent or self.agent
+        target_conversation = conversation or self.conversation
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            owner_agent=target_agent,
+            channel=target_conversation.channel,
+            address=build_web_agent_address(target_agent.id)
+            if target_conversation.channel == CommsChannel.WEB
+            else ("agent@example.com" if target_conversation.channel == CommsChannel.EMAIL else "+15555550100"),
+            defaults={"is_primary": target_conversation.channel == CommsChannel.WEB},
+        )
+        user_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=target_conversation.channel,
+            address=target_conversation.address,
+        )
         return PersistentAgentMessage.objects.create(
             is_outbound=True,
-            from_endpoint=self.agent_endpoint,
-            to_endpoint=self.user_endpoint,
-            conversation=self.conversation,
-            owner_agent=self.agent,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            conversation=target_conversation,
+            owner_agent=target_agent,
             body=body,
             raw_payload={"source": "test"},
         )
@@ -90,12 +135,16 @@ class HumanInputRequestTests(TestCase):
         *,
         question: str = "Which option works best?",
         options: list[dict[str, str]] | None = None,
+        agent: PersistentAgent | None = None,
         conversation: PersistentAgentConversation | None = None,
         requested_via_channel: str = CommsChannel.WEB,
         originating_step=None,
+        recipient_channel: str = "",
+        recipient_address: str = "",
     ) -> PersistentAgentHumanInputRequest:
+        target_agent = agent or self.agent
         return PersistentAgentHumanInputRequest.objects.create(
-            agent=self.agent,
+            agent=target_agent,
             conversation=conversation or self.conversation,
             originating_step=originating_step,
             question=question,
@@ -105,9 +154,100 @@ class HumanInputRequestTests(TestCase):
                 if options
                 else PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY
             ),
+            recipient_channel=recipient_channel,
+            recipient_address=recipient_address,
             requested_via_channel=requested_via_channel,
-            requested_message=self._create_prompt_message(),
+            requested_message=self._create_prompt_message(
+                agent=target_agent,
+                conversation=conversation or self.conversation,
+            ),
         )
+
+    def _create_web_reply_from_user(
+        self,
+        *,
+        user,
+        body: str,
+        agent: PersistentAgent | None = None,
+        raw_payload: dict | None = None,
+    ) -> PersistentAgentMessage:
+        target_agent = agent or self.agent
+        user_address = build_web_user_address(user.id, target_agent.id)
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            owner_agent=target_agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(target_agent.id),
+            defaults={"is_primary": True},
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=target_agent,
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        return PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=conversation,
+            owner_agent=target_agent,
+            body=body,
+            raw_payload=raw_payload or {"source": "test"},
+        )
+
+    def _create_org_agent(self) -> tuple[Organization, PersistentAgent]:
+        org = Organization.objects.create(
+            name="Human Input Org",
+            slug="human-input-org",
+            plan="free",
+            created_by=self.user,
+        )
+        billing = org.billing
+        billing.purchased_seats = 3
+        billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        org_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Org Browser Agent")
+        org_agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=org,
+            name="Org Human Input Agent",
+            charter="Collect internal human input.",
+            browser_use_agent=org_browser_agent,
+        )
+        owner_address = build_web_user_address(self.user.id, org_agent.id)
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=org_agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(org_agent.id),
+            is_primary=True,
+        )
+        owner_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=owner_address,
+        )
+        owner_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=org_agent,
+            channel=CommsChannel.WEB,
+            address=owner_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=owner_endpoint,
+            to_endpoint=agent_endpoint,
+            conversation=owner_conversation,
+            owner_agent=org_agent,
+            body="Org owner here",
+            raw_payload={"source": "test"},
+        )
+        return org, org_agent
 
     def _create_cross_channel_message(
         self,
@@ -150,6 +290,7 @@ class HumanInputRequestTests(TestCase):
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
+        self.assertIn("recipient", function["parameters"]["properties"])
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["required"],
             ["question"],
@@ -166,11 +307,15 @@ class HumanInputRequestTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertNotIn("reference_code", result)
+        self.assertEqual(result["request_ids"], [result["request_id"]])
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
         self.assertEqual(
             request_obj.input_mode,
             PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
         )
+        self.assertEqual(request_obj.conversation_id, self.conversation.id)
+        self.assertEqual(request_obj.recipient_channel, "")
+        self.assertEqual(request_obj.recipient_address, "")
         self.assertIsNone(request_obj.requested_message_id)
 
     def test_execute_request_human_input_rejects_more_than_six_options(self):
@@ -206,7 +351,7 @@ class HumanInputRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["requests_count"], 2)
+        self.assertEqual(result["request_id"], result["request_ids"][0])
         self.assertEqual(len(result["request_ids"]), 2)
         self.assertEqual(
             PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(),
@@ -217,6 +362,95 @@ class HumanInputRequestTests(TestCase):
                 agent=self.agent,
                 requested_message__isnull=False,
             ).exists()
+        )
+
+    @patch("api.agent.comms.human_input_requests.execute_send_email")
+    def test_execute_request_human_input_targets_explicit_recipient(self, mock_send_email):
+        collaborator = get_user_model().objects.create_user(
+            username="recipient-collaborator",
+            email="recipient-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        mock_send_email.return_value = {"status": "ok"}
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "Who should review this?",
+                "recipient": {
+                    "channel": CommsChannel.EMAIL,
+                    "address": collaborator.email.upper(),
+                },
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+        self.assertEqual(request_obj.conversation.channel, CommsChannel.EMAIL)
+        self.assertEqual(request_obj.conversation.address, collaborator.email)
+        self.assertEqual(request_obj.recipient_channel, CommsChannel.EMAIL)
+        self.assertEqual(request_obj.recipient_address, collaborator.email)
+        self.assertNotEqual(request_obj.conversation_id, self.conversation.id)
+
+    @patch("api.agent.comms.human_input_requests.execute_send_email")
+    def test_execute_request_human_input_batch_applies_top_level_recipient(self, mock_send_email):
+        mock_send_email.return_value = {"status": "ok"}
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "recipient": {
+                    "channel": CommsChannel.EMAIL,
+                    "address": self.user.email,
+                },
+                "requests": [
+                    {"question": "What should happen first?"},
+                    {"question": "What should happen second?"},
+                ],
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        request_objects = list(
+            PersistentAgentHumanInputRequest.objects.filter(id__in=result["request_ids"]).order_by("created_at")
+        )
+        self.assertEqual(len(request_objects), 2)
+        self.assertTrue(all(request_obj.conversation.channel == CommsChannel.EMAIL for request_obj in request_objects))
+        self.assertTrue(all(request_obj.conversation.address == self.user.email for request_obj in request_objects))
+        self.assertTrue(all(request_obj.recipient_channel == CommsChannel.EMAIL for request_obj in request_objects))
+        self.assertTrue(all(request_obj.recipient_address == self.user.email for request_obj in request_objects))
+
+    @patch("api.agent.comms.human_input_requests.execute_send_email")
+    def test_batch_request_returns_partial_success_details_when_later_send_fails(self, mock_send_email):
+        mock_send_email.side_effect = [
+            {"status": "ok"},
+            {"status": "error", "message": "Mailbox is unavailable."},
+        ]
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "recipient": {
+                    "channel": CommsChannel.EMAIL,
+                    "address": self.user.email,
+                },
+                "requests": [
+                    {"question": "What should happen first?"},
+                    {"question": "What should happen second?"},
+                ],
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertTrue(result["partial_success"])
+        self.assertEqual(len(result["request_ids"]), 1)
+        self.assertEqual(result["request_id"], result["request_ids"][0])
+        self.assertIn("Sent 1 of 2 human input requests", result["message"])
+        self.assertIn("Mailbox is unavailable.", result["message"])
+        self.assertEqual(
+            PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(),
+            1,
         )
 
     @patch("api.agent.comms.human_input_requests.execute_send_email")
@@ -458,6 +692,548 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.PENDING)
         self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
 
+    def test_omitted_recipient_request_can_be_resolved_by_collaborator(self):
+        collaborator = get_user_model().objects.create_user(
+            username="human-input-collaborator",
+            email="human-input-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        result = create_human_input_request(
+            self.agent,
+            question="Who should join the kickoff?",
+            raw_options=[],
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+
+        reply = self._create_web_reply_from_user(
+            user=collaborator,
+            body="Invite the design lead.",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, request_obj.id)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.free_text, "Invite the design lead.")
+        self.assertEqual(request_obj.recipient_channel, "")
+
+    def test_omitted_recipient_request_can_be_resolved_by_active_org_member(self):
+        org, org_agent = self._create_org_agent()
+        member = get_user_model().objects.create_user(
+            username="org-member-human-input",
+            email="org-member-human-input@example.com",
+            password="password123",
+        )
+        OrganizationMembership.objects.create(
+            org=org,
+            user=member,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        result = create_human_input_request(
+            org_agent,
+            question="Who should review the budget?",
+            raw_options=[],
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+
+        reply = self._create_web_reply_from_user(
+            user=member,
+            body="Have finance review it.",
+            agent=org_agent,
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, request_obj.id)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.free_text, "Have finance review it.")
+
+    def test_omitted_recipient_request_cannot_be_resolved_by_allowlisted_external_contact(self):
+        self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+        self.agent.save(update_fields=["whitelist_policy"])
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="external-contact@example.com",
+        )
+        result = create_human_input_request(
+            self.agent,
+            question="What should we tell the customer?",
+            raw_options=[],
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body="Tell them we'll follow up tomorrow.",
+            sender_address="external-contact@example.com",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    def test_direct_request_id_fails_for_unauthorized_explicit_recipient(self):
+        collaborator = get_user_model().objects.create_user(
+            username="explicit-recipient-collaborator",
+            email="explicit-recipient-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        result = create_human_input_request(
+            self.agent,
+            question="Should we approve this launch?",
+            raw_options=[{"title": "Yes", "description": "Approve it."}],
+            recipient={
+                "channel": CommsChannel.WEB,
+                "address": build_web_user_address(collaborator.id, self.agent.id),
+            },
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="Yes",
+            raw_payload={
+                "source": "test",
+                "human_input_request_id": str(request_obj.id),
+                "human_input_selected_option_key": "yes",
+                "human_input_selected_option_title": "Yes",
+            },
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    def test_reference_code_fails_for_unauthorized_explicit_recipient(self):
+        collaborator = get_user_model().objects.create_user(
+            username="explicit-ref-collaborator",
+            email="explicit-ref-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        result = create_human_input_request(
+            self.agent,
+            question="Should we approve this launch?",
+            raw_options=[{"title": "Yes", "description": "Approve it."}],
+            recipient={
+                "channel": CommsChannel.WEB,
+                "address": build_web_user_address(collaborator.id, self.agent.id),
+            },
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body=f"{request_obj.reference_code} Yes",
+            raw_payload={"source": "test"},
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_llm_resolves_non_latest_same_conversation_request(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
+        older = self._create_request(question="When should we ship the launch email?")
+        newer = self._create_request(question="Who should approve the homepage changes?")
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = _make_tool_call_completion_response(
+            {
+                "matches": [
+                {
+                    "request_id": str(older.id),
+                    "confidence": 0.93,
+                    "answer_span": "Send it on Tuesday morning.",
+                }
+                ]
+            }
+        )
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="Send it on Tuesday morning.",
+            raw_payload={"source": "test"},
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, older.id)
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(older.free_text, "Send it on Tuesday morning.")
+        self.assertEqual(
+            older.resolution_source,
+            PersistentAgentHumanInputRequest.ResolutionSource.LLM_EXTRACTION,
+        )
+        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
+        _, kwargs = mock_run_completion.call_args
+        self.assertIn("tools", kwargs)
+        self.assertEqual(
+            kwargs.get("tool_choice"),
+            {"type": "function", "function": {"name": "resolve_human_input_requests"}},
+        )
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_llm_resolves_multiple_requests_with_mixed_option_and_text(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
+        first_request = self._create_request(
+            question="What's our next foodie destination?",
+            options=[
+                {"key": "sushi", "title": "Sushi", "description": "Fresh fish."},
+                {"key": "ramen", "title": "Ramen", "description": "Hot noodles."},
+            ],
+        )
+        second_request = self._create_request(question="How should we travel to our next spot?")
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = _make_tool_call_completion_response(
+            {
+                "matches": [
+                {
+                    "request_id": str(first_request.id),
+                    "confidence": 0.98,
+                    "answer_span": "Ramen",
+                },
+                {
+                    "request_id": str(second_request.id),
+                    "confidence": 0.91,
+                    "answer_span": "Take the metro",
+                }
+                ]
+            }
+        )
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="For food, let's do Ramen. For travel, take the metro.",
+            raw_payload={"source": "test"},
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, first_request.id)
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(first_request.selected_option_key, "ramen")
+        self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(second_request.free_text, "Take the metro")
+        self.assertEqual(
+            first_request.resolution_source,
+            PersistentAgentHumanInputRequest.ResolutionSource.LLM_EXTRACTION,
+        )
+        self.assertEqual(
+            second_request.resolution_source,
+            PersistentAgentHumanInputRequest.ResolutionSource.LLM_EXTRACTION,
+        )
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_llm_only_applies_matches_meeting_confidence_threshold(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
+        high_confidence_request = self._create_request(question="What should we prioritize first?")
+        low_confidence_request = self._create_request(question="What should we postpone?")
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = _make_tool_call_completion_response(
+            {
+                "matches": [
+                {
+                    "request_id": str(high_confidence_request.id),
+                    "confidence": 0.88,
+                    "answer_span": "Prioritize onboarding.",
+                },
+                {
+                    "request_id": str(low_confidence_request.id),
+                    "confidence": 0.61,
+                    "answer_span": "Postpone pricing updates.",
+                }
+                ]
+            }
+        )
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="Prioritize onboarding. Postpone pricing updates.",
+            raw_payload={"source": "test"},
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, high_confidence_request.id)
+        high_confidence_request.refresh_from_db()
+        low_confidence_request.refresh_from_db()
+        self.assertEqual(high_confidence_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(low_confidence_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
+    def test_direct_request_id_bypasses_llm(self, _mock_run_completion):
+        direct_request = self._create_request(
+            question="Should we ship this now?",
+            options=[{"key": "yes", "title": "Yes", "description": "Ship it now."}],
+        )
+        other_request = self._create_request(question="What should happen next?")
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="Yes",
+            raw_payload={
+                "source": "test",
+                "human_input_request_id": str(direct_request.id),
+                "human_input_selected_option_key": "yes",
+                "human_input_selected_option_title": "Yes",
+            },
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, direct_request.id)
+        direct_request.refresh_from_db()
+        other_request.refresh_from_db()
+        self.assertEqual(direct_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(
+            direct_request.resolution_source,
+            PersistentAgentHumanInputRequest.ResolutionSource.DIRECT,
+        )
+        self.assertEqual(other_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
+    def test_reference_code_bypasses_llm(self, _mock_run_completion):
+        older = self._create_request(
+            question="Should we deploy this week?",
+            options=[{"key": "yes", "title": "Yes", "description": "Deploy this week."}],
+        )
+        newer = self._create_request(question="Who should handle QA?")
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body=f"{older.reference_code} Yes",
+            raw_payload={"source": "test"},
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, older.id)
+        older.refresh_from_db()
+        newer.refresh_from_db()
+        self.assertEqual(older.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(newer.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_conflicting_llm_matches_resolve_nothing(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
+        first_request = self._create_request(question="What should we do first?")
+        second_request = self._create_request(question="What should we do second?")
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+        mock_run_completion.return_value = _make_tool_call_completion_response(
+            {
+                "matches": [
+                {
+                    "request_id": str(first_request.id),
+                    "confidence": 0.94,
+                    "answer_span": "Wait until Friday.",
+                },
+                {
+                    "request_id": str(second_request.id),
+                    "confidence": 0.91,
+                    "answer_span": "Wait until Friday.",
+                }
+                ]
+            }
+        )
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="Wait until Friday.",
+            raw_payload={"source": "test"},
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+        self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
+    @patch("api.agent.comms.human_input_requests.run_completion")
+    def test_llm_failures_fall_back_without_accidental_resolution(
+        self,
+        mock_run_completion,
+        mock_get_summarization_llm_config,
+    ):
+        first_request = self._create_request(question="What should we do first?")
+        second_request = self._create_request(question="What should we do second?")
+        mock_get_summarization_llm_config.return_value = ("openai", "openai/gpt-4.1", {})
+
+        failure_cases = [
+            litellm.Timeout("timeout", model="mock-model", llm_provider="mock"),
+            make_completion_response(content="not-json"),
+            RuntimeError("boom"),
+        ]
+        for index, failure_case in enumerate(failure_cases, start=1):
+            with self.subTest(case=index):
+                mock_run_completion.reset_mock()
+                if isinstance(failure_case, Exception):
+                    mock_run_completion.side_effect = failure_case
+                else:
+                    mock_run_completion.side_effect = None
+                    mock_run_completion.return_value = failure_case
+
+                reply = PersistentAgentMessage.objects.create(
+                    is_outbound=False,
+                    from_endpoint=self.user_endpoint,
+                    to_endpoint=self.agent_endpoint,
+                    conversation=self.conversation,
+                    owner_agent=self.agent,
+                    body=f"Fallback case {index}",
+                    raw_payload={"source": "test"},
+                )
+
+                resolved = resolve_human_input_request_for_message(reply)
+
+                self.assertIsNone(resolved)
+                first_request.refresh_from_db()
+                second_request.refresh_from_db()
+                self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+                self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
+    def test_wrong_sender_cross_channel_does_not_trigger_llm_matching(self, _mock_run_completion):
+        request_obj = self._create_request(question="What's our next foodie destination?")
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body="Sushi",
+            sender_address="other-person@example.com",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
+    def test_llm_path_rejects_unauthorized_sender_for_explicit_recipient_request(self, _mock_run_completion):
+        collaborator = get_user_model().objects.create_user(
+            username="llm-explicit-collaborator",
+            email="llm-explicit-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        result = create_human_input_request(
+            self.agent,
+            question="Which reviewer should approve this?",
+            raw_options=[],
+            recipient={
+                "channel": CommsChannel.WEB,
+                "address": build_web_user_address(collaborator.id, self.agent.id),
+            },
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+        stranger = get_user_model().objects.create_user(
+            username="llm-explicit-stranger",
+            email="llm-explicit-stranger@example.com",
+            password="password123",
+        )
+        reply = self._create_web_reply_from_user(
+            user=stranger,
+            body="I can review it.",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
+    @override_settings(HUMAN_INPUT_LLM_MATCHING_ENABLED=True)
+    @patch("api.agent.comms.human_input_requests.run_completion", side_effect=AssertionError("LLM should not run"))
+    def test_llm_path_rejects_unauthorized_sender_for_internal_only_request(self, _mock_run_completion):
+        self.agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+        self.agent.save(update_fields=["whitelist_policy"])
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="llm-external@example.com",
+        )
+        result = create_human_input_request(
+            self.agent,
+            question="What should we tell the customer?",
+            raw_options=[],
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+        reply = self._create_cross_channel_message(
+            channel=CommsChannel.EMAIL,
+            body="Tell them we need a day.",
+            sender_address="llm-external@example.com",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.PENDING)
+
     def test_email_reply_resolves_single_web_request_when_only_batch_is_open(self):
         request_obj = self._create_request(
             question="What's our next foodie destination?",
@@ -603,6 +1379,50 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(first_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(second_request.free_text, "Take the metro")
+
+    def test_batch_reply_from_collaborator_respects_internal_only_authorization(self):
+        from api.models import PersistentAgentStep
+
+        collaborator = get_user_model().objects.create_user(
+            username="batch-collaborator",
+            email="batch-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collaborator batch",
+            credits_cost=0,
+        )
+        batch_result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {"question": "What ships first?"},
+                    {"question": "When should we launch?"},
+                ],
+            },
+        )
+        request_objects = list(
+            PersistentAgentHumanInputRequest.objects.filter(id__in=batch_result["request_ids"]).order_by("created_at")
+        )
+        for request_obj in request_objects:
+            request_obj.originating_step = step
+            request_obj.save(update_fields=["originating_step", "updated_at"])
+
+        reply = self._create_web_reply_from_user(
+            user=collaborator,
+            body="1. Ship onboarding\n2. Next Monday",
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertEqual(resolved.id, request_objects[0].id)
+        for request_obj in request_objects:
+            request_obj.refresh_from_db()
+            self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
+        self.assertEqual(request_objects[0].free_text, "Ship onboarding")
+        self.assertEqual(request_objects[1].free_text, "Next Monday")
 
     def test_prompt_context_block_includes_recent_response(self):
         request_obj = self._create_request(question="What is the status?")

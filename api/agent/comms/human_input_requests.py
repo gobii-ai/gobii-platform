@@ -1,30 +1,33 @@
 """Helpers for persistent-agent human input requests."""
 
+import logging
 from dataclasses import dataclass
 from email.utils import parseaddr
 import json
 import re
 from typing import Any
 
-from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.html import escape
 from django.utils.text import slugify
 
+from api.agent.core.llm_config import get_summarization_llm_config
+from api.agent.core.llm_utils import run_completion
+from api.agent.core.token_usage import log_agent_completion
 from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
 from api.models import (
     CommsChannel,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentConversationParticipant,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     build_web_agent_address,
-    parse_web_user_address,
-    UserPhoneNumber,
 )
 
 HUMAN_INPUT_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
@@ -32,6 +35,10 @@ OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\
 REFERENCE_CODE_RE = re.compile(r"\b(HIR-[A-Z0-9]{6})\b", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
 MAX_OPTION_COUNT = 6
+HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
+HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD = 0.8
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -39,6 +46,12 @@ class HumanInputTarget:
     channel: str
     address: str
     conversation: PersistentAgentConversation
+
+
+@dataclass(slots=True)
+class HumanInputRecipient:
+    channel: str
+    address: str
 
 
 @dataclass(slots=True)
@@ -59,6 +72,13 @@ class ResolvedHumanInputResponse:
     free_text: str
     resolution_source: str
     raw_reply_text: str
+
+
+@dataclass(slots=True)
+class LLMHumanInputMatch:
+    request_id: str
+    confidence: float
+    answer_span: str
 
 
 def _coerce_string(value: Any) -> str:
@@ -143,6 +163,101 @@ def _latest_inbound_human_message(agent: PersistentAgent) -> PersistentAgentMess
         .order_by("-timestamp")
         .first()
     )
+
+
+def _normalize_human_input_recipient(
+    raw_recipient: HumanInputRecipient | dict[str, Any] | None,
+) -> tuple[HumanInputRecipient | None, dict[str, Any] | None]:
+    if raw_recipient is None:
+        return None, None
+
+    if isinstance(raw_recipient, HumanInputRecipient):
+        channel = raw_recipient.channel
+        raw_address = raw_recipient.address
+    elif isinstance(raw_recipient, dict):
+        channel = _coerce_string(raw_recipient.get("channel")).lower()
+        raw_address = _coerce_string(raw_recipient.get("address"))
+    else:
+        return None, {
+            "status": "error",
+            "message": "Recipient must be an object with channel and address.",
+        }
+
+    if channel not in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
+        return None, {
+            "status": "error",
+            "message": "Recipient channel must be one of: web, email, sms.",
+        }
+
+    normalized_address = PersistentAgentCommsEndpoint.normalize_address(channel, raw_address)
+    if not normalized_address:
+        return None, {
+            "status": "error",
+            "message": "Recipient address is required when recipient is provided.",
+        }
+
+    return HumanInputRecipient(channel=channel, address=normalized_address), None
+
+
+def _get_or_create_human_input_conversation(
+    agent: PersistentAgent,
+    *,
+    channel: str,
+    address: str,
+) -> PersistentAgentConversation:
+    conversation = (
+        PersistentAgentConversation.objects.filter(
+            owner_agent=agent,
+            channel=channel,
+            address=address,
+        )
+        .order_by("id")
+        .first()
+    )
+    if conversation is not None:
+        return conversation
+
+    unowned_conversation = (
+        PersistentAgentConversation.objects.filter(
+            owner_agent__isnull=True,
+            channel=channel,
+            address=address,
+        )
+        .order_by("id")
+        .first()
+    )
+    if unowned_conversation is not None:
+        unowned_conversation.owner_agent = agent
+        unowned_conversation.save(update_fields=["owner_agent"])
+        return unowned_conversation
+
+    return PersistentAgentConversation.objects.create(
+        owner_agent=agent,
+        channel=channel,
+        address=address,
+    )
+
+
+def _resolve_explicit_human_input_target(
+    agent: PersistentAgent,
+    recipient: HumanInputRecipient,
+) -> tuple[HumanInputTarget | None, dict[str, Any] | None]:
+    if not agent.is_recipient_whitelisted(recipient.channel, recipient.address):
+        return None, {
+            "status": "error",
+            "message": f"Recipient {recipient.address} is not eligible for {recipient.channel} delivery.",
+        }
+
+    conversation = _get_or_create_human_input_conversation(
+        agent,
+        channel=recipient.channel,
+        address=recipient.address,
+    )
+    return HumanInputTarget(
+        channel=recipient.channel,
+        address=recipient.address,
+        conversation=conversation,
+    ), None
 
 
 def resolve_human_input_target(agent: PersistentAgent) -> HumanInputTarget | None:
@@ -267,6 +382,7 @@ def _create_human_input_request_for_target(
     *,
     question: str,
     raw_options: list[dict[str, Any]] | None,
+    recipient: HumanInputRecipient | None = None,
 ) -> dict[str, Any]:
     options = build_option_payloads(raw_options)
     input_mode = (
@@ -280,6 +396,8 @@ def _create_human_input_request_for_target(
         question=question,
         options_json=options,
         input_mode=input_mode,
+        recipient_channel=recipient.channel if recipient else "",
+        recipient_address=recipient.address if recipient else "",
         requested_via_channel=target.channel,
     )
 
@@ -300,9 +418,7 @@ def _create_human_input_request_for_target(
         "status": "ok",
         "message": f"Human input request sent via {target.channel}.",
         "request_id": str(request_obj.id),
-        "input_mode": request_obj.input_mode,
-        "options_count": len(options),
-        "active_conversation_channel": target.channel,
+        "request_ids": [str(request_obj.id)],
         "auto_sleep_ok": True,
     }
 
@@ -312,19 +428,30 @@ def create_human_input_request(
     *,
     question: str,
     raw_options: list[dict[str, Any]] | None,
+    recipient: HumanInputRecipient | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    target = resolve_human_input_target(agent)
-    if target is None:
-        return {
-            "status": "error",
-            "message": "No eligible human conversation is available to request input from.",
-        }
+    normalized_recipient, error = _normalize_human_input_recipient(recipient)
+    if error:
+        return error
+
+    if normalized_recipient is not None:
+        target, target_error = _resolve_explicit_human_input_target(agent, normalized_recipient)
+        if target_error:
+            return target_error
+    else:
+        target = resolve_human_input_target(agent)
+        if target is None:
+            return {
+                "status": "error",
+                "message": "No eligible human conversation is available to request input from.",
+            }
 
     return _create_human_input_request_for_target(
         agent,
         target,
         question=question,
         raw_options=raw_options,
+        recipient=normalized_recipient,
     )
 
 
@@ -332,13 +459,23 @@ def create_human_input_requests_batch(
     agent: PersistentAgent,
     *,
     requests: list[dict[str, Any]],
+    recipient: HumanInputRecipient | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    target = resolve_human_input_target(agent)
-    if target is None:
-        return {
-            "status": "error",
-            "message": "No eligible human conversation is available to request input from.",
-        }
+    normalized_recipient, error = _normalize_human_input_recipient(recipient)
+    if error:
+        return error
+
+    if normalized_recipient is not None:
+        target, target_error = _resolve_explicit_human_input_target(agent, normalized_recipient)
+        if target_error:
+            return target_error
+    else:
+        target = resolve_human_input_target(agent)
+        if target is None:
+            return {
+                "status": "error",
+                "message": "No eligible human conversation is available to request input from.",
+            }
 
     created_requests: list[dict[str, Any]] = []
     for request in requests:
@@ -347,19 +484,34 @@ def create_human_input_requests_batch(
             target,
             question=_coerce_string(request.get("question")),
             raw_options=request.get("options"),
+            recipient=normalized_recipient,
         )
         status = _coerce_string(result.get("status")).lower()
         if status not in HUMAN_INPUT_SUCCESS_STATUSES:
+            if created_requests:
+                created_request_ids = [
+                    result["request_id"] for result in created_requests if result.get("request_id")
+                ]
+                failure_message = _coerce_string(result.get("message")) or "A later request failed to send."
+                return {
+                    "status": "error",
+                    "message": (
+                        f"Sent {len(created_request_ids)} of {len(requests)} human input requests via "
+                        f"{target.channel} before a later request failed. {failure_message}"
+                    ),
+                    "request_id": created_request_ids[0],
+                    "request_ids": created_request_ids,
+                    "partial_success": True,
+                    "auto_sleep_ok": False,
+                }
             return result
         created_requests.append(result)
 
     return {
         "status": "ok",
         "message": f"{len(created_requests)} human input requests sent via {target.channel}.",
+        "request_id": created_requests[0]["request_id"] if created_requests else None,
         "request_ids": [result["request_id"] for result in created_requests if result.get("request_id")],
-        "requests": created_requests,
-        "requests_count": len(created_requests),
-        "active_conversation_channel": target.channel,
         "auto_sleep_ok": True,
     }
 
@@ -580,73 +732,105 @@ def _get_pending_batch_for_request(
     return _order_requests_for_batch(list(queryset))
 
 
-def _get_unambiguous_pending_batch_for_agent(agent_id) -> list[PersistentAgentHumanInputRequest]:
-    request_objects = _order_requests_for_batch(
-        list(
-            PersistentAgentHumanInputRequest.objects.filter(
-                agent_id=agent_id,
-                status=PersistentAgentHumanInputRequest.Status.PENDING,
-            )
-        )
+def _request_has_explicit_recipient(
+    request_obj: PersistentAgentHumanInputRequest,
+) -> bool:
+    return bool(
+        _coerce_string(request_obj.recipient_channel)
+        and _coerce_string(request_obj.recipient_address)
     )
+
+def _get_message_sender_address(message: PersistentAgentMessage) -> str:
+    raw_address = ""
+    if message.from_endpoint_id:
+        raw_address = message.from_endpoint.address
+    elif message.conversation_id:
+        raw_address = message.conversation.address
+    return PersistentAgentCommsEndpoint.normalize_address(
+        message.conversation.channel,
+        raw_address,
+    ) or ""
+
+
+def _sender_is_authorized_for_request(
+    request_obj: PersistentAgentHumanInputRequest,
+    message: PersistentAgentMessage,
+) -> bool:
+    sender_address = _get_message_sender_address(message)
+    if not sender_address:
+        return False
+
+    if _request_has_explicit_recipient(request_obj):
+        return (
+            message.conversation.channel == request_obj.recipient_channel
+            and sender_address == request_obj.recipient_address
+        )
+
+    return request_obj.agent.is_internal_responder_identity(
+        message.conversation.channel,
+        sender_address,
+    )
+
+
+def _get_authorized_pending_requests_for_message(
+    message: PersistentAgentMessage,
+) -> list[PersistentAgentHumanInputRequest]:
+    if not message.owner_agent_id:
+        return []
+
+    request_objects = (
+        PersistentAgentHumanInputRequest.objects.select_related("agent", "conversation")
+        .filter(
+            agent_id=message.owner_agent_id,
+            status=PersistentAgentHumanInputRequest.Status.PENDING,
+        )
+        .order_by("-created_at")
+    )
+
+    authorized_requests: list[PersistentAgentHumanInputRequest] = []
+    for request_obj in request_objects:
+        if _sender_is_authorized_for_request(request_obj, message):
+            authorized_requests.append(request_obj)
+        if len(authorized_requests) >= HUMAN_INPUT_LLM_MAX_CANDIDATES:
+            break
+    return authorized_requests
+
+
+def _get_authorized_pending_requests_for_conversation(
+    message: PersistentAgentMessage,
+) -> list[PersistentAgentHumanInputRequest]:
+    if not message.conversation_id:
+        return []
+
+    request_objects = (
+        PersistentAgentHumanInputRequest.objects.select_related("agent", "conversation")
+        .filter(
+            conversation_id=message.conversation_id,
+            status=PersistentAgentHumanInputRequest.Status.PENDING,
+        )
+        .order_by("-created_at")
+    )
+    return [
+        request_obj
+        for request_obj in request_objects
+        if _sender_is_authorized_for_request(request_obj, message)
+    ]
+
+
+def _get_unambiguous_authorized_batch_for_message(
+    message: PersistentAgentMessage,
+) -> list[PersistentAgentHumanInputRequest]:
+    request_objects = _get_authorized_pending_requests_for_message(message)
     if not request_objects:
         return []
 
+    ordered_requests = _order_requests_for_batch(request_objects)
     batch_members: dict[str, list[PersistentAgentHumanInputRequest]] = {}
-    for request_obj in request_objects:
+    for request_obj in ordered_requests:
         batch_members.setdefault(_batch_key_for_request(request_obj), []).append(request_obj)
     if len(batch_members) != 1:
         return []
     return next(iter(batch_members.values()))
-
-
-def _sender_matches_request_identity(
-    request_obj: PersistentAgentHumanInputRequest,
-    message: PersistentAgentMessage,
-) -> bool:
-    if request_obj.conversation.channel != CommsChannel.WEB or not message.from_endpoint_id:
-        return False
-
-    user_id, agent_id = parse_web_user_address(request_obj.conversation.address)
-    if not user_id or agent_id != str(request_obj.agent_id):
-        return False
-
-    sender_address = PersistentAgentCommsEndpoint.normalize_address(
-        message.conversation.channel,
-        message.from_endpoint.address,
-    )
-    if not sender_address:
-        return False
-
-    user_model = get_user_model()
-    try:
-        matched_user = user_model.objects.only("id", "email").get(id=user_id)
-    except user_model.DoesNotExist:
-        return False
-
-    if message.conversation.channel == CommsChannel.EMAIL:
-        sender_email = (parseaddr(sender_address)[1] or sender_address).lower()
-        return sender_email == (matched_user.email or "").strip().lower()
-
-    if message.conversation.channel == CommsChannel.SMS:
-        return UserPhoneNumber.objects.filter(
-            user_id=matched_user.id,
-            phone_number__iexact=sender_address,
-            is_verified=True,
-        ).exists()
-
-    return False
-
-
-def _get_unambiguous_cross_channel_batch_for_message(
-    message: PersistentAgentMessage,
-) -> list[PersistentAgentHumanInputRequest]:
-    request_objects = _get_unambiguous_pending_batch_for_agent(message.owner_agent_id)
-    if not request_objects:
-        return []
-    if not all(_sender_matches_request_identity(request_obj, message) for request_obj in request_objects):
-        return []
-    return request_objects
 
 
 def _extract_numbered_batch_answers(text: str) -> list[tuple[int, str]]:
@@ -676,6 +860,357 @@ def _extract_numbered_batch_answers(text: str) -> list[tuple[int, str]]:
 
 def _split_paragraph_batch_answers(text: str) -> list[str]:
     return [chunk.strip() for chunk in re.split(r"\n\s*\n+", text or "") if chunk.strip()]
+
+
+def _get_sender_scoped_pending_requests(
+    message: PersistentAgentMessage,
+) -> list[PersistentAgentHumanInputRequest]:
+    return _get_authorized_pending_requests_for_message(message)
+
+
+def _get_single_batch_requests(
+    requests: list[PersistentAgentHumanInputRequest],
+) -> list[PersistentAgentHumanInputRequest]:
+    if not requests:
+        return []
+    ordered_requests = _order_requests_for_batch(requests)
+    batch_keys = {_batch_key_for_request(request_obj) for request_obj in ordered_requests}
+    if len(batch_keys) != 1:
+        return []
+    return ordered_requests
+
+
+def _coerce_match_confidence(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_human_input_match_tool_def() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "resolve_human_input_requests",
+            "description": "Return the pending request matches extracted from the inbound human reply.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "matches": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "request_id": {"type": "string"},
+                                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                                "answer_span": {"type": "string"},
+                            },
+                            "required": ["request_id", "confidence", "answer_span"],
+                        },
+                    }
+                },
+                "required": ["matches"],
+            },
+        },
+    }
+
+
+def _extract_human_input_match_tool_payload(response: Any) -> dict[str, Any] | None:
+    choices = getattr(response, "choices", None)
+    if not choices:
+        return None
+    message = getattr(choices[0], "message", None)
+    if message is None and isinstance(choices[0], dict):
+        message = choices[0].get("message")
+    if message is None:
+        return None
+
+    raw_tool_calls = getattr(message, "tool_calls", None)
+    if raw_tool_calls is None and isinstance(message, dict):
+        raw_tool_calls = message.get("tool_calls")
+    tool_calls = raw_tool_calls or []
+    if not tool_calls:
+        raw_function_call = getattr(message, "function_call", None)
+        if raw_function_call is None and isinstance(message, dict):
+            raw_function_call = message.get("function_call")
+        if raw_function_call:
+            tool_calls = [
+                {
+                    "function": raw_function_call,
+                }
+            ]
+
+    for tool_call in tool_calls:
+        function_block = getattr(tool_call, "function", None) or (
+            tool_call.get("function") if isinstance(tool_call, dict) else None
+        )
+        if not function_block:
+            continue
+        function_name = getattr(function_block, "name", None) or (
+            function_block.get("name") if isinstance(function_block, dict) else None
+        )
+        if function_name != "resolve_human_input_requests":
+            continue
+        raw_args = getattr(function_block, "arguments", None) or (
+            function_block.get("arguments") if isinstance(function_block, dict) else None
+        ) or "{}"
+        if isinstance(raw_args, dict):
+            return raw_args
+        return json.loads(raw_args)
+    return None
+
+
+def _normalize_answer_span_key(value: str) -> str:
+    return re.sub(r"\s+", " ", (value or "").strip().lower())
+
+
+def _body_contains_explicit_answer(body_text: str, snippet: str) -> bool:
+    normalized_body = _normalize_answer_span_key(body_text)
+    normalized_snippet = _normalize_answer_span_key(snippet)
+    if not normalized_body or not normalized_snippet:
+        return False
+    return normalized_snippet in normalized_body
+
+
+def _deserialize_llm_human_input_matches(payload: dict[str, Any]) -> list[LLMHumanInputMatch]:
+    if isinstance(payload, list):
+        raw_matches = payload
+    elif isinstance(payload, dict):
+        raw_matches = payload.get("matches")
+    else:
+        raw_matches = None
+
+    if not isinstance(raw_matches, list):
+        raise ValueError("Human input matcher did not return a matches array.")
+
+    normalized_matches: list[LLMHumanInputMatch] = []
+    for raw_match in raw_matches:
+        if not isinstance(raw_match, dict):
+            continue
+        normalized_matches.append(
+            LLMHumanInputMatch(
+                request_id=_coerce_string(raw_match.get("request_id")),
+                confidence=_coerce_match_confidence(raw_match.get("confidence")),
+                answer_span=_coerce_string(raw_match.get("answer_span")),
+            )
+        )
+    return normalized_matches
+
+
+def _filter_conflicting_llm_matches(
+    matches: list[LLMHumanInputMatch],
+) -> list[LLMHumanInputMatch]:
+    kept_by_request_id: dict[str, LLMHumanInputMatch] = {}
+    discarded_request_ids: set[str] = set()
+
+    grouped_matches: dict[str, list[LLMHumanInputMatch]] = {}
+    for match in matches:
+        if not match.request_id or match.confidence < HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD:
+            continue
+        grouped_matches.setdefault(match.request_id, []).append(match)
+
+    for request_id, request_matches in grouped_matches.items():
+        request_matches.sort(key=lambda item: item.confidence, reverse=True)
+        top_confidence = request_matches[0].confidence
+        top_matches = [
+            item for item in request_matches if abs(item.confidence - top_confidence) < 1e-9
+        ]
+        if len(top_matches) > 1:
+            discarded_request_ids.add(request_id)
+            continue
+        kept_by_request_id[request_id] = request_matches[0]
+
+    surviving_matches = [
+        match for request_id, match in kept_by_request_id.items() if request_id not in discarded_request_ids
+    ]
+
+    conflicted_request_ids: set[str] = set()
+    for index, left_match in enumerate(surviving_matches):
+        left_span = _normalize_answer_span_key(left_match.answer_span)
+        if not left_span:
+            continue
+        for right_match in surviving_matches[index + 1:]:
+            right_span = _normalize_answer_span_key(right_match.answer_span)
+            if not right_span:
+                continue
+            if (
+                left_span == right_span
+                or left_span in right_span
+                or right_span in left_span
+            ):
+                conflicted_request_ids.add(left_match.request_id)
+                conflicted_request_ids.add(right_match.request_id)
+
+    return [
+        match for match in surviving_matches if match.request_id not in conflicted_request_ids
+    ]
+
+
+def _build_human_input_matching_payload(
+    request_objects: list[PersistentAgentHumanInputRequest],
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for request_obj in request_objects:
+        batch_requests = _get_pending_batch_for_request(request_obj)
+        batch_position = 1
+        for index, batch_request in enumerate(batch_requests, start=1):
+            if batch_request.id == request_obj.id:
+                batch_position = index
+                break
+        payloads.append(
+            {
+                "request_id": str(request_obj.id),
+                "question": request_obj.question,
+                "input_mode": request_obj.input_mode,
+                "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
+                "created_at": request_obj.created_at.isoformat() if request_obj.created_at else None,
+                "reference_code": request_obj.reference_code,
+                "batch_position": batch_position,
+                "batch_size": len(batch_requests),
+            }
+        )
+    return payloads
+
+
+def _build_human_input_matching_messages(
+    *,
+    body_text: str,
+    request_objects: list[PersistentAgentHumanInputRequest],
+) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You map an inbound human reply to pending human-input requests. "
+                "Always respond by calling the resolve_human_input_requests tool. "
+                "Only match answers explicitly present in the inbound message. "
+                "If unsure, omit the match. Never invent request IDs, option keys, or answer text."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Inbound message:\n"
+                f"{body_text}\n\n"
+                "Pending requests:\n"
+                f"{json.dumps(_build_human_input_matching_payload(request_objects), indent=2)}"
+            ),
+        },
+    ]
+
+
+def _resolve_requests_with_llm(
+    message: PersistentAgentMessage,
+    request_objects: list[PersistentAgentHumanInputRequest],
+    *,
+    body_text: str,
+) -> list[ResolvedHumanInputResponse]:
+    if not settings.HUMAN_INPUT_LLM_MATCHING_ENABLED:
+        return []
+    if len(request_objects) < 2:
+        return []
+    if not body_text:
+        return []
+
+    try:
+        provider, model, params = get_summarization_llm_config(agent=message.owner_agent)
+        completion_params = dict(params)
+        completion_params.setdefault("temperature", 0)
+        tools = [_build_human_input_match_tool_def()]
+        run_kwargs: dict[str, Any] = {}
+        if completion_params.get("supports_tool_choice", True):
+            run_kwargs["tool_choice"] = {
+                "type": "function",
+                "function": {"name": "resolve_human_input_requests"},
+            }
+        response = run_completion(
+            model=model,
+            messages=_build_human_input_matching_messages(
+                body_text=body_text,
+                request_objects=request_objects,
+            ),
+            params=completion_params,
+            tools=tools,
+            drop_params=True,
+            **run_kwargs,
+        )
+        log_agent_completion(
+            message.owner_agent,
+            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+            response=response,
+            model=model,
+            provider=provider,
+        )
+        tool_payload = _extract_human_input_match_tool_payload(response)
+        if not tool_payload:
+            logger.info(
+                "Human input LLM matcher returned no resolution tool call for message %s",
+                getattr(message, "id", None),
+            )
+            return []
+        raw_matches = _deserialize_llm_human_input_matches(tool_payload)
+    except Exception as exc:
+        logger.exception(
+            "Human input LLM matching failed closed for message %s",
+            getattr(message, "id", None),
+        )
+        return []
+
+    filtered_matches = _filter_conflicting_llm_matches(raw_matches)
+    requests_by_id = {str(request_obj.id): request_obj for request_obj in request_objects}
+    resolved_requests: list[ResolvedHumanInputResponse] = []
+
+    for match in filtered_matches:
+        request_obj = requests_by_id.get(match.request_id)
+        if request_obj is None:
+            continue
+
+        if not _body_contains_explicit_answer(body_text, match.answer_span):
+            continue
+
+        resolved = _resolve_request_response(
+            request_obj,
+            body_text=match.answer_span,
+        )
+        resolved.resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.LLM_EXTRACTION
+        resolved.raw_reply_text = match.answer_span
+        resolved_requests.append(resolved)
+
+    return resolved_requests
+
+
+def _resolve_requests_with_safe_fallback(
+    request_objects: list[PersistentAgentHumanInputRequest],
+    *,
+    body_text: str,
+    reference_code: str | None = None,
+    allow_single_fallback: bool,
+) -> list[ResolvedHumanInputResponse]:
+    if not request_objects:
+        return []
+
+    if len(request_objects) == 1 and allow_single_fallback:
+        return [
+            _resolve_request_response(
+                request_objects[0],
+                body_text=body_text,
+                reference_code=reference_code,
+            )
+        ]
+
+    single_batch = _get_single_batch_requests(request_objects)
+    if not single_batch:
+        return []
+
+    batch_resolutions = _resolve_batch_requests_from_body(
+        single_batch,
+        body_text=body_text,
+        reference_code=reference_code,
+    )
+    if batch_resolutions:
+        return batch_resolutions
+
+    return []
 
 
 def _resolve_request_response(
@@ -799,36 +1334,40 @@ def _resolve_batch_requests_from_body(
     return []
 
 
-def _resolve_request_candidates(
+def _get_authorized_pending_request_by_id(
     message: PersistentAgentMessage,
-    direct_request_id: str | None,
-    reference_code: str | None,
-) -> list[PersistentAgentHumanInputRequest]:
-    if direct_request_id:
-        direct = PersistentAgentHumanInputRequest.objects.filter(
-            id=direct_request_id,
+    request_id: str,
+) -> PersistentAgentHumanInputRequest | None:
+    request_obj = (
+        PersistentAgentHumanInputRequest.objects.select_related("agent", "conversation")
+        .filter(
+            id=request_id,
             agent_id=message.owner_agent_id,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
-        ).first()
-        return [direct] if direct else []
+        )
+        .first()
+    )
+    if request_obj is None or not _sender_is_authorized_for_request(request_obj, message):
+        return None
+    return request_obj
 
-    if reference_code:
-        referenced = PersistentAgentHumanInputRequest.objects.filter(
+
+def _get_authorized_pending_request_by_reference(
+    message: PersistentAgentMessage,
+    reference_code: str,
+) -> PersistentAgentHumanInputRequest | None:
+    request_obj = (
+        PersistentAgentHumanInputRequest.objects.select_related("agent", "conversation")
+        .filter(
             agent_id=message.owner_agent_id,
             reference_code=reference_code,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
-        ).first()
-        return [referenced] if referenced else []
-
-    if not message.conversation_id:
-        return []
-
-    return list(
-        PersistentAgentHumanInputRequest.objects.filter(
-            conversation_id=message.conversation_id,
-            status=PersistentAgentHumanInputRequest.Status.PENDING,
-        ).order_by("-created_at")
+        )
+        .first()
     )
+    if request_obj is None or not _sender_is_authorized_for_request(request_obj, message):
+        return None
+    return request_obj
 
 
 def resolve_human_input_request_for_message(
@@ -843,16 +1382,15 @@ def resolve_human_input_request_for_message(
     direct_option_title = _coerce_string(raw_payload.get("human_input_selected_option_title"))
     body_text = _coerce_string(message.body)
     reference_code = _extract_reference_code(body_text)
-
-    candidates = _resolve_request_candidates(message, direct_request_id, reference_code)
     resolved_requests: list[ResolvedHumanInputResponse] = []
 
     if direct_request_id:
-        if not candidates:
+        direct_request = _get_authorized_pending_request_by_id(message, direct_request_id)
+        if direct_request is None:
             return None
         resolved_requests = [
             _resolve_request_response(
-                candidates[0],
+                direct_request,
                 body_text=body_text,
                 direct_option_key=direct_option_key,
                 direct_option_title=direct_option_title,
@@ -861,10 +1399,14 @@ def resolve_human_input_request_for_message(
             )
         ]
     elif reference_code:
-        if not candidates:
+        referenced_request = _get_authorized_pending_request_by_reference(message, reference_code)
+        if referenced_request is None:
             return None
-        referenced_request = candidates[0]
-        referenced_batch = _get_pending_batch_for_request(referenced_request)
+        referenced_batch = [
+            request_obj
+            for request_obj in _get_pending_batch_for_request(referenced_request)
+            if _sender_is_authorized_for_request(request_obj, message)
+        ]
         batch_resolutions = _resolve_batch_requests_from_body(
             referenced_batch,
             body_text=body_text,
@@ -880,36 +1422,72 @@ def resolve_human_input_request_for_message(
                     reference_code=reference_code,
                 )
             ]
-    elif candidates:
-        resolved_requests = [
-            _resolve_request_response(
-                candidates[0],
+    elif settings.HUMAN_INPUT_LLM_MATCHING_ENABLED:
+        sender_scoped_candidates = _get_sender_scoped_pending_requests(message)
+        resolved_requests = _resolve_requests_with_llm(
+            message,
+            sender_scoped_candidates,
+            body_text=body_text,
+        )
+        if not resolved_requests:
+            same_conversation_candidates = _get_authorized_pending_requests_for_conversation(message)
+            resolved_requests = _resolve_requests_with_safe_fallback(
+                same_conversation_candidates,
                 body_text=body_text,
                 reference_code=reference_code,
+                allow_single_fallback=True,
             )
-        ]
-    elif (
-        message.conversation_id
-        and message.conversation.channel in {CommsChannel.EMAIL, CommsChannel.SMS}
-    ):
-        unambiguous_batch = _get_unambiguous_cross_channel_batch_for_message(message)
-        if not unambiguous_batch:
-            return None
-        batch_resolutions = _resolve_batch_requests_from_body(
-            unambiguous_batch,
+        if not resolved_requests:
+            resolved_requests = _resolve_requests_with_safe_fallback(
+                sender_scoped_candidates,
+                body_text=body_text,
+                reference_code=reference_code,
+                allow_single_fallback=True,
+            )
+    else:
+        same_conversation_candidates = _get_authorized_pending_requests_for_conversation(message)
+        batch_resolutions = _resolve_requests_with_safe_fallback(
+            same_conversation_candidates,
             body_text=body_text,
             reference_code=reference_code,
+            allow_single_fallback=False,
         )
         if batch_resolutions:
             resolved_requests = batch_resolutions
-        else:
+        elif same_conversation_candidates:
             resolved_requests = [
                 _resolve_request_response(
-                    unambiguous_batch[0],
+                    same_conversation_candidates[0],
                     body_text=body_text,
                     reference_code=reference_code,
                 )
             ]
+        else:
+            authorized_candidates = _get_authorized_pending_requests_for_message(message)
+            resolved_requests = _resolve_requests_with_safe_fallback(
+                authorized_candidates,
+                body_text=body_text,
+                reference_code=reference_code,
+                allow_single_fallback=True,
+            )
+            if not resolved_requests and message.conversation.channel in {CommsChannel.EMAIL, CommsChannel.SMS}:
+                unambiguous_batch = _get_unambiguous_authorized_batch_for_message(message)
+                if unambiguous_batch:
+                    batch_resolutions = _resolve_batch_requests_from_body(
+                        unambiguous_batch,
+                        body_text=body_text,
+                        reference_code=reference_code,
+                    )
+                    if batch_resolutions:
+                        resolved_requests = batch_resolutions
+                    else:
+                        resolved_requests = [
+                            _resolve_request_response(
+                                unambiguous_batch[0],
+                                body_text=body_text,
+                                reference_code=reference_code,
+                            )
+                        ]
 
     if not resolved_requests:
         return None

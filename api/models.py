@@ -5957,6 +5957,66 @@ class PersistentAgent(models.Model):
 
         return self._is_allowed_default(channel_val, addr)
 
+    def is_internal_responder_identity(self, channel: CommsChannel | str, address: str) -> bool:
+        """Return whether the identity belongs to an internal agent principal."""
+        channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
+        addr_raw = (address or "").strip()
+
+        if channel_val == CommsChannel.WEB:
+            user_id, agent_id = parse_web_user_address(addr_raw)
+            if agent_id != str(self.id) or user_id is None:
+                return False
+            if user_id == self.user_id:
+                return True
+            if self.organization_id and OrganizationMembership.objects.filter(
+                org=self.organization,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                user_id=user_id,
+            ).exists():
+                return True
+            return AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists()
+
+        if channel_val == CommsChannel.EMAIL:
+            normalized_email = (parseaddr(addr_raw)[1] or addr_raw).lower()
+            owner_email = (self.user.email or "").strip().lower()
+            if normalized_email == owner_email:
+                return True
+            if self.organization_id and OrganizationMembership.objects.filter(
+                org=self.organization,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                user__email__iexact=normalized_email,
+            ).exists():
+                return True
+            return AgentCollaborator.objects.filter(
+                agent=self,
+                user__email__iexact=normalized_email,
+            ).exists()
+
+        if channel_val == CommsChannel.SMS:
+            normalized_phone = PersistentAgentCommsEndpoint.normalize_address(channel_val, addr_raw)
+            if not normalized_phone:
+                return False
+            if UserPhoneNumber.objects.filter(
+                user=self.user,
+                phone_number__iexact=normalized_phone,
+                is_verified=True,
+            ).exists():
+                return True
+            if self.organization_id and UserPhoneNumber.objects.filter(
+                user__organizationmembership__org=self.organization,
+                user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+                phone_number__iexact=normalized_phone,
+                is_verified=True,
+            ).exists():
+                return True
+            return UserPhoneNumber.objects.filter(
+                user__agent_collaborations__agent=self,
+                phone_number__iexact=normalized_phone,
+                is_verified=True,
+            ).exists()
+
+        return False
+
     def _legacy_owner_only(self, channel_val: str, address: str) -> bool:
         """Original behavior: only owner's email or verified phone allowed."""
         addr_raw = (address or "").strip()
@@ -9292,6 +9352,7 @@ class PersistentAgentHumanInputRequest(models.Model):
         OPTION_TITLE = "option_title", "Option title"
         FREE_TEXT = "free_text", "Free text"
         DIRECT = "direct", "Direct"
+        LLM_EXTRACTION = "llm_extraction", "LLM extraction"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     agent = models.ForeignKey(
@@ -9317,6 +9378,17 @@ class PersistentAgentHumanInputRequest(models.Model):
         max_length=32,
         choices=InputMode.choices,
         default=InputMode.FREE_TEXT_ONLY,
+    )
+    recipient_channel = models.CharField(
+        max_length=32,
+        choices=CommsChannel.choices,
+        blank=True,
+        help_text="Explicit recipient channel when the request targets a specific identity.",
+    )
+    recipient_address = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Normalized explicit recipient address when set.",
     )
     reference_code = models.CharField(max_length=16, unique=True, editable=False)
     status = models.CharField(

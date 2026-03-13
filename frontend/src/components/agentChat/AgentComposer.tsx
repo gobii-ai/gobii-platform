@@ -486,15 +486,16 @@ export const AgentComposer = memo(function AgentComposer({
   const activeHumanInputRequest =
     pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
     ?? null
+  const activeHumanInputDraftText = activeHumanInputRequestId
+    ? (draftHumanInputResponses[activeHumanInputRequestId]?.freeText ?? '')
+    : ''
 
   useEffect(() => {
-    if (!activeHumanInputRequest) {
+    if (!activeHumanInputRequestId) {
       return
     }
-    const draft = draftHumanInputResponses[activeHumanInputRequest.id]
-    const nextBody = draft?.freeText ?? ''
-    setBody((current) => (current === nextBody ? current : nextBody))
-  }, [activeHumanInputRequest, draftHumanInputResponses])
+    setBody((current) => (current === activeHumanInputDraftText ? current : activeHumanInputDraftText))
+  }, [activeHumanInputDraftText, activeHumanInputRequestId])
 
   const composerPlaceholder = disabledReason || (activeHumanInputRequest
     ? `Other option · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`

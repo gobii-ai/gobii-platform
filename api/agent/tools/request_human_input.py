@@ -7,12 +7,27 @@ from api.agent.comms.human_input_requests import (
     create_human_input_request,
     create_human_input_requests_batch,
 )
-from api.models import PersistentAgent
+from api.models import CommsChannel, PersistentAgent
 
 
 def get_request_human_input_tool() -> dict[str, Any]:
     """Return the human input request tool definition."""
 
+    recipient_schema = {
+        "type": "object",
+        "properties": {
+            "channel": {
+                "type": "string",
+                "enum": [CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS],
+                "description": "Channel for the explicitly targeted recipient.",
+            },
+            "address": {
+                "type": "string",
+                "description": "Recipient address for the selected channel.",
+            },
+        },
+        "required": ["channel", "address"],
+    }
     option_schema = {
         "type": "object",
         "properties": {
@@ -77,6 +92,14 @@ def get_request_human_input_tool() -> dict[str, Any]:
                             "When provided, omit the top-level question/options."
                         ),
                     },
+                    "recipient": {
+                        "description": (
+                            "Optional explicit recipient target. When omitted, the request is sent "
+                            "to the current implicit conversation target and can only be answered "
+                            "by the agent owner, active org members, or collaborators."
+                        ),
+                        **recipient_schema,
+                    },
                 },
             },
         },
@@ -120,8 +143,40 @@ def _normalize_request_options(raw_options: Any) -> tuple[list[dict[str, Any]] |
     return options, None
 
 
+def _normalize_recipient(raw_recipient: Any) -> tuple[dict[str, str] | None, dict[str, Any] | None]:
+    if raw_recipient is None:
+        return None, None
+    if not isinstance(raw_recipient, dict):
+        return None, {
+            "status": "error",
+            "message": "Invalid parameter: recipient must be an object when provided.",
+        }
+
+    channel = str(raw_recipient.get("channel") or "").strip().lower()
+    address = str(raw_recipient.get("address") or "").strip()
+    if channel not in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
+        return None, {
+            "status": "error",
+            "message": "Recipient channel must be one of: web, email, sms.",
+        }
+    if not address:
+        return None, {
+            "status": "error",
+            "message": "Recipient address is required when recipient is provided.",
+        }
+
+    return {
+        "channel": channel,
+        "address": address,
+    }, None
+
+
 def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
     """Create and send one or more human input requests."""
+
+    recipient, recipient_error = _normalize_recipient(params.get("recipient"))
+    if recipient_error:
+        return recipient_error
 
     raw_requests = params.get("requests")
     if raw_requests is not None:
@@ -154,7 +209,7 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
                 }
             )
 
-        return create_human_input_requests_batch(agent, requests=requests)
+        return create_human_input_requests_batch(agent, requests=requests, recipient=recipient)
 
     question = str(params.get("question") or "").strip()
     if not question:
@@ -171,4 +226,5 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
         agent,
         question=question,
         raw_options=options or [],
+        recipient=recipient,
     )
