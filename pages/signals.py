@@ -1814,12 +1814,6 @@ def handle_invoice_payment_failed(event, **kwargs):
                     payload.get("id"),
                 )
 
-        properties = Analytics.with_org_properties(
-            properties,
-            organization=owner if owner_type == "organization" else None,
-            organization_flag=owner_type == "organization",
-        )
-
         try:
             if owner_type == "user" and owner:
                 track_user_id = getattr(owner, "id", None)
