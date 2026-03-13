@@ -73,4 +73,19 @@ capi(
 )
 ```
 
+## Billing failure events
+
+`invoice.payment_failed` can emit ad-only marketing events for user-owned subscriptions.
+These are currently routed to `meta`, `reddit`, and `tiktok`, but not GA.
+
+- `TrialConversionPaymentFailed`: retryable failed trial-conversion charge.
+- `TrialConversionPaymentFailedFinal`: terminal failed trial-conversion charge.
+- `SubscriptionPaymentFailed`: retryable non-trial subscription payment failure.
+
+Notes:
+
+- `TrialConversionPaymentFailedFinal` is the current "we've given up" event.
+- These events use the Stripe webhook event id as `event_id` when available so repeated failures for the same invoice do not dedupe together downstream.
+- Failure payloads carry `value` and `currency` for provider-friendly reporting, plus `attempt_number`, `final_attempt`, `subscription_id`, and `stripe.invoice_id`.
+
 The helper will merge this context with any derived request metadata, hash PII, and send the normalized payload to all enabled providers. OpenTelemetry spans (`marketing_event`) are emitted automatically for observability.***
