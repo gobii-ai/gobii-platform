@@ -92,6 +92,10 @@ UTM_MAPPING = {
 }
 
 CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid')
+TRIAL_CONVERSION_PAYMENT_FAILED_EVENT = "TrialConversionPaymentFailed"
+TRIAL_CONVERSION_PAYMENT_FAILED_FINAL_EVENT = "TrialConversionPaymentFailedFinal"
+SUBSCRIPTION_PAYMENT_FAILED_EVENT = "SubscriptionPaymentFailed"
+AD_CAPI_PROVIDER_TARGETS = ["meta", "reddit", "tiktok"]
 
 
 def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
@@ -1676,56 +1680,57 @@ def handle_invoice_payment_failed(event, **kwargs):
         )
         properties.setdefault("trial_conversion_invoice", False)
 
-        try:
-            subscription_obj = getattr(invoice, "subscription", None) if invoice else None
-            subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
-            if not isinstance(subscription_data, Mapping):
-                subscription_data = {}
+        subscription_obj = getattr(invoice, "subscription", None) if invoice else None
+        subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
+        if not isinstance(subscription_data, Mapping):
+            subscription_data = {}
 
-            billing_reason = payload.get("billing_reason")
-            line_period_start_dt = _line_period_start(lines)
-            trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
-            if trial_end_dt is None:
-                trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_obj, "trial_end"))
+        billing_reason = payload.get("billing_reason")
+        line_period_start_dt = _line_period_start(lines)
+        trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
+        if trial_end_dt is None:
+            trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_obj, "trial_end"))
+        subscription_current_period_start_dt = _coerce_datetime(
+            _get_stripe_data_value(subscription_data, "current_period_start")
+        )
+        if subscription_current_period_start_dt is None:
             subscription_current_period_start_dt = _coerce_datetime(
-                _get_stripe_data_value(subscription_data, "current_period_start")
+                _get_stripe_data_value(subscription_obj, "current_period_start")
             )
-            if subscription_current_period_start_dt is None:
-                subscription_current_period_start_dt = _coerce_datetime(
-                    _get_stripe_data_value(subscription_obj, "current_period_start")
-                )
 
-            attempt_count_raw = payload.get("attempt_count")
+        attempt_count_raw = payload.get("attempt_count")
+        try:
+            attempt_count = int(attempt_count_raw) if attempt_count_raw is not None else None
+        except (TypeError, ValueError):
+            attempt_count = None
+        final_attempt = _is_final_payment_attempt(payload)
+
+        subscription_status = _get_stripe_data_value(subscription_data, "status")
+        if subscription_status is None:
+            subscription_status = _get_stripe_data_value(subscription_obj, "status")
+        if isinstance(subscription_status, str):
+            subscription_status = subscription_status.strip().lower()
+        else:
+            subscription_status = None
+
+        trial_conversion_invoice = is_trial_conversion_invoice(
+            billing_reason=billing_reason,
+            trial_end_dt=trial_end_dt,
+            line_period_start_dt=line_period_start_dt,
+            subscription_current_period_start_dt=subscription_current_period_start_dt,
+            subscription_status=subscription_status,
+        )
+        properties["trial_conversion_invoice"] = trial_conversion_invoice
+
+        if owner and owner_type and is_trial_conversion_failure(
+            billing_reason=billing_reason,
+            trial_end_dt=trial_end_dt,
+            line_period_start_dt=line_period_start_dt,
+            subscription_current_period_start_dt=subscription_current_period_start_dt,
+            subscription_status=subscription_status,
+            attempt_count=attempt_count,
+        ):
             try:
-                attempt_count = int(attempt_count_raw) if attempt_count_raw is not None else None
-            except (TypeError, ValueError):
-                attempt_count = None
-
-            subscription_status = _get_stripe_data_value(subscription_data, "status")
-            if subscription_status is None:
-                subscription_status = _get_stripe_data_value(subscription_obj, "status")
-            if isinstance(subscription_status, str):
-                subscription_status = subscription_status.strip().lower()
-            else:
-                subscription_status = None
-
-            trial_conversion_invoice = is_trial_conversion_invoice(
-                billing_reason=billing_reason,
-                trial_end_dt=trial_end_dt,
-                line_period_start_dt=line_period_start_dt,
-                subscription_current_period_start_dt=subscription_current_period_start_dt,
-                subscription_status=subscription_status,
-            )
-            properties["trial_conversion_invoice"] = trial_conversion_invoice
-
-            if owner and owner_type and is_trial_conversion_failure(
-                billing_reason=billing_reason,
-                trial_end_dt=trial_end_dt,
-                line_period_start_dt=line_period_start_dt,
-                subscription_current_period_start_dt=subscription_current_period_start_dt,
-                subscription_status=subscription_status,
-                attempt_count=attempt_count,
-            ):
                 emit_billing_lifecycle_event(
                     TRIAL_CONVERSION_FAILED,
                     sender=handle_invoice_payment_failed,
@@ -1738,18 +1743,76 @@ def handle_invoice_payment_failed(event, **kwargs):
                         stripe_event_id=str(getattr(event, "id", "")) or None,
                         subscription_status=subscription_status,
                         attempt_count=attempt_count,
-                        final_attempt=_is_final_payment_attempt(payload),
+                        final_attempt=final_attempt,
                         occurred_at=timezone.now(),
                         metadata=dict(properties),
                     ),
                 )
-        except Exception:
-            # Intentionally broad: lifecycle emission is best-effort and must never
-            # interrupt the core Stripe webhook path for invoice payment failures.
-            logger.exception(
-                "Failed to emit trial conversion failure lifecycle event for invoice %s",
-                payload.get("id"),
-            )
+            except Exception:
+                logger.exception(
+                    "Failed to emit trial conversion failure lifecycle event for invoice %s",
+                    payload.get("id"),
+                )
+
+        marketing_event_name = None
+        if owner_type == "user" and owner and subscription_id:
+            if trial_conversion_invoice:
+                if final_attempt:
+                    marketing_event_name = TRIAL_CONVERSION_PAYMENT_FAILED_FINAL_EVENT
+                else:
+                    marketing_event_name = TRIAL_CONVERSION_PAYMENT_FAILED_EVENT
+            elif not final_attempt:
+                marketing_event_name = SUBSCRIPTION_PAYMENT_FAILED_EVENT
+
+        if marketing_event_name:
+            try:
+                failed_amount = properties.get("amount_due")
+                marketing_properties = {
+                    "plan": plan_value,
+                    "subscription_id": subscription_id,
+                    "stripe.invoice_id": payload.get("id"),
+                    "attempt_number": attempt_count,
+                    "final_attempt": final_attempt,
+                    "trial_conversion_invoice": trial_conversion_invoice,
+                    "value": failed_amount,
+                    "amount_due": failed_amount,
+                    "currency": properties.get("currency"),
+                }
+                marketing_event_id = str(getattr(event, "id", "") or "").strip()
+                if not marketing_event_id:
+                    invoice_id = str(payload.get("id", "") or "").strip()
+                    attempt_suffix = str(attempt_count) if attempt_count is not None else ""
+                    marketing_event_id = ":".join(part for part in (invoice_id, attempt_suffix) if part)
+                if marketing_event_id:
+                    marketing_properties["event_id"] = marketing_event_id
+                marketing_properties = {
+                    key: value
+                    for key, value in marketing_properties.items()
+                    if value not in (None, "")
+                }
+
+                metadata = _coerce_metadata_dict(subscription_data.get("metadata"))
+                if not metadata:
+                    metadata = _coerce_metadata_dict(payload.get("metadata"))
+
+                marketing_context = _build_marketing_context_from_user(owner)
+                checkout_source_url = metadata.get("checkout_source_url")
+                if checkout_source_url:
+                    marketing_context["page"] = {"url": checkout_source_url}
+
+                capi(
+                    user=owner,
+                    event_name=marketing_event_name,
+                    properties=marketing_properties,
+                    request=None,
+                    context=marketing_context,
+                    provider_targets=AD_CAPI_PROVIDER_TARGETS,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to emit payment failure marketing event for invoice %s",
+                    payload.get("id"),
+                )
 
         try:
             if owner_type == "user" and owner:

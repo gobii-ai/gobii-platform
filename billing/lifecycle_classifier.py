@@ -126,6 +126,25 @@ def is_trial_conversion_invoice(
     if normalized_status is not None and normalized_status not in FUTURE_DELINQUENT_STATUSES:
         return False
 
+    return is_trial_conversion_charge(
+        billing_reason=billing_reason,
+        trial_end_dt=trial_end_dt,
+        line_period_start_dt=line_period_start_dt,
+        subscription_current_period_start_dt=subscription_current_period_start_dt,
+    )
+
+
+def is_trial_conversion_charge(
+    *,
+    billing_reason: str | None,
+    trial_end_dt: datetime | None,
+    line_period_start_dt: datetime | None,
+    subscription_current_period_start_dt: datetime | None,
+) -> bool:
+    if billing_reason != "subscription_cycle":
+        return False
+    if trial_end_dt is None:
+        return False
     if line_period_start_dt and trial_end_dt.date() == line_period_start_dt.date():
         return True
     if (
