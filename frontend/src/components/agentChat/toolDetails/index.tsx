@@ -13,7 +13,12 @@ import { RedditPostsDetail } from './details/reddit'
 import { YahooFinanceBusinessDetail } from './details/finance'
 import { CrunchbaseCompanyDetail } from './details/crunchbase'
 import { AmazonProductDetail, AmazonProductReviewsDetail, AmazonProductSearchDetail } from './details/commerce'
-import { RequestContactPermissionDetail, SecureCredentialsDetail, SpawnAgentDetail } from './details/permissions'
+import {
+  RequestContactPermissionDetail,
+  RequestHumanInputDetail,
+  SecureCredentialsDetail,
+  SpawnAgentDetail,
+} from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
 import { ChartDetail } from './details/chart'
@@ -34,6 +39,7 @@ export {
   FileExportDetail,
   BrowserTaskDetail,
   RequestContactPermissionDetail,
+  RequestHumanInputDetail,
   SpawnAgentDetail,
   SecureCredentialsDetail,
   AnalysisToolDetail,
@@ -71,6 +77,7 @@ export const TOOL_DETAIL_COMPONENTS = {
   fileExport: FileExportDetail,
   browserTask: BrowserTaskDetail,
   contactPermission: RequestContactPermissionDetail,
+  humanInputRequest: RequestHumanInputDetail,
   spawnAgent: SpawnAgentDetail,
   secureCredentials: SecureCredentialsDetail,
   analysis: AnalysisToolDetail,

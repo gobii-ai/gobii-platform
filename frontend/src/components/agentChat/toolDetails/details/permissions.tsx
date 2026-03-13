@@ -49,6 +49,17 @@ type CredentialDetail = {
   description: string | null
 }
 
+type HumanInputOptionDetail = {
+  key: string | null
+  title: string | null
+  description: string | null
+}
+
+type HumanInputRequestDetail = {
+  question: string | null
+  options: HumanInputOptionDetail[]
+}
+
 function normalizeCredential(value: unknown): CredentialDetail | null {
   if (!isRecord(value)) return null
   const nameValue = value['name']
@@ -60,6 +71,89 @@ function normalizeCredential(value: unknown): CredentialDetail | null {
   const domainPattern = typeof domainValue === 'string' && domainValue.trim().length ? domainValue : null
   const description = typeof descriptionValue === 'string' && descriptionValue.trim().length ? descriptionValue : null
   return { name, key, domainPattern, description }
+}
+
+function normalizeHumanInputOption(value: unknown): HumanInputOptionDetail | null {
+  if (!isRecord(value)) return null
+  const keyValue = value['key'] ?? value['option_key'] ?? value['optionKey']
+  const titleValue = value['title']
+  const descriptionValue = value['description']
+  const key = typeof keyValue === 'string' && keyValue.trim().length ? keyValue : null
+  const title = typeof titleValue === 'string' && titleValue.trim().length ? titleValue : null
+  const description = typeof descriptionValue === 'string' && descriptionValue.trim().length ? descriptionValue : null
+  return { key, title, description }
+}
+
+function normalizeHumanInputRequest(value: unknown): HumanInputRequestDetail | null {
+  if (!isRecord(value)) return null
+  const questionValue = value['question']
+  const question = typeof questionValue === 'string' && questionValue.trim().length ? questionValue : null
+  const optionsValue = value['options']
+  const options = Array.isArray(optionsValue)
+    ? (optionsValue.map(normalizeHumanInputOption).filter(Boolean) as HumanInputOptionDetail[])
+    : []
+  if (!question) return null
+  return { question, options }
+}
+
+export function RequestHumanInputDetail({ entry }: ToolDetailProps) {
+  const params = (entry.parameters as Record<string, unknown>) || {}
+  const singleQuestion = typeof params['question'] === 'string' ? params['question'] : null
+  const singleOptionsRaw = params['options']
+  const singleOptions = Array.isArray(singleOptionsRaw)
+    ? (singleOptionsRaw.map(normalizeHumanInputOption).filter(Boolean) as HumanInputOptionDetail[])
+    : []
+  const batchRequestsRaw = Array.isArray(params['requests']) ? params['requests'] : []
+  const requests = batchRequestsRaw.length
+    ? (batchRequestsRaw.map(normalizeHumanInputRequest).filter(Boolean) as HumanInputRequestDetail[])
+    : singleQuestion
+      ? [{ question: singleQuestion, options: singleOptions }]
+      : []
+
+  const result = parseResultObject(entry.result)
+  const targetChannel =
+    typeof result?.['target_channel'] === 'string'
+      ? (result['target_channel'] as string)
+      : typeof result?.['targetChannel'] === 'string'
+        ? (result['targetChannel'] as string)
+        : null
+
+  const infoItems: Array<{ label: string; value: ReactNode } | null> = [
+    targetChannel ? { label: 'Channel', value: formatChannelLabel(targetChannel) || targetChannel } : null,
+  ]
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      <KeyValueList items={infoItems} />
+      {requests.length ? (
+        <Section title={`Question${requests.length === 1 ? '' : 's'}`}>
+          <ol className="space-y-3">
+            {requests.map((request, requestIndex) => (
+              <li key={`human-input-request-${requestIndex}`} className="rounded-lg border border-slate-200/80 bg-white/90 p-3 shadow-sm">
+                <p className="whitespace-pre-line font-semibold text-slate-800">
+                  {requests.length > 1 ? `${requestIndex + 1}. ` : ''}{request.question}
+                </p>
+                {request.options.length ? (
+                  <ol className="mt-3 space-y-3">
+                    {request.options.map((option, optionIndex) => (
+                      <li key={option.key || `human-input-option-${requestIndex}-${optionIndex}`}>
+                        <p className="font-semibold text-slate-800">
+                          {optionIndex + 1}. {option.title || `Option ${optionIndex + 1}`}
+                        </p>
+                        {option.description ? (
+                          <p className="mt-1 whitespace-pre-line text-slate-600">{option.description}</p>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </Section>
+      ) : null}
+    </div>
+  )
 }
 
 export function RequestContactPermissionDetail({ entry }: ToolDetailProps) {

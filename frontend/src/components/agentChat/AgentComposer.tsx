@@ -4,7 +4,8 @@ import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
-import type { ProcessingWebTask } from '../../types/agentChat'
+import { HumanInputComposerPanel } from './HumanInputComposerPanel'
+import type { PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useLocalStorageState } from '../../hooks/useLocalStorageState'
@@ -17,6 +18,11 @@ import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 function isMacOS(): boolean {
   if (typeof navigator === 'undefined') return false
   return /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+}
+
+function shouldShowSubmitShortcutHint(): boolean {
+  if (typeof window === 'undefined') return true
+  return window.innerWidth >= 768
 }
 
 // Get the color for an insight tab based on its type
@@ -99,8 +105,21 @@ const workingPanelStorageCodec = {
   },
 }
 
+type HumanInputComposerResponse = {
+  requestId: string
+  selectedOptionKey?: string
+  freeText?: string
+}
+
+type HumanInputComposerBatchResponse = {
+  batchId: string
+  responses: HumanInputComposerResponse[]
+}
+
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
+  pendingHumanInputRequests?: PendingHumanInputRequest[]
+  onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
   disabled?: boolean
   disabledReason?: string | null
   autoFocus?: boolean
@@ -134,6 +153,8 @@ type AgentComposerProps = {
 
 export const AgentComposer = memo(function AgentComposer({
   onSubmit,
+  pendingHumanInputRequests = [],
+  onRespondHumanInput,
   disabled = false,
   disabledReason = null,
   autoFocus = false,
@@ -166,6 +187,9 @@ export const AgentComposer = memo(function AgentComposer({
   const [attachments, setAttachments] = useState<File[]>([])
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [activeHumanInputRequestId, setActiveHumanInputRequestId] = useState<string | null>(null)
+  const [busyHumanInputRequestId, setBusyHumanInputRequestId] = useState<string | null>(null)
+  const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -179,7 +203,6 @@ export const AgentComposer = memo(function AgentComposer({
   const [countdownProgress, setCountdownProgress] = useState(0)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRotationTimeRef = useRef<number>(Date.now())
-  const composerPlaceholder = disabledReason || `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
   const feedbackMessage = disabledReason || submitError
   const showSubmitErrorAlert = Boolean(submitError && !disabledReason)
 
@@ -395,6 +418,50 @@ export const AgentComposer = memo(function AgentComposer({
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
 
+  useEffect(() => {
+    const node = textareaRef.current
+    if (!node || typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(() => {
+      adjustTextareaHeight(true)
+    })
+    observer.observe(node)
+
+    return () => {
+      observer.disconnect()
+    }
+  }, [adjustTextareaHeight])
+
+  useEffect(() => {
+    if (!pendingHumanInputRequests.length) {
+      setActiveHumanInputRequestId(null)
+      setBusyHumanInputRequestId(null)
+      setDraftHumanInputResponses({})
+      return
+    }
+    const hasActiveRequest = pendingHumanInputRequests.some((request) => request.id === activeHumanInputRequestId)
+    if (!hasActiveRequest) {
+      const latestBatchId = pendingHumanInputRequests[0]?.batchId
+      const latestBatchRequests = pendingHumanInputRequests
+        .filter((request) => request.batchId === latestBatchId)
+        .sort((left, right) => left.batchPosition - right.batchPosition)
+      setActiveHumanInputRequestId(latestBatchRequests[0]?.id ?? pendingHumanInputRequests[0]?.id ?? null)
+    }
+  }, [activeHumanInputRequestId, pendingHumanInputRequests])
+
+  useEffect(() => {
+    const pendingIds = new Set(pendingHumanInputRequests.map((request) => request.id))
+    setDraftHumanInputResponses((current) => {
+      const nextEntries = Object.entries(current).filter(([requestId]) => pendingIds.has(requestId))
+      if (nextEntries.length === Object.keys(current).length) {
+        return current
+      }
+      return Object.fromEntries(nextEntries)
+    })
+  }, [pendingHumanInputRequests])
+
   // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
   useEffect(() => {
     if (!autoFocus) return
@@ -433,12 +500,158 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [])
 
+  const activeHumanInputRequest =
+    pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
+    ?? null
+  const activeHumanInputDraftText = activeHumanInputRequestId
+    ? (draftHumanInputResponses[activeHumanInputRequestId]?.freeText ?? '')
+    : ''
+
+  useEffect(() => {
+    if (!activeHumanInputRequestId) {
+      return
+    }
+    setBody((current) => (current === activeHumanInputDraftText ? current : activeHumanInputDraftText))
+  }, [activeHumanInputDraftText, activeHumanInputRequestId])
+
+  const submitShortcutHint = shouldShowSubmitShortcutHint()
+    ? `${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+    : ''
+  const composerPlaceholder = disabledReason || (activeHumanInputRequest
+    ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
+    : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    const frame = window.requestAnimationFrame(() => {
+      adjustTextareaHeight(true)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    activeHumanInputRequestId,
+    adjustTextareaHeight,
+    composerPlaceholder,
+    pendingHumanInputRequests.length,
+    resolvedWorkingExpanded,
+  ])
+
+  const submitHumanInputResponse = useCallback(async (
+    request: PendingHumanInputRequest,
+    response: HumanInputComposerResponse,
+  ) => {
+    if (!onRespondHumanInput || disabled || isSending || busyHumanInputRequestId) {
+      return false
+    }
+
+    const batchRequests = pendingHumanInputRequests
+      .filter((candidate) => candidate.batchId === request.batchId)
+      .sort((left, right) => left.batchPosition - right.batchPosition)
+    const nextDrafts = {
+      ...draftHumanInputResponses,
+      [request.id]: response,
+    }
+
+    if (batchRequests.length > 1) {
+      const nextUnanswered = batchRequests.find((candidate) => !nextDrafts[candidate.id])
+      if (nextUnanswered) {
+        setDraftHumanInputResponses(nextDrafts)
+        setActiveHumanInputRequestId(nextUnanswered.id)
+        setBody('')
+        requestAnimationFrame(() => adjustTextareaHeight(true))
+        return true
+      }
+    }
+
+    try {
+      setBusyHumanInputRequestId(request.id)
+      if (batchRequests.length > 1) {
+        const responses = batchRequests
+          .map((candidate) => nextDrafts[candidate.id])
+          .filter((candidate): candidate is HumanInputComposerResponse => Boolean(candidate))
+        await onRespondHumanInput({
+          batchId: request.batchId,
+          responses,
+        })
+        setDraftHumanInputResponses((current) => {
+          const remaining = { ...current }
+          batchRequests.forEach((candidate) => {
+            delete remaining[candidate.id]
+          })
+          return remaining
+        })
+      } else {
+        await onRespondHumanInput(response)
+        setDraftHumanInputResponses((current) => {
+          if (!current[request.id]) {
+            return current
+          }
+          const remaining = { ...current }
+          delete remaining[request.id]
+          return remaining
+        })
+      }
+      setBody('')
+      requestAnimationFrame(() => adjustTextareaHeight(true))
+      return true
+    } finally {
+      setBusyHumanInputRequestId(null)
+    }
+  }, [
+    adjustTextareaHeight,
+    busyHumanInputRequestId,
+    disabled,
+    draftHumanInputResponses,
+    isSending,
+    onRespondHumanInput,
+    pendingHumanInputRequests,
+  ])
+
+  const handleActiveHumanInputRequestChange = useCallback((nextRequestId: string) => {
+    const currentRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null
+    const trimmedBody = body.trim()
+    if (currentRequest) {
+      setDraftHumanInputResponses((current) => {
+        const next = { ...current }
+        const existing = next[currentRequest.id]
+        if (trimmedBody) {
+          next[currentRequest.id] = {
+            ...existing,
+            requestId: currentRequest.id,
+            freeText: trimmedBody,
+          }
+        } else if (existing?.selectedOptionKey) {
+          next[currentRequest.id] = {
+            ...existing,
+            requestId: currentRequest.id,
+            freeText: '',
+          }
+        } else {
+          delete next[currentRequest.id]
+        }
+        return next
+      })
+    }
+    setActiveHumanInputRequestId(nextRequestId)
+  }, [activeHumanInputRequestId, body, pendingHumanInputRequests])
+
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
     if ((!trimmed && attachments.length === 0) || disabled || isSending) {
       return
     }
     const attachmentsSnapshot = attachments.slice()
+    const activeRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null
+    if (activeRequest && trimmed && attachmentsSnapshot.length === 0 && onRespondHumanInput) {
+      const submitted = await submitHumanInputResponse(activeRequest, {
+        requestId: activeRequest.id,
+        freeText: trimmed,
+      })
+      if (submitted) {
+        return
+      }
+    }
     if (onSubmit) {
       try {
         setIsSending(true)
@@ -460,7 +673,26 @@ export const AgentComposer = memo(function AgentComposer({
       }
       requestAnimationFrame(() => adjustTextareaHeight(true))
     }
-  }, [adjustTextareaHeight, attachments, body, disabled, isSending, onSubmit])
+  }, [
+    activeHumanInputRequestId,
+    adjustTextareaHeight,
+    attachments,
+    body,
+    disabled,
+    isSending,
+    onRespondHumanInput,
+    onSubmit,
+    pendingHumanInputRequests,
+    submitHumanInputResponse,
+  ])
+
+  const handleSelectHumanInputOption = useCallback(async (requestId: string, optionKey: string) => {
+    const request = pendingHumanInputRequests.find((candidate) => candidate.id === requestId)
+    if (!request) {
+      return
+    }
+    await submitHumanInputResponse(request, { requestId, selectedOptionKey: optionKey })
+  }, [pendingHumanInputRequests, submitHumanInputResponse])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -678,6 +910,20 @@ export const AgentComposer = memo(function AgentComposer({
                 </div>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {pendingHumanInputRequests.length > 0 ? (
+          <div>
+            <HumanInputComposerPanel
+              requests={pendingHumanInputRequests}
+              activeRequestId={activeHumanInputRequestId}
+              draftResponses={draftHumanInputResponses}
+              disabled={disabled || isSending}
+              busyRequestId={busyHumanInputRequestId}
+              onActiveRequestChange={handleActiveHumanInputRequestChange}
+              onSelectOption={handleSelectHumanInputOption}
+            />
           </div>
         ) : null}
 

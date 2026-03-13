@@ -5957,6 +5957,79 @@ class PersistentAgent(models.Model):
 
         return self._is_allowed_default(channel_val, addr)
 
+    def is_internal_responder_identity(self, channel: CommsChannel | str, address: str) -> bool:
+        """Return whether the identity belongs to an internal agent principal."""
+        channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
+        addr_raw = (address or "").strip()
+
+        if channel_val == CommsChannel.WEB:
+            user_id, agent_id = parse_web_user_address(addr_raw)
+            if agent_id != str(self.id) or user_id is None:
+                return False
+            return self._is_internal_responder_user_id(user_id)
+
+        if channel_val == CommsChannel.EMAIL:
+            normalized_email = (parseaddr(addr_raw)[1] or addr_raw).lower()
+            return self._is_internal_responder_email(normalized_email)
+
+        if channel_val == CommsChannel.SMS:
+            normalized_phone = PersistentAgentCommsEndpoint.normalize_address(channel_val, addr_raw)
+            return self._is_internal_responder_phone(normalized_phone)
+
+        return False
+
+    def _is_internal_responder_user_id(self, user_id: int | None) -> bool:
+        if user_id is None:
+            return False
+        if user_id == self.user_id:
+            return True
+        if self.organization_id and OrganizationMembership.objects.filter(
+            org=self.organization,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            user_id=user_id,
+        ).exists():
+            return True
+        return AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists()
+
+    def _is_internal_responder_email(self, normalized_email: str) -> bool:
+        if not normalized_email:
+            return False
+        owner_email = (self.user.email or "").strip().lower()
+        if normalized_email == owner_email:
+            return True
+        if self.organization_id and OrganizationMembership.objects.filter(
+            org=self.organization,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            user__email__iexact=normalized_email,
+        ).exists():
+            return True
+        return AgentCollaborator.objects.filter(
+            agent=self,
+            user__email__iexact=normalized_email,
+        ).exists()
+
+    def _is_internal_responder_phone(self, normalized_phone: str) -> bool:
+        if not normalized_phone:
+            return False
+        if UserPhoneNumber.objects.filter(
+            user=self.user,
+            phone_number__iexact=normalized_phone,
+            is_verified=True,
+        ).exists():
+            return True
+        if self.organization_id and UserPhoneNumber.objects.filter(
+            user__organizationmembership__org=self.organization,
+            user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+            phone_number__iexact=normalized_phone,
+            is_verified=True,
+        ).exists():
+            return True
+        return UserPhoneNumber.objects.filter(
+            user__agent_collaborations__agent=self,
+            phone_number__iexact=normalized_phone,
+            is_verified=True,
+        ).exists()
+
     def _legacy_owner_only(self, channel_val: str, address: str) -> bool:
         """Original behavior: only owner's email or verified phone allowed."""
         addr_raw = (address or "").strip()
@@ -9271,6 +9344,107 @@ class PersistentAgentMessage(models.Model):
                 self.owner_agent = self.from_endpoint.owner_agent
 
         super().save(*args, **kwargs)
+
+
+class PersistentAgentHumanInputRequest(models.Model):
+    """Pending or answered human-input prompt tied to a conversation."""
+
+    class InputMode(models.TextChoices):
+        OPTIONS_PLUS_TEXT = "options_plus_text", "Options plus text"
+        FREE_TEXT_ONLY = "free_text_only", "Free text only"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ANSWERED = "answered", "Answered"
+        CANCELLED = "cancelled", "Cancelled"
+        EXPIRED = "expired", "Expired"
+
+    class ResolutionSource(models.TextChoices):
+        OPTION_NUMBER = "option_number", "Option number"
+        OPTION_TITLE = "option_title", "Option title"
+        FREE_TEXT = "free_text", "Free text"
+        DIRECT = "direct", "Direct"
+        LLM_EXTRACTION = "llm_extraction", "LLM extraction"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="human_input_requests",
+    )
+    conversation = models.ForeignKey(
+        "PersistentAgentConversation",
+        on_delete=models.CASCADE,
+        related_name="human_input_requests",
+    )
+    originating_step = models.ForeignKey(
+        "PersistentAgentStep",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="human_input_requests",
+    )
+    question = models.TextField()
+    options_json = models.JSONField(default=list, blank=True)
+    input_mode = models.CharField(
+        max_length=32,
+        choices=InputMode.choices,
+        default=InputMode.FREE_TEXT_ONLY,
+    )
+    recipient_channel = models.CharField(
+        max_length=32,
+        choices=CommsChannel.choices,
+        blank=True,
+        help_text="Explicit recipient channel when the request targets a specific identity.",
+    )
+    recipient_address = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Normalized explicit recipient address when set.",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    requested_via_channel = models.CharField(max_length=32, choices=CommsChannel.choices)
+    requested_message = models.ForeignKey(
+        "PersistentAgentMessage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="human_input_requests_sent",
+    )
+    selected_option_key = models.CharField(max_length=128, blank=True)
+    selected_option_title = models.CharField(max_length=255, blank=True)
+    free_text = models.TextField(blank=True)
+    raw_reply_text = models.TextField(blank=True)
+    raw_reply_message = models.ForeignKey(
+        "PersistentAgentMessage",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="human_input_requests_resolved",
+    )
+    resolution_source = models.CharField(
+        max_length=32,
+        choices=ResolutionSource.choices,
+        blank=True,
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "status", "-created_at"], name="pa_hir_agent_status_idx"),
+            models.Index(fields=["conversation", "status", "-created_at"], name="pa_hir_conv_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"HumanInputRequest<{self.id}:{self.status}>"
 
 
 class PersistentAgentEmailFooter(models.Model):

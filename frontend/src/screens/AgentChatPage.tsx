@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
+import { respondToHumanInputRequest, respondToHumanInputRequestsBatch } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
   updateUserPreferences,
@@ -32,6 +33,7 @@ import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse } from '../hooks/useAgentTimeline'
 import {
   refreshTimelineLatestInCache,
+  replacePendingHumanInputRequestsInCache,
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
 } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
@@ -41,7 +43,7 @@ import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../types/agentRoster'
-import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
+import type { KanbanBoardSnapshot, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -699,6 +701,10 @@ export function AgentChatPage({
   const timelineQuery = useAgentTimeline(activeAgentId, { enabled: agentContextReady && !isNewAgent })
   const flatEvents = useMemo(() => flattenTimelinePages(timelineQuery.data), [timelineQuery.data])
   const initialPageResponse = useMemo(() => getInitialPageResponse(timelineQuery.data), [timelineQuery.data])
+  const pendingHumanInputRequests = useMemo<PendingHumanInputRequest[]>(
+    () => initialPageResponse?.pending_human_input_requests ?? [],
+    [initialPageResponse],
+  )
 
   // Extract agent metadata from timeline response
   useEffect(() => {
@@ -734,6 +740,7 @@ export function AgentChatPage({
   const storedAgentName = useAgentChatStore((state) => state.agentName)
   const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
   const sendMessage = useAgentChatStore((state) => state.sendMessage)
+  const receiveRealtimeEvent = useAgentChatStore((state) => state.receiveRealtimeEvent)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const processingStartedAt = useAgentChatStore((state) => state.processingStartedAt)
@@ -2699,7 +2706,11 @@ export function AgentChatPage({
     void createNewAgent(pending.body, tierToUse, pending.charterOverride)
   }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
 
-  const handleSend = useCallback(async (body: string, attachments: File[] = [], charterOverride?: string | null) => {
+  const handleSend = useCallback(async (
+    body: string,
+    attachments: File[] = [],
+    charterOverride?: string | null,
+  ) => {
     if (!activeAgentId && !isNewAgent) {
       return
     }
@@ -2793,6 +2804,7 @@ export function AgentChatPage({
     llmIntelligence?.maxAllowedTierRank,
     llmIntelligence?.options,
     queryClient,
+    receiveRealtimeEvent,
     resolvedIntelligenceTier,
     refetchBurnRateSummary,
     scrollToBottom,
@@ -2800,6 +2812,51 @@ export function AgentChatPage({
     sendMessageDisabledReason,
     shouldFetchUsageBurnRate,
   ])
+
+  const handleRespondHumanInputRequest = useCallback(async (
+    response:
+      | { requestId: string; selectedOptionKey?: string; freeText?: string }
+      | { batchId: string; responses: Array<{ requestId: string; selectedOptionKey?: string; freeText?: string }> },
+  ) => {
+    if (!activeAgentId) {
+      return
+    }
+    if ('responses' in response) {
+      const result = await respondToHumanInputRequestsBatch(activeAgentId, {
+        responses: response.responses.map((item) => (
+          item.selectedOptionKey
+            ? { request_id: item.requestId, selected_option_key: item.selectedOptionKey }
+            : { request_id: item.requestId, free_text: item.freeText?.trim() ?? '' }
+        )),
+      })
+      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
+      if (result.event) {
+        receiveRealtimeEvent(result.event)
+      }
+    } else if (response.selectedOptionKey) {
+      const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
+        selected_option_key: response.selectedOptionKey,
+      })
+      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
+      if (result.event) {
+        receiveRealtimeEvent(result.event)
+      }
+    } else if (response.freeText && response.freeText.trim().length > 0) {
+      const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
+        free_text: response.freeText.trim(),
+      })
+      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
+      if (result.event) {
+        receiveRealtimeEvent(result.event)
+      }
+    } else {
+      return
+    }
+    if (!autoScrollPinnedRef.current) {
+      return
+    }
+    scrollToBottom()
+  }, [activeAgentId, queryClient, receiveRealtimeEvent, scrollToBottom])
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow || !requiresTrialPlanSelection) {
@@ -3042,6 +3099,7 @@ export function AgentChatPage({
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
+        pendingHumanInputRequests={pendingHumanInputRequests}
         events={timelineEvents}
         displayEvents={displayEvents}
         hasMoreOlder={timelineHasMoreOlder}
@@ -3056,6 +3114,7 @@ export function AgentChatPage({
         streaming={timelineStreaming}
         virtualizer={virtualizer}
         onSendMessage={handleSend}
+        onRespondHumanInputRequest={handleRespondHumanInputRequest}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer
         autoScrollPinned={autoScrollPinned}

@@ -1,4 +1,10 @@
-import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
+import type {
+  PendingHumanInputRequest,
+  PendingHumanInputRequestInputMode,
+  PendingHumanInputRequestStatus,
+  ProcessingSnapshot,
+  TimelineEvent,
+} from '../types/agentChat'
 import type { InsightsResponse } from '../types/insight'
 import { jsonFetch } from './http'
 
@@ -25,6 +31,7 @@ export type TimelineResponse = {
   agent_color_hex?: string | null
   agent_name?: string | null
   agent_avatar_url?: string | null
+  pending_human_input_requests?: PendingHumanInputRequest[]
 }
 
 export type AgentWebSessionSnapshot = {
@@ -46,7 +53,134 @@ export async function fetchAgentTimeline(
   if (params.limit) query.set('limit', params.limit.toString())
 
   const url = `/console/api/agents/${agentId}/timeline/${query.toString() ? `?${query.toString()}` : ''}`
-  return jsonFetch<TimelineResponse>(url)
+  const response = await jsonFetch<TimelineResponse & {
+    pending_human_input_requests?: unknown[]
+  }>(url)
+  return {
+    ...response,
+    pending_human_input_requests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+  }
+}
+
+type PendingHumanInputRequestWire = {
+  id?: unknown
+  question?: unknown
+  options?: unknown
+  createdAt?: unknown
+  created_at?: unknown
+  status?: unknown
+  activeConversationChannel?: unknown
+  active_conversation_channel?: unknown
+  inputMode?: unknown
+  input_mode?: unknown
+  batchId?: unknown
+  batch_id?: unknown
+  batchPosition?: unknown
+  batch_position?: unknown
+  batchSize?: unknown
+  batch_size?: unknown
+}
+
+type HumanInputOptionWire = {
+  key?: unknown
+  optionKey?: unknown
+  option_key?: unknown
+  title?: unknown
+  description?: unknown
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function asPositiveInteger(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10)
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  }
+  return null
+}
+
+function normalizeHumanInputOption(raw: unknown): PendingHumanInputRequest['options'][number] | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const option = raw as HumanInputOptionWire
+  const key =
+    asNonEmptyString(option.key)
+    ?? asNonEmptyString(option.optionKey)
+    ?? asNonEmptyString(option.option_key)
+  const title = asNonEmptyString(option.title)
+  const description = asNonEmptyString(option.description)
+  if (!key || !title || !description) {
+    return null
+  }
+  return { key, title, description }
+}
+
+function normalizePendingHumanInputRequest(raw: unknown): PendingHumanInputRequest | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const request = raw as PendingHumanInputRequestWire
+  const id = asNonEmptyString(request.id)
+  const question = asNonEmptyString(request.question)
+  if (!id || !question) {
+    return null
+  }
+
+  const options = Array.isArray(request.options)
+    ? request.options.map(normalizeHumanInputOption).filter((value): value is NonNullable<typeof value> => Boolean(value))
+    : []
+
+  const status = (
+    asNonEmptyString(request.status)
+    ?? 'pending'
+  ) as PendingHumanInputRequestStatus
+  const inputMode = (
+    asNonEmptyString(request.inputMode)
+    ?? asNonEmptyString(request.input_mode)
+    ?? (options.length > 0 ? 'options_plus_text' : 'free_text_only')
+  ) as PendingHumanInputRequestInputMode
+  const batchId =
+    asNonEmptyString(request.batchId)
+    ?? asNonEmptyString(request.batch_id)
+    ?? id
+  const batchPosition =
+    asPositiveInteger(request.batchPosition)
+    ?? asPositiveInteger(request.batch_position)
+    ?? 1
+  const batchSize =
+    asPositiveInteger(request.batchSize)
+    ?? asPositiveInteger(request.batch_size)
+    ?? 1
+
+  return {
+    id,
+    question,
+    options,
+    createdAt: asNonEmptyString(request.createdAt) ?? asNonEmptyString(request.created_at),
+    status,
+    activeConversationChannel:
+      asNonEmptyString(request.activeConversationChannel)
+      ?? asNonEmptyString(request.active_conversation_channel),
+    inputMode,
+    batchId,
+    batchPosition,
+    batchSize,
+  }
+}
+
+export function normalizePendingHumanInputRequests(raw: unknown): PendingHumanInputRequest[] {
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  return raw
+    .map(normalizePendingHumanInputRequest)
+    .filter((value): value is PendingHumanInputRequest => Boolean(value))
 }
 
 export async function sendAgentMessage(agentId: string, body: string, attachments: File[] = []): Promise<TimelineEvent> {
@@ -71,6 +205,61 @@ export async function sendAgentMessage(agentId: string, body: string, attachment
     body: JSON.stringify({ body }),
   })
   return response.event
+}
+
+export type HumanInputResponsePayload =
+  | { selected_option_key: string; free_text?: never }
+  | { free_text: string; selected_option_key?: never }
+
+export type HumanInputResponseResult = {
+  event?: TimelineEvent
+  pendingHumanInputRequests: PendingHumanInputRequest[]
+}
+
+export type HumanInputBatchResponsePayload = {
+  responses: Array<
+    | { request_id: string; selected_option_key: string; free_text?: never }
+    | { request_id: string; free_text: string; selected_option_key?: never }
+  >
+}
+
+export async function respondToHumanInputRequest(
+  agentId: string,
+  requestId: string,
+  payload: HumanInputResponsePayload,
+): Promise<HumanInputResponseResult> {
+  const url = `/console/api/agents/${agentId}/human-input-requests/${requestId}/respond/`
+  const response = await jsonFetch<{
+    event?: TimelineEvent
+    pending_human_input_requests?: unknown[]
+  }>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return {
+    event: response.event,
+    pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+  }
+}
+
+export async function respondToHumanInputRequestsBatch(
+  agentId: string,
+  payload: HumanInputBatchResponsePayload,
+): Promise<HumanInputResponseResult> {
+  const url = `/console/api/agents/${agentId}/human-input-requests/respond-batch/`
+  const response = await jsonFetch<{
+    event?: TimelineEvent
+    pending_human_input_requests?: unknown[]
+  }>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return {
+    event: response.event,
+    pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+  }
 }
 
 export type ProcessingStatusResponse = {

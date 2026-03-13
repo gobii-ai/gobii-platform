@@ -54,6 +54,7 @@ from ...models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
     PersistentAgentKanbanCard,
+    PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentPromptArchive,
@@ -2109,6 +2110,12 @@ def build_prompt_context(
         weight=1,
         non_shrinkable=True
     )
+    human_input_block = _get_recent_human_input_responses_block(agent)
+    important_group.section_text(
+        "human_input_responses",
+        human_input_block,
+        weight=2,
+    )
 
     if agent.charter:
         important_group.section_text(
@@ -3687,6 +3694,8 @@ def _get_system_instruction(
             "## Delivery & Response Behavior\n\n"
             "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
+            "request_human_input only creates a tracked request. For web chat it appears in the composer panel; "
+            "for email/SMS it returns relay_payload that you must send with send_email/send_sms if you want the user to see it. "
             "Use send_chat_message for web chat - it broadcasts to all active web chat users for this agent (owners and collaborators) regardless of send address, "
             "and send_email/send_sms/send_agent_message for other channels. "
             "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most recently active non-web channel from unified history/recent contacts. "
@@ -5510,4 +5519,35 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
             "If you just requested these, follow up with the user through the appropriate communication channel."
         )
 
+    return "\n".join(lines)
+
+
+def _get_recent_human_input_responses_block(agent: PersistentAgent) -> str:
+    responses = list(
+        PersistentAgentHumanInputRequest.objects.filter(
+            agent=agent,
+            status=PersistentAgentHumanInputRequest.Status.ANSWERED,
+        )
+        .select_related("raw_reply_message")
+        .order_by("-resolved_at", "-created_at")[:8]
+    )
+    if not responses:
+        return "No recent human input responses."
+
+    lines = ["Recent human input responses:"]
+    for response in responses:
+        lines.append(f"- {response.question}")
+        lines.append(f"  Input mode: {response.input_mode}")
+        if response.selected_option_key:
+            lines.append(
+                "  Selected option: "
+                f"{response.selected_option_title or response.selected_option_key} "
+                f"(key={response.selected_option_key})"
+            )
+        if response.free_text:
+            lines.append(f"  Free text: {response.free_text}")
+        if response.raw_reply_text:
+            lines.append(f"  Raw reply: {response.raw_reply_text}")
+        if response.resolution_source:
+            lines.append(f"  Resolution source: {response.resolution_source}")
     return "\n".join(lines)

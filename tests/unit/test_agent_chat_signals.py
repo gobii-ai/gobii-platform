@@ -16,8 +16,14 @@ from api.models import (
     BrowserUseAgent,
     PersistentAgent,
     PersistentAgentCompletion,
+    PersistentAgentConversation,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentHumanInputRequest,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    build_web_agent_address,
+    build_web_user_address,
 )
 
 
@@ -78,6 +84,15 @@ class AgentChatSignalTests(TestCase):
             self.collaborator_profile_group_name,
             self.collaborator_profile_channel_name,
         )
+
+    def _drain_timeline_events(self) -> list[dict]:
+        drained: list[dict] = []
+        while True:
+            try:
+                drained.append(self._receive_with_timeout(timeout=0.05))
+            except AssertionError:
+                break
+        return drained
 
     def _receive_with_timeout(self, channel_name: str | None = None, timeout: float = 1.0):
         target_channel_name = channel_name or self.timeline_channel_name
@@ -205,3 +220,51 @@ class AgentChatSignalTests(TestCase):
         payload = collaborator_profile_event.get("payload", {})
         self.assertEqual(payload.get("agent_id"), str(self.agent.id))
         self.assertIn("/console/agents/", payload.get("agent_avatar_url", ""))
+
+    @tag("batch_agent_chat")
+    def test_human_input_request_save_emits_pending_requests_update(self):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel="web",
+            address=build_web_user_address(self.user.id, self.agent.id),
+        )
+        requester_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="web",
+            address=build_web_user_address(self.user.id, self.agent.id),
+        )
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel="web",
+            address=build_web_agent_address(self.agent.id),
+        )
+        requested_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            owner_agent=self.agent,
+            from_endpoint=agent_endpoint,
+            to_endpoint=requester_endpoint,
+            conversation=conversation,
+            body="Need your input",
+            raw_payload={"source": "test"},
+        )
+        self._drain_timeline_events()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentHumanInputRequest.objects.create(
+                agent=self.agent,
+                conversation=conversation,
+                requested_message=requested_message,
+                question="What should we do next?",
+                options_json=[],
+                input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+                recipient_channel="web",
+                recipient_address=build_web_user_address(self.user.id, self.agent.id),
+                requested_via_channel="web",
+            )
+
+        realtime_event = self._receive_with_timeout()
+        self.assertEqual(realtime_event.get("type"), "human_input_requests_event")
+        payload = realtime_event.get("payload", {})
+        self.assertEqual(payload.get("agent_id"), str(self.agent.id))
+        pending_requests = payload.get("pending_human_input_requests", [])
+        self.assertEqual(len(pending_requests), 1)
+        self.assertEqual(pending_requests[0].get("question"), "What should we do next?")

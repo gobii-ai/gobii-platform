@@ -48,7 +48,10 @@ CHANNEL_LAYER_SETTINGS = {
 }
 
 
-@override_settings(CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS)
+@override_settings(
+    CHANNEL_LAYERS=CHANNEL_LAYER_SETTINGS,
+    PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
+)
 class AgentChatAPITests(TestCase):
     @classmethod
     def setUpTestData(cls):

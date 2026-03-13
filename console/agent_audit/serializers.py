@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from django.utils import timezone
 from django.urls import reverse
 
+from api.agent.comms.human_input_requests import serialize_human_input_tool_result
 from api.models import (
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -103,6 +104,11 @@ def serialize_tool_call(step: PersistentAgentStep) -> dict:
     tool_call = getattr(step, "tool_call", None)
     if tool_call is None:
         raise ValueError("Step is missing tool_call relation")
+    result = (
+        serialize_human_input_tool_result(step, tool_call.result)
+        if tool_call.tool_name == "request_human_input"
+        else tool_call.result
+    )
     return {
         "kind": "tool_call",
         "id": str(step.id),
@@ -110,7 +116,7 @@ def serialize_tool_call(step: PersistentAgentStep) -> dict:
         "completion_id": str(step.completion_id) if step.completion_id else None,
         "tool_name": tool_call.tool_name,
         "parameters": tool_call.tool_params,
-        "result": tool_call.result,
+        "result": result,
         "execution_duration_ms": tool_call.execution_duration_ms,
         "prompt_archive": serialize_prompt_meta(getattr(step, "llm_prompt_archive", None)),
     }

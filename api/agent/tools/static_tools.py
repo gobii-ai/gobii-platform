@@ -21,6 +21,7 @@ def _get_sleep_tool() -> Dict[str, object]:
 def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     """Return static (always-present) tool definitions for an agent."""
     from .email_sender import get_send_email_tool
+    from .request_human_input import get_request_human_input_tool
     from .request_contact_permission import get_request_contact_permission_tool
     from .search_tools import get_search_tools_tool
     from .secure_credentials_request import get_secure_credentials_request_tool
@@ -38,6 +39,7 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
         get_send_chat_tool(),
         get_spawn_web_task_tool(agent),
         get_search_tools_tool(),
+        get_request_human_input_tool(),
         get_request_contact_permission_tool(),
         get_secure_credentials_request_tool(),
     ]

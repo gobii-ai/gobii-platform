@@ -30,7 +30,12 @@ import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { shouldShowStreamingThinking, shouldUseTypingIndicator } from './simplifiedChatPresentation'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
-import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
+import type {
+  PendingHumanInputRequest,
+  ProcessingWebTask,
+  StreamState,
+  KanbanBoardSnapshot,
+} from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
@@ -123,7 +128,10 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onShare?: () => void
   onSimplifiedChatSelect?: (enabled: boolean) => void
   simplifiedChatTogglePending?: boolean
-  onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
+  onSendMessage?: (
+    body: string,
+    attachments?: File[],
+  ) => void | Promise<void>
   onComposerFocus?: () => void
   autoScrollPinned?: boolean
   isNearBottom?: boolean
@@ -157,6 +165,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
+  pendingHumanInputRequests?: PendingHumanInputRequest[]
+  onRespondHumanInputRequest?: (
+    response:
+      | { requestId: string; selectedOptionKey?: string; freeText?: string }
+      | { batchId: string; responses: Array<{ requestId: string; selectedOptionKey?: string; freeText?: string }> }
+  ) => Promise<void>
 }
 
 export function AgentChatLayout({
@@ -268,6 +282,8 @@ export function AgentChatLayout({
   composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
+  pendingHumanInputRequests = [],
+  onRespondHumanInputRequest,
 }: AgentChatLayoutProps) {
   const { enabled: simplifiedChat, toggleAvailable: simplifiedChatToggleAvailable } = useSimplifiedChat()
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
@@ -569,6 +585,7 @@ export function AgentChatLayout({
     isWorkingNow,
     onSendMessage,
     promptCount: starterPromptCount,
+    hasPendingHumanInput: pendingHumanInputRequests.length > 0,
   })
   const hasTimelineEvents = timelineRenderEvents.length > 0
   const showJumpButton = !initialLoading
@@ -949,7 +966,7 @@ export function AgentChatLayout({
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}
-                {starterPromptsLoading || starterPrompts.length > 0 ? (
+                {pendingHumanInputRequests.length === 0 && (starterPromptsLoading || starterPrompts.length > 0) ? (
                   <StarterPromptSuggestions
                     prompts={starterPrompts}
                     loading={starterPromptsLoading}
@@ -1041,6 +1058,8 @@ export function AgentChatLayout({
           ) : (
             <AgentComposer
               onSubmit={onSendMessage}
+              pendingHumanInputRequests={pendingHumanInputRequests}
+              onRespondHumanInput={onRespondHumanInputRequest}
               onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}

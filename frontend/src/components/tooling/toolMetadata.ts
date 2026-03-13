@@ -16,6 +16,7 @@ import {
   FilePen,
   Globe,
   ContactRound,
+  MessageSquareQuote,
   Mail,
   MessageSquareText,
   MessageCircle,
@@ -576,6 +577,29 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         caption: caption ?? entry.caption ?? 'Create agent',
         summary: message ?? entry.summary ?? null,
         separateFromPreview: true,
+      }
+    },
+  },
+  {
+    name: 'request_human_input',
+    label: 'Human input request',
+    icon: MessageSquareQuote,
+    iconBgClass: 'bg-amber-100',
+    iconColorClass: 'text-amber-700',
+    detailKind: 'humanInputRequest',
+    derive(entry, parameters) {
+      const result = parseResultObject(entry.result)
+      const question = coerceString(parameters?.['question']) || coerceString(result?.['question'])
+      const batchRequests = Array.isArray(parameters?.['requests']) ? parameters?.['requests'] as unknown[] : []
+      const requestQuestions = batchRequests
+        .map((request) => (request && typeof request === 'object' ? coerceString((request as Record<string, unknown>)['question']) : null))
+        .filter((value): value is string => Boolean(value))
+      const questions = requestQuestions.length ? requestQuestions : (question ? [question] : [])
+      const caption = questions[0] ? truncate(questions[0], 72) : null
+
+      return {
+        caption: caption ?? entry.caption ?? 'Human input request',
+        summary: null,
       }
     },
   },

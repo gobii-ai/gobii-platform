@@ -170,6 +170,8 @@ jobs:
             tag: batch_agent_webhooks
           - batch: agent_chat
             tag: batch_agent_chat
+          - batch: human_input
+            tag: batch_human_input
           - batch: peer_dm
             tag: batch_peer_dm
           - batch: peer_intro
