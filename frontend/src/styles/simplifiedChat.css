@@ -87,6 +87,10 @@
   overflow: hidden;
 }
 
+.collapsed-activity-cluster__body .tool-cluster-timeline-row {
+  border-radius: 1.25rem;
+}
+
 .collapsed-activity-cluster__footer {
   display: flex;
   justify-content: center;
