@@ -1,11 +1,11 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { KanbanEventCard } from './KanbanEventCard'
-import { CollapsedEventGroupCard } from './CollapsedEventGroupCard'
+import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
-import type { ToolClusterEvent } from './types'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
+import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
 
 type TimelineVirtualItemProps = {
   event: SimplifiedTimelineItem
@@ -28,8 +28,15 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   viewerEmail,
   suppressedThinkingCursor,
 }: TimelineVirtualItemProps) {
+  const collapsedEntries = useMemo(() => {
+    if (event.kind !== 'collapsed-group') {
+      return []
+    }
+    return flattenTimelineEventsToEntries(event.events)
+  }, [event])
+
   if (event.kind === 'collapsed-group') {
-    return <CollapsedEventGroupCard group={event} />
+    return <CollapsedActivityCard overlayId={event.cursor} entries={collapsedEntries} label={event.summary.label} subtitle="Collapsed actions" />
   }
   if (event.kind === 'inline-schedule') {
     return <InlineScheduleCard entry={event.entry} />
@@ -48,20 +55,9 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
     )
   }
   if (event.kind === 'thinking') {
-    const cluster: ToolClusterEvent = {
-      kind: 'steps',
-      cursor: event.cursor,
-      entries: [],
-      entryCount: 1,
-      collapsible: false,
-      collapseThreshold: 3,
-      thinkingEntries: [event],
-      earliestTimestamp: event.timestamp ?? null,
-      latestTimestamp: event.timestamp ?? null,
-    }
     return (
       <ToolClusterCard
-        cluster={cluster}
+        cluster={buildThinkingCluster(event)}
         isLatestEvent={isLatestEvent}
         suppressedThinkingCursor={suppressedThinkingCursor}
       />

@@ -13,6 +13,7 @@ import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 type ToolClusterLivePreviewProps = {
   cluster: ToolClusterTransform
   isLatestEvent: boolean
+  previewEntryLimit?: number
   onOpenTimeline: () => void
   onSelectEntry: (entry: ToolEntryDisplay) => void
 }
@@ -954,6 +955,7 @@ function derivePreviewState(activeEntry: ToolEntryDisplay | null, hasActiveProce
 export function ToolClusterLivePreview({
   cluster,
   isLatestEvent,
+  previewEntryLimit = MAX_PREVIEW_ENTRIES,
   onOpenTimeline,
   onSelectEntry,
 }: ToolClusterLivePreviewProps) {
@@ -970,7 +972,7 @@ export function ToolClusterLivePreview({
   const previewEntries = useMemo<PreviewEntry[]>(
     () =>
       previewableEntries
-        .slice(-MAX_PREVIEW_ENTRIES)
+        .slice(-previewEntryLimit)
         .map((entry) => {
           const activity = deriveActivityDescriptor(entry)
           return {
@@ -980,7 +982,7 @@ export function ToolClusterLivePreview({
             relativeTime: formatRelativeTimestamp(entry.timestamp),
           }
         }),
-    [previewableEntries],
+    [previewEntryLimit, previewableEntries],
   )
 
   const pendingCount = useMemo(
@@ -1000,11 +1002,11 @@ export function ToolClusterLivePreview({
     const previousEntryIds = previousEntryIdsRef.current
     const addedEntryIds = currentEntryIds.filter((id) => !previousEntryIds.includes(id))
     if (addedEntryIds.length > 0 || (pendingCount > 0 && hasActiveProcessing)) {
-      setNewEntryIds(addedEntryIds.slice(-MAX_PREVIEW_ENTRIES))
+      setNewEntryIds(addedEntryIds.slice(-previewEntryLimit))
     }
 
     previousEntryIdsRef.current = currentEntryIds
-  }, [hasActiveProcessing, pendingCount, previewableEntries])
+  }, [hasActiveProcessing, pendingCount, previewEntryLimit, previewableEntries])
 
   useEffect(() => {
     if (newEntryIds.length === 0) {
@@ -1045,7 +1047,7 @@ export function ToolClusterLivePreview({
         >
           <span className="tool-cluster-live-preview__more-link-line" aria-hidden="true" />
           <span className="tool-cluster-live-preview__more-link-label">
-            {hiddenEntryCount} more actions
+            {hiddenEntryCount} action{hiddenEntryCount === 1 ? '' : 's'}
           </span>
           <span className="tool-cluster-live-preview__more-link-line" aria-hidden="true" />
         </button>

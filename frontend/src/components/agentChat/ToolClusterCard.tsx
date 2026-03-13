@@ -3,11 +3,13 @@ import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistr
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import { ToolIconSlot } from './ToolIconSlot'
 import { ToolProviderBadge } from './ToolProviderBadge'
-import { ToolClusterLivePreview, TOOL_CLUSTER_PREVIEW_ENTRY_LIMIT } from './ToolClusterLivePreview'
+import { ToolClusterLivePreview } from './ToolClusterLivePreview'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
 import { compareTimelineCursors } from '../../util/timelineCursor'
+import { CollapsedActivityCard } from './CollapsedActivityCard'
+import { buildActionCountLabel } from './activityEntryUtils'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
@@ -28,10 +30,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
     () => transformed.entries.filter((entry) => !entry.separateFromPreview),
     [transformed.entries],
   )
-  const visiblePreviewEntries = useMemo(
-    () => previewEntries.slice(-TOOL_CLUSTER_PREVIEW_ENTRY_LIMIT),
-    [previewEntries],
-  )
+  const visiblePreviewEntries = previewEntries
   const separatedEntryPlacement = useMemo(() => {
     if (!separatedEntries.length) {
       return { beforePreview: [] as ToolEntryDisplay[], afterPreview: [] as ToolEntryDisplay[] }
@@ -86,6 +85,16 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
     return null
   }
 
+  if (transformed.collapsible) {
+    return (
+      <CollapsedActivityCard
+        overlayId={transformed.cursor}
+        entries={transformed.entries}
+        label={buildActionCountLabel(transformed.entryCount)}
+      />
+    )
+  }
+
   const renderSeparatedEntry = (entry: ToolEntryDisplay) => {
     const DetailComponent = entry.detailComponent
     const detailRelative = formatRelativeTimestamp(entry.timestamp) || entry.timestamp || ''
@@ -138,6 +147,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
             <ToolClusterLivePreview
               cluster={transformed}
               isLatestEvent={isLatestEvent}
+              previewEntryLimit={previewEntries.length}
               onOpenTimeline={handleToggleCluster}
               onSelectEntry={handlePreviewEntrySelect}
             />
@@ -149,7 +159,9 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
       </div>
       <ToolClusterTimelineOverlay
         open={timelineOpen}
-        cluster={transformed}
+        overlayId={transformed.cursor}
+        title={buildActionCountLabel(transformed.entryCount)}
+        entries={transformed.entries}
         initialOpenEntryId={timelineInitialEntryId}
         onClose={() => {
           setTimelineOpen(false)

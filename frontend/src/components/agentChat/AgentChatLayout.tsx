@@ -12,7 +12,6 @@ import { AgentComposer } from './AgentComposer'
 import { TimelineVirtualItem } from './TimelineVirtualItem'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { StreamingThinkingCard } from './StreamingThinkingCard'
-import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
@@ -27,7 +26,7 @@ import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
-import { shouldShowStreamingThinking, shouldUseTypingIndicator } from './simplifiedChatPresentation'
+import { shouldShowStreamingThinking } from './simplifiedChatPresentation'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
@@ -243,7 +242,6 @@ export function AgentChatLayout({
   highPriorityBanner = null,
   hasMoreNewer,
   processingActive,
-  processingStartedAt,
   awaitingResponse = false,
   processingWebTasks = [],
   nextScheduledAt = null,
@@ -548,8 +546,8 @@ export function AgentChatLayout({
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
   const isActivelyStreamingContent = hasStreamingContent && isStreaming
-  const shouldRenderResponseSkeleton = Boolean(awaitingResponse || processingActive || isStreaming)
-  const hideResponseSkeleton = isActivelyStreamingContent || hasMoreNewer
+  const showTypingIndicator = Boolean(awaitingResponse || processingActive || isStreaming)
+  const hideTypingIndicator = isActivelyStreamingContent || hasMoreNewer
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showScheduledResumeEvent = Boolean(
@@ -997,18 +995,14 @@ export function AgentChatLayout({
                   </div>
                 ) : null}
 
-                {shouldRenderResponseSkeleton ? (
-                  shouldUseTypingIndicator(simplifiedChat) ? (
-                    <TypingIndicator
-                      statusText={deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })}
-                      agentColorHex={agentColorHex || undefined}
-                      agentAvatarUrl={agentAvatarUrl}
-                      agentFirstName={agentFirstName}
-                      hidden={hideResponseSkeleton}
-                    />
-                  ) : (
-                    <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
-                  )
+                {showTypingIndicator ? (
+                  <TypingIndicator
+                    statusText={deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })}
+                    agentColorHex={agentColorHex || undefined}
+                    agentAvatarUrl={agentAvatarUrl}
+                    agentFirstName={agentFirstName}
+                    hidden={hideTypingIndicator}
+                  />
                 ) : null}
 
                 {showBottomSentinel ? (

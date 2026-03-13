@@ -317,12 +317,23 @@
   z-index: 50;
   margin-top: 0.5rem;
   min-width: 16rem;
+  width: 16rem;
   border-radius: 0.9rem;
   border: 1px solid rgba(139, 92, 246, 0.14);
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 18px 45px rgba(41, 28, 84, 0.18);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  animation: none !important;
+  transition: none !important;
+  will-change: auto;
+  contain: layout paint;
+}
+
+.banner-view-popover[data-entering],
+.banner-view-popover[data-exiting] {
+  animation: none !important;
+  transition: none !important;
 }
 
 .banner-view-menu {
@@ -4566,8 +4577,8 @@
   content: "";
   position: absolute;
   left: calc(var(--timeline-row-padding-x) + (var(--timeline-icon-size) / 2));
-  top: 0.3rem;
-  bottom: 0.3rem;
+  top: calc(0.48rem + var(--timeline-icon-size));
+  bottom: calc(0.48rem + var(--timeline-icon-size));
   width: 2px;
   background: linear-gradient(180deg, rgba(99, 102, 241, 0.28), rgba(14, 165, 233, 0.18));
   opacity: 0.7;
@@ -5664,191 +5675,7 @@
   }
 }
 
-/* ==========================================================================
-   Response Throbber — Futuristic orbital loading indicator
-   ========================================================================== */
-
-.response-throbber-container {
-  display: flex;
-  justify-content: center;
-  padding: 0.75rem 0;
-  overflow: hidden;
-  animation: throbberIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.response-throbber-container[hidden] {
-  display: none;
-}
-
-@keyframes throbberIn {
-  from { opacity: 0; transform: scale(0.7); }
-  to   { opacity: 1; transform: scale(1); }
-}
-
-.response-throbber {
-  position: relative;
-  width: 44px;
-  height: 44px;
-}
-
-/* Soft ambient halo */
-.response-throbber::before {
-  content: '';
-  position: absolute;
-  inset: -10px;
-  border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    rgba(167, 139, 250, 0.15) 0%,
-    rgba(124, 58, 237, 0.06) 50%,
-    transparent 80%
-  );
-  animation: haloPulse 3s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes haloPulse {
-  0%, 100% { opacity: 0.6; transform: scale(0.92); }
-  50%      { opacity: 1;   transform: scale(1.1); }
-}
-
-.throbber-svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-/* ---- rings ---- */
-
-.throbber-track {
-  fill: none;
-  stroke: rgba(148, 163, 184, 0.08);
-  stroke-width: 1.5;
-}
-
-.throbber-arc {
-  fill: none;
-  stroke: url(#throbber-grad);
-  stroke-width: 2;
-  stroke-linecap: round;
-  transform-origin: 22px 22px;
-  transform: rotate(-90deg);
-  animation: arcSpin 3.5s linear infinite;
-  filter: drop-shadow(0 0 3px rgba(124, 58, 237, 0.6))
-         drop-shadow(0 0 6px rgba(99, 102, 241, 0.25));
-  will-change: transform, stroke-dasharray;
-}
-
-@keyframes arcSpin {
-  from { transform: rotate(-90deg); }
-  to   { transform: rotate(270deg); }
-}
-
-.throbber-inner {
-  fill: none;
-  stroke: rgba(167, 139, 250, 0.1);
-  stroke-width: 0.75;
-  stroke-dasharray: 5 8;
-  stroke-linecap: round;
-  transform-origin: 22px 22px;
-  animation: ringCCW 9s linear infinite;
-  will-change: transform;
-}
-
-@keyframes ringCCW {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(-360deg); }
-}
-
-.throbber-outer {
-  fill: none;
-  stroke: rgba(148, 163, 184, 0.04);
-  stroke-width: 0.5;
-  stroke-dasharray: 2 6;
-  transform-origin: 22px 22px;
-  animation: ringCW 14s linear infinite;
-  will-change: transform;
-}
-
-@keyframes ringCW {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-
-/* ---- center core ---- */
-
-.throbber-core {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  margin: -3px 0 0 -3px;
-  background: rgba(167, 139, 250, 0.85);
-  border-radius: 50%;
-  animation: coreBreathe 3s ease-in-out infinite;
-  will-change: transform, box-shadow, background;
-}
-
-@keyframes coreBreathe {
-  0% {
-    transform: scale(1);
-    background: rgba(167, 139, 250, 0.85);
-    box-shadow:
-      0 0 3px 1px rgba(196, 181, 253, 0.95),
-      0 0 7px 2px rgba(167, 139, 250, 0.8),
-      0 0 14px 4px rgba(139, 92, 246, 0.35),
-      0 0 22px 6px rgba(124, 58, 237, 0.1);
-  }
-  35% {
-    transform: scale(1.5);
-    background: rgba(139, 92, 246, 0.9);
-    box-shadow:
-      0 0 4px 2px rgba(196, 181, 253, 1),
-      0 0 10px 3px rgba(167, 139, 250, 0.9),
-      0 0 18px 5px rgba(139, 92, 246, 0.5),
-      0 0 28px 8px rgba(124, 58, 237, 0.15);
-  }
-  65% {
-    transform: scale(1.2);
-    background: rgba(196, 181, 253, 0.9);
-    box-shadow:
-      0 0 3px 1px rgba(196, 181, 253, 0.9),
-      0 0 8px 3px rgba(167, 139, 250, 0.65),
-      0 0 16px 4px rgba(124, 58, 237, 0.3),
-      0 0 24px 6px rgba(109, 40, 217, 0.08);
-  }
-  100% {
-    transform: scale(1);
-    background: rgba(167, 139, 250, 0.85);
-    box-shadow:
-      0 0 3px 1px rgba(196, 181, 253, 0.95),
-      0 0 7px 2px rgba(167, 139, 250, 0.8),
-      0 0 14px 4px rgba(139, 92, 246, 0.35),
-      0 0 22px 6px rgba(124, 58, 237, 0.1);
-  }
-}
-
-/* ---- reduced motion ---- */
-
 @media (prefers-reduced-motion: reduce) {
-  .response-throbber-container { animation: none; }
-  .response-throbber::before  { animation: none; opacity: 0.7; }
-  .throbber-arc {
-    animation: none;
-    transform: rotate(-90deg);
-    filter: drop-shadow(0 0 2px rgba(139, 92, 246, 0.4));
-  }
-  .throbber-inner { animation: none; }
-  .throbber-outer { animation: none; }
-  .throbber-core {
-    animation: none;
-    background: rgba(167, 139, 250, 0.85);
-    box-shadow:
-      0 0 3px 1px rgba(237, 233, 254, 0.95),
-      0 0 7px 2px rgba(196, 181, 253, 0.8),
-      0 0 14px 4px rgba(139, 92, 246, 0.35);
-  }
   .thinking-window[data-streaming='true'] {
     animation: none;
   }
@@ -7088,7 +6915,11 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .agent-mobile-sheet-body--padded {

@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { TimelineEvent, ToolCallEntry } from '../types/agentChat'
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
+import { buildActionCountLabel } from '../components/agentChat/activityEntryUtils'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -66,25 +67,19 @@ export function buildCollapsedGroupLabel(counts: {
   thinkingCount: number
   kanbanCount: number
 }): string {
-  const parts: string[] = []
-  const actionCount = counts.toolCallCount + counts.thinkingCount
-  if (actionCount > 0) {
-    parts.push(`${actionCount} action${actionCount === 1 ? '' : 's'}`)
-  }
-  if (counts.kanbanCount > 0) {
-    parts.push(`${counts.kanbanCount} board update${counts.kanbanCount === 1 ? '' : 's'}`)
-  }
-  return parts.join(', ') || '1 action'
+  const actionCount = counts.toolCallCount + counts.thinkingCount + counts.kanbanCount
+  return buildActionCountLabel(actionCount || 1)
 }
 
 function makeCollapsedGroup(buffer: TimelineEvent[]): CollapsedEventGroup {
   const counts = countByKind(buffer)
+  const totalCount = counts.toolCallCount + counts.thinkingCount + counts.kanbanCount
   return {
     kind: 'collapsed-group',
     cursor: buffer[0].cursor,
     events: [...buffer],
     summary: {
-      totalCount: buffer.length,
+      totalCount,
       ...counts,
       label: buildCollapsedGroupLabel(counts),
     },
