@@ -8,7 +8,7 @@ export function buildActionCountLabel(count: number): string {
   return `${count} action${count === 1 ? '' : 's'}`
 }
 
-function buildThinkingCluster(event: ThinkingEvent): ToolClusterEvent {
+export function buildThinkingCluster(event: ThinkingEvent): ToolClusterEvent {
   return {
     kind: 'steps',
     cursor: event.cursor,

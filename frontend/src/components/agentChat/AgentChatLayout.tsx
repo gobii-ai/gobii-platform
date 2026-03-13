@@ -546,8 +546,8 @@ export function AgentChatLayout({
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
   const isActivelyStreamingContent = hasStreamingContent && isStreaming
-  const shouldRenderResponseSkeleton = Boolean(awaitingResponse || processingActive || isStreaming)
-  const hideResponseSkeleton = isActivelyStreamingContent || hasMoreNewer
+  const showTypingIndicator = Boolean(awaitingResponse || processingActive || isStreaming)
+  const hideTypingIndicator = isActivelyStreamingContent || hasMoreNewer
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showScheduledResumeEvent = Boolean(
@@ -995,13 +995,13 @@ export function AgentChatLayout({
                   </div>
                 ) : null}
 
-                {shouldRenderResponseSkeleton ? (
+                {showTypingIndicator ? (
                   <TypingIndicator
                     statusText={deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })}
                     agentColorHex={agentColorHex || undefined}
                     agentAvatarUrl={agentAvatarUrl}
                     agentFirstName={agentFirstName}
-                    hidden={hideResponseSkeleton}
+                    hidden={hideTypingIndicator}
                   />
                 ) : null}
 
