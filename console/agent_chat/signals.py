@@ -14,6 +14,7 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCompletion,
+    PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -122,6 +123,20 @@ def _broadcast_audit_event(agent_id: str | None, payload: dict) -> None:
     send_audit_event(agent_id, payload)
 
 
+def emit_pending_human_input_requests_update(agent: PersistentAgent) -> None:
+    if not agent or not getattr(agent, "id", None):
+        return
+
+    from api.agent.comms.human_input_requests import list_pending_human_input_requests
+
+    payload = {
+        "agent_id": str(agent.id),
+        "pending_human_input_requests": list_pending_human_input_requests(agent),
+        "timestamp": timezone.now().isoformat(),
+    }
+    _send(_group_name(agent.id), "human_input_requests_event", payload)
+
+
 def _should_audit_tool_call(tool_call: PersistentAgentToolCall | None) -> bool:
     if tool_call is None:
         return False
@@ -182,6 +197,36 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
             _broadcast_audit_event(str(owner_agent_id), audit_payload)
         except Exception:
             logger.debug("Failed to broadcast audit message for %s", message_id, exc_info=True)
+
+    transaction.on_commit(_on_commit)
+
+
+@receiver(post_save, sender=PersistentAgentHumanInputRequest)
+def broadcast_human_input_requests_updated(sender, instance: PersistentAgentHumanInputRequest, **kwargs):
+    if not instance.agent_id:
+        return
+
+    def _on_commit():
+        try:
+            agent = PersistentAgent.objects.get(id=instance.agent_id)
+        except PersistentAgent.DoesNotExist:
+            return
+        emit_pending_human_input_requests_update(agent)
+
+    transaction.on_commit(_on_commit)
+
+
+@receiver(post_delete, sender=PersistentAgentHumanInputRequest)
+def broadcast_human_input_requests_deleted(sender, instance: PersistentAgentHumanInputRequest, **kwargs):
+    if not instance.agent_id:
+        return
+
+    def _on_commit():
+        try:
+            agent = PersistentAgent.objects.get(id=instance.agent_id)
+        except PersistentAgent.DoesNotExist:
+            return
+        emit_pending_human_input_requests_update(agent)
 
     transaction.on_commit(_on_commit)
 

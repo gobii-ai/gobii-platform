@@ -174,7 +174,7 @@ function normalizePendingHumanInputRequest(raw: unknown): PendingHumanInputReque
   }
 }
 
-function normalizePendingHumanInputRequests(raw: unknown): PendingHumanInputRequest[] {
+export function normalizePendingHumanInputRequests(raw: unknown): PendingHumanInputRequest[] {
   if (!Array.isArray(raw)) {
     return []
   }

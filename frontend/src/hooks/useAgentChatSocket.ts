@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
+import { normalizePendingHumanInputRequests } from '../api/agentChat'
 import { scheduleLoginRedirect } from '../api/http'
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { useAgentChatStore } from '../stores/agentChatStore'
-import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
+import { refreshTimelineLatestInCache, replacePendingHumanInputRequestsInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 
@@ -467,6 +468,16 @@ export function useAgentChatSocket(
             }
             updateAgentIdentityRef.current(nextIdentity)
             profileEventRef.current?.(profilePayload)
+          } else if (payload?.type === 'human_input_requests.updated' && payload.payload) {
+            const rawHumanInputPayload = payload.payload as Record<string, unknown>
+            const payloadAgentId = typeof rawHumanInputPayload.agent_id === 'string' ? rawHumanInputPayload.agent_id : null
+            if (payloadAgentId && payloadAgentId === agentIdRef.current) {
+              replacePendingHumanInputRequestsInCache(
+                queryClient,
+                payloadAgentId,
+                normalizePendingHumanInputRequests(rawHumanInputPayload.pending_human_input_requests),
+              )
+            }
           } else if (payload?.type === 'credit.event' && payload.payload) {
             creditEventRef.current?.(payload.payload as Record<string, unknown>)
           }
