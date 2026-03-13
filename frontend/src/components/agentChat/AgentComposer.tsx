@@ -202,7 +202,6 @@ export const AgentComposer = memo(function AgentComposer({
   const [countdownProgress, setCountdownProgress] = useState(0)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRotationTimeRef = useRef<number>(Date.now())
-  const composerPlaceholder = disabledReason || `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
   const feedbackMessage = disabledReason || submitError
   const showSubmitErrorAlert = Boolean(submitError && !disabledReason)
 
@@ -497,9 +496,9 @@ export const AgentComposer = memo(function AgentComposer({
     setBody((current) => (current === nextBody ? current : nextBody))
   }, [activeHumanInputRequest, draftHumanInputResponses])
 
-  const composerPlaceholder = activeHumanInputRequest
+  const composerPlaceholder = disabledReason || (activeHumanInputRequest
     ? `Other option · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
-    : `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+    : `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`)
 
   const submitHumanInputResponse = useCallback(async (
     request: PendingHumanInputRequest,
