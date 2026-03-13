@@ -20,6 +20,11 @@ function isMacOS(): boolean {
   return /Mac|iPod|iPhone|iPad/.test(navigator.platform)
 }
 
+function shouldShowSubmitShortcutHint(): boolean {
+  if (typeof window === 'undefined') return true
+  return window.innerWidth >= 768
+}
+
 // Get the color for an insight tab based on its type
 function getInsightTabColor(insight: InsightEvent): string {
   if (insight.insightType === 'time_saved') {
@@ -493,9 +498,12 @@ export const AgentComposer = memo(function AgentComposer({
     setBody((current) => (current === activeHumanInputDraftText ? current : activeHumanInputDraftText))
   }, [activeHumanInputDraftText, activeHumanInputRequestId])
 
+  const submitShortcutHint = shouldShowSubmitShortcutHint()
+    ? `${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+    : ''
   const composerPlaceholder = disabledReason || (activeHumanInputRequest
-    ? `Other option · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
-    : `Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`)
+    ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
+    : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
 
   const submitHumanInputResponse = useCallback(async (
     request: PendingHumanInputRequest,
