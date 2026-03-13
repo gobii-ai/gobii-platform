@@ -5966,56 +5966,69 @@ class PersistentAgent(models.Model):
             user_id, agent_id = parse_web_user_address(addr_raw)
             if agent_id != str(self.id) or user_id is None:
                 return False
-            if user_id == self.user_id:
-                return True
-            if self.organization_id and OrganizationMembership.objects.filter(
-                org=self.organization,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-                user_id=user_id,
-            ).exists():
-                return True
-            return AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists()
+            return self._is_internal_responder_user_id(user_id)
 
         if channel_val == CommsChannel.EMAIL:
             normalized_email = (parseaddr(addr_raw)[1] or addr_raw).lower()
-            owner_email = (self.user.email or "").strip().lower()
-            if normalized_email == owner_email:
-                return True
-            if self.organization_id and OrganizationMembership.objects.filter(
-                org=self.organization,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-                user__email__iexact=normalized_email,
-            ).exists():
-                return True
-            return AgentCollaborator.objects.filter(
-                agent=self,
-                user__email__iexact=normalized_email,
-            ).exists()
+            return self._is_internal_responder_email(normalized_email)
 
         if channel_val == CommsChannel.SMS:
             normalized_phone = PersistentAgentCommsEndpoint.normalize_address(channel_val, addr_raw)
-            if not normalized_phone:
-                return False
-            if UserPhoneNumber.objects.filter(
-                user=self.user,
-                phone_number__iexact=normalized_phone,
-                is_verified=True,
-            ).exists():
-                return True
-            if self.organization_id and UserPhoneNumber.objects.filter(
-                user__organizationmembership__org=self.organization,
-                user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
-                phone_number__iexact=normalized_phone,
-                is_verified=True,
-            ).exists():
-                return True
-            return UserPhoneNumber.objects.filter(
-                user__agent_collaborations__agent=self,
-                phone_number__iexact=normalized_phone,
-                is_verified=True,
-            ).exists()
+            return self._is_internal_responder_phone(normalized_phone)
 
         return False
+
+    def _is_internal_responder_user_id(self, user_id: int | None) -> bool:
+        if user_id is None:
+            return False
+        if user_id == self.user_id:
+            return True
+        if self.organization_id and OrganizationMembership.objects.filter(
+            org=self.organization,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            user_id=user_id,
+        ).exists():
+            return True
+        return AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists()
+
+    def _is_internal_responder_email(self, normalized_email: str) -> bool:
+        if not normalized_email:
+            return False
+        owner_email = (self.user.email or "").strip().lower()
+        if normalized_email == owner_email:
+            return True
+        if self.organization_id and OrganizationMembership.objects.filter(
+            org=self.organization,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            user__email__iexact=normalized_email,
+        ).exists():
+            return True
+        return AgentCollaborator.objects.filter(
+            agent=self,
+            user__email__iexact=normalized_email,
+        ).exists()
+
+    def _is_internal_responder_phone(self, normalized_phone: str) -> bool:
+        if not normalized_phone:
+            return False
+        if UserPhoneNumber.objects.filter(
+            user=self.user,
+            phone_number__iexact=normalized_phone,
+            is_verified=True,
+        ).exists():
+            return True
+        if self.organization_id and UserPhoneNumber.objects.filter(
+            user__organizationmembership__org=self.organization,
+            user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+            phone_number__iexact=normalized_phone,
+            is_verified=True,
+        ).exists():
+            return True
+        return UserPhoneNumber.objects.filter(
+            user__agent_collaborations__agent=self,
+            phone_number__iexact=normalized_phone,
+            is_verified=True,
+        ).exists()
 
     def _legacy_owner_only(self, channel_val: str, address: str) -> bool:
         """Original behavior: only owner's email or verified phone allowed."""

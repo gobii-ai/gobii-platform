@@ -774,7 +774,7 @@ def ingest_inbound_message(
             from api.agent.comms.human_input_requests import resolve_human_input_request_for_message
 
             resolve_human_input_request_for_message(message)
-        except (DatabaseError, ValidationError, ValueError, TypeError):
+        except (DatabaseError, ValidationError, ValueError):
             logging.exception(
                 "Failed resolving human input request for inbound message %s",
                 getattr(message, "id", None),
