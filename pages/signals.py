@@ -1697,12 +1697,12 @@ def handle_invoice_payment_failed(event, **kwargs):
                 _get_stripe_data_value(subscription_obj, "current_period_start")
             )
 
-            attempt_count_raw = payload.get("attempt_count")
-            try:
-                attempt_count = int(attempt_count_raw) if attempt_count_raw is not None else None
-            except (TypeError, ValueError):
-                attempt_count = None
-            final_attempt = _is_final_payment_attempt(payload)
+        attempt_count_raw = payload.get("attempt_count")
+        try:
+            attempt_count = int(attempt_count_raw) if attempt_count_raw is not None else None
+        except (TypeError, ValueError):
+            attempt_count = None
+        final_attempt = _is_final_payment_attempt(payload)
 
         subscription_status = _get_stripe_data_value(subscription_data, "status")
         if subscription_status is None:
