@@ -1775,11 +1775,13 @@ class PaymentFailedSignalTests(TestCase):
             patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
             patch("pages.signals.Analytics.track_event") as mock_track_event, \
             patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous, \
-            patch("pages.signals.get_plan_by_product_id", return_value=None):
+            patch("pages.signals.get_plan_by_product_id", return_value=None), \
+            patch("pages.signals.capi") as mock_capi:
 
             handle_invoice_payment_failed(event)
 
         mock_track_anonymous.assert_not_called()
+        mock_capi.assert_not_called()
         mock_track_event.assert_called_once()
         kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(kwargs["user_id"], self.user.id)
@@ -1848,12 +1850,14 @@ class PaymentFailedSignalTests(TestCase):
             patch("pages.signals.Analytics.track_event") as mock_track_event, \
             patch("pages.signals.Analytics.track_event_anonymous"), \
             patch("pages.signals.get_plan_by_product_id", return_value=None), \
-            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit:
+            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit, \
+            patch("pages.signals.capi") as mock_capi:
 
             handle_invoice_payment_failed(event)
 
         emitted_names = [call.args[0] for call in mock_emit.call_args_list]
         self.assertIn("trial_conversion_failed", emitted_names)
+        self.assertEqual(mock_capi.call_args.kwargs["event_name"], "TrialConversionPaymentFailed")
         track_kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(track_kwargs["event"], AnalyticsEvent.BILLING_PAYMENT_FAILED)
         self.assertTrue(track_kwargs["properties"]["trial_conversion_invoice"])
@@ -1920,11 +1924,13 @@ class PaymentFailedSignalTests(TestCase):
             patch("pages.signals.Analytics.track_event") as mock_track_event, \
             patch("pages.signals.Analytics.track_event_anonymous"), \
             patch("pages.signals.get_plan_by_product_id", return_value=None), \
-            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit:
+            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit, \
+            patch("pages.signals.capi") as mock_capi:
 
             handle_invoice_payment_failed(event)
 
         mock_emit.assert_not_called()
+        self.assertEqual(mock_capi.call_args.kwargs["event_name"], "TrialConversionPaymentFailed")
         mock_track_event.assert_called_once()
         props = mock_track_event.call_args.kwargs["properties"]
         self.assertEqual(mock_track_event.call_args.kwargs["event"], AnalyticsEvent.BILLING_PAYMENT_FAILED)
@@ -2178,7 +2184,7 @@ class PaymentFailedSignalTests(TestCase):
         self.assertEqual(props["amount_due"], 30.0)
         self.assertEqual(props["amount_paid"], 30.0)
 
-    def test_invoice_payment_failed_does_not_emit_trial_conversion_failure_capi_before_final_attempt(self):
+    def test_invoice_payment_failed_emits_trial_conversion_failure_capi_before_final_attempt(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
         payload = _build_invoice_payload(
             customer_id="cus_user",
@@ -2220,7 +2226,13 @@ class PaymentFailedSignalTests(TestCase):
 
             handle_invoice_payment_failed(event)
 
-        mock_capi.assert_not_called()
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "TrialConversionPaymentFailed")
+        self.assertEqual(capi_kwargs["provider_targets"], ["meta", "reddit", "tiktok"])
+        props = capi_kwargs["properties"]
+        self.assertFalse(props["final_attempt"])
+        self.assertTrue(props["trial_conversion_invoice"])
 
     def test_invoice_payment_failed_emits_trial_conversion_failure_capi_for_final_attempt(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
@@ -2268,7 +2280,7 @@ class PaymentFailedSignalTests(TestCase):
         mock_emit.assert_not_called()
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
-        self.assertEqual(capi_kwargs["event_name"], "TrialConversionPaymentFailed")
+        self.assertEqual(capi_kwargs["event_name"], "TrialConversionPaymentFailedFinal")
         self.assertEqual(capi_kwargs["provider_targets"], ["meta", "reddit", "tiktok"])
         self.assertEqual(capi_kwargs["context"]["page"]["url"], "https://gobii.ai/pricing")
         props = capi_kwargs["properties"]
@@ -2278,6 +2290,7 @@ class PaymentFailedSignalTests(TestCase):
         self.assertEqual(props["event_id"], payload["id"])
         self.assertEqual(props["attempt_number"], 2)
         self.assertTrue(props["final_attempt"])
+        self.assertTrue(props["trial_conversion_invoice"])
         self.assertEqual(props["value"], 25.0)
         self.assertEqual(props["amount_due"], 25.0)
         self.assertEqual(props["currency"], "USD")
@@ -2327,8 +2340,59 @@ class PaymentFailedSignalTests(TestCase):
         mock_capi.assert_called_once()
         self.assertEqual(
             mock_capi.call_args.kwargs["event_name"],
-            "TrialConversionPaymentFailed",
+            "TrialConversionPaymentFailedFinal",
         )
+
+    def test_invoice_payment_failed_emits_subscription_payment_failed_capi_for_retryable_subscription_failure(self):
+        payload = _build_invoice_payload(
+            customer_id="cus_user",
+            subscription_id="sub_user",
+            attempt_count=2,
+            next_payment_attempt=timezone.now().timestamp() + 3600,
+            auto_advance=True,
+            amount_due=2500,
+            billing_reason="subscription_cycle",
+        )
+        event = _build_djstripe_event(payload, event_type="invoice.payment_failed", event_id="evt_subscription_retry")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user", subscriber=self.user),
+            subscription=SimpleNamespace(
+                id="sub_user",
+                stripe_data={
+                    "status": "past_due",
+                },
+            ),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.Analytics.track_event_anonymous"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.emit_billing_lifecycle_event") as mock_emit, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_invoice_payment_failed(event)
+
+        mock_emit.assert_not_called()
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "SubscriptionPaymentFailed")
+        self.assertEqual(capi_kwargs["provider_targets"], ["meta", "reddit", "tiktok"])
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
+        self.assertEqual(props["subscription_id"], "sub_user")
+        self.assertEqual(props["stripe.invoice_id"], payload["id"])
+        self.assertEqual(props["event_id"], payload["id"])
+        self.assertEqual(props["attempt_number"], 2)
+        self.assertFalse(props["final_attempt"])
+        self.assertFalse(props["trial_conversion_invoice"])
+        self.assertEqual(props["value"], 25.0)
+        self.assertEqual(props["currency"], "USD")
 
     def test_invoice_payment_failed_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-fail", email="org-fail@example.com", password="pw")

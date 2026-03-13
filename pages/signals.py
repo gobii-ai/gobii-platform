@@ -42,7 +42,6 @@ import stripe
 from billing.addons import AddonEntitlementService
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
-    is_trial_conversion_charge,
     is_trial_cancel_scheduled,
     is_trial_conversion_failure,
     is_trial_conversion_invoice,
@@ -94,6 +93,8 @@ UTM_MAPPING = {
 
 CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid')
 TRIAL_CONVERSION_PAYMENT_FAILED_EVENT = "TrialConversionPaymentFailed"
+TRIAL_CONVERSION_PAYMENT_FAILED_FINAL_EVENT = "TrialConversionPaymentFailedFinal"
+SUBSCRIPTION_PAYMENT_FAILED_EVENT = "SubscriptionPaymentFailed"
 AD_CAPI_PROVIDER_TARGETS = ["meta", "reddit", "tiktok"]
 
 
@@ -1712,13 +1713,6 @@ def handle_invoice_payment_failed(event, **kwargs):
         else:
             subscription_status = None
 
-        trial_conversion_charge = is_trial_conversion_charge(
-            billing_reason=billing_reason,
-            trial_end_dt=trial_end_dt,
-            line_period_start_dt=line_period_start_dt,
-            subscription_current_period_start_dt=subscription_current_period_start_dt,
-        )
-
         trial_conversion_invoice = is_trial_conversion_invoice(
             billing_reason=billing_reason,
             trial_end_dt=trial_end_dt,
@@ -1760,7 +1754,17 @@ def handle_invoice_payment_failed(event, **kwargs):
                     payload.get("id"),
                 )
 
-        if trial_conversion_charge and final_attempt and owner_type == "user" and owner:
+        marketing_event_name = None
+        if owner_type == "user" and owner and subscription_id:
+            if trial_conversion_invoice:
+                if final_attempt:
+                    marketing_event_name = TRIAL_CONVERSION_PAYMENT_FAILED_FINAL_EVENT
+                else:
+                    marketing_event_name = TRIAL_CONVERSION_PAYMENT_FAILED_EVENT
+            elif not final_attempt:
+                marketing_event_name = SUBSCRIPTION_PAYMENT_FAILED_EVENT
+
+        if marketing_event_name:
             try:
                 failed_amount = properties.get("amount_due")
                 marketing_properties = {
@@ -1769,6 +1773,7 @@ def handle_invoice_payment_failed(event, **kwargs):
                     "stripe.invoice_id": payload.get("id"),
                     "attempt_number": attempt_count,
                     "final_attempt": final_attempt,
+                    "trial_conversion_invoice": trial_conversion_invoice,
                     "value": failed_amount,
                     "amount_due": failed_amount,
                     "currency": properties.get("currency"),
@@ -1793,7 +1798,7 @@ def handle_invoice_payment_failed(event, **kwargs):
 
                 capi(
                     user=owner,
-                    event_name=TRIAL_CONVERSION_PAYMENT_FAILED_EVENT,
+                    event_name=marketing_event_name,
                     properties=marketing_properties,
                     request=None,
                     context=marketing_context,
@@ -1801,7 +1806,7 @@ def handle_invoice_payment_failed(event, **kwargs):
                 )
             except Exception:
                 logger.exception(
-                    "Failed to emit trial conversion failure marketing event for invoice %s",
+                    "Failed to emit payment failure marketing event for invoice %s",
                     payload.get("id"),
                 )
 
