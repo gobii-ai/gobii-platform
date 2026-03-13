@@ -2709,7 +2709,7 @@ export function AgentChatPage({
   const handleSend = useCallback(async (
     body: string,
     attachments: File[] = [],
-    thirdArg?: string | { humanInputRequestId?: string | null } | null,
+    charterOverride?: string | null,
   ) => {
     if (!activeAgentId && !isNewAgent) {
       return
@@ -2721,7 +2721,6 @@ export function AgentChatPage({
     if (!hasMessageContent) {
       return
     }
-    const charterOverride = typeof thirdArg === 'string' || thirdArg === null ? thirdArg : null
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
       const authenticated = await ensureAuthenticated()

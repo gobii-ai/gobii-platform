@@ -131,7 +131,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onSendMessage?: (
     body: string,
     attachments?: File[],
-    meta?: { humanInputRequestId?: string | null },
   ) => void | Promise<void>
   onComposerFocus?: () => void
   autoScrollPinned?: boolean

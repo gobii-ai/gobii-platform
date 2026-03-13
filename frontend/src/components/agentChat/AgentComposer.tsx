@@ -100,10 +100,6 @@ const workingPanelStorageCodec = {
   },
 }
 
-type ComposerSubmitMeta = {
-  humanInputRequestId?: string | null
-}
-
 type HumanInputComposerResponse = {
   requestId: string
   selectedOptionKey?: string
@@ -116,7 +112,7 @@ type HumanInputComposerBatchResponse = {
 }
 
 type AgentComposerProps = {
-  onSubmit?: (message: string, attachments?: File[], meta?: ComposerSubmitMeta) => void | Promise<void>
+  onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   pendingHumanInputRequests?: PendingHumanInputRequest[]
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
   disabled?: boolean
@@ -625,7 +621,7 @@ export const AgentComposer = memo(function AgentComposer({
           fileInputRef.current.value = ''
         }
         requestAnimationFrame(() => adjustTextareaHeight(true))
-        await onSubmit(trimmed, attachmentsSnapshot, undefined)
+        await onSubmit(trimmed, attachmentsSnapshot)
       } finally {
         setIsSending(false)
       }
