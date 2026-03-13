@@ -165,6 +165,7 @@ class HumanInputRequestTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
+        self.assertNotIn("reference_code", result)
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
         self.assertEqual(
             request_obj.input_mode,
@@ -270,7 +271,45 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("Reply with the number, the option title, or your own words.", params["mobile_first_html"])
         self.assertIn("Short summary", params["mobile_first_html"])
         self.assertIn("Detailed memo", params["mobile_first_html"])
-        self.assertIn("Ref:", params["mobile_first_html"])
+        self.assertNotIn("Ref:", params["mobile_first_html"])
+
+    @patch("api.agent.comms.human_input_requests.execute_send_sms")
+    def test_create_human_input_request_renders_sms_without_reference(self, mock_send_sms):
+        sms_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550100",
+        )
+        sms_user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15555550199",
+        )
+        sms_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550199",
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=sms_user_endpoint,
+            to_endpoint=sms_agent_endpoint,
+            conversation=sms_conversation,
+            owner_agent=self.agent,
+            body="Please text me",
+            raw_payload={"source": "test"},
+        )
+        mock_send_sms.return_value = {"status": "ok"}
+
+        create_human_input_request(
+            self.agent,
+            question="How should I send this?",
+            raw_options=[{"title": "Short summary", "description": "A concise update."}],
+        )
+
+        self.assertTrue(mock_send_sms.called)
+        params = mock_send_sms.call_args.args[1]
+        self.assertIn("How should I send this?", params["body"])
+        self.assertNotIn("Ref:", params["body"])
 
     def test_resolve_request_by_option_number(self):
         request_obj = self._create_request(
@@ -622,6 +661,7 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(entry["result"]["status"], PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(entry["result"]["request_id"], str(request_obj.id))
         self.assertNotIn("title", entry["result"])
+        self.assertNotIn("reference_code", entry["result"])
         self.assertEqual(entry["result"]["selected_option_title"], "Ship it")
 
 
@@ -718,10 +758,7 @@ class HumanInputRequestApiTests(TestCase):
             timeline_payload["pending_human_input_requests"][0]["question"],
             "What should I do next?",
         )
-        self.assertEqual(
-            timeline_payload["pending_human_input_requests"][0]["referenceCode"],
-            self.request_obj.reference_code,
-        )
+        self.assertNotIn("referenceCode", timeline_payload["pending_human_input_requests"][0])
         self.assertEqual(
             timeline_payload["pending_human_input_requests"][0]["batchId"],
             str(self.request_obj.id),

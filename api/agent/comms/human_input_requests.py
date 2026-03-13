@@ -182,7 +182,6 @@ def _render_prompt_text(
     request_obj: PersistentAgentHumanInputRequest,
     *,
     compact: bool,
-    include_reference: bool,
 ) -> str:
     lines = [request_obj.question.strip()]
     options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
@@ -205,8 +204,6 @@ def _render_prompt_text(
     else:
         lines.append("")
         lines.append("Reply in your own words.")
-    if include_reference:
-        lines.append(f"Ref: {request_obj.reference_code}")
     return "\n".join(line for line in lines if line is not None)
 
 
@@ -228,7 +225,6 @@ def _render_prompt_html(request_obj: PersistentAgentHumanInputRequest) -> str:
         parts.append("<p>Reply with the number, the option title, or your own words.</p>")
     else:
         parts.append("<p>Reply in your own words.</p>")
-    parts.append(f"<p><strong>Ref:</strong> {escape(request_obj.reference_code)}</p>")
     return "".join(parts)
 
 
@@ -248,7 +244,7 @@ def _send_request_prompt(
             agent,
             {
                 "to_number": target.address,
-                "body": _render_prompt_text(request_obj, compact=True, include_reference=True),
+                "body": _render_prompt_text(request_obj, compact=True),
                 "will_continue_work": False,
             },
         )
@@ -304,7 +300,6 @@ def _create_human_input_request_for_target(
         "status": "ok",
         "message": f"Human input request sent via {target.channel}.",
         "request_id": str(request_obj.id),
-        "reference_code": request_obj.reference_code,
         "input_mode": request_obj.input_mode,
         "options_count": len(options),
         "active_conversation_channel": target.channel,
@@ -394,7 +389,6 @@ def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInput
         "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
         "createdAt": request_obj.created_at.isoformat() if request_obj.created_at else None,
         "status": request_obj.status,
-        "referenceCode": request_obj.reference_code,
         "activeConversationChannel": request_obj.requested_via_channel,
         "inputMode": request_obj.input_mode,
     }
@@ -466,7 +460,6 @@ def serialize_human_input_tool_result(step, raw_result: Any) -> Any:
             "question": request_obj.question,
             "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
             "status": request_obj.status,
-            "reference_code": request_obj.reference_code,
             "active_conversation_channel": request_obj.requested_via_channel,
             "input_mode": request_obj.input_mode,
             "selected_option_key": request_obj.selected_option_key or None,
