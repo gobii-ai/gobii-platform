@@ -197,6 +197,7 @@ class AnalyticsEvent(StrEnum):
     BILLING_TRIAL_ENDED = 'Billing Trial Ended' # Without converting
     BILLING_TRIAL_PAYMENT_FAILURE = 'Billing Trial Payment Failure' # Initial payment failure
     BILLING_DELINQUENCY_ENTERED = 'Billing Delinquency Entered'
+    ACCOUNT_EXECUTION_PAUSED = 'Account Execution Paused'
 
     # API Key Events
     API_KEY_CREATED = 'API Key Created'

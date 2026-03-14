@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from api.models import ExecutionPauseReasonChoices
 from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,15 @@ def pause_owner_execution(
                 AgentShutdownReason.PAUSE,
                 meta=cleanup_meta,
             )
+
+    if state_changed:
+        _track_account_execution_paused(
+            owner,
+            reason=normalized_reason,
+            source=source,
+            paused_at=effective_paused_at,
+            trigger_agent_cleanup=trigger_agent_cleanup,
+        )
 
     logger.info(
         "Owner execution paused for %s %s (reason=%s source=%s changed=%s)",
@@ -313,6 +323,60 @@ def _iter_active_owner_agent_ids(owner):
         qs = qs.filter(user_id=owner.id, organization__isnull=True)
 
     return qs.values_list("id", flat=True).iterator(chunk_size=200)
+
+
+def _track_account_execution_paused(
+    owner,
+    *,
+    reason: str,
+    source: str,
+    paused_at,
+    trigger_agent_cleanup: bool,
+) -> None:
+    properties = {
+        "owner_type": _owner_type_label(owner),
+        "owner_id": str(getattr(owner, "id", "") or ""),
+        "execution_pause_reason": reason,
+        "pause_source": source,
+        "trigger_agent_cleanup": bool(trigger_agent_cleanup),
+    }
+    if paused_at is not None:
+        properties["paused_at"] = paused_at.isoformat() if hasattr(paused_at, "isoformat") else str(paused_at)
+
+    analytics_user_id = _analytics_user_id_for_owner(owner)
+    if analytics_user_id is not None:
+        Analytics.track_event(
+            user_id=analytics_user_id,
+            event=AnalyticsEvent.ACCOUNT_EXECUTION_PAUSED,
+            source=AnalyticsSource.API,
+            properties=properties,
+        )
+        return
+
+    anonymous_id = _analytics_anonymous_id_for_owner(owner)
+    if anonymous_id is not None:
+        Analytics.track_event_anonymous(
+            anonymous_id=anonymous_id,
+            event=AnalyticsEvent.ACCOUNT_EXECUTION_PAUSED,
+            source=AnalyticsSource.API,
+            properties=properties,
+        )
+
+
+def _analytics_user_id_for_owner(owner):
+    owner_type = _owner_type_label(owner)
+    if owner_type == "user":
+        return getattr(owner, "id", None)
+    if owner_type == "organization":
+        return getattr(owner, "created_by_id", None)
+    return None
+
+
+def _analytics_anonymous_id_for_owner(owner) -> str | None:
+    owner_id = getattr(owner, "id", None)
+    if owner_id is None:
+        return None
+    return f"owner:{_owner_type_label(owner)}:{owner_id}"
 
 
 def _enqueue_agent_resumes(agent_ids) -> None:
