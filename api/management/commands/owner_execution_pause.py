@@ -7,6 +7,7 @@ from api.services.owner_execution_pause import (
     pause_owner_execution,
     resume_owner_execution,
 )
+from util.analytics import AnalyticsSource
 
 
 class Command(BaseCommand):
@@ -67,6 +68,7 @@ class Command(BaseCommand):
                 options["reason"],
                 source=options["source"],
                 trigger_agent_cleanup=not options["skip_cleanup"],
+                analytics_source=AnalyticsSource.NA,
             )
         elif action == "resume":
             resume_owner_execution(

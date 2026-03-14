@@ -101,6 +101,7 @@ def pause_owner_execution(
     source: str = "unknown",
     paused_at=None,
     trigger_agent_cleanup: bool = True,
+    analytics_source: AnalyticsSource = AnalyticsSource.NA,
 ) -> bool:
     if owner is None:
         return False
@@ -142,13 +143,14 @@ def pause_owner_execution(
                 meta=cleanup_meta,
             )
 
-    if state_changed:
+    if not was_paused:
         _track_account_execution_paused(
             owner,
             reason=normalized_reason,
             source=source,
             paused_at=effective_paused_at,
             trigger_agent_cleanup=trigger_agent_cleanup,
+            analytics_source=analytics_source,
         )
 
     logger.info(
@@ -170,6 +172,7 @@ def pause_owner_execution_by_ref(
     source: str = "unknown",
     paused_at=None,
     trigger_agent_cleanup: bool = True,
+    analytics_source: AnalyticsSource = AnalyticsSource.API,
 ) -> bool:
     owner = resolve_owner_by_ref(owner_type, owner_id)
     if owner is None:
@@ -186,6 +189,7 @@ def pause_owner_execution_by_ref(
         source=source,
         paused_at=paused_at,
         trigger_agent_cleanup=trigger_agent_cleanup,
+        analytics_source=analytics_source,
     )
 
 
@@ -332,6 +336,7 @@ def _track_account_execution_paused(
     source: str,
     paused_at,
     trigger_agent_cleanup: bool,
+    analytics_source: AnalyticsSource,
 ) -> None:
     properties = {
         "owner_type": _owner_type_label(owner),
@@ -348,7 +353,7 @@ def _track_account_execution_paused(
         Analytics.track_event(
             user_id=analytics_user_id,
             event=AnalyticsEvent.ACCOUNT_EXECUTION_PAUSED,
-            source=AnalyticsSource.API,
+            source=analytics_source,
             properties=properties,
         )
         return
@@ -358,7 +363,7 @@ def _track_account_execution_paused(
         Analytics.track_event_anonymous(
             anonymous_id=anonymous_id,
             event=AnalyticsEvent.ACCOUNT_EXECUTION_PAUSED,
-            source=AnalyticsSource.API,
+            source=analytics_source,
             properties=properties,
         )
 

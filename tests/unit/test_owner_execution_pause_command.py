@@ -11,7 +11,7 @@ from api.services.owner_execution_pause import (
     pause_owner_execution as real_pause_owner_execution,
     resume_owner_execution as real_resume_owner_execution,
 )
-from util.analytics import AnalyticsEvent
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_owner_billing")
@@ -78,6 +78,7 @@ class OwnerExecutionPauseCommandTests(TestCase):
         self.assertIn("paused=True", out.getvalue())
         mock_track_event.assert_called_once()
         self.assertEqual(mock_track_event.call_args.kwargs["event"], AnalyticsEvent.ACCOUNT_EXECUTION_PAUSED)
+        self.assertEqual(mock_track_event.call_args.kwargs["source"], AnalyticsSource.NA)
 
     def test_resume_updates_org_state(self):
         billing = self.org.billing

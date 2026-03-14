@@ -8,7 +8,7 @@ from django.urls import reverse
 
 from api.admin import CustomUserAdmin
 from api.models import ExecutionPauseReasonChoices
-from util.analytics import AnalyticsEvent
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_owner_billing")
@@ -66,6 +66,7 @@ class UserAdminExecutionPauseTests(TestCase):
         self.assertIsNotNone(self.target_user.billing.execution_paused_at)
         mock_track_event.assert_called_once()
         self.assertEqual(mock_track_event.call_args.kwargs["event"], AnalyticsEvent.ACCOUNT_EXECUTION_PAUSED)
+        self.assertEqual(mock_track_event.call_args.kwargs["source"], AnalyticsSource.WEB)
 
     def test_save_model_can_resume_user_execution(self):
         billing = self.target_user.billing

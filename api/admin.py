@@ -1889,6 +1889,7 @@ class CustomUserAdmin(UserAdmin):
                     pause_reason,
                     source="django_admin.user_change",
                     trigger_agent_cleanup=False,
+                    analytics_source=AnalyticsSource.WEB,
                 )
             return
 
