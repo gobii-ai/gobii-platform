@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
@@ -7,6 +8,7 @@ from django.urls import reverse
 
 from api.admin import CustomUserAdmin
 from api.models import ExecutionPauseReasonChoices
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_owner_billing")
@@ -42,7 +44,8 @@ class UserAdminExecutionPauseTests(TestCase):
         self.assertContains(response, f'value="{ExecutionPauseReasonChoices.ADMIN_MANUAL_PAUSE}"')
         self.assertContains(response, f'value="{ExecutionPauseReasonChoices.BILLING_DELINQUENCY}"')
 
-    def test_save_model_can_pause_user_execution(self):
+    @patch("api.services.owner_execution_pause.Analytics.track_event")
+    def test_save_model_can_pause_user_execution(self, mock_track_event):
         request = self.factory.post(self._change_url())
         request.user = self.admin_user
         form = SimpleNamespace(
@@ -61,6 +64,9 @@ class UserAdminExecutionPauseTests(TestCase):
             ExecutionPauseReasonChoices.ADMIN_MANUAL_PAUSE,
         )
         self.assertIsNotNone(self.target_user.billing.execution_paused_at)
+        mock_track_event.assert_called_once()
+        self.assertEqual(mock_track_event.call_args.kwargs["event"], AnalyticsEvent.ACCOUNT_EXECUTION_PAUSED)
+        self.assertEqual(mock_track_event.call_args.kwargs["source"], AnalyticsSource.WEB)
 
     def test_save_model_can_resume_user_execution(self):
         billing = self.target_user.billing

@@ -124,6 +124,7 @@ def _handle_trial_conversion_failed(sender, payload, **_kwargs) -> None:
             EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED,
             source="billing.lifecycle.trial_conversion_failed",
             paused_at=payload.occurred_at,
+            analytics_source=AnalyticsSource.API,
         )
 
 
@@ -148,6 +149,7 @@ def _handle_subscription_delinquency_entered(sender, payload, **_kwargs) -> None
             EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
             source="billing.lifecycle.subscription_delinquency_entered",
             paused_at=payload.occurred_at,
+            analytics_source=AnalyticsSource.API,
         )
 
 
