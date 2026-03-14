@@ -363,7 +363,7 @@ def _track_account_execution_paused(
         )
 
 
-def _analytics_user_id_for_owner(owner):
+def _analytics_user_id_for_owner(owner: Any) -> Any | None:
     owner_type = _owner_type_label(owner)
     if owner_type == "user":
         return getattr(owner, "id", None)
