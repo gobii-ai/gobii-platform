@@ -3,17 +3,19 @@
 {% block title %}{% trans "Create your account" %}{% endblock %}
 
 {% block head_extras %}
-  {% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL %}
-    <script src="{{ settings.FINGERPRINT_JS_URL }}">
-      const fp = import('{{ settings.FINGERPRINT_JS_URL }}')
-        .then(Fingerprint => Fingerprint.start())
+  {% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
+    <script>
+      const fp = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
+        .then(({ load, defaultEndpoint }) => load({
+            endpoint: [
+              '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL }}?region=us',
+              defaultEndpoint
+            ]
+          })
+        );
 
-      // Get the visitor and event identifier when you need it.
-      fp
-        .then(fp => fp.get())
-        .then(result => console.log(result.event_id, result.visitor_id))
+      fp.then(fp => fp.get()).then(result => console.log(result.visitorId));
     </script>
-
   {% endif %}
 {% endblock %}
 
