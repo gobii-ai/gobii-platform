@@ -2,6 +2,21 @@
 {% load i18n form_extras socialaccount social_extras %}
 {% block title %}{% trans "Create your account" %}{% endblock %}
 
+{% block head_extras %}
+  {% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL %}
+    <script src="{{ settings.FINGERPRINT_JS_URL }}">
+      const fp = import('{{ settings.FINGERPRINT_JS_URL }}')
+        .then(Fingerprint => Fingerprint.start())
+
+      // Get the visitor and event identifier when you need it.
+      fp
+        .then(fp => fp.get())
+        .then(result => console.log(result.event_id, result.visitor_id))
+    </script>
+
+  {% endif %}
+{% endblock %}
+
 {% block body_inner %}
 <div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs mb-20">
   <div class="p-8">
