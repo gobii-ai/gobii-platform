@@ -4,6 +4,7 @@ import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
+import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { HumanInputComposerPanel } from './HumanInputComposerPanel'
 import type { PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
@@ -149,6 +150,8 @@ type AgentComposerProps = {
   canManageAgent?: boolean
   submitError?: string | null
   showSubmitErrorUpgrade?: boolean
+  pipedreamAppsSettingsUrl?: string | null
+  pipedreamAppSearchUrl?: string | null
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -182,6 +185,8 @@ export const AgentComposer = memo(function AgentComposer({
   canManageAgent = true,
   submitError = null,
   showSubmitErrorUpgrade = false,
+  pipedreamAppsSettingsUrl = null,
+  pipedreamAppSearchUrl = null,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -248,6 +253,9 @@ export const AgentComposer = memo(function AgentComposer({
   const MAX_COMPOSER_HEIGHT = 320
 
   const showIntelligenceSelector = Boolean(intelligenceConfig && intelligenceTier && onIntelligenceChange)
+  const showPipedreamAppsControl = Boolean(
+    canManageAgent && pipedreamAppsSettingsUrl && pipedreamAppSearchUrl,
+  )
   const handleIntelligenceUpsell = useCallback(async () => {
     const authenticated = await ensureAuthenticated()
     if (!authenticated) {
@@ -1034,6 +1042,15 @@ export const AgentComposer = memo(function AgentComposer({
                     </button>
                   </span>
                 ))}
+              </div>
+            ) : null}
+            {showPipedreamAppsControl ? (
+              <div className="flex items-center justify-start pt-2">
+                <ComposerPipedreamAppsControl
+                  settingsUrl={pipedreamAppsSettingsUrl as string}
+                  searchUrl={pipedreamAppSearchUrl as string}
+                  disabled={disabled || isSending}
+                />
               </div>
             ) : null}
             {feedbackMessage ? (

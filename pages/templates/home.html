@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% load vite_tags %}
 {% load waffle_tags %}
 {% block title %}Gobii | Your AI Team, Always On — Virtual Coworkers That Automate Web Work 24/7{% endblock %}
 {% block head_extras %}
@@ -218,6 +219,7 @@
             <input type="hidden" name="source_page" value="home_hero">
             <input type="hidden" name="trial_onboarding" value="1">
             <input type="hidden" name="trial_onboarding_target" value="agent_ui">
+            <div id="homepage-integrations-selected-fields"></div>
             
             <!-- Charter Input with inline CTA button -->
             <div>
@@ -235,105 +237,139 @@
                 {{ agent_charter_form.charter }}
 
                 <!-- Button row -->
-                <div class="flex items-center justify-end gap-3 p-3 relative z-[200]">
-                  {% if llm_intelligence %}
-                  <div
-                    class="relative"
-                    data-intelligence-selector
-                    data-intelligence-upgrade="{{ llm_intelligence.upgradeUrl|default_if_none:'' }}"
-                    data-intelligence-can-edit="{{ llm_intelligence.canEdit|yesno:'true,false' }}"
-                    data-intelligence-disabled="{{ llm_intelligence.disabledReason|default_if_none:''|escape }}"
-                    data-intelligence-max-tier="{{ llm_intelligence.maxAllowedTier|default_if_none:'' }}"
-                    data-intelligence-max-rank="{{ llm_intelligence.maxAllowedTierRank|default_if_none:'' }}"
-                    data-billing-url="{{ billing_url|default_if_none:'' }}"
-                  >
-                    <input type="hidden" name="preferred_llm_tier" id="preferred-llm-tier" value="{{ preferred_llm_tier }}">
-                    <button
-                      type="button"
-                      class="group flex items-center gap-1.5 rounded-lg bg-transparent px-2 py-1.5 text-xs font-medium text-slate-500 transition-all hover:text-indigo-600"
-                      data-intelligence-trigger
-                      aria-expanded="false"
-                      aria-label="Select intelligence level"
+                <div class="flex flex-col gap-3 p-3 relative z-[200] sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex min-w-0 items-center gap-2">
+                    {% if homepage_integrations_enabled %}
+                      <div class="flex items-center gap-2" data-integrations-inline>
+                        {% if homepage_integrations_inline_builtins %}
+                          <span class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Apps</span>
+                          <div class="flex items-center -space-x-1.5">
+                            {% for app in homepage_integrations_inline_builtins %}
+                              <span class="relative inline-flex h-7 w-7 items-center justify-center rounded-lg border-2 border-white bg-indigo-50 text-[9px] font-semibold uppercase text-indigo-700 shadow-sm" title="{{ app.name }}">
+                                {% if app.icon_url %}
+                                  <img src="{{ app.icon_url }}" alt="{{ app.name }}" class="h-full w-full rounded-[8px] object-cover" loading="lazy" />
+                                {% else %}
+                                  <span>{{ app.name|slice:":2"|upper }}</span>
+                                {% endif %}
+                              </span>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                        <button
+                          type="button"
+                          class="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-indigo-200 hover:text-indigo-600"
+                          aria-label="Search more integrations"
+                          data-integrations-open
+                        >
+                          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <circle cx="5" cy="12" r="1.8"></circle>
+                            <circle cx="12" cy="12" r="1.8"></circle>
+                            <circle cx="19" cy="12" r="1.8"></circle>
+                          </svg>
+                        </button>
+                      </div>
+                    {% endif %}
+                  </div>
+
+                  <div class="flex items-center justify-end gap-3">
+                    {% if llm_intelligence %}
+                    <div
+                      class="relative"
+                      data-intelligence-selector
+                      data-intelligence-upgrade="{{ llm_intelligence.upgradeUrl|default_if_none:'' }}"
+                      data-intelligence-can-edit="{{ llm_intelligence.canEdit|yesno:'true,false' }}"
+                      data-intelligence-disabled="{{ llm_intelligence.disabledReason|default_if_none:''|escape }}"
+                      data-intelligence-max-tier="{{ llm_intelligence.maxAllowedTier|default_if_none:'' }}"
+                      data-intelligence-max-rank="{{ llm_intelligence.maxAllowedTierRank|default_if_none:'' }}"
+                      data-billing-url="{{ billing_url|default_if_none:'' }}"
                     >
-                      <svg class="h-4 w-4 text-indigo-400 group-hover:text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path>
-                        <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path>
-                        <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"></path>
-                        <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"></path>
-                        <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"></path>
-                        <path d="M3.477 10.896a4 4 0 0 1 .585-.396"></path>
-                        <path d="M19.938 10.5a4 4 0 0 1 .585.396"></path>
-                        <path d="M6 18a4 4 0 0 1-1.967-.516"></path>
-                        <path d="M19.967 17.484A4 4 0 0 1 18 18"></path>
-                      </svg>
-                      <span data-intelligence-current>{{ preferred_llm_tier_label }}</span>
-                      <svg class="h-3 w-3 text-slate-400 transition-transform group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-chevron>
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                      <input type="hidden" name="preferred_llm_tier" id="preferred-llm-tier" value="{{ preferred_llm_tier }}">
+                      <button
+                        type="button"
+                        class="group flex items-center gap-1.5 rounded-lg bg-transparent px-2 py-1.5 text-xs font-medium text-slate-500 transition-all hover:text-indigo-600"
+                        data-intelligence-trigger
+                        aria-expanded="false"
+                        aria-label="Select intelligence level"
+                      >
+                        <svg class="h-4 w-4 text-indigo-400 group-hover:text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                          <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path>
+                          <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path>
+                          <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"></path>
+                          <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"></path>
+                          <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"></path>
+                          <path d="M3.477 10.896a4 4 0 0 1 .585-.396"></path>
+                          <path d="M19.938 10.5a4 4 0 0 1 .585.396"></path>
+                          <path d="M6 18a4 4 0 0 1-1.967-.516"></path>
+                          <path d="M19.967 17.484A4 4 0 0 1 18 18"></path>
+                        </svg>
+                        <span data-intelligence-current>{{ preferred_llm_tier_label }}</span>
+                        <svg class="h-3 w-3 text-slate-400 transition-transform group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-chevron>
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                      </button>
+                      <div
+                        class="absolute top-full right-0 z-[100] mt-1.5 hidden w-56 origin-top-right rounded-lg border border-slate-200/60 bg-white py-1 shadow-xl shadow-slate-900/10"
+                        data-intelligence-menu
+                      >
+                        {% for option in llm_intelligence.options %}
+                          <button
+                            type="button"
+                            class="grid w-full grid-cols-[20px_1fr_42px_76px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-indigo-50/30 {% if option.key == preferred_llm_tier %}bg-indigo-50/40{% endif %}"
+                            data-intelligence-option
+                            data-tier="{{ option.key }}"
+                            data-label="{{ option.label }}"
+                            data-multiplier="{{ option.multiplier|floatformat:-1 }}"
+                            data-rank="{{ option.rank|default_if_none:'' }}"
+                            {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
+                              data-locked="{% if option.rank > llm_intelligence.maxAllowedTierRank %}true{% else %}false{% endif %}"
+                            {% else %}
+                              data-locked="{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}true{% else %}false{% endif %}"
+                            {% endif %}
+                          >
+                            <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
+                            <span class="min-w-0 truncate text-[13px] font-medium whitespace-nowrap {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{{ option.label }}</span>
+                            <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
+                            {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
+                              {% if option.rank > llm_intelligence.maxAllowedTierRank %}
+                                <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
+                                  <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="3" y="11" width="18" height="11" rx="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                  </svg>
+                                  Unlock
+                                </span>
+                              {% else %}
+                                <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
+                              {% endif %}
+                            {% else %}
+                              {% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
+                                <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
+                                  <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="3" y="11" width="18" height="11" rx="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                                  </svg>
+                                  Unlock
+                                </span>
+                              {% else %}
+                                <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
+                              {% endif %}
+                            {% endif %}
+                          </button>
+                        {% endfor %}
+                      </div>
+                    </div>
+                    {% endif %}
+
+                    <button
+                      type="submit"
+                      class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
+                    >
+                      {% if not user.is_authenticated or home_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+                      <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
                       </svg>
                     </button>
-		                    <div
-	                      class="absolute top-full right-0 z-[100] mt-1.5 hidden w-56 origin-top-right rounded-lg border border-slate-200/60 bg-white py-1 shadow-xl shadow-slate-900/10"
-		                      data-intelligence-menu
-		                    >
-                      {% for option in llm_intelligence.options %}
-	                      <button
-	                        type="button"
-	                        class="grid w-full grid-cols-[20px_1fr_42px_76px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-indigo-50/30 {% if option.key == preferred_llm_tier %}bg-indigo-50/40{% endif %}"
-	                        data-intelligence-option
-	                        data-tier="{{ option.key }}"
-	                        data-label="{{ option.label }}"
-	                        data-multiplier="{{ option.multiplier|floatformat:-1 }}"
-                        data-rank="{{ option.rank|default_if_none:'' }}"
-                        {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
-                          data-locked="{% if option.rank > llm_intelligence.maxAllowedTierRank %}true{% else %}false{% endif %}"
-                        {% else %}
-                          data-locked="{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}true{% else %}false{% endif %}"
-	                        {% endif %}
-	                      >
-	                        <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
-	                        <span class="min-w-0 truncate text-[13px] font-medium whitespace-nowrap {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{{ option.label }}</span>
-	                        <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
-	                        {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
-	                          {% if option.rank > llm_intelligence.maxAllowedTierRank %}
-	                            <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
-	                              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-	                                <rect x="3" y="11" width="18" height="11" rx="2"></rect>
-	                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-	                              </svg>
-	                              Unlock
-	                            </span>
-	                          {% else %}
-	                            <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
-	                          {% endif %}
-	                        {% else %}
-	                          {% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
-	                            <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
-	                              <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-	                                <rect x="3" y="11" width="18" height="11" rx="2"></rect>
-	                                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-	                              </svg>
-	                              Unlock
-	                            </span>
-	                          {% else %}
-	                            <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
-	                          {% endif %}
-	                        {% endif %}
-	                      </button>
-                      {% endfor %}
-                    </div>
                   </div>
-                  {% endif %}
-
-                  <button
-                    type="submit"
-                    class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
-
-                  >
-                    {% if not user.is_authenticated or home_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
-                    <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
-                    </svg>
-                  </button>
                 </div>
               </div>
               
@@ -401,6 +437,14 @@
           </div>
         </div>
       </div>
+
+      {% if homepage_integrations_enabled %}
+        {{ homepage_integrations_modal_props|json_script:"homepage-integrations-props" }}
+        <div
+          id="homepage-integrations-root"
+          data-props-json-id="homepage-integrations-props"
+        ></div>
+      {% endif %}
 
       {% if user.is_authenticated and recent_agents_total|default:0 > 0 %}
       <div class="max-w-4xl mx-auto mt-16 pb-0 px-6 relative z-10">
@@ -774,9 +818,9 @@
     });
   </script>
 
-	  <script>
-	    document.addEventListener('DOMContentLoaded', function () {
-	      const selector = document.querySelector('[data-intelligence-selector]')
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const selector = document.querySelector('[data-intelligence-selector]')
 	      if (!selector) {
 	        return
 	      }
@@ -1273,4 +1317,11 @@
       });
     </script>
 </div> <!-- New closing div for the main wrapper -->
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% if homepage_integrations_enabled %}
+    {% vite_asset 'src/homepageIntegrations.tsx' %}
+  {% endif %}
 {% endblock %}

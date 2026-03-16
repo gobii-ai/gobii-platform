@@ -4,6 +4,8 @@ import type { CSSProperties, PointerEvent, ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { X } from 'lucide-react'
 
+import './agentChatMobileSheet.css'
+
 type AgentChatMobileSheetProps = {
   open: boolean
   onClose: () => void

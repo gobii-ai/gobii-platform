@@ -63,6 +63,8 @@ const ROSTER_REFRESH_INTERVAL_MS = 20_000
 const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
 const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
+const PIPEDREAM_APPS_SETTINGS_URL = '/console/api/mcp/pipedream/apps/'
+const PIPEDREAM_APP_SEARCH_URL = '/console/api/mcp/pipedream/apps/search/'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -647,7 +649,13 @@ export function AgentChatPage({
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey; charterOverride?: string | null } | null>(null)
+  const pendingCreateRef = useRef<{
+    body: string
+    attachments: File[]
+    tier: IntelligenceTierKey
+    charterOverride?: string | null
+    selectedPipedreamAppSlugs?: string[]
+  } | null>(null)
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
 
   const handleContextSwitched = useCallback(
@@ -2327,10 +2335,20 @@ export function AgentChatPage({
   }, [ensureAuthenticated, onboardingTarget, requiresTrialPlanSelection, upgradeModalSource])
 
   const createNewAgent = useCallback(
-    async (body: string, tier: IntelligenceTierKey, charterOverride?: string | null) => {
+    async (
+      body: string,
+      tier: IntelligenceTierKey,
+      charterOverride?: string | null,
+      selectedPipedreamAppSlugs?: string[],
+    ) => {
       setCreateAgentError(null)
       try {
-        const result = await createAgent(body, tier, charterOverride)
+        const result = await createAgent(
+          body,
+          tier,
+          charterOverride,
+          selectedPipedreamAppSlugs,
+        )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
         const createdAgentEntry: AgentRosterEntry = {
@@ -2703,13 +2721,19 @@ export function AgentChatPage({
       setDraftIntelligenceTier(tierToUse)
     }
     closeGate()
-    void createNewAgent(pending.body, tierToUse, pending.charterOverride)
+    void createNewAgent(
+      pending.body,
+      tierToUse,
+      pending.charterOverride,
+      pending.selectedPipedreamAppSlugs,
+    )
   }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
 
   const handleSend = useCallback(async (
     body: string,
     attachments: File[] = [],
     charterOverride?: string | null,
+    selectedPipedreamAppSlugs?: string[],
   ) => {
     if (!activeAgentId && !isNewAgent) {
       return
@@ -2766,7 +2790,13 @@ export function AgentChatPage({
           burnRatePerDay,
           currentPlan,
         })
-        pendingCreateRef.current = { body, attachments, tier: selectedTier, charterOverride }
+        pendingCreateRef.current = {
+          body,
+          attachments,
+          tier: selectedTier,
+          charterOverride,
+          selectedPipedreamAppSlugs,
+        }
         setIntelligenceGate({
           reason: 'credits',
           selectedTier,
@@ -2777,7 +2807,7 @@ export function AgentChatPage({
         })
         return
       }
-      await createNewAgent(body, selectedTier, charterOverride)
+      await createNewAgent(body, selectedTier, charterOverride, selectedPipedreamAppSlugs)
       return
     }
     if (activeAgentId) {
@@ -2910,7 +2940,12 @@ export function AgentChatPage({
     }
 
     spawnIntentAutoSubmittedRef.current = true
-    const sendPromise = handleSend(spawnIntent.charter, [], spawnIntent.charter_override)
+    const sendPromise = handleSend(
+      spawnIntent.charter,
+      [],
+      spawnIntent.charter_override,
+      spawnIntent.selected_pipedream_app_slugs,
+    )
     sendPromise.finally(() => setSpawnIntentStatus('done'))
   }, [
     contextReady,
@@ -3099,6 +3134,8 @@ export function AgentChatPage({
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
+        pipedreamAppsSettingsUrl={PIPEDREAM_APPS_SETTINGS_URL}
+        pipedreamAppSearchUrl={PIPEDREAM_APP_SEARCH_URL}
         pendingHumanInputRequests={pendingHumanInputRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

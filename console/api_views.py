@@ -146,7 +146,10 @@ from console.daily_credit import (
     parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
-from console.agent_creation import enable_agent_sms_contact
+from console.agent_creation import (
+    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    enable_agent_sms_contact,
+)
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
@@ -156,6 +159,7 @@ import litellm
 
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.agent.core.llm_utils import run_completion
+from api.pipedream_app_utils import normalize_app_slugs
 from api.evals.tasks import gc_eval_runs_task
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
@@ -349,6 +353,10 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             "charter": request.session.get("agent_charter"),
             "charter_override": request.session.get("agent_charter_override"),
             "preferred_llm_tier": preferred_llm_tier,
+            "selected_pipedream_app_slugs": request.session.get(
+                AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
+            )
+            or [],
             "onboarding_target": onboarding_target if pending_onboarding else None,
             "requires_plan_selection": bool(pending_onboarding and requires_plan_selection),
         }
@@ -1950,6 +1958,14 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": "Message is required"}, status=400)
         preferred_llm_tier_key = (body.get("preferred_llm_tier") or "").strip() or None
         charter_override = (body.get("charter_override") or "").strip() or None
+        try:
+            selected_pipedream_app_slugs = normalize_app_slugs(
+                body.get("selected_pipedream_app_slugs"),
+                strict=True,
+                require_list=True,
+            )
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
 
         contact_email = (request.user.email or "").strip()
 
@@ -1964,6 +1980,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
                 web_enabled=True,
                 preferred_llm_tier_key=preferred_llm_tier_key,
                 charter_override=charter_override,
+                selected_pipedream_app_slugs=selected_pipedream_app_slugs,
             )
         except PermissionDenied:
             return JsonResponse({"error": "Invalid context override."}, status=403)

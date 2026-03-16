@@ -54,6 +54,13 @@ class PeriodicTasksTest(TestCase):
         )
         self.assertEqual(beat_schedule["homepage-pretrained-cache-refresh"]["args"], [])
 
+        self.assertIn("homepage-integrations-cache-refresh", beat_schedule)
+        self.assertEqual(
+            beat_schedule["homepage-integrations-cache-refresh"]["task"],
+            "pages.refresh_homepage_integrations_cache",
+        )
+        self.assertEqual(beat_schedule["homepage-integrations-cache-refresh"]["args"], [])
+
     @patch('redis.from_url')
     def test_clean_up_old_decodo_schedules_handles_redis_error(self, mock_redis):
         """Test that cleanup_orphaned_schedules gracefully handles Redis connection errors."""

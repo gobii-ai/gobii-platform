@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 import logging
 
@@ -13,9 +14,11 @@ from api.agent.comms.message_service import _ensure_participant, _get_or_create_
 from api.agent.tasks import process_agent_events_task
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.core.llm_config import AgentLLMTier, resolve_intelligence_tier_for_owner
+from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import (
     CommsChannel,
     IntelligenceTier,
+    MCPServerConfig,
     Organization,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -30,6 +33,8 @@ from api.services.persistent_agents import (
     PersistentAgentProvisioningService,
     ensure_default_agent_email_endpoint,
 )
+from api.pipedream_app_utils import normalize_app_slugs
+from api.services.pipedream_apps import get_owner_selected_app_slugs, set_owner_selected_app_slugs
 from console.context_helpers import build_console_context
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -42,6 +47,51 @@ from util.trial_enforcement import (
 )
 
 logger = logging.getLogger(__name__)
+AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY = "agent_selected_pipedream_app_slugs"
+
+
+def _apply_pending_pipedream_app_selections(
+    request: HttpRequest,
+    *,
+    organization: Organization | None,
+    selected_pipedream_app_slugs: Iterable[object] | None = None,
+) -> None:
+    pending_source = (
+        request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY) or []
+        if selected_pipedream_app_slugs is None
+        else selected_pipedream_app_slugs
+    )
+    pending_slugs = normalize_app_slugs(pending_source)
+    if not pending_slugs:
+        return
+
+    owner_scope = (
+        MCPServerConfig.Scope.ORGANIZATION
+        if organization is not None
+        else MCPServerConfig.Scope.USER
+    )
+    owner_user = None if organization is not None else request.user
+    owner_org = organization
+    existing_slugs = get_owner_selected_app_slugs(
+        owner_scope,
+        owner_user=owner_user,
+        owner_org=owner_org,
+    )
+    merged_slugs = normalize_app_slugs([*existing_slugs, *pending_slugs])
+    selected_slugs = set_owner_selected_app_slugs(
+        owner_scope,
+        merged_slugs,
+        owner_user=owner_user,
+        owner_org=owner_org,
+    )
+    owner_id = str(organization.id) if organization is not None else str(request.user.id)
+
+    def _refresh_owner_cache() -> None:
+        manager = get_mcp_manager()
+        manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
+        manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected_slugs)
+
+    transaction.on_commit(_refresh_owner_cache)
 
 
 @dataclass(frozen=True)
@@ -67,6 +117,7 @@ def create_persistent_agent_from_charter(
     web_enabled: bool = False,
     preferred_llm_tier_key: str | None = None,
     charter_override: str | None = None,
+    selected_pipedream_app_slugs: Iterable[object] | None = None,
 ) -> AgentCreationResult:
     initial_message = (initial_message or "").strip()
     if not initial_message:
@@ -324,9 +375,21 @@ def create_persistent_agent_from_charter(
                         exc,
                     )
 
+        _apply_pending_pipedream_app_selections(
+            request,
+            organization=organization,
+            selected_pipedream_app_slugs=selected_pipedream_app_slugs,
+        )
+
         transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
 
-        for key in ("agent_charter", "agent_charter_source", "agent_charter_override", PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY):
+        for key in (
+            "agent_charter",
+            "agent_charter_source",
+            "agent_charter_override",
+            AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+            PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
+        ):
             if key in request.session:
                 del request.session[key]
         clear_trial_onboarding_intent(request)

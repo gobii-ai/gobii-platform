@@ -17,7 +17,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
-from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
+from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
@@ -58,14 +58,24 @@ from util.urls import (
     normalize_return_to,
 )
 from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
+from api.services.pipedream_apps import (
+    PipedreamCatalogError,
+    PipedreamCatalogService,
+    get_owner_selected_app_slugs,
+)
+from api.pipedream_app_utils import normalize_app_slugs
 from .utils_markdown import (
     load_page,
     get_prev_next,
     get_all_doc_pages,
 )
-from .homepage_cache import get_homepage_pretrained_payload
+from .homepage_cache import (
+    get_homepage_integrations_payload,
+    get_homepage_pretrained_payload,
+)
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -79,6 +89,12 @@ import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
+HOMEPAGE_INLINE_INTEGRATION_SLUGS = (
+    "linkedin",
+    "google_sheets",
+    "trello",
+    "slack",
+)
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     """
@@ -523,6 +539,52 @@ class HomePage(TemplateView):
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
 
+        integrations_payload = get_homepage_integrations_payload()
+        builtin_integrations = list(integrations_payload.get("builtins") or [])
+        builtin_by_slug = {
+            str(app.get("slug") or "").strip(): app
+            for app in builtin_integrations
+            if str(app.get("slug") or "").strip()
+        }
+        inline_builtin_integrations = [
+            builtin_by_slug[slug]
+            for slug in HOMEPAGE_INLINE_INTEGRATION_SLUGS
+            if slug in builtin_by_slug
+        ]
+        integrations_enabled = bool(integrations_payload.get("enabled"))
+
+        initial_selected_pipedream_app_slugs = normalize_app_slugs(
+            self.request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY) or []
+        )
+        if integrations_enabled and self.request.user.is_authenticated:
+            owner_scope = (
+                MCPServerConfig.Scope.ORGANIZATION
+                if organization is not None
+                else MCPServerConfig.Scope.USER
+            )
+            enabled_pipedream_app_slugs = get_owner_selected_app_slugs(
+                owner_scope,
+                owner_user=None if organization is not None else self.request.user,
+                owner_org=organization,
+            )
+            initial_selected_pipedream_app_slugs = normalize_app_slugs(
+                [*enabled_pipedream_app_slugs, *initial_selected_pipedream_app_slugs]
+            )
+
+        context.update(
+            {
+                "homepage_integrations_enabled": integrations_enabled,
+                "homepage_integrations_inline_builtins": inline_builtin_integrations,
+                "homepage_integrations_modal_props": {
+                    "builtins": builtin_integrations,
+                    "initialSearchTerm": (self.request.GET.get("integration_search") or "").strip(),
+                    "initialSelectedAppSlugs": initial_selected_pipedream_app_slugs,
+                    "searchUrl": reverse("pages:homepage_integrations_search"),
+                    "selectedFieldsContainerId": "homepage-integrations-selected-fields",
+                },
+            }
+        )
+
         payload = get_homepage_pretrained_payload()
         all_templates = list(payload.get("templates") or [])
 
@@ -617,6 +679,15 @@ class HomeAgentSpawnView(TemplateView):
         from django.contrib.auth.views import redirect_to_login
         
         form = PersistentAgentCharterForm(request.POST)
+        selected_pipedream_app_slugs = normalize_app_slugs(
+            request.POST.getlist("selected_pipedream_app_slugs")
+        )
+        if selected_pipedream_app_slugs:
+            request.session[AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = (
+                selected_pipedream_app_slugs
+            )
+        else:
+            request.session.pop(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, None)
         trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
         trial_onboarding_target = normalize_trial_onboarding_target(
             request.POST.get("trial_onboarding_target"),
@@ -706,6 +777,34 @@ class HomeAgentSpawnView(TemplateView):
         homepage_view = HomePage()
         homepage_view.request = self.request
         return homepage_view.get_context_data(**kwargs)
+
+
+class HomepageIntegrationsSearchView(View):
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        query = str(request.GET.get("q") or "").strip()
+        if not query:
+            return JsonResponse({"results": []})
+
+        integrations_payload = get_homepage_integrations_payload()
+        if not integrations_payload.get("enabled"):
+            return JsonResponse({"results": []})
+
+        builtin_slugs = {
+            str(app.get("slug") or "").strip()
+            for app in (integrations_payload.get("builtins") or [])
+            if str(app.get("slug") or "").strip()
+        }
+        try:
+            results = [
+                app.to_dict()
+                for app in PipedreamCatalogService().search_apps(query)
+                if app.slug not in builtin_slugs
+            ]
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse({"results": results})
 
 
 class PretrainedWorkerDirectoryRedirectView(RedirectView):

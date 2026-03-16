@@ -225,7 +225,7 @@ const mapAssignments = (payload: McpServerAssignmentsResponseDTO): McpServerAssi
   message: payload.message,
 })
 
-const mapPipedreamApp = (app: PipedreamAppSummaryDTO): PipedreamAppSummary => ({
+export const mapPipedreamApp = (app: PipedreamAppSummaryDTO): PipedreamAppSummary => ({
   slug: app.slug ?? '',
   name: app.name ?? app.slug ?? '',
   description: app.description ?? '',
