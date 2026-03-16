@@ -58,12 +58,16 @@ from util.urls import (
     normalize_return_to,
 )
 from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
+from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService
 from .utils_markdown import (
     load_page,
     get_prev_next,
     get_all_doc_pages,
 )
-from .homepage_cache import get_homepage_pretrained_payload
+from .homepage_cache import (
+    get_homepage_integrations_payload,
+    get_homepage_pretrained_payload,
+)
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
 from console.views import build_llm_intelligence_props
@@ -79,6 +83,12 @@ import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
+HOMEPAGE_INLINE_INTEGRATION_SLUGS = (
+    "linkedin",
+    "google_sheets",
+    "trello",
+    "slack",
+)
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     """
@@ -523,6 +533,32 @@ class HomePage(TemplateView):
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
 
+        integrations_payload = get_homepage_integrations_payload()
+        builtin_integrations = list(integrations_payload.get("builtins") or [])
+        builtin_by_slug = {
+            str(app.get("slug") or "").strip(): app
+            for app in builtin_integrations
+            if str(app.get("slug") or "").strip()
+        }
+        inline_builtin_integrations = [
+            builtin_by_slug[slug]
+            for slug in HOMEPAGE_INLINE_INTEGRATION_SLUGS
+            if slug in builtin_by_slug
+        ]
+        integrations_enabled = bool(integrations_payload.get("enabled"))
+
+        context.update(
+            {
+                "homepage_integrations_enabled": integrations_enabled,
+                "homepage_integrations_inline_builtins": inline_builtin_integrations,
+                "homepage_integrations_modal_props": {
+                    "builtins": builtin_integrations,
+                    "initialSearchTerm": (self.request.GET.get("integration_search") or "").strip(),
+                    "searchUrl": reverse("pages:homepage_integrations_search"),
+                },
+            }
+        )
+
         payload = get_homepage_pretrained_payload()
         all_templates = list(payload.get("templates") or [])
 
@@ -706,6 +742,34 @@ class HomeAgentSpawnView(TemplateView):
         homepage_view = HomePage()
         homepage_view.request = self.request
         return homepage_view.get_context_data(**kwargs)
+
+
+class HomepageIntegrationsSearchView(View):
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        query = str(request.GET.get("q") or "").strip()
+        if not query:
+            return JsonResponse({"results": []})
+
+        integrations_payload = get_homepage_integrations_payload()
+        if not integrations_payload.get("enabled"):
+            return JsonResponse({"results": []})
+
+        builtin_slugs = {
+            str(app.get("slug") or "").strip()
+            for app in (integrations_payload.get("builtins") or [])
+            if str(app.get("slug") or "").strip()
+        }
+        try:
+            results = [
+                app.to_dict()
+                for app in PipedreamCatalogService().search_apps(query)
+                if app.slug not in builtin_slugs
+            ]
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse({"results": results})
 
 
 class PretrainedWorkerDirectoryRedirectView(RedirectView):

@@ -5,9 +5,14 @@ from django.test import TestCase, tag
 from django.utils import timezone
 
 from pages.homepage_cache import (
+    HOMEPAGE_INTEGRATIONS_CACHE_FRESH_SECONDS,
+    HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
     HOMEPAGE_PRETRAINED_CACHE_FRESH_SECONDS,
     HOMEPAGE_PRETRAINED_CACHE_STALE_SECONDS,
+    _build_homepage_integrations_payload,
+    _homepage_integrations_cache_key,
     _homepage_pretrained_cache_key,
+    get_homepage_integrations_payload,
     get_homepage_pretrained_payload,
 )
 
@@ -73,3 +78,72 @@ class HomepagePretrainedCacheTests(TestCase):
         self.assertEqual(result, cached_data)
         mock_build.assert_not_called()
         mock_enqueue.assert_called_once()
+
+
+@tag("batch_pages")
+class HomepageIntegrationsCacheTests(TestCase):
+    def setUp(self):
+        cache.clear()
+
+    def tearDown(self):
+        cache.clear()
+
+    @patch("pages.homepage_cache._build_homepage_integrations_payload")
+    @patch("pages.homepage_cache._enqueue_homepage_integrations_refresh")
+    def test_cache_miss_populates_cache(self, mock_enqueue, mock_build):
+        mock_build.return_value = {"enabled": True, "builtins": [{"slug": "slack"}]}
+
+        result = get_homepage_integrations_payload()
+
+        self.assertEqual(result, mock_build.return_value)
+        mock_enqueue.assert_not_called()
+
+        cache_entry = cache.get(_homepage_integrations_cache_key())
+        self.assertIsNotNone(cache_entry)
+        self.assertEqual(cache_entry["data"], mock_build.return_value)
+
+    @patch("pages.homepage_cache._build_homepage_integrations_payload")
+    @patch("pages.homepage_cache._enqueue_homepage_integrations_refresh")
+    def test_fresh_cache_hit_skips_refresh(self, mock_enqueue, mock_build):
+        cached_data = {"enabled": True, "builtins": [{"slug": "slack"}]}
+        cache.set(
+            _homepage_integrations_cache_key(),
+            {"data": cached_data, "refreshed_at": timezone.now().timestamp()},
+            timeout=HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
+        )
+
+        result = get_homepage_integrations_payload()
+
+        self.assertEqual(result, cached_data)
+        mock_build.assert_not_called()
+        mock_enqueue.assert_not_called()
+
+    @patch("pages.homepage_cache._build_homepage_integrations_payload")
+    @patch("pages.homepage_cache._enqueue_homepage_integrations_refresh")
+    def test_stale_cache_triggers_refresh(self, mock_enqueue, mock_build):
+        self.assertGreater(
+            HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
+            HOMEPAGE_INTEGRATIONS_CACHE_FRESH_SECONDS,
+        )
+        cached_data = {"enabled": True, "builtins": [{"slug": "slack"}]}
+        cache.set(
+            _homepage_integrations_cache_key(),
+            {
+                "data": cached_data,
+                "refreshed_at": timezone.now().timestamp()
+                - (HOMEPAGE_INTEGRATIONS_CACHE_FRESH_SECONDS + 5),
+            },
+            timeout=HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
+        )
+
+        result = get_homepage_integrations_payload()
+
+        self.assertEqual(result, cached_data)
+        mock_build.assert_not_called()
+        mock_enqueue.assert_called_once()
+
+    @patch("pages.homepage_cache._platform_pipedream_server_is_active", return_value=False)
+    def test_build_payload_returns_disabled_when_platform_server_is_inactive(self, _mock_is_active):
+        result = _build_homepage_integrations_payload()
+
+        self.assertEqual(result, {"enabled": False, "builtins": []})

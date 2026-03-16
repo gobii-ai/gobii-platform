@@ -98,6 +98,11 @@ def add_dynamic_schedules():
         "schedule": crontab(minute="*/2"),
         "args": [],
     }
+    beat_schedule["homepage-integrations-cache-refresh"] = {
+        "task": "pages.refresh_homepage_integrations_cache",
+        "schedule": crontab(minute="*/2"),
+        "args": [],
+    }
 
 def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""

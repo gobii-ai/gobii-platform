@@ -18,6 +18,7 @@ from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from constants.plans import PlanNames
+from api.services.pipedream_apps import PipedreamCatalogError
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
@@ -170,6 +171,176 @@ class HomePageTests(TestCase):
         self.assertEqual(len(workers), len(expected))
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
 
+    @patch("pages.views.get_homepage_integrations_payload", return_value={"enabled": False, "builtins": []})
+    @tag("batch_pages")
+    def test_home_page_hides_integrations_section_when_pipedream_is_disabled(self, _mock_integrations):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context.get("homepage_integrations_enabled"))
+        self.assertNotContains(response, "Search more integrations")
+
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={
+            "enabled": True,
+            "builtins": [
+                {
+                    "slug": "notion",
+                    "name": "Notion",
+                    "description": "Notes",
+                    "icon_url": "https://example.com/notion.png",
+                },
+                {
+                    "slug": "slack",
+                    "name": "Slack",
+                    "description": "Team messaging",
+                    "icon_url": "https://example.com/slack.png",
+                },
+                {
+                    "slug": "trello",
+                    "name": "Trello",
+                    "description": "Boards",
+                    "icon_url": "https://example.com/trello.png",
+                },
+                {
+                    "slug": "linkedin",
+                    "name": "LinkedIn",
+                    "description": "Professional network",
+                    "icon_url": "https://example.com/linkedin.png",
+                },
+                {
+                    "slug": "google_sheets",
+                    "name": "Google Sheets",
+                    "description": "Spreadsheets",
+                    "icon_url": "https://example.com/sheets.png",
+                },
+            ],
+        },
+    )
+    @tag("batch_pages")
+    def test_home_page_renders_built_in_integrations(self, _mock_integrations):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context.get("homepage_integrations_enabled"))
+        self.assertContains(response, 'data-integrations-open')
+        self.assertContains(response, 'id="homepage-integrations-root"')
+        self.assertContains(response, "Apps")
+        self.assertEqual(
+            response.context.get("homepage_integrations_modal_props"),
+            {
+                "builtins": _mock_integrations.return_value["builtins"],
+                "initialSearchTerm": "",
+                "searchUrl": reverse("pages:homepage_integrations_search"),
+            },
+        )
+        self.assertEqual(
+            [app["slug"] for app in response.context.get("homepage_integrations_inline_builtins")],
+            ["linkedin", "google_sheets", "trello", "slack"],
+        )
+
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={
+            "enabled": True,
+            "builtins": [
+                {
+                    "slug": "notion",
+                    "name": "Notion",
+                    "description": "Docs",
+                    "icon_url": "",
+                }
+            ],
+        },
+    )
+    @tag("batch_pages")
+    def test_home_page_keeps_integrations_trigger_when_no_inline_icons_match(self, _mock_integrations):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context.get("homepage_integrations_inline_builtins"), [])
+        self.assertContains(response, 'id="homepage-integrations-root"')
+        self.assertContains(response, 'data-integrations-open')
+
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={"enabled": True, "builtins": []},
+    )
+    @patch("pages.views.PipedreamCatalogService.search_apps")
+    @tag("batch_pages")
+    def test_homepage_integrations_search_api_error_is_non_fatal(self, mock_search, _mock_integrations):
+        mock_search.side_effect = PipedreamCatalogError("Pipedream catalog unavailable.")
+
+        response = self.client.get(
+            reverse("pages:homepage_integrations_search"),
+            {"q": "slack"},
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            response.json(),
+            {"error": "Pipedream catalog unavailable."},
+        )
+
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={
+            "enabled": True,
+            "builtins": [
+                {
+                    "slug": "slack",
+                    "name": "Slack Builtin",
+                    "description": "Builtin messaging",
+                    "icon_url": "",
+                }
+            ],
+        },
+    )
+    @patch("pages.views.PipedreamCatalogService.search_apps")
+    @tag("batch_pages")
+    def test_homepage_integrations_search_api_excludes_built_in_integrations(self, mock_search, _mock_integrations):
+        mock_search.return_value = [
+            MagicMock(
+                slug="slack",
+                to_dict=lambda: {
+                    "slug": "slack",
+                    "name": "Slack Builtin",
+                    "description": "Builtin messaging",
+                    "icon_url": "",
+                },
+            ),
+            MagicMock(
+                slug="notion",
+                to_dict=lambda: {
+                    "slug": "notion",
+                    "name": "Notion Search Result",
+                    "description": "Knowledge base",
+                    "icon_url": "",
+                },
+            ),
+        ]
+
+        response = self.client.get(
+            reverse("pages:homepage_integrations_search"),
+            {"q": "slack"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "results": [
+                    {
+                        "slug": "notion",
+                        "name": "Notion Search Result",
+                        "description": "Knowledge base",
+                        "icon_url": "",
+                    }
+                ]
+            },
+        )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     @tag("batch_pages")
     def test_home_cta_text_changes_for_authenticated_users(self):
         unauth_response = self.client.get("/")
@@ -678,6 +849,7 @@ class SolutionCtaCopyTests(TestCase):
         with override_flag("fish_upper_left", active=True):
             self.assertEqual(self._mini_header_logo_src(), "/static/images/gobii_fish_with_text_purple_nav.png")
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     @tag("batch_pages")
     def test_solution_cta_text_changes_for_authenticated_users(self):
         unauth_recruiting = self.client.get("/solutions/recruiting/")

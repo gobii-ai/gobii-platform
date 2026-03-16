@@ -14,7 +14,11 @@ from pages.context_processors import (
     _build_account_info,
 )
 from pages.homepage_cache import (
+    HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
     HOMEPAGE_PRETRAINED_CACHE_STALE_SECONDS,
+    _build_homepage_integrations_payload,
+    _homepage_integrations_cache_key,
+    _homepage_integrations_cache_lock_key,
     _build_homepage_pretrained_payload,
     _homepage_pretrained_cache_key,
     _homepage_pretrained_cache_lock_key,
@@ -59,5 +63,21 @@ def refresh_homepage_pretrained_cache() -> None:
         )
     except Exception:
         logger.exception("Failed to refresh homepage pretrained cache")
+    finally:
+        cache.delete(lock_key)
+
+
+@shared_task(name="pages.refresh_homepage_integrations_cache")
+def refresh_homepage_integrations_cache() -> None:
+    lock_key = _homepage_integrations_cache_lock_key()
+    try:
+        payload = _build_homepage_integrations_payload()
+        cache.set(
+            _homepage_integrations_cache_key(),
+            {"data": payload, "refreshed_at": timezone.now().timestamp()},
+            timeout=HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
+        )
+    except Exception:
+        logger.exception("Failed to refresh homepage integrations cache")
     finally:
         cache.delete(lock_key)
