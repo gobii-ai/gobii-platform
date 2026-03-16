@@ -23,9 +23,6 @@ from ...models import (
 
 logger = logging.getLogger(__name__)
 
-# Matches _BULK_TOKEN_MAX_AGE in console/views.py
-_BULK_TOKEN_MAX_AGE = 7 * 24 * 60 * 60
-
 
 def get_request_contact_permission_tool() -> dict:
     """Return the tool definition for requesting contact permission."""

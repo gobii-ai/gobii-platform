@@ -7683,6 +7683,10 @@ class ContactRequestDenyView(TemplateView):
             context["already_responded"] = True
             context["contact_request"] = contact_request
             context["agent"] = contact_request.agent
+        elif contact_request.is_expired():
+            context["expired"] = True
+            context["contact_request"] = contact_request
+            context["agent"] = contact_request.agent
         else:
             context["can_act"] = True
             context["contact_request"] = contact_request
@@ -7729,7 +7733,7 @@ class ContactRequestBulkApproveView(TemplateView):
     """Approve all contact requests identified in a signed bulk token (one-click from email)."""
     template_name = "console/contact_request_token_response.html"
 
-    def _process(self, request, token):
+    def _process(self, token):
         payload = _decode_bulk_token(token)
         context = {"action": "approve_all"}
         if not payload:
@@ -7776,7 +7780,7 @@ class ContactRequestBulkApproveView(TemplateView):
         return context
 
     def get(self, request, *args, **kwargs):
-        context = self._process(request, kwargs.get("token"))
+        context = self._process(kwargs.get("token"))
         return self.render_to_response(context)
 
     def post(self, request, *args, **kwargs):
