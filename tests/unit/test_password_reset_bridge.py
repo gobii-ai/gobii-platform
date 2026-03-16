@@ -86,27 +86,24 @@ class PasswordResetBridgeTests(TestCase):
             reverse("account_reset_password_bridge_start", kwargs={"key": opaque_key})
         )
 
-        response = self.client.post(
-            reverse("account_reset_password_bridge_continue"),
-            follow=True,
+        continue_response = self.client.post(
+            reverse("account_reset_password_bridge_continue")
         )
 
-        self.assertEqual(
-            response.redirect_chain[0][0],
+        self.assertRedirects(
+            continue_response,
             reverse(
                 "account_reset_password_from_key",
                 kwargs={"uidb36": uidb36, "key": token},
             ),
+            fetch_redirect_response=False,
         )
-        self.assertEqual(
-            response.redirect_chain[1][0],
-            reverse(
-                "account_reset_password_from_key",
-                kwargs={"uidb36": uidb36, "key": "set-password"},
-            ),
-        )
-        self.assertContains(response, "Set New Password")
         self.assertNotIn(PASSWORD_RESET_BRIDGE_SESSION_KEY, self.client.session)
+
+        response = self.client.get(continue_response["Location"], follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Set New Password")
 
     def test_malformed_bridge_key_never_reaches_token_url(self) -> None:
         response = self.client.get(

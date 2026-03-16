@@ -52,12 +52,13 @@ class PasswordResetBridgeConfirmView(TemplateView):
 class PasswordResetBridgeContinueView(View):
     def post(self, request: HttpRequest, *args, **kwargs) -> HttpResponse:
         opaque_key = request.session.pop(PASSWORD_RESET_BRIDGE_SESSION_KEY, None)
-        if not opaque_key or opaque_key == PASSWORD_RESET_BRIDGE_INVALID_SENTINEL:
+        parsed_key = None
+        if opaque_key and opaque_key != PASSWORD_RESET_BRIDGE_INVALID_SENTINEL:
+            parsed_key = _parse_opaque_key(opaque_key)
+
+        if not parsed_key:
             return HttpResponseRedirect(reverse("account_reset_password"))
 
-        parsed_key = _parse_opaque_key(opaque_key)
-        if parsed_key is None:
-            return HttpResponseRedirect(reverse("account_reset_password"))
         uidb36, token = parsed_key
 
         return HttpResponseRedirect(
