@@ -1,13 +1,18 @@
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
 from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PublicProfile
 from api.public_profiles import validate_public_handle
 from pages.library_views import LIBRARY_CACHE_KEY
+from util.onboarding import (
+    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+)
 
 
 class PublicProfileHandleTests(TestCase):
@@ -54,6 +59,64 @@ class PublicTemplateViewsTests(TestCase):
         self.assertContains(response, '<script type="application/ld+json">')
         self.assertContains(response, '"@type": "SoftwareApplication"')
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @tag("batch_public_templates")
+    def test_public_template_detail_omits_trial_onboarding_fields_in_community_mode(self):
+        user = get_user_model().objects.create_user(username="owner-community", email="owner-community@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="quiet-forest")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-community",
+            public_profile=profile,
+            slug="ops-radar",
+            display_name="Ops Radar",
+            tagline="Watch operations signals",
+            description="Tracks operational changes.",
+            charter="Track operational changes.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Operations",
+        )
+
+        response = self.client.get(
+            reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="trial_onboarding" value="1"')
+        self.assertNotContains(
+            response,
+            f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_public_templates")
+    def test_public_template_detail_includes_trial_onboarding_fields_in_proprietary_mode(self):
+        user = get_user_model().objects.create_user(username="owner-pro", email="owner-pro@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="bright-ridge")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-pro",
+            public_profile=profile,
+            slug="ops-signal",
+            display_name="Ops Signal",
+            tagline="Signal operational changes",
+            description="Highlights operational changes.",
+            charter="Highlight operational changes.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Operations",
+        )
+
+        response = self.client.get(
+            reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="trial_onboarding" value="1"')
+        self.assertContains(
+            response,
+            f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
+        )
+
     @tag("batch_public_templates")
     def test_public_template_hire_sets_session(self):
         user = get_user_model().objects.create_user(username="owner2", email="owner2@example.com", password="pw")
@@ -82,6 +145,40 @@ class PublicTemplateViewsTests(TestCase):
         self.assertEqual(
             session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
             template.code,
+        )
+
+    @tag("batch_public_templates")
+    def test_public_template_hire_sets_trial_onboarding_for_anonymous_user(self):
+        user = get_user_model().objects.create_user(username="owner3", email="owner3@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="steady-harbor")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-trial",
+            public_profile=profile,
+            slug="sales-desk",
+            display_name="Sales Desk",
+            tagline="Qualify inbound leads",
+            description="Screens leads and drafts follow-ups.",
+            charter="Qualify leads and draft next steps.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Sales",
+        )
+
+        response = self.client.post(
+            reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+            data={
+                "source_page": "public_template_detail",
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
 
 

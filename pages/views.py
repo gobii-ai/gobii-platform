@@ -1037,6 +1037,11 @@ class PublicTemplateHireView(View):
 
         source_page = request.POST.get("source_page") or "public_template"
         flow = (request.POST.get("flow") or "").strip().lower()
+        trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
+        trial_onboarding_target = normalize_trial_onboarding_target(
+            request.POST.get("trial_onboarding_target"),
+            default=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
         analytics_properties = {
             "source_page": source_page,
             "template_code": template.code,
@@ -1074,6 +1079,11 @@ class PublicTemplateHireView(View):
 
         app_next_url = next_url
         if flow != "pro":
+            if trial_onboarding_requested:
+                set_trial_onboarding_intent(
+                    request,
+                    target=trial_onboarding_target,
+                )
             return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
             app_params = {"spawn": "1"}
             if return_to:
