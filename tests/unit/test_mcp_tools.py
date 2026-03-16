@@ -66,11 +66,17 @@ def _default_fake_run_completion(*args, **kwargs):
             user_content = user_message.get("content") or ""
 
     tool_names: list[str] = []
-    for line in user_content.splitlines():
-        line = line.strip()
-        if not line.startswith("- "):
+    in_tool_section = False
+    for raw_line in user_content.splitlines():
+        line = raw_line.strip()
+        if line == "Available tools:":
+            in_tool_section = True
             continue
-        # Keep portion before any separator (":" or "|")
+        if line == "Available Pipedream apps:":
+            in_tool_section = False
+            continue
+        if not in_tool_section or not line.startswith("- "):
+            continue
         trimmed = line[2:].split("|", 1)[0].split(":", 1)[0].strip()
         if trimmed:
             tool_names.append(trimmed)
@@ -1324,6 +1330,7 @@ class MCPToolFunctionsTests(TestCase):
         kwargs = mock_run_completion.call_args.kwargs
         self.assertNotIn('use_parallel_tool_calls', kwargs)
         self.assertNotIn('supports_vision', kwargs)
+        self.assertNotIn('tool_choice', kwargs)
 
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     def test_search_tools_no_tools(self, mock_get_manager):
@@ -1340,8 +1347,20 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
-    def test_search_tools_includes_builtin_catalog(self, mock_get_config, mock_get_manager, mock_run_completion, mock_enable_tools):
+    @patch('api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    def test_search_tools_includes_builtin_catalog(
+        self,
+        mock_search_apps,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
         """search_tools should include builtin tools when MCP catalog is empty."""
+        mock_search_apps.return_value = []
+        mock_get_effective_pipedream_app_slugs_for_agent.return_value = []
         mock_manager = MagicMock()
         mock_manager._initialized = True
         mock_manager.get_tools_for_agent.return_value = []
@@ -1367,6 +1386,281 @@ class MCPToolFunctionsTests(TestCase):
         self.assertIn("sqlite_batch", user_message)
         self.assertIn("http_request", user_message)
         self.assertNotIn("create_image", user_message)
+        mock_search_apps.assert_not_called()
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=True)
+    def test_search_tools_includes_pipedream_app_prompt_section(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_search_apps,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        mock_search_apps.return_value = [
+            SimpleNamespace(slug="slack", name="Slack"),
+            SimpleNamespace(slug="trello", name="Trello"),
+        ]
+        mock_get_effective_pipedream_app_slugs_for_agent.return_value = ["slack"]
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "anything")
+
+        self.assertEqual(result["status"], "success")
+        mock_search_apps.assert_called_once_with("anything", limit=20)
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Available Pipedream apps:", user_message)
+        self.assertIn("- slack | Slack [enabled]", user_message)
+        self.assertIn("- trello | Trello [not enabled]", user_message)
+        self.assertNotIn("asana", user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools", "enable_apps"])
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_pipedream_apps_for_agent')
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=True)
+    def test_search_tools_enable_apps_returns_guidance_and_skips_enable_tools(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_search_apps,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        mock_enable_pipedream_apps_for_agent,
+    ):
+        mock_search_apps.return_value = [
+            SimpleNamespace(slug="slack", name="Slack"),
+        ]
+        mock_get_effective_pipedream_app_slugs_for_agent.return_value = []
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(self.config_id, "mcp_brightdata_search", "brightdata", "search", "Search web", {}),
+        ]
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        tool_calls = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_apps",
+                    "arguments": json.dumps({"app_slugs": ["slack"]}),
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_tools",
+                    "arguments": json.dumps({"tool_names": ["mcp_brightdata_search"]}),
+                },
+            },
+        ]
+        msg = MagicMock()
+        msg.content = "Enable Slack first."
+        setattr(msg, "tool_calls", tool_calls)
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        mock_enable_pipedream_apps_for_agent.return_value = {
+            "status": "success",
+            "enabled": ["slack"],
+            "already_enabled": [],
+            "invalid": [],
+            "selected": ["slack"],
+            "effective_apps": ["google_sheets", "slack"],
+        }
+
+        result = search_tools(self.agent, "post to slack")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["enabled_apps"], ["slack"])
+        self.assertEqual(result["already_enabled"], [])
+        self.assertEqual(result["invalid"], [])
+        self.assertEqual(result["effective_apps"], ["google_sheets", "slack"])
+        self.assertIn("Run search_tools again", result["message"])
+        mock_enable_pipedream_apps_for_agent.assert_called_once_with(
+            self.agent,
+            ["slack"],
+            available_app_slugs=["slack"],
+        )
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=True)
+    def test_search_tools_tool_path_still_works_when_app_catalog_available(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_search_apps,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        mock_search_apps.return_value = [
+            SimpleNamespace(slug="slack", name="Slack"),
+        ]
+        mock_get_effective_pipedream_app_slugs_for_agent.return_value = []
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(self.config_id, "mcp_brightdata_search", "brightdata", "search", "Search web", {}),
+        ]
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the search tool."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_tools",
+                    "arguments": json.dumps({"tool_names": ["mcp_brightdata_search"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+        mock_enable_tools.return_value = {
+            "status": "success",
+            "enabled": ["mcp_brightdata_search"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+
+        result = search_tools(self.agent, "search the web")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["enabled_tools"], ["mcp_brightdata_search"])
+        mock_enable_tools.assert_called_once_with(self.agent, ["mcp_brightdata_search"])
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=True)
+    def test_search_tools_omits_app_section_when_catalog_lookup_fails(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_search_apps,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        from api.services.pipedream_apps import PipedreamCatalogError
+
+        mock_search_apps.side_effect = PipedreamCatalogError("boom")
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "anything")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn("Available Pipedream apps:", user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools"])
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=True)
+    def test_search_tools_omits_enable_apps_when_query_shortlist_empty(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_search_apps,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        mock_search_apps.return_value = []
+        mock_get_effective_pipedream_app_slugs_for_agent.return_value = ["slack"]
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "very specific unknown app")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn("Available Pipedream apps:", user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools"])
         mock_enable_tools.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')

@@ -8,13 +8,20 @@ both MCP-discovered tools and builtin tools, then enables any selected tools.
 import json
 import logging
 import re
+from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import litellm  # re-exported for tests that patch LiteLLM directly
 from litellm import drop_params
 from opentelemetry import trace
 
-from ...models import PersistentAgent, PersistentAgentCompletion
+from ...models import MCPServerConfig, PersistentAgent, PersistentAgentCompletion
+from ...services.pipedream_apps import (
+    PipedreamCatalogError,
+    PipedreamCatalogService,
+    enable_pipedream_apps_for_agent,
+    get_effective_pipedream_app_slugs_for_agent,
+)
 from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
@@ -33,6 +40,14 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 ToolSearchResult = Dict[str, Any]
+
+
+def _has_active_pipedream_runtime() -> bool:
+    return MCPServerConfig.objects.filter(
+        scope=MCPServerConfig.Scope.PLATFORM,
+        name="pipedream",
+        is_active=True,
+    ).exists()
 
 
 def _strip_description(text: str, limit: int = 180) -> str:
@@ -235,6 +250,24 @@ def _build_tool_examples(available_names: set[str]) -> str:
     return example_text
 
 
+def _build_app_lines(
+    app_catalog: Iterable[Any],
+    *,
+    enabled_app_slugs: Optional[Iterable[str]] = None,
+) -> list[str]:
+    enabled_set = set(enabled_app_slugs or [])
+    lines: list[str] = []
+    for app in app_catalog:
+        slug = _tool_attr(app, "slug")
+        name = _tool_attr(app, "name")
+        if not isinstance(slug, str) or not slug:
+            continue
+        label = name if isinstance(name, str) and name.strip() else slug
+        status = "enabled" if slug in enabled_set else "not enabled"
+        lines.append(f"- {slug} | {label} [{status}]")
+    return lines
+
+
 def _search_with_llm(
     agent: PersistentAgent,
     query: str,
@@ -242,13 +275,22 @@ def _search_with_llm(
     catalog: Iterable[Any],
     enable_callback: Callable[[PersistentAgent, List[str]], Dict[str, Any]],
     empty_message: str,
+    *,
+    enable_apps_callback: Optional[Callable[[PersistentAgent, List[str]], Dict[str, Any]]] = None,
+    pipedream_app_catalog: Optional[Iterable[Any]] = None,
+    enabled_app_slugs: Optional[Iterable[str]] = None,
 ) -> ToolSearchResult:
     tools = list(catalog)
-    logger.info("search_tools.%s: %d tools available", provider_name, len(tools))
+    app_catalog = list(pipedream_app_catalog or [])
+    logger.info(
+        "search_tools.%s: %d tools available, %d pipedream apps available",
+        provider_name,
+        len(tools),
+        len(app_catalog),
+    )
 
-    if not tools:
+    if not tools and not app_catalog:
         return {"status": "success", "tools": [], "message": empty_message}
-
     available_names = {
         _tool_attr(tool, "full_name") or _tool_attr(tool, "name")
         for tool in tools
@@ -285,6 +327,8 @@ def _search_with_llm(
     except Exception:  # pragma: no cover - defensive logging
         logger.exception("search_tools.%s: failed to log compact catalog preview", provider_name)
 
+    app_lines = _build_app_lines(app_catalog, enabled_app_slugs=enabled_app_slugs)
+
     examples_text = _build_tool_examples(available_names)
     examples_block = f"## Examples\n\n{examples_text}\n\n" if examples_text else ""
     image_generation_rules = ""
@@ -298,25 +342,34 @@ def _search_with_llm(
 
     system_prompt = (
         "You select tools for research tasks. Be INCLUSIVE - enable all tools that might help.\n"
-        "CRITICAL: Use EXACT tool names from the Available tools list below. Never invent or modify names.\n"
-        "If no tools match, do NOT call enable_tools.\n\n"
+        "CRITICAL: Use EXACT tool names and app slugs from the lists below. Never invent or modify names.\n"
+        "If a needed Pipedream app is not enabled yet, call enable_apps with exact app slugs and stop there.\n"
+        "Do not call enable_tools in the same response as enable_apps.\n"
+        "If no tools or apps match, do NOT call any tool.\n\n"
         f"{examples_block}"
         "## Format\n"
         "Call enable_tools with tool_names copied verbatim from the Available tools list.\n"
+        "Call enable_apps with app_slugs copied verbatim from the Available Pipedream apps list.\n"
         "Example (placeholders, do not copy names):\n"
         "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n\n"
         "## Rules\n"
         "- Only include tools that appear in Available tools.\n"
+        "- Only include app slugs that appear in Available Pipedream apps.\n"
         f"{image_generation_rules}"
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
-    user_prompt = (
-        f"Query: {query}\n\n"
-        "Available tools:\n"
-        + "\n".join(tool_lines)
-        + "\n\nUse ONLY tool names from the list above. If none match, do not call enable_tools."
-    )
+    user_prompt = f"Query: {query}\n\nAvailable tools:\n" + "\n".join(tool_lines)
+    if app_lines:
+        user_prompt += (
+            "\n\nAvailable Pipedream apps:\n"
+            + "\n".join(app_lines)
+            + "\n\nUse ONLY tool names and app slugs from the lists above."
+        )
+        user_prompt += " If none match, do not call enable_tools or enable_apps."
+    else:
+        user_prompt += "\n\nUse ONLY tool names from the list above."
+        user_prompt += " If none match, do not call enable_tools."
 
     try:
         failover_configs = get_llm_config_with_failover(
@@ -373,6 +426,33 @@ def _search_with_llm(
                         },
                     },
                 }
+                tool_defs = [enable_tools_def]
+                if app_lines and enable_apps_callback is not None:
+                    tool_defs.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "enable_apps",
+                                "description": (
+                                    "Enable Pipedream apps for future tool discovery. "
+                                    "Use exact app slugs from the Available Pipedream apps list."
+                                ),
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {
+                                        "app_slugs": {
+                                            "type": "array",
+                                            "items": {"type": "string"},
+                                            "minItems": 1,
+                                            "maxItems": 20,
+                                            "description": "List of exact Pipedream app slugs to enable",
+                                        },
+                                    },
+                                    "required": ["app_slugs"],
+                                },
+                            },
+                        }
+                    )
 
                 run_kwargs: Dict[str, Any] = {}
                 safety_value = getattr(agent.user, "id", None) if agent and agent.user else None
@@ -383,12 +463,6 @@ def _search_with_llm(
                 ):
                     run_kwargs["safety_identifier"] = str(safety_value)
 
-                # Only force tool_choice if provider supports it (via hint in params)
-                tool_choice_hint = params.get("supports_tool_choice")
-                tool_choice_supported = tool_choice_hint is None or tool_choice_hint
-                if tool_choice_supported:
-                    run_kwargs["tool_choice"] = {"type": "function", "function": {"name": "enable_tools"}}
-
                 response = run_completion(
                     model=model,
                     messages=[
@@ -396,7 +470,7 @@ def _search_with_llm(
                         {"role": "user", "content": user_prompt},
                     ],
                     params=params,
-                    tools=[enable_tools_def],
+                    tools=tool_defs,
                     drop_params=True,
                     **run_kwargs,
                 )
@@ -414,6 +488,7 @@ def _search_with_llm(
                 content_text = getattr(message, "content", None) or ""
 
                 requested: List[str] = []
+                requested_apps: List[str] = []
                 external_resources: List[Dict[str, str]] = []
                 tool_calls = getattr(message, "tool_calls", None) or []
                 for tool_call in tool_calls:
@@ -424,28 +499,31 @@ def _search_with_llm(
                         if not function_block:
                             continue
                         function_name = getattr(function_block, "name", None) or function_block.get("name")
-                        if function_name != "enable_tools":
-                            continue
                         raw_args = getattr(function_block, "arguments", None) or function_block.get("arguments") or "{}"
                         arguments = json.loads(raw_args)
-                        names = arguments.get("tool_names") or []
-                        if isinstance(names, list):
-                            for name in names:
-                                if isinstance(name, str) and name not in requested:
-                                    requested.append(name)
-                        # Extract external resources
-                        resources = arguments.get("external_resources") or []
-                        if isinstance(resources, list):
-                            for res in resources:
-                                if isinstance(res, dict) and res.get("name") and res.get("url"):
-                                    # Validate URL looks real (starts with http)
-                                    url = res.get("url", "")
-                                    if url.startswith("http://") or url.startswith("https://"):
-                                        external_resources.append({
-                                            "name": str(res.get("name", ""))[:100],
-                                            "description": str(res.get("description", ""))[:200],
-                                            "url": url[:500],
-                                        })
+                        if function_name == "enable_tools":
+                            names = arguments.get("tool_names") or []
+                            if isinstance(names, list):
+                                for name in names:
+                                    if isinstance(name, str) and name not in requested:
+                                        requested.append(name)
+                            resources = arguments.get("external_resources") or []
+                            if isinstance(resources, list):
+                                for res in resources:
+                                    if isinstance(res, dict) and res.get("name") and res.get("url"):
+                                        url = res.get("url", "")
+                                        if url.startswith("http://") or url.startswith("https://"):
+                                            external_resources.append({
+                                                "name": str(res.get("name", ""))[:100],
+                                                "description": str(res.get("description", ""))[:200],
+                                                "url": url[:500],
+                                            })
+                        elif function_name == "enable_apps":
+                            app_slugs = arguments.get("app_slugs") or []
+                            if isinstance(app_slugs, list):
+                                for app_slug in app_slugs:
+                                    if isinstance(app_slug, str) and app_slug not in requested_apps:
+                                        requested_apps.append(app_slug)
                     except Exception:  # pragma: no cover - defensive parsing
                         logger.exception("search_tools.%s: failed to parse tool call; skipping", provider_name)
 
@@ -459,6 +537,42 @@ def _search_with_llm(
                     )
 
                 requested = valid_requested
+                enabled_apps_result = None
+                if requested_apps and enable_apps_callback is not None:
+                    try:
+                        enabled_apps_result = enable_apps_callback(agent, requested_apps)
+                    except Exception as err:  # pragma: no cover - defensive enabling
+                        logger.error("search_tools.%s: enable_apps failed: %s", provider_name, err)
+
+                if enabled_apps_result and enabled_apps_result.get("status") == "success":
+                    message_lines: List[str] = []
+                    if content_text:
+                        message_lines.append(content_text.strip())
+                    summary: List[str] = []
+                    if enabled_apps_result.get("enabled"):
+                        summary.append(f"Enabled apps: {', '.join(enabled_apps_result['enabled'])}")
+                    if enabled_apps_result.get("already_enabled"):
+                        summary.append(f"Already enabled apps: {', '.join(enabled_apps_result['already_enabled'])}")
+                    if enabled_apps_result.get("invalid"):
+                        summary.append(f"Invalid apps: {', '.join(enabled_apps_result['invalid'])}")
+                    if summary:
+                        message_lines.append("; ".join(summary))
+                    if enabled_apps_result.get("enabled") or enabled_apps_result.get("already_enabled"):
+                        message_lines.append(
+                            "Pipedream apps are ready. Run search_tools again to discover and enable the specific tools for those apps."
+                        )
+                    else:
+                        message_lines.append("No Pipedream apps were enabled. Search again with one of the listed app slugs.")
+                    response_payload: ToolSearchResult = {
+                        "status": "success",
+                        "message": "\n".join([line for line in message_lines if line]) or "",
+                        "enabled_apps": enabled_apps_result.get("enabled", []),
+                        "already_enabled": enabled_apps_result.get("already_enabled", []),
+                        "invalid": enabled_apps_result.get("invalid", []),
+                        "effective_apps": enabled_apps_result.get("effective_apps", []),
+                    }
+                    return response_payload
+
                 enabled_result = None
                 if requested:
                     try:
@@ -591,8 +705,16 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     ]
 
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog
+    pipedream_app_catalog: list[Any] = []
+    enabled_app_slugs: list[str] = []
+    if _has_active_pipedream_runtime():
+        try:
+            pipedream_app_catalog = PipedreamCatalogService().search_apps(query, limit=20)
+            enabled_app_slugs = get_effective_pipedream_app_slugs_for_agent(agent)
+        except PipedreamCatalogError as exc:
+            logger.warning("search_tools: unable to search Pipedream apps for agent %s: %s", agent.id, exc)
 
-    if not combined_catalog:
+    if not combined_catalog and not pipedream_app_catalog:
         logger.info("search_tools: no tools available for agent %s", agent.id)
         return {"status": "success", "tools": [], "message": "No tools available"}
 
@@ -603,6 +725,16 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         catalog=combined_catalog,
         enable_callback=enable_tools,
         empty_message="No tools available",
+        enable_apps_callback=(
+            partial(
+                enable_pipedream_apps_for_agent,
+                available_app_slugs=[_tool_attr(app, "slug") for app in pipedream_app_catalog],
+            )
+            if pipedream_app_catalog
+            else None
+        ),
+        pipedream_app_catalog=pipedream_app_catalog,
+        enabled_app_slugs=enabled_app_slugs,
     )
 
 

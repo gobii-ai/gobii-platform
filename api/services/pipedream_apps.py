@@ -4,7 +4,7 @@ import hashlib
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 
 import requests
 from django.conf import settings
@@ -223,6 +223,96 @@ def set_owner_selected_app_slugs(owner_scope: str, selected_app_slugs: Iterable[
         owner_org=owner_org,
     )
     return normalized
+
+
+def _agent_owner_info(agent: PersistentAgent) -> tuple[str, str, Any | None, Any | None, str]:
+    if agent.organization_id:
+        owner_scope = MCPServerConfig.Scope.ORGANIZATION
+        owner_label = agent.organization.name if agent.organization else ""
+        owner_org = agent.organization
+        owner_user = None
+        owner_id = owner_id_from_scope(owner_scope, owner_org=owner_org)
+        return owner_scope, owner_label, owner_user, owner_org, owner_id
+
+    owner_scope = MCPServerConfig.Scope.USER
+    owner_label = agent.user.get_full_name() or agent.user.username if agent.user else ""
+    owner_user = agent.user
+    owner_org = None
+    owner_id = owner_id_from_scope(owner_scope, owner_user=owner_user)
+    return owner_scope, owner_label, owner_user, owner_org, owner_id
+
+
+def enable_pipedream_apps_for_agent(
+    agent: PersistentAgent,
+    app_slugs: Iterable[object],
+    *,
+    available_app_slugs: Optional[Iterable[object]] = None,
+) -> dict[str, object]:
+    if available_app_slugs is None:
+        return {
+            "status": "error",
+            "message": "available_app_slugs is required",
+            "enabled": [],
+            "already_enabled": [],
+            "invalid": [],
+            "selected": [],
+            "effective_apps": get_effective_pipedream_app_slugs_for_agent(agent),
+        }
+
+    requested: list[str] = []
+    invalid: list[str] = []
+    seen: set[str] = set()
+
+    for value in app_slugs or []:
+        normalized = normalize_app_slug(value)
+        if not normalized:
+            if value is not None:
+                invalid.append(str(value))
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        requested.append(normalized)
+
+    available_set = set(normalize_app_slugs(available_app_slugs))
+
+    valid_requested = [slug for slug in requested if slug in available_set]
+    invalid.extend(slug for slug in requested if slug not in available_set)
+
+    owner_scope, owner_label, owner_user, owner_org, owner_id = _agent_owner_info(agent)
+    platform_set = set(get_platform_pipedream_app_slugs())
+    prior_selected = get_owner_selected_app_slugs(owner_scope, owner_user=owner_user, owner_org=owner_org)
+    prior_selected_set = set(prior_selected)
+
+    enabled = [
+        slug for slug in valid_requested
+        if slug not in platform_set and slug not in prior_selected_set
+    ]
+    already_enabled = [slug for slug in valid_requested if slug in platform_set or slug in prior_selected_set]
+
+    if enabled:
+        merged_selected = normalize_app_slugs([*prior_selected, *enabled])
+        selected = set_owner_selected_app_slugs(
+            owner_scope,
+            merged_selected,
+            owner_user=owner_user,
+            owner_org=owner_org,
+        )
+        from api.agent.tools.mcp_manager import get_mcp_manager
+
+        manager = get_mcp_manager()
+        manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
+        manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
+
+    state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
+    return {
+        "status": "success",
+        "enabled": enabled,
+        "already_enabled": already_enabled,
+        "invalid": invalid,
+        "selected": state.selected_app_slugs,
+        "effective_apps": state.effective_app_slugs,
+    }
 
 
 def _search_cache_key(query: str, limit: int) -> str:
