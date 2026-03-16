@@ -9,6 +9,10 @@ from django.utils import timezone
 
 from api.models import ExecutionPauseReasonChoices
 from api.services.agent_lifecycle import AgentLifecycleService, AgentShutdownReason
+from api.services.billing_pause_notifications import (
+    is_billing_execution_pause_reason,
+    send_owner_billing_pause_notification,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
@@ -19,6 +23,7 @@ EXECUTION_PAUSE_NOTE = "owner_execution_paused"
 
 EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY = ExecutionPauseReasonChoices.BILLING_DELINQUENCY
 EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED = ExecutionPauseReasonChoices.TRIAL_CONVERSION_FAILED
+EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL = ExecutionPauseReasonChoices.TRIAL_ENDED_NON_RENEWAL
 
 
 def resolve_agent_owner(agent) -> Any:
@@ -152,6 +157,8 @@ def pause_owner_execution(
             trigger_agent_cleanup=trigger_agent_cleanup,
             analytics_source=analytics_source,
         )
+        if is_billing_execution_pause_reason(normalized_reason):
+            transaction.on_commit(lambda: send_owner_billing_pause_notification(owner))
 
     logger.info(
         "Owner execution paused for %s %s (reason=%s source=%s changed=%s)",
@@ -281,6 +288,11 @@ def _get_billing_record(owner, *, create: bool = False):
     BillingModel, filters, owner_type = _get_billing_model_and_filters(owner)
     if create:
         cached_billing = _get_cached_billing_record(owner)
+        if cached_billing is not None:
+            try:
+                cached_billing.refresh_from_db()
+            except cached_billing.__class__.DoesNotExist:
+                cached_billing = None
         if cached_billing is not None:
             return cached_billing
 

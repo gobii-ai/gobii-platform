@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.utils import timezone
 
 from api.models import (
     PersistentAgent,
@@ -20,6 +21,10 @@ from api.models import (
 )
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
+from api.services.owner_execution_pause import (
+    EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
+    EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
+)
 from config import settings
 
 
@@ -49,6 +54,19 @@ class InboundOutOfCreditsReplyTests(TestCase):
             channel=CommsChannel.EMAIL,
             address=f"agent@{default_domain}",
             is_primary=True,
+        )
+
+    def _pause_owner(self, reason: str) -> None:
+        billing = self.owner.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = reason
+        billing.execution_paused_at = timezone.now()
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
         )
 
     @tag("batch_email")
@@ -210,6 +228,63 @@ class InboundOutOfCreditsReplyTests(TestCase):
         mock_delay.assert_not_called()
         mock_calc.assert_called_once()
 
+    @tag("batch_email")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_email")
+    def test_paused_agent_email_sends_sender_only_reply_and_skips_processing(
+        self,
+        mock_deliver_email,
+        mock_delay,
+    ):
+        self._pause_owner(EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL)
+        parsed = ParsedMessage(
+            sender=self.owner.email,
+            recipient=self.agent_email.address,
+            subject="Need help",
+            body="Hello",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.EMAIL,
+        )
+
+        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        mock_delay.assert_not_called()
+        mock_deliver_email.assert_called_once()
+        outbound = mock_deliver_email.call_args.args[0]
+        self.assertEqual(outbound.owner_agent, self.agent)
+        self.assertEqual(outbound.to_endpoint.address, self.owner.email)
+        self.assertEqual(outbound.from_endpoint, self.agent_email)
+        self.assertIn("can't reply right now", outbound.raw_payload.get("subject", ""))
+        self.assertIn("trial ended", outbound.body.lower())
+
+    @tag("batch_email")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_email")
+    def test_paused_agent_email_uses_generic_billing_copy_for_delinquency(
+        self,
+        mock_deliver_email,
+        mock_delay,
+    ):
+        self._pause_owner(EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY)
+        parsed = ParsedMessage(
+            sender=self.owner.email,
+            recipient=self.agent_email.address,
+            subject="Need help",
+            body="Hello",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.EMAIL,
+        )
+
+        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        mock_delay.assert_not_called()
+        mock_deliver_email.assert_called_once()
+        outbound = mock_deliver_email.call_args.args[0]
+        self.assertIn("billing needs attention", outbound.body.lower())
+        self.assertNotIn("trial ended", outbound.body.lower())
+
 
 @tag("batch_sms")
 class InboundDailyCreditsSmsTests(TestCase):
@@ -237,6 +312,19 @@ class InboundDailyCreditsSmsTests(TestCase):
             channel=CommsChannel.SMS,
             address="+15550009999",
             is_primary=True,
+        )
+
+    def _pause_owner(self, reason: str) -> None:
+        billing = self.owner.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = reason
+        billing.execution_paused_at = timezone.now()
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
         )
 
     @tag("batch_sms")
@@ -269,6 +357,35 @@ class InboundDailyCreditsSmsTests(TestCase):
         self.assertEqual(outbound_msg.to_endpoint.address, self.owner_phone)
         self.assertTrue(outbound_msg.is_outbound)
         self.assertEqual(outbound_msg.owner_agent, self.agent)
+
+    @tag("batch_sms")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
+    def test_paused_agent_sms_sends_sender_only_reply_and_skips_processing(
+        self,
+        mock_deliver_sms,
+        mock_delay,
+    ):
+        self._pause_owner(EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY)
+        parsed = ParsedMessage(
+            sender=self.owner_phone,
+            recipient=self.sms_endpoint.address,
+            subject=None,
+            body="Ping",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.SMS,
+        )
+
+        ingest_inbound_message(CommsChannel.SMS, parsed)
+
+        mock_delay.assert_not_called()
+        mock_deliver_sms.assert_called_once()
+        outbound_msg = mock_deliver_sms.call_args.args[0]
+        self.assertEqual(outbound_msg.owner_agent, self.agent)
+        self.assertEqual(outbound_msg.from_endpoint, self.sms_endpoint)
+        self.assertEqual(outbound_msg.to_endpoint.address, self.owner_phone)
+        self.assertIn("billing needs attention", outbound_msg.body.lower())
 
 
 @tag("batch_agent_chat")

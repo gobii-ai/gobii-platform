@@ -8,6 +8,7 @@ from constants.feature_flags import (
 )
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
+    EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
     EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED,
     pause_owner_execution_by_ref,
 )
@@ -103,7 +104,14 @@ def _handle_trial_ended_non_renewal(sender, payload, **_kwargs) -> None:
         event_name=TRIAL_ENDED_NON_RENEWAL,
     )
 
-    # TODO: Make sure we downgrade users credit to free
+    pause_owner_execution_by_ref(
+        payload.owner_type,
+        payload.owner_id,
+        EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
+        source="billing.lifecycle.trial_ended_non_renewal",
+        paused_at=payload.occurred_at,
+        analytics_source=AnalyticsSource.API,
+    )
 
 
 def _handle_trial_conversion_failed(sender, payload, **_kwargs) -> None:

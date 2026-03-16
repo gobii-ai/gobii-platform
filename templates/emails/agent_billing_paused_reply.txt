@@ -1,0 +1,10 @@
+{{ intro_text }}
+
+{{ detail_text }}
+{% if billing_url %}
+
+Billing: {{ billing_url }}
+{% endif %}
+
+Best,
+{{ agent.name }}
