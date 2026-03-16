@@ -333,43 +333,47 @@ const generateTempId = () =>
 
 const normalizeAllowlistAddress = (value: string) => value.trim().toLowerCase()
 
-function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowlistAction[]): AllowlistTableRow[] {
-  const rows = new Map<string, AllowlistTableRow>()
+function isCreatePendingAction<TAction extends { type: string }>(action: TAction): action is Extract<TAction, PendingCreateAction> {
+  return action.type === 'create'
+}
 
-  for (const entry of state.entries) {
-    rows.set(entry.id, {
-      id: entry.id,
-      kind: 'entry',
-      channel: entry.channel,
-      address: entry.address,
-      allowInbound: entry.allowInbound,
-      allowOutbound: entry.allowOutbound,
-    })
-  }
+type PendingCreateAction = {
+  type: 'create'
+  tempId: string
+}
 
-  for (const invite of state.pendingInvites) {
-    rows.set(invite.id, {
-      id: invite.id,
-      kind: 'invite',
-      channel: invite.channel,
-      address: invite.address,
-      allowInbound: invite.allowInbound,
-      allowOutbound: invite.allowOutbound,
-    })
-  }
+type PendingIdAction = {
+  type: string
+  id: string
+}
+
+function isPendingRemoval(pendingType?: string): boolean {
+  return pendingType === 'remove' || pendingType === 'cancel_invite' || pendingType === 'delete'
+}
+
+function buildStagedRows<
+  TPendingAction extends PendingCreateAction | PendingIdAction,
+  TRow extends { id: string; pendingType?: TPendingAction['type']; temp?: boolean },
+>({
+  baseRows,
+  pendingActions,
+  createRow,
+  sortRows,
+}: {
+  baseRows: TRow[]
+  pendingActions: TPendingAction[]
+  createRow: (action: Extract<TPendingAction, PendingCreateAction>) => TRow
+  sortRows: (left: TRow, right: TRow) => number
+}): TRow[] {
+  const rows = new Map(baseRows.map((row) => [row.id, row] as const))
 
   for (const action of pendingActions) {
-    if (action.type === 'create') {
-      rows.set(action.tempId, {
-        id: action.tempId,
-        kind: 'entry',
-        channel: action.channel,
-        address: action.address,
-        allowInbound: action.allowInbound,
-        allowOutbound: action.allowOutbound,
-        temp: true,
-        pendingType: 'create',
-      })
+    if (isCreatePendingAction(action)) {
+      rows.set(action.tempId, createRow(action))
+      continue
+    }
+
+    if (!('id' in action)) {
       continue
     }
 
@@ -384,72 +388,154 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
     })
   }
 
-  return Array.from(rows.values()).sort((left, right) => {
-    const addressCompare = left.address.localeCompare(right.address, undefined, { sensitivity: 'base' })
-    if (addressCompare !== 0) {
-      return addressCompare
+  return Array.from(rows.values()).sort(sortRows)
+}
+
+function stagePersistedRowActions<
+  TPendingAction extends PendingCreateAction | PendingIdAction,
+  TRow extends { id: string; temp?: boolean },
+>({
+  pendingActions,
+  rows,
+  getPersistedAction,
+}: {
+  pendingActions: TPendingAction[]
+  rows: TRow[]
+  getPersistedAction: (row: TRow) => Extract<TPendingAction, PendingIdAction> | null
+}): TPendingAction[] {
+  const tempIds = new Set(rows.filter((row) => row.temp).map((row) => row.id))
+  const persistedActions = rows
+    .filter((row) => !row.temp)
+    .map(getPersistedAction)
+    .filter((action): action is Extract<TPendingAction, PendingIdAction> => action !== null)
+  const persistedKeys = new Set(persistedActions.map((action) => `${action.type}:${action.id}`))
+
+  const next = pendingActions.filter((action) => {
+    if (isCreatePendingAction(action)) {
+      return !tempIds.has(action.tempId)
     }
-    if (left.kind !== right.kind) {
-      return left.kind === 'entry' ? -1 : 1
+
+    if (!('id' in action)) {
+      return true
     }
-    return left.id.localeCompare(right.id)
+
+    return !persistedKeys.has(`${action.type}:${action.id}`)
+  })
+
+  return [...next, ...persistedActions] as TPendingAction[]
+}
+
+async function runPendingActionGroup<TAction>({
+  actions,
+  submitAction,
+  clearActions,
+  trimProcessedActions,
+}: {
+  actions: TAction[]
+  submitAction: (action: TAction) => Promise<void>
+  clearActions: () => void
+  trimProcessedActions: (processedCount: number) => void
+}) {
+  if (!actions.length) {
+    return
+  }
+
+  let processedCount = 0
+
+  try {
+    for (const action of actions) {
+      await submitAction(action)
+      processedCount += 1
+    }
+
+    clearActions()
+  } catch (error) {
+    if (processedCount > 0) {
+      trimProcessedActions(processedCount)
+    }
+    throw error
+  }
+}
+
+function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowlistAction[]): AllowlistTableRow[] {
+  return buildStagedRows({
+    baseRows: [
+      ...state.entries.map<AllowlistTableRow>((entry) => ({
+        id: entry.id,
+        kind: 'entry',
+        channel: entry.channel,
+        address: entry.address,
+        allowInbound: entry.allowInbound,
+        allowOutbound: entry.allowOutbound,
+      })),
+      ...state.pendingInvites.map<AllowlistTableRow>((invite) => ({
+        id: invite.id,
+        kind: 'invite',
+        channel: invite.channel,
+        address: invite.address,
+        allowInbound: invite.allowInbound,
+        allowOutbound: invite.allowOutbound,
+      })),
+    ],
+    pendingActions,
+    createRow: (action) => ({
+      id: action.tempId,
+      kind: 'entry',
+      channel: action.channel,
+      address: action.address,
+      allowInbound: action.allowInbound,
+      allowOutbound: action.allowOutbound,
+      temp: true,
+      pendingType: 'create',
+    }),
+    sortRows: (left, right) => {
+      const addressCompare = left.address.localeCompare(right.address, undefined, { sensitivity: 'base' })
+      if (addressCompare !== 0) {
+        return addressCompare
+      }
+      if (left.kind !== right.kind) {
+        return left.kind === 'entry' ? -1 : 1
+      }
+      return left.id.localeCompare(right.id)
+    },
   })
 }
 
 function buildCollaboratorRows(state: CollaboratorState, pendingActions: PendingCollaboratorAction[]): CollaboratorTableRow[] {
-  const rows = new Map<string, CollaboratorTableRow>()
-
-  for (const entry of state.entries) {
-    rows.set(entry.id, {
-      id: entry.id,
-      kind: 'active',
-      email: entry.email,
-      name: entry.name,
-    })
-  }
-
-  for (const invite of state.pendingInvites) {
-    rows.set(invite.id, {
-      id: invite.id,
-      kind: 'pending',
-      email: invite.email,
-      name: 'Invite pending',
-    })
-  }
-
-  for (const action of pendingActions) {
-    if (action.type === 'create') {
-      rows.set(action.tempId, {
-        id: action.tempId,
+  return buildStagedRows({
+    baseRows: [
+      ...state.entries.map<CollaboratorTableRow>((entry) => ({
+        id: entry.id,
+        kind: 'active',
+        email: entry.email,
+        name: entry.name,
+      })),
+      ...state.pendingInvites.map<CollaboratorTableRow>((invite) => ({
+        id: invite.id,
         kind: 'pending',
-        email: action.email,
-        name: action.name,
-        temp: true,
-        pendingType: 'create',
-      })
-      continue
-    }
-
-    const row = rows.get(action.id)
-    if (!row) {
-      continue
-    }
-
-    rows.set(action.id, {
-      ...row,
-      pendingType: action.type,
-    })
-  }
-
-  return Array.from(rows.values()).sort((left, right) => {
-    const emailCompare = left.email.localeCompare(right.email, undefined, { sensitivity: 'base' })
-    if (emailCompare !== 0) {
-      return emailCompare
-    }
-    if (left.kind !== right.kind) {
-      return left.kind === 'active' ? -1 : 1
-    }
-    return left.id.localeCompare(right.id)
+        email: invite.email,
+        name: 'Invite pending',
+      })),
+    ],
+    pendingActions,
+    createRow: (action) => ({
+      id: action.tempId,
+      kind: 'pending',
+      email: action.email,
+      name: action.name,
+      temp: true,
+      pendingType: 'create',
+    }),
+    sortRows: (left, right) => {
+      const emailCompare = left.email.localeCompare(right.email, undefined, { sensitivity: 'base' })
+      if (emailCompare !== 0) {
+        return emailCompare
+      }
+      if (left.kind !== right.kind) {
+        return left.kind === 'active' ? -1 : 1
+      }
+      return left.id.localeCompare(right.id)
+    },
   })
 }
 
@@ -932,6 +1018,119 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setPeerLinkDefaults(payload.defaults)
   }, [])
 
+  const submitAllowlistAction = useCallback(
+    async (action: PendingAllowlistAction) => {
+      const formData = new FormData()
+      formData.append('action', action.type === 'cancel_invite' ? 'cancel_invite' : action.type === 'remove' ? 'remove_allowlist' : 'add_allowlist')
+      if (action.type === 'create') {
+        formData.append('channel', action.channel)
+        formData.append('address', action.address)
+        formData.append('allow_inbound', String(action.allowInbound))
+        formData.append('allow_outbound', String(action.allowOutbound))
+      } else if (action.type === 'remove') {
+        formData.append('entry_id', action.id)
+      } else {
+        formData.append('invite_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.allowlist) {
+        applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
+      }
+      if (data?.collaborators) {
+        applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
+      }
+    },
+    [applyAllowlistPayload, applyCollaboratorPatch, submitFormData],
+  )
+
+  const submitCollaboratorAction = useCallback(
+    async (action: PendingCollaboratorAction) => {
+      const formData = new FormData()
+      formData.append(
+        'action',
+        action.type === 'cancel_invite'
+          ? 'cancel_collaborator_invite'
+          : action.type === 'remove'
+            ? 'remove_collaborator'
+            : 'add_collaborator',
+      )
+      if (action.type === 'create') {
+        formData.append('email', action.email)
+      } else if (action.type === 'remove') {
+        formData.append('collaborator_id', action.id)
+      } else {
+        formData.append('invite_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.collaborators) {
+        applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
+      }
+      if (data?.allowlist) {
+        applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
+      }
+    },
+    [applyAllowlistPayload, applyCollaboratorPatch, submitFormData],
+  )
+
+  const submitWebhookAction = useCallback(
+    async (action: PendingWebhookAction) => {
+      const formData = new FormData()
+      if (action.type === 'create') {
+        formData.append('webhook_action', 'create')
+        formData.append('webhook_name', action.name)
+        formData.append('webhook_url', action.url)
+      } else if (action.type === 'update') {
+        formData.append('webhook_action', 'update')
+        formData.append('webhook_id', action.id)
+        formData.append('webhook_name', action.name)
+        formData.append('webhook_url', action.url)
+      } else {
+        formData.append('webhook_action', 'delete')
+        formData.append('webhook_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.webhooks) {
+        const normalized = normalizeWebhooks(data.webhooks as AgentWebhook[])
+        setSavedWebhooks(data.webhooks as AgentWebhook[])
+        setWebhooksState(normalized)
+      }
+    },
+    [submitFormData],
+  )
+
+  const submitPeerAction = useCallback(
+    async (action: PendingPeerLinkAction) => {
+      const formData = new FormData()
+      if (action.type === 'create') {
+        formData.append('peer_link_action', 'create')
+        formData.append('peer_agent_id', action.peerAgentId)
+        formData.append('messages_per_window', String(action.messagesPerWindow))
+        formData.append('window_hours', String(action.windowHours))
+      } else if (action.type === 'update') {
+        formData.append('peer_link_action', 'update')
+        formData.append('link_id', action.id)
+        formData.append('messages_per_window', String(action.messagesPerWindow))
+        formData.append('window_hours', String(action.windowHours))
+        formData.append('feature_flag', action.featureFlag)
+        if (action.isEnabled) {
+          formData.append('is_enabled', 'on')
+        }
+      } else {
+        formData.append('peer_link_action', 'delete')
+        formData.append('link_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.peerLinks) {
+        applyPeerLinkPayload(data.peerLinks as PeerLinksInfo)
+      }
+    },
+    [applyPeerLinkPayload, submitFormData],
+  )
+
   const resetForm = useCallback(() => {
     setFormState(savedFormState)
   }, [savedFormState])
@@ -961,10 +1160,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setSaving(true)
     setSaveError(null)
     setSaveNotice(null)
-    let processedAllowlistActions = 0
-    let processedCollaboratorActions = 0
-    let processedWebhookActions = 0
-    let processedPeerActions = 0
     try {
       if (generalHasChanges && generalFormRef.current) {
         const data = await submitFormData(new FormData(generalFormRef.current))
@@ -1016,133 +1211,36 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         }
       }
 
-      if (pendingAllowlistActions.length) {
-        for (const action of pendingAllowlistActions) {
-          const formData = new FormData()
-          formData.append('action', action.type === 'cancel_invite' ? 'cancel_invite' : action.type === 'remove' ? 'remove_allowlist' : 'add_allowlist')
-          if (action.type === 'create') {
-            formData.append('channel', action.channel)
-            formData.append('address', action.address)
-            formData.append('allow_inbound', String(action.allowInbound))
-            formData.append('allow_outbound', String(action.allowOutbound))
-          } else if (action.type === 'remove') {
-            formData.append('entry_id', action.id)
-          } else {
-            formData.append('invite_id', action.id)
-          }
-          const data = await submitFormData(formData)
-          if (data?.allowlist) {
-            applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
-          }
-          if (data?.collaborators) {
-            applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
-          }
-          processedAllowlistActions += 1
-        }
-        setPendingAllowlistActions([])
-      }
+      await runPendingActionGroup({
+        actions: pendingAllowlistActions,
+        submitAction: submitAllowlistAction,
+        clearActions: () => setPendingAllowlistActions([]),
+        trimProcessedActions: (processedCount) => setPendingAllowlistActions((prev) => prev.slice(processedCount)),
+      })
 
-      if (pendingCollaboratorActions.length) {
-        for (const action of pendingCollaboratorActions) {
-          const formData = new FormData()
-          formData.append(
-            'action',
-            action.type === 'cancel_invite'
-              ? 'cancel_collaborator_invite'
-              : action.type === 'remove'
-                ? 'remove_collaborator'
-                : 'add_collaborator',
-          )
-          if (action.type === 'create') {
-            formData.append('email', action.email)
-          } else if (action.type === 'remove') {
-            formData.append('collaborator_id', action.id)
-          } else {
-            formData.append('invite_id', action.id)
-          }
-          const data = await submitFormData(formData)
-          if (data?.collaborators) {
-            applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
-          }
-          if (data?.allowlist) {
-            applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
-          }
-          processedCollaboratorActions += 1
-        }
-        setPendingCollaboratorActions([])
-      }
+      await runPendingActionGroup({
+        actions: pendingCollaboratorActions,
+        submitAction: submitCollaboratorAction,
+        clearActions: () => setPendingCollaboratorActions([]),
+        trimProcessedActions: (processedCount) => setPendingCollaboratorActions((prev) => prev.slice(processedCount)),
+      })
 
-      if (pendingWebhookActions.length) {
-        for (const action of pendingWebhookActions) {
-          const formData = new FormData()
-          if (action.type === 'create') {
-            formData.append('webhook_action', 'create')
-            formData.append('webhook_name', action.name)
-            formData.append('webhook_url', action.url)
-          } else if (action.type === 'update') {
-            formData.append('webhook_action', 'update')
-            formData.append('webhook_id', action.id)
-            formData.append('webhook_name', action.name)
-            formData.append('webhook_url', action.url)
-          } else {
-            formData.append('webhook_action', 'delete')
-            formData.append('webhook_id', action.id)
-          }
-          const data = await submitFormData(formData)
-          if (data?.webhooks) {
-            const normalized = normalizeWebhooks(data.webhooks as AgentWebhook[])
-            setSavedWebhooks(data.webhooks as AgentWebhook[])
-            setWebhooksState(normalized)
-          }
-          processedWebhookActions += 1
-        }
-        setPendingWebhookActions([])
-      }
+      await runPendingActionGroup({
+        actions: pendingWebhookActions,
+        submitAction: submitWebhookAction,
+        clearActions: () => setPendingWebhookActions([]),
+        trimProcessedActions: (processedCount) => setPendingWebhookActions((prev) => prev.slice(processedCount)),
+      })
 
-      if (pendingPeerActions.length) {
-        for (const action of pendingPeerActions) {
-          const formData = new FormData()
-          if (action.type === 'create') {
-            formData.append('peer_link_action', 'create')
-            formData.append('peer_agent_id', action.peerAgentId)
-            formData.append('messages_per_window', String(action.messagesPerWindow))
-            formData.append('window_hours', String(action.windowHours))
-          } else if (action.type === 'update') {
-            formData.append('peer_link_action', 'update')
-            formData.append('link_id', action.id)
-            formData.append('messages_per_window', String(action.messagesPerWindow))
-            formData.append('window_hours', String(action.windowHours))
-            formData.append('feature_flag', action.featureFlag)
-            if (action.isEnabled) {
-              formData.append('is_enabled', 'on')
-            }
-          } else {
-            formData.append('peer_link_action', 'delete')
-            formData.append('link_id', action.id)
-          }
-          const data = await submitFormData(formData)
-          if (data?.peerLinks) {
-            applyPeerLinkPayload(data.peerLinks as PeerLinksInfo)
-          }
-          processedPeerActions += 1
-        }
-        setPendingPeerActions([])
-      }
+      await runPendingActionGroup({
+        actions: pendingPeerActions,
+        submitAction: submitPeerAction,
+        clearActions: () => setPendingPeerActions([]),
+        trimProcessedActions: (processedCount) => setPendingPeerActions((prev) => prev.slice(processedCount)),
+      })
 
       setSaveError(null)
     } catch (error) {
-      if (processedAllowlistActions > 0) {
-        setPendingAllowlistActions((prev) => prev.slice(processedAllowlistActions))
-      }
-      if (processedCollaboratorActions > 0) {
-        setPendingCollaboratorActions((prev) => prev.slice(processedCollaboratorActions))
-      }
-      if (processedWebhookActions > 0) {
-        setPendingWebhookActions((prev) => prev.slice(processedWebhookActions))
-      }
-      if (processedPeerActions > 0) {
-        setPendingPeerActions((prev) => prev.slice(processedPeerActions))
-      }
       setSaveError(error instanceof Error ? error.message : 'Failed to save changes. Please try again.')
     } finally {
       setSaving(false)
@@ -1168,7 +1266,11 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     selectedOrgServers,
     selectedPersonalServers,
     sliderEmptyValue,
+    submitAllowlistAction,
+    submitCollaboratorAction,
+    submitPeerAction,
     submitFormData,
+    submitWebhookAction,
   ])
   const openConfirmAction = useCallback(
     (config: ConfirmActionConfig) => {
@@ -1321,8 +1423,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         (row) =>
           row.channel === input.channel
           && normalizeAllowlistAddress(row.address) === normalizedAddress
-          && row.pendingType !== 'remove'
-          && row.pendingType !== 'cancel_invite',
+          && !isPendingRemoval(row.pendingType),
       )
 
       if (hasDuplicate) {
@@ -1354,33 +1455,21 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       return
     }
 
-    const tempIds = new Set(rows.filter((row) => row.temp).map((row) => row.id))
-    const entryIds = new Set(
-      rows
-        .filter((row) => !row.temp && row.kind === 'entry' && row.pendingType !== 'remove')
-        .map((row) => row.id),
+    setPendingAllowlistActions((prev) =>
+      stagePersistedRowActions({
+        pendingActions: prev,
+        rows,
+        getPersistedAction: (row) => {
+          if (row.kind === 'entry' && row.pendingType !== 'remove') {
+            return { type: 'remove', id: row.id }
+          }
+          if (row.kind === 'invite' && row.pendingType !== 'cancel_invite') {
+            return { type: 'cancel_invite', id: row.id }
+          }
+          return null
+        },
+      }),
     )
-    const inviteIds = new Set(
-      rows
-        .filter((row) => !row.temp && row.kind === 'invite' && row.pendingType !== 'cancel_invite')
-        .map((row) => row.id),
-    )
-
-    setPendingAllowlistActions((prev) => {
-      const next = prev.filter((action) => {
-        if (action.type === 'create') {
-          return !tempIds.has(action.tempId)
-        }
-        if (action.type === 'remove') {
-          return !entryIds.has(action.id)
-        }
-        return !inviteIds.has(action.id)
-      })
-
-      entryIds.forEach((id) => next.push({ type: 'remove', id }))
-      inviteIds.forEach((id) => next.push({ type: 'cancel_invite', id }))
-      return next
-    })
   }, [])
 
   const openAddContactModal = useCallback(() => {
@@ -1441,8 +1530,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       const hasDuplicate = collaboratorRows.some(
         (row) =>
           row.email.trim().toLowerCase() === normalizedEmail
-          && row.pendingType !== 'remove'
-          && row.pendingType !== 'cancel_invite',
+          && !isPendingRemoval(row.pendingType),
       )
 
       if (hasDuplicate) {
@@ -1474,19 +1562,21 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
 
   const stageCollaboratorRemove = useCallback((row: CollaboratorTableRow) => {
     setCollaboratorError(null)
-    setPendingCollaboratorActions((prev) => {
-      if (row.temp) {
-        return prev.filter((action) => !(action.type === 'create' && action.tempId === row.id))
-      }
-
-      const next = prev.filter(
-        (action) =>
-          !((action.type === 'remove' || action.type === 'cancel_invite') && action.id === row.id),
-      )
-
-      next.push({ type: row.kind === 'active' ? 'remove' : 'cancel_invite', id: row.id })
-      return next
-    })
+    setPendingCollaboratorActions((prev) =>
+      stagePersistedRowActions({
+        pendingActions: prev,
+        rows: [row],
+        getPersistedAction: (currentRow) => {
+          if (currentRow.kind === 'active' && currentRow.pendingType !== 'remove') {
+            return { type: 'remove', id: currentRow.id }
+          }
+          if (currentRow.kind === 'pending' && currentRow.pendingType !== 'cancel_invite') {
+            return { type: 'cancel_invite', id: currentRow.id }
+          }
+          return null
+        },
+      }),
+    )
   }, [])
 
   const openAddCollaboratorModal = useCallback(() => {
