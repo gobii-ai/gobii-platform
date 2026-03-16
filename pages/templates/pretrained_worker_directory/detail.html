@@ -82,8 +82,10 @@
               <form method="post" action="{% url 'pages:pretrained_worker_hire' pretrained_worker.code %}" class="mt-6">
                 {% csrf_token %}
                 <input type="hidden" name="source_page" value="pretrained_worker_detail" />
+                {% if settings.GOBII_PROPRIETARY_MODE %}
                 <input type="hidden" name="trial_onboarding" value="1" />
                 <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+                {% endif %}
                 <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-indigo-600 font-semibold px-5 py-3 shadow-lg shadow-indigo-200 hover:text-indigo-700 transition">
                   Spawn this worker
                   <span aria-hidden="true">→</span>

@@ -97,8 +97,10 @@
         <form method="post" action="{% url 'pages:public_template_hire' public_profile_handle template.slug %}" class="mt-8">
           {% csrf_token %}
           <input type="hidden" name="source_page" value="public_template_detail" />
+          {% if settings.GOBII_PROPRIETARY_MODE %}
           <input type="hidden" name="trial_onboarding" value="1" />
           <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
+          {% endif %}
           <button type="submit" class="inline-flex items-center gap-2 rounded-full bg-indigo-600 text-white font-semibold px-6 py-3 hover:bg-indigo-500 transition">
             Spawn this template
             <span aria-hidden="true">&rarr;</span>

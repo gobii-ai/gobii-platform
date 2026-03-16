@@ -532,6 +532,38 @@ class PretrainedWorkerDirectoryTests(TestCase):
         self.assertIn("foo=bar", location)
         self.assertTrue(location.endswith("#pretrained-workers"))
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @tag("batch_pages")
+    def test_pretrained_worker_detail_omits_trial_onboarding_fields_in_community_mode(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'name="trial_onboarding" value="1"')
+        self.assertNotContains(
+            response,
+            f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_pretrained_worker_detail_includes_trial_onboarding_fields_in_proprietary_mode(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="trial_onboarding" value="1"')
+        self.assertContains(
+            response,
+            f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
+        )
+
 
 @tag("batch_pages")
 class PretrainedWorkerHireRedirectTests(TestCase):
