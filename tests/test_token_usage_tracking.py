@@ -847,6 +847,8 @@ class TokenUsageTrackingTest(TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["enabled_apps"], ["slack"])
+        self.assertEqual(result["already_enabled"], [])
+        self.assertEqual(result["invalid"], [])
         completion = PersistentAgentCompletion.objects.filter(
             agent=self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,

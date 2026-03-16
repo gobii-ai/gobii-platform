@@ -1508,6 +1508,8 @@ class MCPToolFunctionsTests(TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["enabled_apps"], ["slack"])
+        self.assertEqual(result["already_enabled"], [])
+        self.assertEqual(result["invalid"], [])
         self.assertEqual(result["effective_apps"], ["google_sheets", "slack"])
         self.assertIn("Run search_tools again", result["message"])
         mock_enable_pipedream_apps_for_agent.assert_called_once_with(

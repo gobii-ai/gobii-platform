@@ -567,8 +567,8 @@ def _search_with_llm(
                         "status": "success",
                         "message": "\n".join([line for line in message_lines if line]) or "",
                         "enabled_apps": enabled_apps_result.get("enabled", []),
-                        "already_enabled_apps": enabled_apps_result.get("already_enabled", []),
-                        "invalid_apps": enabled_apps_result.get("invalid", []),
+                        "already_enabled": enabled_apps_result.get("already_enabled", []),
+                        "invalid": enabled_apps_result.get("invalid", []),
                         "effective_apps": enabled_apps_result.get("effective_apps", []),
                     }
                     return response_payload
