@@ -1,10 +1,8 @@
-import { Brain, CalendarClock, FileCheck2, LayoutGrid, Waypoints, Workflow } from 'lucide-react'
+import { Brain, LayoutGrid, Waypoints } from 'lucide-react'
 import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import { compareTimelineCursors } from '../../../util/timelineCursor'
 import type { KanbanEvent, ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
-import { AgentConfigUpdateDetail } from '../toolDetails'
-import { summarizeSchedule } from '../../../util/schedule'
 import type {
   ToolClusterTransform,
   ToolDescriptor,
@@ -14,13 +12,18 @@ import {
   CHAT_SKIP_TOOL_NAMES,
   buildToolDescriptorMap,
   coerceString,
-  extractSqlStatementsFromParameters,
-  getSqliteInternalTableDisplay,
   truncate,
 } from '../../tooling/toolMetadata'
-import { classifySqliteStatements, parseAgentConfigUpdates } from '../../tooling/agentConfigSql'
+import { classifySqliteStatements } from '../../tooling/agentConfigSql'
+import {
+  extractSqlStatementsFromParameters,
+  extractSqliteStatementResult,
+  extractSqliteGroupedResult,
+  getSqliteInternalTableDisplay,
+} from '../../tooling/sqliteDisplay'
 import { ThinkingDetail } from '../toolDetails/details/common'
 import { KanbanUpdateDetail } from '../toolDetails/details/kanban'
+import { buildAgentConfigEntry, buildSqliteSyntheticId } from './sqliteEntries'
 
 const TOOL_DESCRIPTORS = buildToolDescriptorMap(resolveDetailComponent)
 
@@ -199,120 +202,6 @@ function buildToolEntryDisplay(
   }
 }
 
-function makeSqliteSyntheticId(baseId: string, suffix: string, index: number): string {
-  return `${baseId}:sqlite:${String(index).padStart(3, '0')}:${suffix}`
-}
-
-function extractSqliteStatementResult(rawResult: unknown, statementIndex: number): unknown {
-  const resultObject = parseResultObject(rawResult)
-  const results = Array.isArray(resultObject?.results) ? resultObject.results : null
-  if (!results?.length) {
-    return rawResult
-  }
-  return results[statementIndex] ?? rawResult
-}
-
-function extractSqliteGroupedResult(rawResult: unknown, statementIndexes: number[]): unknown {
-  if (statementIndexes.length === 1) {
-    return extractSqliteStatementResult(rawResult, statementIndexes[0])
-  }
-  const resultObject = parseResultObject(rawResult)
-  const results = Array.isArray(resultObject?.results) ? resultObject.results : null
-  if (!resultObject || !results?.length) {
-    return rawResult
-  }
-  return {
-    ...resultObject,
-    results: statementIndexes
-      .map((index) => results[index])
-      .filter((item) => item !== undefined),
-  }
-}
-
-function buildAgentConfigEntry(
-  clusterCursor: string,
-  entry: ToolCallEntry,
-  statements: string[],
-  statementIndexes: number[],
-): ToolEntryDisplay | null {
-  const parsedUpdate = parseAgentConfigUpdates(statements)
-  if (!parsedUpdate) {
-    return null
-  }
-
-  const {
-    updatesCharter,
-    updatesSchedule,
-    charterValue,
-    scheduleValue,
-    scheduleCleared,
-  } = parsedUpdate
-  const scheduleKnown = scheduleCleared || scheduleValue !== null
-  const normalizedSchedule = scheduleCleared ? null : scheduleValue
-  const scheduleSummary = scheduleKnown ? summarizeSchedule(normalizedSchedule) : null
-  const scheduleCaption = scheduleCleared
-    ? 'Disabled'
-    : scheduleSummary ?? 'Schedule updated'
-  const scheduleSummaryText = scheduleCleared
-    ? 'Schedule disabled.'
-    : scheduleSummary
-      ? `Schedule set to ${scheduleSummary}.`
-      : 'Schedule updated.'
-
-  let label = 'Database query'
-  let caption: string | null = null
-  let summary: string | null = null
-  let icon = Workflow
-  let iconBgClass = 'bg-indigo-100'
-  let iconColorClass = 'text-indigo-600'
-
-  if (updatesCharter && updatesSchedule) {
-    label = 'Assignment and schedule updated'
-    caption = `Assignment updated • ${scheduleCleared ? 'Schedule disabled' : scheduleSummary ?? 'Schedule updated'}`
-    summary = scheduleCleared
-      ? 'Assignment updated. Schedule disabled.'
-      : scheduleSummary
-        ? `Assignment updated. Schedule set to ${scheduleSummary}.`
-        : 'Assignment and schedule updated.'
-  } else if (updatesCharter) {
-    label = 'Assignment updated'
-    caption = charterValue ? truncate(charterValue, 48) : 'Assignment updated'
-    summary = 'Assignment updated.'
-    icon = FileCheck2
-  } else if (updatesSchedule) {
-    label = 'Schedule updated'
-    caption = scheduleCaption
-    summary = scheduleSummaryText
-    icon = CalendarClock
-    iconBgClass = 'bg-sky-100'
-    iconColorClass = 'text-sky-600'
-  }
-
-  return {
-    id: makeSqliteSyntheticId(entry.id, 'agent-config', Math.min(...statementIndexes)),
-    clusterCursor,
-    cursor: entry.cursor,
-    toolName: entry.toolName ?? 'sqlite_batch',
-    label,
-    caption,
-    timestamp: entry.timestamp ?? null,
-    status: entry.status ?? null,
-    icon,
-    iconBgClass,
-    iconColorClass,
-    parameters: isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null,
-    rawParameters: entry.parameters,
-    result: extractSqliteGroupedResult(entry.result, statementIndexes),
-    summary,
-    charterText: charterValue ?? null,
-    sqlStatements: statements,
-    detailComponent: AgentConfigUpdateDetail,
-    meta: entry.meta,
-    sourceEntry: entry,
-    separateFromPreview: true,
-  }
-}
-
 function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
   const descriptor = descriptorFor(entry.toolName)
   const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
@@ -368,7 +257,7 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
     )
 
     entries.push({
-      id: makeSqliteSyntheticId(entry.id, display.tableName.replace(/^_+/, ''), classification.index),
+      id: buildSqliteSyntheticId(entry.id, display.tableName.replace(/^_+/, ''), classification.index),
       clusterCursor,
       cursor: entry.cursor,
       toolName: entry.toolName ?? 'sqlite_batch',
@@ -401,7 +290,7 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
 
   if (leftoverStatements.length) {
     entries.push({
-      id: makeSqliteSyntheticId(entry.id, 'generic', statements.length),
+      id: buildSqliteSyntheticId(entry.id, 'generic', statements.length),
       clusterCursor,
       cursor: entry.cursor,
       toolName: entry.toolName ?? 'sqlite_batch',

@@ -2,7 +2,6 @@ import type { ToolDetailProps } from '../../tooling/types'
 import { isRecord, parseResultObject } from '../../../../util/objectUtils'
 import { KeyValueList, Section } from '../shared'
 import { stringify } from '../utils'
-import { StructuredDataTable } from '../../../common/StructuredDataTable'
 
 export function SqliteBatchDetail({ entry }: ToolDetailProps) {
   const statements = (() => {
@@ -119,35 +118,36 @@ export function EnableDatabaseDetail({ entry }: ToolDetailProps) {
 export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
   const sqliteInfo = entry.sqliteInfo
   const resultObject = parseResultObject(entry.result)
-  const hasStructuredResult =
-    (entry.result && typeof entry.result === 'object') ||
-    (resultObject && typeof resultObject === 'object')
-  const structuredResult =
-    entry.result && typeof entry.result === 'object'
-      ? entry.result
-      : resultObject
+  const status =
+    entry.summary ??
+    (typeof resultObject?.message === 'string' && resultObject.message.trim().length ? resultObject.message : null) ??
+    (typeof resultObject?.status === 'string' && resultObject.status.trim().length ? resultObject.status : null)
+  const fallbackResult =
+    status
+      ? null
+      : typeof entry.result === 'string'
+        ? entry.result
+        : resultObject
+          ? stringify(resultObject)
+          : entry.result
+            ? stringify(entry.result)
+            : null
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
-      <p className="text-slate-700">
-        {entry.summary ?? sqliteInfo?.purpose ?? 'This SQLite batch targeted an internal agent snapshot table.'}
-      </p>
       <KeyValueList
         items={[
+          status ? { label: 'Status', value: status } : null,
           sqliteInfo ? { label: 'Table', value: sqliteInfo.tableName } : null,
           sqliteInfo ? { label: 'Operation', value: sqliteInfo.operationLabel } : null,
           entry.label ? { label: 'Action', value: entry.label } : null,
         ]}
       />
-      {entry.result ? (
+      {fallbackResult ? (
         <Section title="Result">
-          {hasStructuredResult && structuredResult ? (
-            <StructuredDataTable value={structuredResult} />
-          ) : (
-            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
-              {stringify(entry.result)}
-            </pre>
-          )}
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+            {typeof fallbackResult === 'string' ? fallbackResult : stringify(fallbackResult)}
+          </pre>
         </Section>
       ) : null}
     </div>
