@@ -11,6 +11,7 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.http import HttpResponseRedirect
 from django.urls import reverse
+from allauth.utils import build_absolute_uri
 
 from api.services.system_settings import (
     get_account_allow_password_login,
@@ -130,6 +131,10 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
             messages.error(request, "Social login is currently disabled.")
             raise ImmediateHttpResponse(HttpResponseRedirect(reverse("account_login")))
         return None
+
+    def get_reset_password_from_key_url(self, key: str) -> str:
+        path = reverse("account_reset_password_bridge_start", kwargs={"key": key})
+        return build_absolute_uri(self.request, path)
 
     @staticmethod
     def _extract_domain(email: str) -> str:
