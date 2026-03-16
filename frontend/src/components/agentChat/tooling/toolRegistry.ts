@@ -1,8 +1,10 @@
-import { Brain, LayoutGrid, Waypoints } from 'lucide-react'
+import { Brain, CalendarClock, FileCheck2, LayoutGrid, Waypoints, Workflow } from 'lucide-react'
 import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import { compareTimelineCursors } from '../../../util/timelineCursor'
 import type { KanbanEvent, ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
+import { AgentConfigUpdateDetail } from '../toolDetails'
+import { summarizeSchedule } from '../../../util/schedule'
 import type {
   ToolClusterTransform,
   ToolDescriptor,
@@ -12,8 +14,11 @@ import {
   CHAT_SKIP_TOOL_NAMES,
   buildToolDescriptorMap,
   coerceString,
+  extractSqlStatementsFromParameters,
+  getSqliteInternalTableDisplay,
   truncate,
 } from '../../tooling/toolMetadata'
+import { classifySqliteStatements, parseAgentConfigUpdates } from '../../tooling/agentConfigSql'
 import { ThinkingDetail } from '../toolDetails/details/common'
 import { KanbanUpdateDetail } from '../toolDetails/details/kanban'
 
@@ -121,14 +126,12 @@ function deriveCaptionFallback(parameters: Record<string, unknown> | null): stri
   return null
 }
 
-function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay | null {
+function buildToolEntryDisplay(
+  clusterCursor: string,
+  entry: ToolCallEntry,
+  descriptor: ToolDescriptor,
+): ToolEntryDisplay | null {
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
-  const normalizedName = (toolName || '').toLowerCase()
-  if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
-    return null
-  }
-
-  const descriptor = descriptorFor(toolName)
   if (descriptor.skip) {
     return null
   }
@@ -192,7 +195,254 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
     sourceEntry: entry,
     mcpInfo: mcpInfo ?? undefined,
     separateFromPreview: transform.separateFromPreview ?? false,
+    sqliteInfo: transform.sqliteInfo,
   }
+}
+
+function makeSqliteSyntheticId(baseId: string, suffix: string, index: number): string {
+  return `${baseId}:sqlite:${String(index).padStart(3, '0')}:${suffix}`
+}
+
+function extractSqliteStatementResult(rawResult: unknown, statementIndex: number): unknown {
+  const resultObject = parseResultObject(rawResult)
+  const results = Array.isArray(resultObject?.results) ? resultObject.results : null
+  if (!results?.length) {
+    return rawResult
+  }
+  return results[statementIndex] ?? rawResult
+}
+
+function extractSqliteGroupedResult(rawResult: unknown, statementIndexes: number[]): unknown {
+  if (statementIndexes.length === 1) {
+    return extractSqliteStatementResult(rawResult, statementIndexes[0])
+  }
+  const resultObject = parseResultObject(rawResult)
+  const results = Array.isArray(resultObject?.results) ? resultObject.results : null
+  if (!resultObject || !results?.length) {
+    return rawResult
+  }
+  return {
+    ...resultObject,
+    results: statementIndexes
+      .map((index) => results[index])
+      .filter((item) => item !== undefined),
+  }
+}
+
+function buildAgentConfigEntry(
+  clusterCursor: string,
+  entry: ToolCallEntry,
+  statements: string[],
+  statementIndexes: number[],
+): ToolEntryDisplay | null {
+  const parsedUpdate = parseAgentConfigUpdates(statements)
+  if (!parsedUpdate) {
+    return null
+  }
+
+  const {
+    updatesCharter,
+    updatesSchedule,
+    charterValue,
+    scheduleValue,
+    scheduleCleared,
+  } = parsedUpdate
+  const scheduleKnown = scheduleCleared || scheduleValue !== null
+  const normalizedSchedule = scheduleCleared ? null : scheduleValue
+  const scheduleSummary = scheduleKnown ? summarizeSchedule(normalizedSchedule) : null
+  const scheduleCaption = scheduleCleared
+    ? 'Disabled'
+    : scheduleSummary ?? 'Schedule updated'
+  const scheduleSummaryText = scheduleCleared
+    ? 'Schedule disabled.'
+    : scheduleSummary
+      ? `Schedule set to ${scheduleSummary}.`
+      : 'Schedule updated.'
+
+  let label = 'Database query'
+  let caption: string | null = null
+  let summary: string | null = null
+  let icon = Workflow
+  let iconBgClass = 'bg-indigo-100'
+  let iconColorClass = 'text-indigo-600'
+
+  if (updatesCharter && updatesSchedule) {
+    label = 'Assignment and schedule updated'
+    caption = `Assignment updated • ${scheduleCleared ? 'Schedule disabled' : scheduleSummary ?? 'Schedule updated'}`
+    summary = scheduleCleared
+      ? 'Assignment updated. Schedule disabled.'
+      : scheduleSummary
+        ? `Assignment updated. Schedule set to ${scheduleSummary}.`
+        : 'Assignment and schedule updated.'
+  } else if (updatesCharter) {
+    label = 'Assignment updated'
+    caption = charterValue ? truncate(charterValue, 48) : 'Assignment updated'
+    summary = 'Assignment updated.'
+    icon = FileCheck2
+  } else if (updatesSchedule) {
+    label = 'Schedule updated'
+    caption = scheduleCaption
+    summary = scheduleSummaryText
+    icon = CalendarClock
+    iconBgClass = 'bg-sky-100'
+    iconColorClass = 'text-sky-600'
+  }
+
+  return {
+    id: makeSqliteSyntheticId(entry.id, 'agent-config', Math.min(...statementIndexes)),
+    clusterCursor,
+    cursor: entry.cursor,
+    toolName: entry.toolName ?? 'sqlite_batch',
+    label,
+    caption,
+    timestamp: entry.timestamp ?? null,
+    status: entry.status ?? null,
+    icon,
+    iconBgClass,
+    iconColorClass,
+    parameters: isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null,
+    rawParameters: entry.parameters,
+    result: extractSqliteGroupedResult(entry.result, statementIndexes),
+    summary,
+    charterText: charterValue ?? null,
+    sqlStatements: statements,
+    detailComponent: AgentConfigUpdateDetail,
+    meta: entry.meta,
+    sourceEntry: entry,
+    separateFromPreview: true,
+  }
+}
+
+function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
+  const descriptor = descriptorFor(entry.toolName)
+  const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
+  const statements = extractSqlStatementsFromParameters(parameters)
+  if (!statements.length) {
+    const fallback = buildToolEntryDisplay(clusterCursor, entry, descriptor)
+    return fallback ? [fallback] : []
+  }
+
+  const classifications = classifySqliteStatements(statements)
+  const configStatementIndexes = classifications
+    .filter((classification) => classification.reservedTableKind === 'agentConfig')
+    .map((classification) => classification.index)
+  const kanbanStatementIndexes = new Set(
+    classifications
+      .filter((classification) => classification.reservedTableKind === 'kanban')
+      .map((classification) => classification.index),
+  )
+  const nonKanbanCount = classifications.filter((classification) => !kanbanStatementIndexes.has(classification.index)).length
+
+  if (nonKanbanCount === 0) {
+    return []
+  }
+
+  const entries: ToolEntryDisplay[] = []
+  if (configStatementIndexes.length) {
+    const configStatements = configStatementIndexes.map((index) => statements[index]).filter(Boolean)
+    const configEntry = buildAgentConfigEntry(clusterCursor, entry, configStatements, configStatementIndexes)
+    if (configEntry) {
+      entries.push(configEntry)
+    }
+  }
+
+  const leftoverStatements: string[] = []
+  const leftoverIndexes: number[] = []
+
+  for (const classification of classifications) {
+    if (kanbanStatementIndexes.has(classification.index) || classification.reservedTableKind === 'agentConfig') {
+      continue
+    }
+
+    if (!classification.internalTableKind || !classification.tableName) {
+      leftoverStatements.push(classification.statement)
+      leftoverIndexes.push(classification.index)
+      continue
+    }
+
+    const display = getSqliteInternalTableDisplay(
+      classification.internalTableKind,
+      classification.operation,
+      classification.statement,
+      extractSqliteStatementResult(entry.result, classification.index),
+    )
+
+    entries.push({
+      id: makeSqliteSyntheticId(entry.id, display.tableName.replace(/^_+/, ''), classification.index),
+      clusterCursor,
+      cursor: entry.cursor,
+      toolName: entry.toolName ?? 'sqlite_batch',
+      label: display.label,
+      caption: display.caption,
+      timestamp: entry.timestamp ?? null,
+      status: entry.status ?? null,
+      icon: display.icon,
+      iconBgClass: display.iconBgClass,
+      iconColorClass: display.iconColorClass,
+      parameters,
+      rawParameters: entry.parameters,
+      result: extractSqliteStatementResult(entry.result, classification.index),
+      summary: display.summary,
+      charterText: null,
+      sqlStatements: [classification.statement],
+      detailComponent: resolveDetailComponent(display.detailKind),
+      meta: entry.meta,
+      sourceEntry: entry,
+      sqliteInfo: {
+        kind: classification.internalTableKind,
+        tableName: display.tableName,
+        operation: classification.operation,
+        operationLabel: display.operationLabel,
+        purpose: display.purpose,
+        statementIndex: classification.index,
+      },
+    })
+  }
+
+  if (leftoverStatements.length) {
+    entries.push({
+      id: makeSqliteSyntheticId(entry.id, 'generic', statements.length),
+      clusterCursor,
+      cursor: entry.cursor,
+      toolName: entry.toolName ?? 'sqlite_batch',
+      label: descriptor.label,
+      caption: leftoverStatements.length === 1
+        ? '1 statement'
+        : `${leftoverStatements.length} statements`,
+      timestamp: entry.timestamp ?? null,
+      status: entry.status ?? null,
+      icon: descriptor.icon,
+      iconBgClass: descriptor.iconBgClass,
+      iconColorClass: descriptor.iconColorClass,
+      parameters,
+      rawParameters: entry.parameters,
+      result: extractSqliteGroupedResult(entry.result, leftoverIndexes),
+      summary: entry.summary ?? null,
+      charterText: null,
+      sqlStatements: leftoverStatements,
+      detailComponent: descriptor.detailComponent,
+      meta: entry.meta,
+      sourceEntry: entry,
+    })
+  }
+
+  return entries
+}
+
+function buildToolEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
+  const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
+  const normalizedName = (toolName || '').toLowerCase()
+  if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
+    return []
+  }
+
+  if (normalizedName === 'sqlite_batch') {
+    return buildSqliteEntries(clusterCursor, entry)
+  }
+
+  const descriptor = descriptorFor(toolName)
+  const transformed = buildToolEntryDisplay(clusterCursor, entry, descriptor)
+  return transformed ? [transformed] : []
 }
 
 function buildThinkingEntry(
@@ -269,12 +519,12 @@ export function transformToolCluster(
   const suppressedThinkingCursor = options?.suppressedThinkingCursor ?? null
 
   for (const entry of cluster.entries) {
-    const transformed = buildToolEntry(cluster.cursor, entry)
-    if (!transformed) {
+    const transformedEntries = buildToolEntries(cluster.cursor, entry)
+    if (!transformedEntries.length) {
       skippedCount += 1
       continue
     }
-    entries.push(transformed)
+    entries.push(...transformedEntries)
   }
 
   for (const entry of thinkingEntries) {

@@ -6,8 +6,42 @@ export type AgentConfigSqlUpdate = {
   scheduleCleared: boolean
 }
 
+export type SqliteStatementOperation =
+  | 'select'
+  | 'insert'
+  | 'update'
+  | 'delete'
+  | 'replace'
+  | 'create'
+  | 'other'
+
+export type SqliteInternalTableKind =
+  | 'messages'
+  | 'toolResults'
+  | 'agentSkills'
+  | 'files'
+
+export type SqliteReservedTableKind =
+  | 'agentConfig'
+  | 'kanban'
+
+export type SqliteStatementClassification = {
+  index: number
+  statement: string
+  operation: SqliteStatementOperation
+  tableName: string | null
+  internalTableKind: SqliteInternalTableKind | null
+  reservedTableKind: SqliteReservedTableKind | null
+}
+
 const AGENT_CONFIG_TABLE = '__agent_config'
 const MUTATION_RE = /\b(update|insert|replace|delete)\b/i
+const SQLITE_INTERNAL_TABLE_NAME_MAP = {
+  __messages: 'messages',
+  __tool_results: 'toolResults',
+  __agent_skills: 'agentSkills',
+  __files: 'files',
+} satisfies Record<string, SqliteInternalTableKind>
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -161,6 +195,234 @@ function isClearingAssignment(statement: string, field: string): boolean {
   const emptySingleRe = new RegExp(`\\b${token}\\b\\s*=\\s*''`, 'i')
   const emptyDoubleRe = new RegExp(`\\b${token}\\b\\s*=\\s*""`, 'i')
   return nullRe.test(statement) || emptySingleRe.test(statement) || emptyDoubleRe.test(statement)
+}
+
+function normalizeSqlForParsing(sql: string): string {
+  let output = ''
+  let inSingle = false
+  let inDouble = false
+  let inLineComment = false
+  let inBlockComment = false
+
+  for (let idx = 0; idx < sql.length; idx += 1) {
+    const char = sql[idx]
+    const next = idx + 1 < sql.length ? sql[idx + 1] : ''
+
+    if (inLineComment) {
+      output += char === '\n' ? '\n' : ' '
+      if (char === '\n') {
+        inLineComment = false
+      }
+      continue
+    }
+
+    if (inBlockComment) {
+      output += char === '\n' ? '\n' : ' '
+      if (char === '*' && next === '/') {
+        output += ' '
+        idx += 1
+        inBlockComment = false
+      }
+      continue
+    }
+
+    if (inSingle) {
+      output += ' '
+      if (char === "'" && next === "'") {
+        output += ' '
+        idx += 1
+      } else if (char === "'") {
+        inSingle = false
+      }
+      continue
+    }
+
+    if (inDouble) {
+      output += ' '
+      if (char === '"' && next === '"') {
+        output += ' '
+        idx += 1
+      } else if (char === '"') {
+        inDouble = false
+      }
+      continue
+    }
+
+    if (char === "'" && !inDouble) {
+      inSingle = true
+      output += ' '
+      continue
+    }
+    if (char === '"' && !inSingle) {
+      inDouble = true
+      output += ' '
+      continue
+    }
+    if (char === '-' && next === '-') {
+      inLineComment = true
+      output += '  '
+      idx += 1
+      continue
+    }
+    if (char === '/' && next === '*') {
+      inBlockComment = true
+      output += '  '
+      idx += 1
+      continue
+    }
+
+    output += char
+  }
+
+  return output
+}
+
+function extractTopLevelOperation(statement: string): SqliteStatementOperation {
+  const normalized = normalizeSqlForParsing(statement)
+  let depth = 0
+  let token = ''
+
+  const maybeResolveToken = () => {
+    if (!token) {
+      return null
+    }
+    const lowered = token.toLowerCase()
+    token = ''
+    if (depth !== 0) {
+      return null
+    }
+    switch (lowered) {
+      case 'select':
+      case 'insert':
+      case 'update':
+      case 'delete':
+      case 'replace':
+      case 'create':
+        return lowered
+      default:
+        return null
+    }
+  }
+
+  for (let idx = 0; idx < normalized.length; idx += 1) {
+    const char = normalized[idx]
+    if (char === '(') {
+      const operation = maybeResolveToken()
+      if (operation) {
+        return operation
+      }
+      depth += 1
+      continue
+    }
+    if (char === ')') {
+      const operation = maybeResolveToken()
+      if (operation) {
+        return operation
+      }
+      if (depth > 0) {
+        depth -= 1
+      }
+      continue
+    }
+    if (/[A-Za-z_]/.test(char)) {
+      token += char
+      continue
+    }
+
+    const operation = maybeResolveToken()
+    if (operation) {
+      return operation
+    }
+  }
+
+  return maybeResolveToken() ?? 'other'
+}
+
+function cleanTableToken(token: string): string {
+  return token.replace(/^[`"'[]+/, '').replace(/[`"'\]]+$/, '').trim().toLowerCase()
+}
+
+function collectTableReferences(statement: string, operation: SqliteStatementOperation): string[] {
+  const normalized = normalizeSqlForParsing(statement)
+  const patterns: RegExp[] = []
+
+  if (operation === 'select' || operation === 'other') {
+    patterns.push(/\b(?:from|join)\s+([`"'[]?[A-Za-z_][A-Za-z0-9_.$]*[`"'\]]?)/gi)
+  }
+  if (operation === 'update' || operation === 'other') {
+    patterns.push(/\bupdate\s+([`"'[]?[A-Za-z_][A-Za-z0-9_.$]*[`"'\]]?)/gi)
+  }
+  if (operation === 'insert' || operation === 'replace' || operation === 'other') {
+    patterns.push(/\b(?:insert(?:\s+or\s+\w+)?|replace)\s+into\s+([`"'[]?[A-Za-z_][A-Za-z0-9_.$]*[`"'\]]?)/gi)
+  }
+  if (operation === 'delete' || operation === 'other') {
+    patterns.push(/\bdelete\s+from\s+([`"'[]?[A-Za-z_][A-Za-z0-9_.$]*[`"'\]]?)/gi)
+  }
+  if (operation === 'create' || operation === 'other') {
+    patterns.push(/\bcreate\s+(?:temporary\s+|temp\s+)?table\s+(?:if\s+not\s+exists\s+)?([`"'[]?[A-Za-z_][A-Za-z0-9_.$]*[`"'\]]?)/gi)
+  }
+
+  const matches: string[] = []
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(normalized)) !== null) {
+      const tableName = cleanTableToken(match[1] ?? '')
+      if (tableName) {
+        matches.push(tableName)
+      }
+    }
+  }
+  return matches
+}
+
+function classifyTableName(tableName: string | null): {
+  internalTableKind: SqliteInternalTableKind | null
+  reservedTableKind: SqliteReservedTableKind | null
+} {
+  if (!tableName) {
+    return { internalTableKind: null, reservedTableKind: null }
+  }
+  if (tableName === AGENT_CONFIG_TABLE) {
+    return { internalTableKind: null, reservedTableKind: 'agentConfig' }
+  }
+  if (tableName.startsWith('__kanban')) {
+    return { internalTableKind: null, reservedTableKind: 'kanban' }
+  }
+  return {
+    internalTableKind: SQLITE_INTERNAL_TABLE_NAME_MAP[tableName as keyof typeof SQLITE_INTERNAL_TABLE_NAME_MAP] ?? null,
+    reservedTableKind: null,
+  }
+}
+
+export function classifySqliteStatements(statements: string[]): SqliteStatementClassification[] {
+  return expandSqlStatements(statements).map((statement, index) => {
+    const operation = extractTopLevelOperation(statement)
+    const tables = collectTableReferences(statement, operation)
+    const uniqueTables = Array.from(new Set(tables))
+    const classifications = uniqueTables
+      .map((tableName) => ({ tableName, ...classifyTableName(tableName) }))
+      .filter((item) => item.internalTableKind !== null || item.reservedTableKind !== null)
+
+    if (classifications.length !== 1) {
+      return {
+        index,
+        statement,
+        operation,
+        tableName: null,
+        internalTableKind: null,
+        reservedTableKind: null,
+      }
+    }
+
+    return {
+      index,
+      statement,
+      operation,
+      tableName: classifications[0].tableName,
+      internalTableKind: classifications[0].internalTableKind,
+      reservedTableKind: classifications[0].reservedTableKind,
+    }
+  })
 }
 
 export function splitSqlStatements(sql: string): string[] {
