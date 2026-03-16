@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 import stripe
+from django.core import signing
 from django.template.loader import render_to_string
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import UploadedFile
@@ -7594,6 +7595,235 @@ class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         context['agent'] = self.get_object()
         return context
+
+class ContactRequestApproveView(TemplateView):
+    """One-click approval of a single contact request via email token (no login required)."""
+    template_name = "console/contact_request_token_response.html"
+
+    def _get_request_or_none(self, token):
+        from api.models import CommsAllowlistRequest
+        try:
+            return CommsAllowlistRequest.objects.select_related("agent__user").get(approval_token=token)
+        except CommsAllowlistRequest.DoesNotExist:
+            return None
+
+    def get(self, request, *args, **kwargs):
+        token = kwargs.get("token")
+        contact_request = self._get_request_or_none(token)
+        context = {"action": "approve"}
+        if not contact_request:
+            context["invalid_token"] = True
+        elif contact_request.status != contact_request.RequestStatus.PENDING:
+            context["already_responded"] = True
+            context["contact_request"] = contact_request
+            context["agent"] = contact_request.agent
+        elif contact_request.is_expired():
+            context["expired"] = True
+            context["contact_request"] = contact_request
+            context["agent"] = contact_request.agent
+        else:
+            context["can_act"] = True
+            context["contact_request"] = contact_request
+            context["agent"] = contact_request.agent
+        return self.render_to_response(context)
+
+    def post(self, request, *args, **kwargs):
+        from api.models import CommsAllowlistRequest
+        token = kwargs.get("token")
+        contact_request = self._get_request_or_none(token)
+        if not contact_request or not contact_request.can_be_approved():
+            return self.get(request, *args, **kwargs)
+        agent = contact_request.agent
+        try:
+            contact_request.approve(invited_by=agent.user, skip_invitation=True)
+            if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                agent.save(update_fields=["whitelist_policy"])
+            from api.models import PersistentAgentStep, PersistentAgentSystemStep
+            step = PersistentAgentStep.objects.create(
+                agent=agent,
+                description="User approved 1 contact request via email"
+            )
+            PersistentAgentSystemStep.objects.create(
+                step=step,
+                code=PersistentAgentSystemStep.Code.CONTACTS_APPROVED,
+                notes=f"Approved via email: {contact_request.name or contact_request.address}"
+            )
+            from api.agent.tasks.process_events import process_agent_events_task
+            transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
+        except (ValueError, ValidationError):
+            pass
+        context = {
+            "action": "approve",
+            "done": True,
+            "contact_request": contact_request,
+            "agent": agent,
+        }
+        return self.render_to_response(context)
+
+
+class ContactRequestDenyView(TemplateView):
+    """One-click denial of a single contact request via email token (no login required)."""
+    template_name = "console/contact_request_token_response.html"
+
+    def _get_request_or_none(self, token):
+        from api.models import CommsAllowlistRequest
+        try:
+            return CommsAllowlistRequest.objects.select_related("agent__user").get(denial_token=token)
+        except CommsAllowlistRequest.DoesNotExist:
+            return None
+
+    def get(self, request, *args, **kwargs):
+        token = kwargs.get("token")
+        contact_request = self._get_request_or_none(token)
+        context = {"action": "deny"}
+        if not contact_request:
+            context["invalid_token"] = True
+        elif contact_request.status != contact_request.RequestStatus.PENDING:
+            context["already_responded"] = True
+            context["contact_request"] = contact_request
+            context["agent"] = contact_request.agent
+        else:
+            context["can_act"] = True
+            context["contact_request"] = contact_request
+            context["agent"] = contact_request.agent
+        return self.render_to_response(context)
+
+    def post(self, request, *args, **kwargs):
+        from api.models import CommsAllowlistRequest
+        token = kwargs.get("token")
+        contact_request = self._get_request_or_none(token)
+        if not contact_request or contact_request.status != CommsAllowlistRequest.RequestStatus.PENDING:
+            return self.get(request, *args, **kwargs)
+        contact_request.reject()
+        context = {
+            "action": "deny",
+            "done": True,
+            "contact_request": contact_request,
+            "agent": contact_request.agent,
+        }
+        return self.render_to_response(context)
+
+
+# Max age for signed bulk approve/deny tokens (7 days, matching request expiry)
+_BULK_TOKEN_MAX_AGE = 7 * 24 * 60 * 60
+
+
+def _make_bulk_token(agent_pk, request_ids, action):
+    """Return a signed token encoding a bulk approve/deny action for a specific set of requests."""
+    return signing.dumps(
+        {"agent_id": str(agent_pk), "request_ids": [str(r) for r in request_ids], "action": action},
+        salt="contact_request_bulk",
+    )
+
+
+def _decode_bulk_token(token):
+    """Decode a bulk token; return the payload dict or None on failure."""
+    try:
+        return signing.loads(token, salt="contact_request_bulk", max_age=_BULK_TOKEN_MAX_AGE)
+    except signing.BadSignature:
+        return None
+
+
+class ContactRequestBulkApproveView(TemplateView):
+    """Approve all contact requests identified in a signed bulk token (one-click from email)."""
+    template_name = "console/contact_request_token_response.html"
+
+    def _process(self, request, token):
+        payload = _decode_bulk_token(token)
+        context = {"action": "approve_all"}
+        if not payload:
+            context["invalid_token"] = True
+            return context
+
+        from api.models import CommsAllowlistRequest, PersistentAgentStep, PersistentAgentSystemStep
+        agent_id = payload.get("agent_id")
+        request_ids = payload.get("request_ids", [])
+        agent = PersistentAgent.objects.non_eval().alive().filter(pk=agent_id).select_related("user").first()
+        if not agent:
+            context["invalid_token"] = True
+            return context
+
+        context["agent"] = agent
+        approved = []
+        for req_id in request_ids:
+            try:
+                cr = CommsAllowlistRequest.objects.get(pk=req_id, agent=agent)
+                if cr.can_be_approved():
+                    cr.approve(invited_by=agent.user, skip_invitation=True)
+                    approved.append(cr.name or cr.address)
+            except (CommsAllowlistRequest.DoesNotExist, ValueError, ValidationError):
+                continue
+
+        if approved:
+            if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                agent.save(update_fields=["whitelist_policy"])
+            step = PersistentAgentStep.objects.create(
+                agent=agent,
+                description=f"User approved {len(approved)} contact request(s) via email (bulk)"
+            )
+            PersistentAgentSystemStep.objects.create(
+                step=step,
+                code=PersistentAgentSystemStep.Code.CONTACTS_APPROVED,
+                notes=f"Approved via email bulk: {', '.join(approved)}"
+            )
+            from api.agent.tasks.process_events import process_agent_events_task
+            transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
+
+        context["done"] = True
+        context["approved_names"] = approved
+        return context
+
+    def get(self, request, *args, **kwargs):
+        context = self._process(request, kwargs.get("token"))
+        return self.render_to_response(context)
+
+    def post(self, request, *args, **kwargs):
+        return self.get(request, *args, **kwargs)
+
+
+class ContactRequestBulkDenyView(TemplateView):
+    """Deny all contact requests identified in a signed bulk token (one-click from email)."""
+    template_name = "console/contact_request_token_response.html"
+
+    def _process(self, token):
+        payload = _decode_bulk_token(token)
+        context = {"action": "deny_all"}
+        if not payload:
+            context["invalid_token"] = True
+            return context
+
+        from api.models import CommsAllowlistRequest
+        agent_id = payload.get("agent_id")
+        request_ids = payload.get("request_ids", [])
+        agent = PersistentAgent.objects.non_eval().alive().filter(pk=agent_id).select_related("user").first()
+        if not agent:
+            context["invalid_token"] = True
+            return context
+
+        context["agent"] = agent
+        denied = []
+        for req_id in request_ids:
+            try:
+                cr = CommsAllowlistRequest.objects.get(pk=req_id, agent=agent)
+                if cr.status == CommsAllowlistRequest.RequestStatus.PENDING:
+                    cr.reject()
+                    denied.append(cr.name or cr.address)
+            except CommsAllowlistRequest.DoesNotExist:
+                continue
+
+        context["done"] = True
+        context["denied_names"] = denied
+        return context
+
+    def get(self, request, *args, **kwargs):
+        context = self._process(kwargs.get("token"))
+        return self.render_to_response(context)
+
+    def post(self, request, *args, **kwargs):
+        return self.get(request, *args, **kwargs)
+
 
 @tracer.start_as_current_span("CONSOLE Profile - handle_send_verification")
 def handle_send_verification(request, phone):

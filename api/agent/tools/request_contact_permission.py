@@ -7,6 +7,9 @@ these requests before the agent can send messages.
 """
 import logging
 from django.contrib.sites.models import Site
+from django.core.mail import send_mail
+from django.core import signing
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
@@ -20,6 +23,9 @@ from ...models import (
 
 logger = logging.getLogger(__name__)
 
+# Matches _BULK_TOKEN_MAX_AGE in console/views.py
+_BULK_TOKEN_MAX_AGE = 7 * 24 * 60 * 60
+
 
 def get_request_contact_permission_tool() -> dict:
     """Return the tool definition for requesting contact permission."""
@@ -30,7 +36,7 @@ def get_request_contact_permission_tool() -> dict:
             "description": (
                 "Request permission to contact someone via email or SMS who is not in your allowlist. "
                 "Creates a request that the user must approve before you can contact them. "
-                "Returns a URL that you MUST send to the user so they can approve the contact. "
+                "A notification email with approval buttons is sent automatically to the agent owner. "
                 "Check if contact already exists before requesting."
                 "Only use an email or phone number the user has previously provided to you, or that is publicly available."
                 "Do not guess or fabricate contact details."
@@ -76,12 +82,94 @@ def get_request_contact_permission_tool() -> dict:
     }
 
 
+def _build_base_url():
+    """Return the base URL (https://domain) using the current Site."""
+    try:
+        current_site = Site.objects.get_current()
+        return f"https://{current_site.domain}"
+    except Exception:
+        return ""
+
+
+def _send_approval_email(agent, new_requests):
+    """Send a styled HTML notification email to the agent owner with approve/deny buttons."""
+    owner_email = (agent.user.email or "").strip()
+    if not owner_email:
+        logger.warning("Agent %s owner has no email; skipping contact-request notification", agent.id)
+        return
+
+    base_url = _build_base_url()
+
+    # Build per-request context dicts with approve/deny URLs
+    request_contexts = []
+    for req in new_requests:
+        approve_url = f"{base_url}{reverse('contact_request_approve', kwargs={'token': req.approval_token})}"
+        deny_url = f"{base_url}{reverse('contact_request_deny', kwargs={'token': req.denial_token})}"
+        request_contexts.append({
+            "name": req.name,
+            "address": req.address,
+            "purpose": req.purpose,
+            "reason": req.reason,
+            "approve_url": approve_url,
+            "deny_url": deny_url,
+        })
+
+    # Build bulk tokens for Approve All / Deny All
+    request_ids = [req.pk for req in new_requests]
+    approve_all_token = signing.dumps(
+        {"agent_id": str(agent.pk), "request_ids": [str(r) for r in request_ids], "action": "approve_all"},
+        salt="contact_request_bulk",
+    )
+    deny_all_token = signing.dumps(
+        {"agent_id": str(agent.pk), "request_ids": [str(r) for r in request_ids], "action": "deny_all"},
+        salt="contact_request_bulk",
+    )
+    approve_all_url = f"{base_url}{reverse('contact_request_approve_all', kwargs={'token': approve_all_token})}"
+    deny_all_url = f"{base_url}{reverse('contact_request_deny_all', kwargs={'token': deny_all_token})}"
+    review_url = f"{base_url}{reverse('agent_contact_requests', kwargs={'pk': agent.id})}"
+
+    context = {
+        "agent": agent,
+        "contact_requests": request_contexts,
+        "approve_all_url": approve_all_url,
+        "deny_all_url": deny_all_url,
+        "review_url": review_url,
+    }
+
+    html_body = render_to_string("emails/contact_approval_request.html", context)
+    text_body = (
+        f"Your agent '{agent.name}' is requesting permission to contact "
+        f"{len(new_requests)} person(s). Review requests at: {review_url}"
+    )
+
+    n = len(new_requests)
+    subject = (
+        f"{agent.name} wants to contact {new_requests[0].name or new_requests[0].address}"
+        if n == 1
+        else f"{agent.name} wants to contact {n} people"
+    )
+
+    try:
+        send_mail(
+            subject=subject,
+            message=text_body,
+            from_email=None,
+            recipient_list=[owner_email],
+            html_message=html_body,
+            fail_silently=False,
+        )
+        logger.info("Sent contact-request approval email for agent %s to %s", agent.id, owner_email)
+    except Exception:
+        logger.exception("Failed to send contact-request approval email for agent %s", agent.id)
+
+
 def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> dict:
     """Create contact permission requests for the agent.
     
     This tool allows agents to request permission to contact people
     who are not yet in their allowlist. The requests are created as
     CommsAllowlistRequest records that the user must approve.
+    A styled notification email is sent to the agent owner automatically.
     """
     contacts = params.get("contacts")
     if not contacts or not isinstance(contacts, list):
@@ -90,6 +178,8 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
     if not contacts:
         return {"status": "error", "message": "At least one contact must be specified"}
     
+    # Track full model objects so we can use tokens for the email
+    created_request_objects = []
     created_requests = []
     already_allowed = []
     already_pending = []
@@ -164,11 +254,10 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
                 )
                 continue
             
-            # Create the contact request
-            # Set expiry to 7 days from now by default
+            # Create the contact request (expires in 7 days)
             expires_at = timezone.now() + timedelta(days=7)
             
-            request = CommsAllowlistRequest.objects.create(
+            request_obj = CommsAllowlistRequest.objects.create(
                 agent=agent,
                 channel=channel_enum,
                 address=address,
@@ -178,6 +267,7 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
                 expires_at=expires_at
             )
             
+            created_request_objects.append(request_obj)
             created_requests.append({
                 "address": address,
                 "channel": channel,
@@ -195,16 +285,15 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
             errors.append(error_msg)
             logger.exception("Error creating contact request for agent %s", agent.id)
     
-    # Generate the full external URL for the contact requests page
-    try:
-        current_site = Site.objects.get_current()
-        protocol = 'https://'
-        relative_url = reverse('agent_contact_requests', kwargs={'pk': agent.id})
-        approval_url = f"{protocol}{current_site.domain}{relative_url}"
-    except Exception as e:
-        logger.warning("Failed to generate contact requests URL for agent %s: %s", agent.id, str(e))
-        approval_url = "the agent console"
-    
+    # Send a notification email if new requests were created
+    email_sent = False
+    if created_request_objects:
+        try:
+            _send_approval_email(agent, created_request_objects)
+            email_sent = True
+        except Exception:
+            logger.exception("Unexpected error sending approval email for agent %s", agent.id)
+
     # Build response message
     parts = []
     
@@ -227,11 +316,22 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
         parts.append(f"Errors: {error_list}")
     
     message = ". ".join(parts)
-    
-    # Add instruction to message user if any new requests were created
+
+    # Build the review URL for the agent console (also shown in the frontend tool details panel)
+    try:
+        base_url = _build_base_url()
+        review_url = f"{base_url}{reverse('agent_contact_requests', kwargs={'pk': agent.id})}"
+    except Exception:
+        review_url = None
+
     if created_requests:
-        message += f". You must now send a message to the user asking them to approve the contact request(s) at {approval_url}"
-    
+        if email_sent:
+            message += ". A notification email with approval buttons has been sent to the agent owner."
+        else:
+            # Fall back if email sending failed
+            approval_ref = review_url or "the agent console"
+            message += f". Please ask the user to approve the contact request(s) at {approval_ref}"
+
     # Determine status
     if created_requests and not errors:
         status = "ok"
@@ -241,12 +341,14 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
         status = "ok"
     else:
         status = "error"
-    
+
     return {
         "status": status,
         "message": message,
         "created_count": len(created_requests),
         "already_allowed_count": len(already_allowed),
         "already_pending_count": len(already_pending),
-        "approval_url": approval_url if created_requests else None
+        "email_sent": email_sent,
+        # Keep approval_url for the agent console tool-details panel
+        "approval_url": review_url if created_requests else None,
     }

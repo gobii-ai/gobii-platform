@@ -8129,7 +8129,23 @@ class CommsAllowlistRequest(models.Model):
         related_name="from_request",
         help_text="Invitation created when request was approved"
     )
-    
+
+    # Tokens for one-click email approve/deny links (no login required)
+    approval_token = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Unique token for one-click email approval"
+    )
+    denial_token = models.CharField(
+        max_length=64,
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Unique token for one-click email denial"
+    )
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -8144,6 +8160,14 @@ class CommsAllowlistRequest(models.Model):
         ]
         ordering = ["-requested_at"]
     
+    def save(self, *args, **kwargs):
+        # Auto-generate one-click email tokens on first save
+        if not self.approval_token:
+            self.approval_token = secrets.token_urlsafe(32)
+        if not self.denial_token:
+            self.denial_token = secrets.token_urlsafe(32)
+        super().save(*args, **kwargs)
+
     def clean(self):
         super().clean()
         # Normalize address like CommsAllowlistEntry
@@ -8151,7 +8175,7 @@ class CommsAllowlistRequest(models.Model):
             self.address = (self.address or "").strip().lower()
         else:
             self.address = (self.address or "").strip()
-    
+
     def is_expired(self):
         """Check if this request has expired."""
         if not self.expires_at:

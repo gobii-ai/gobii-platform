@@ -1,0 +1,76 @@
+{% extends "emails/gobii_base.html" %}
+{% block content %}
+<p style="font-size: 15px; color: #1e293b; margin: 0 0 12px;">
+  Hi there 👋
+</p>
+<p style="font-size: 15px; color: #1e293b; margin: 0 0 16px;">
+  Your agent <strong>{{ agent.name }}</strong> is requesting permission to contact
+  {{ contact_requests|length }} person{{ contact_requests|length|pluralize }}.
+  Please review and approve or deny each request below.
+</p>
+
+{% for req in contact_requests %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+  style="margin-bottom: 16px; border: 1px solid #e2e8f0; border-radius: 8px; background: #f8fafc;">
+  <tr>
+    <td style="padding: 14px 16px;">
+      <p style="margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #0f172a;">
+        {{ req.name|default:req.address }}
+        {% if req.name %}<span style="font-weight: 400; color: #64748b;">({{ req.address }})</span>{% endif %}
+      </p>
+      <p style="margin: 0 0 4px; font-size: 13px; color: #475569;">
+        <strong>Purpose:</strong> {{ req.purpose }}
+      </p>
+      <p style="margin: 0 0 12px; font-size: 13px; color: #475569;">
+        <strong>Reason:</strong> {{ req.reason }}
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0">
+        <tr>
+          <td style="padding-right: 8px;">
+            <a href="{{ req.approve_url }}"
+               style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none;
+                      padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600;">
+              ✓ Approve
+            </a>
+          </td>
+          <td>
+            <a href="{{ req.deny_url }}"
+               style="display: inline-block; background: #ffffff; color: #dc2626; text-decoration: none;
+                      padding: 8px 18px; border-radius: 6px; font-size: 13px; font-weight: 600;
+                      border: 1px solid #fca5a5;">
+              ✗ Deny
+            </a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+{% endfor %}
+
+{% if contact_requests|length > 1 %}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 20px;">
+  <tr>
+    <td style="padding-right: 8px;">
+      <a href="{{ approve_all_url }}"
+         style="display: inline-block; background: #16a34a; color: #ffffff; text-decoration: none;
+                padding: 10px 22px; border-radius: 6px; font-size: 14px; font-weight: 700;">
+        ✓ Approve All
+      </a>
+    </td>
+    <td>
+      <a href="{{ deny_all_url }}"
+         style="display: inline-block; background: #dc2626; color: #ffffff; text-decoration: none;
+                padding: 10px 22px; border-radius: 6px; font-size: 14px; font-weight: 700;">
+        ✗ Deny All
+      </a>
+    </td>
+  </tr>
+</table>
+{% endif %}
+
+<p style="font-size: 12px; color: #94a3b8; margin: 16px 0 0;">
+  You can also manage all contact requests from your
+  <a href="{{ review_url }}" style="color: #3b82f6; text-decoration: none;">agent console</a>.
+</p>
+{% endblock %}

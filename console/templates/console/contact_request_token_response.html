@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block title %}{% if action == "approve" %}Approve{% elif action == "deny" %}Deny{% elif action == "approve_all" %}Approve All{% else %}Deny All{% endif %} Contact Request{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full space-y-8">
+    <div class="bg-white shadow rounded-lg overflow-hidden">
+
+      {% if invalid_token %}
+        <div class="px-6 py-5 border-b border-gray-100">
+          <h2 class="text-xl font-semibold text-gray-900">Invalid Link</h2>
+        </div>
+        <div class="px-6 py-6">
+          <p class="text-gray-700">This link is invalid or has already been used.</p>
+        </div>
+
+      {% elif done %}
+        <div class="px-6 py-5 border-b border-gray-100">
+          {% if action == "approve" %}
+            <h2 class="text-xl font-semibold text-gray-900">Contact Approved ✓</h2>
+          {% elif action == "approve_all" %}
+            <h2 class="text-xl font-semibold text-gray-900">All Contacts Approved ✓</h2>
+          {% elif action == "deny_all" %}
+            <h2 class="text-xl font-semibold text-gray-900">All Contacts Denied</h2>
+          {% else %}
+            <h2 class="text-xl font-semibold text-gray-900">Contact Denied</h2>
+          {% endif %}
+        </div>
+        <div class="px-6 py-6 space-y-3">
+          {% if action == "approve" %}
+            <p class="text-gray-700">
+              <strong>{{ contact_request.name|default:contact_request.address }}</strong> has been added to
+              <strong>{{ agent.name }}</strong>'s allowed contacts. The agent will continue automatically.
+            </p>
+          {% elif action == "approve_all" %}
+            <p class="text-gray-700">
+              {% if approved_names %}
+                Approved {{ approved_names|length }} contact(s) for <strong>{{ agent.name }}</strong>.
+                The agent will continue automatically.
+              {% else %}
+                No pending requests were found to approve.
+              {% endif %}
+            </p>
+          {% elif action == "deny_all" %}
+            <p class="text-gray-700">
+              {% if denied_names %}
+                Denied {{ denied_names|length }} contact request(s) for <strong>{{ agent.name }}</strong>.
+              {% else %}
+                No pending requests were found to deny.
+              {% endif %}
+            </p>
+          {% else %}
+            <p class="text-gray-700">
+              The request to contact <strong>{{ contact_request.name|default:contact_request.address }}</strong> has been denied.
+            </p>
+          {% endif %}
+        </div>
+
+      {% elif already_responded %}
+        <div class="px-6 py-5 border-b border-gray-100">
+          <h2 class="text-xl font-semibold text-gray-900">Already Responded</h2>
+        </div>
+        <div class="px-6 py-6">
+          <p class="text-gray-700">
+            This request for <strong>{{ contact_request.name|default:contact_request.address }}</strong>
+            has already been {{ contact_request.get_status_display|lower }}.
+          </p>
+        </div>
+
+      {% elif expired %}
+        <div class="px-6 py-5 border-b border-gray-100">
+          <h2 class="text-xl font-semibold text-gray-900">Request Expired</h2>
+        </div>
+        <div class="px-6 py-6">
+          <p class="text-gray-700">
+            This contact request has expired. Please ask <strong>{{ agent.name }}</strong> to
+            send a new request.
+          </p>
+        </div>
+
+      {% elif can_act %}
+        <div class="px-6 py-5 border-b border-gray-100">
+          {% if action == "approve" %}
+            <h2 class="text-xl font-semibold text-gray-900">Approve Contact Request</h2>
+          {% else %}
+            <h2 class="text-xl font-semibold text-gray-900">Deny Contact Request</h2>
+          {% endif %}
+        </div>
+        <div class="px-6 py-6 space-y-4">
+          <p class="text-gray-700">
+            <strong>{{ agent.name }}</strong> is requesting permission to contact
+            <strong>{{ contact_request.name|default:contact_request.address }}</strong>
+            ({{ contact_request.address }}).
+          </p>
+          <div class="bg-gray-50 rounded-md p-4 space-y-1 text-sm text-gray-600">
+            <p><span class="font-medium">Purpose:</span> {{ contact_request.purpose }}</p>
+            <p><span class="font-medium">Reason:</span> {{ contact_request.reason }}</p>
+          </div>
+          <form method="post">
+            {% csrf_token %}
+            {% if action == "approve" %}
+              <button type="submit"
+                class="w-full inline-flex justify-center items-center px-4 py-2 rounded-md bg-green-600 text-white font-medium hover:bg-green-700">
+                ✓ Approve
+              </button>
+            {% else %}
+              <button type="submit"
+                class="w-full inline-flex justify-center items-center px-4 py-2 rounded-md bg-red-600 text-white font-medium hover:bg-red-700">
+                ✗ Deny
+              </button>
+            {% endif %}
+          </form>
+        </div>
+      {% endif %}
+
+    </div>
+
+    <div class="text-center">
+      <a href="https://gobii.ai" class="text-sm text-gray-500 hover:text-gray-700">Powered by Gobii</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
