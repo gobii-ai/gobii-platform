@@ -20,3 +20,17 @@ export type AllowlistTableRow = {
   pendingType?: PendingAllowlistAction['type']
   temp?: boolean
 }
+
+export type PendingCollaboratorAction =
+  | { type: 'create'; tempId: string; email: string; name: string }
+  | { type: 'remove'; id: string }
+  | { type: 'cancel_invite'; id: string }
+
+export type CollaboratorTableRow = {
+  id: string
+  kind: 'active' | 'pending'
+  email: string
+  name: string
+  pendingType?: PendingCollaboratorAction['type']
+  temp?: boolean
+}

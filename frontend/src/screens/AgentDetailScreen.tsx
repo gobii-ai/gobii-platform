@@ -19,7 +19,6 @@ import {
   ShieldAlert,
   Trash2,
   UserPlus,
-  Users,
   XCircle,
   Zap,
 } from 'lucide-react'
@@ -33,11 +32,19 @@ import {
   Switch as AriaSwitch,
 } from 'react-aria-components'
 import { Modal } from '../components/common/Modal'
+import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
 import { AddContactModal } from '../components/agentSettings/AddContactModal'
 import { AllowlistContactsTable } from '../components/agentSettings/AllowlistContactsTable'
-import type { AllowlistInput, AllowlistTableRow, PendingAllowlistAction } from '../components/agentSettings/contactTypes'
+import { CollaboratorsTable } from '../components/agentSettings/CollaboratorsTable'
+import type {
+  AllowlistInput,
+  AllowlistTableRow,
+  CollaboratorTableRow,
+  PendingAllowlistAction,
+  PendingCollaboratorAction,
+} from '../components/agentSettings/contactTypes'
 import { useModal } from '../hooks/useModal'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 
@@ -389,6 +396,63 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
   })
 }
 
+function buildCollaboratorRows(state: CollaboratorState, pendingActions: PendingCollaboratorAction[]): CollaboratorTableRow[] {
+  const rows = new Map<string, CollaboratorTableRow>()
+
+  for (const entry of state.entries) {
+    rows.set(entry.id, {
+      id: entry.id,
+      kind: 'active',
+      email: entry.email,
+      name: entry.name,
+    })
+  }
+
+  for (const invite of state.pendingInvites) {
+    rows.set(invite.id, {
+      id: invite.id,
+      kind: 'pending',
+      email: invite.email,
+      name: 'Invite pending',
+    })
+  }
+
+  for (const action of pendingActions) {
+    if (action.type === 'create') {
+      rows.set(action.tempId, {
+        id: action.tempId,
+        kind: 'pending',
+        email: action.email,
+        name: action.name,
+        temp: true,
+        pendingType: 'create',
+      })
+      continue
+    }
+
+    const row = rows.get(action.id)
+    if (!row) {
+      continue
+    }
+
+    rows.set(action.id, {
+      ...row,
+      pendingType: action.type,
+    })
+  }
+
+  return Array.from(rows.values()).sort((left, right) => {
+    const emailCompare = left.email.localeCompare(right.email, undefined, { sensitivity: 'base' })
+    if (emailCompare !== 0) {
+      return emailCompare
+    }
+    if (left.kind !== right.kind) {
+      return left.kind === 'active' ? -1 : 1
+    }
+    return left.id.localeCompare(right.id)
+  })
+}
+
 const normalizeWebhooks = (hooks: AgentWebhook[]): DisplayWebhook[] => hooks.map((hook) => ({ ...hook }))
 
 function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
@@ -473,9 +537,9 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [pendingPeerActions, setPendingPeerActions] = useState<PendingPeerLinkAction[]>([])
   const [savedAllowlistState, setSavedAllowlistState] = useState(initialData.allowlist)
   const [pendingAllowlistActions, setPendingAllowlistActions] = useState<PendingAllowlistAction[]>([])
-  const [collaboratorState, setCollaboratorState] = useState(initialData.collaborators)
+  const [savedCollaboratorState, setSavedCollaboratorState] = useState(initialData.collaborators)
+  const [pendingCollaboratorActions, setPendingCollaboratorActions] = useState<PendingCollaboratorAction[]>([])
   const [collaboratorError, setCollaboratorError] = useState<string | null>(null)
-  const [collaboratorBusy, setCollaboratorBusy] = useState(false)
   const [selectedOrgId, setSelectedOrgId] = useState(initialData.reassignment.assignedOrg?.id ?? '')
   const [reassignError, setReassignError] = useState<string | null>(null)
   const [reassigning, setReassigning] = useState(false)
@@ -592,7 +656,8 @@ useEffect(() => {
   }, [initialData.allowlist])
 
   useEffect(() => {
-    setCollaboratorState(initialData.collaborators)
+    setSavedCollaboratorState(initialData.collaborators)
+    setPendingCollaboratorActions([])
   }, [initialData.collaborators])
 
 const mcpHasChanges = useMemo(
@@ -829,6 +894,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     () => buildAllowlistRows(savedAllowlistState, pendingAllowlistActions),
     [pendingAllowlistActions, savedAllowlistState],
   )
+  const collaboratorRows = useMemo(
+    () => buildCollaboratorRows(savedCollaboratorState, pendingCollaboratorActions),
+    [pendingCollaboratorActions, savedCollaboratorState],
+  )
   const projectedAllowlistEntryCount = useMemo(
     () => allowlistRows.filter((row) => row.kind === 'entry' && row.pendingType !== 'remove').length,
     [allowlistRows],
@@ -837,14 +906,24 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     () => allowlistRows.filter((row) => row.kind === 'invite' && row.pendingType !== 'cancel_invite').length,
     [allowlistRows],
   )
+  const projectedCollaboratorActiveCount = useMemo(
+    () => collaboratorRows.filter((row) => row.kind === 'active' && row.pendingType !== 'remove').length,
+    [collaboratorRows],
+  )
+  const projectedCollaboratorPendingCount = useMemo(
+    () => collaboratorRows.filter((row) => row.kind === 'pending' && row.pendingType !== 'cancel_invite').length,
+    [collaboratorRows],
+  )
+  const projectedCollaboratorTotalCount = projectedCollaboratorActiveCount + projectedCollaboratorPendingCount
   const projectedContactSlots = useMemo(
-    () => collaboratorState.activeCount + collaboratorState.pendingCount + projectedAllowlistEntryCount + projectedAllowlistInviteCount,
-    [collaboratorState.activeCount, collaboratorState.pendingCount, projectedAllowlistEntryCount, projectedAllowlistInviteCount],
+    () => projectedCollaboratorActiveCount + projectedCollaboratorPendingCount + projectedAllowlistEntryCount + projectedAllowlistInviteCount,
+    [projectedAllowlistEntryCount, projectedAllowlistInviteCount, projectedCollaboratorActiveCount, projectedCollaboratorPendingCount],
   )
   const allowlistDirty = pendingAllowlistActions.length > 0
+  const collaboratorDirty = pendingCollaboratorActions.length > 0
   const webhooksDirty = pendingWebhookActions.length > 0
   const peerLinksDirty = pendingPeerActions.length > 0
-  const hasAnyChanges = generalHasChanges || mcpHasChanges || allowlistDirty || webhooksDirty || peerLinksDirty
+  const hasAnyChanges = generalHasChanges || mcpHasChanges || allowlistDirty || collaboratorDirty || webhooksDirty || peerLinksDirty
 
   const applyPeerLinkPayload = useCallback((payload: PeerLinksInfo) => {
     setSavedPeerLinks(payload)
@@ -862,12 +941,14 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setSelectedOrgServers(new Set(savedOrgServers))
     setSelectedPersonalServers(new Set(savedPersonalServers))
     setPendingAllowlistActions([])
+    setPendingCollaboratorActions([])
     setPendingWebhookActions([])
     setWebhooksState(normalizeWebhooks(savedWebhooks))
     setPendingPeerActions([])
     setPeerLinksState(savedPeerLinks.entries)
     setPeerLinkCandidates(savedPeerLinks.candidates)
     setPeerLinkDefaults(savedPeerLinks.defaults)
+    setCollaboratorError(null)
     setSaveError(null)
     setSaveNotice(null)
     resetAvatarState()
@@ -881,6 +962,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setSaveError(null)
     setSaveNotice(null)
     let processedAllowlistActions = 0
+    let processedCollaboratorActions = 0
     let processedWebhookActions = 0
     let processedPeerActions = 0
     try {
@@ -960,6 +1042,36 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         setPendingAllowlistActions([])
       }
 
+      if (pendingCollaboratorActions.length) {
+        for (const action of pendingCollaboratorActions) {
+          const formData = new FormData()
+          formData.append(
+            'action',
+            action.type === 'cancel_invite'
+              ? 'cancel_collaborator_invite'
+              : action.type === 'remove'
+                ? 'remove_collaborator'
+                : 'add_collaborator',
+          )
+          if (action.type === 'create') {
+            formData.append('email', action.email)
+          } else if (action.type === 'remove') {
+            formData.append('collaborator_id', action.id)
+          } else {
+            formData.append('invite_id', action.id)
+          }
+          const data = await submitFormData(formData)
+          if (data?.collaborators) {
+            applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
+          }
+          if (data?.allowlist) {
+            applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
+          }
+          processedCollaboratorActions += 1
+        }
+        setPendingCollaboratorActions([])
+      }
+
       if (pendingWebhookActions.length) {
         for (const action of pendingWebhookActions) {
           const formData = new FormData()
@@ -1022,6 +1134,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       if (processedAllowlistActions > 0) {
         setPendingAllowlistActions((prev) => prev.slice(processedAllowlistActions))
       }
+      if (processedCollaboratorActions > 0) {
+        setPendingCollaboratorActions((prev) => prev.slice(processedCollaboratorActions))
+      }
       if (processedWebhookActions > 0) {
         setPendingWebhookActions((prev) => prev.slice(processedWebhookActions))
       }
@@ -1046,6 +1161,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     initialData.llmIntelligence?.options,
     mcpHasChanges,
     pendingAllowlistActions,
+    pendingCollaboratorActions,
     pendingPeerActions,
     pendingWebhookActions,
     savedAvatarUrl,
@@ -1186,7 +1302,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     if (!payload) {
       return
     }
-    setCollaboratorState((prev) => ({
+    setSavedCollaboratorState((prev) => ({
       ...prev,
       entries: payload.entries ?? prev.entries,
       pendingInvites: payload.pendingInvites ?? prev.pendingInvites,
@@ -1319,70 +1435,68 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [openConfirmAction, stageAllowlistRemoveRows],
   )
 
-  const postCollaboratorAction = useCallback(
-    async (body: Record<string, string | Blob>) => {
-      setCollaboratorBusy(true)
-      setCollaboratorError(null)
-      try {
-        const formData = new FormData()
-        formData.append('csrfmiddlewaretoken', initialData.csrfToken)
-        for (const [key, value] of Object.entries(body)) {
-          formData.append(key, value)
-        }
-        const response = await fetch(initialData.urls.detail, {
-          method: 'POST',
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          body: formData,
-        })
-        const data = await response.json()
-        if (data.collaborators) {
-          applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
-        }
-        if (data.allowlist) {
-          applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
-        }
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || 'Request failed. Please try again.')
-        }
-      } catch (error) {
-        setCollaboratorError(error instanceof Error ? error.message : 'Request failed. Please try again.')
-        throw error
-      } finally {
-        setCollaboratorBusy(false)
-      }
-    },
-    [applyAllowlistPayload, applyCollaboratorPatch, initialData.csrfToken, initialData.urls.detail],
-  )
-
-  const handleCollaboratorAdd = useCallback(
+  const stageCollaboratorAdd = useCallback(
     async (email: string) => {
-      await postCollaboratorAction({
-        action: 'add_collaborator',
-        email,
-      })
+      const normalizedEmail = email.trim().toLowerCase()
+      const hasDuplicate = collaboratorRows.some(
+        (row) =>
+          row.email.trim().toLowerCase() === normalizedEmail
+          && row.pendingType !== 'remove'
+          && row.pendingType !== 'cancel_invite',
+      )
+
+      if (hasDuplicate) {
+        throw new Error('This collaborator already has access or a pending invite.')
+      }
+
+      if (
+        typeof savedCollaboratorState.maxContacts === 'number'
+        && savedCollaboratorState.maxContacts > 0
+        && projectedContactSlots >= savedCollaboratorState.maxContacts
+      ) {
+        throw new Error(`Contact limit reached. Maximum ${savedCollaboratorState.maxContacts} contacts allowed.`)
+      }
+
+      setCollaboratorError(null)
+      const tempId = generateTempId()
+      setPendingCollaboratorActions((prev) => [
+        ...prev,
+        {
+          type: 'create',
+          tempId,
+          email: normalizedEmail,
+          name: 'Invite pending',
+        },
+      ])
     },
-    [postCollaboratorAction],
+    [collaboratorRows, projectedContactSlots, savedCollaboratorState.maxContacts],
   )
 
-  const handleCollaboratorRemove = useCallback(
-    async (collaboratorId: string) => {
-      await postCollaboratorAction({
-        action: 'remove_collaborator',
-        collaborator_id: collaboratorId,
-      })
-    },
-    [postCollaboratorAction],
-  )
+  const stageCollaboratorRemove = useCallback((row: CollaboratorTableRow) => {
+    setCollaboratorError(null)
+    setPendingCollaboratorActions((prev) => {
+      if (row.temp) {
+        return prev.filter((action) => !(action.type === 'create' && action.tempId === row.id))
+      }
 
-  const handleCollaboratorCancelInvite = useCallback(
-    async (inviteId: string) => {
-      await postCollaboratorAction({
-        action: 'cancel_collaborator_invite',
-        invite_id: inviteId,
-      })
-    },
-    [postCollaboratorAction],
-  )
+      const next = prev.filter(
+        (action) =>
+          !((action.type === 'remove' || action.type === 'cancel_invite') && action.id === row.id),
+      )
+
+      next.push({ type: row.kind === 'active' ? 'remove' : 'cancel_invite', id: row.id })
+      return next
+    })
+  }, [])
+
+  const openAddCollaboratorModal = useCallback(() => {
+    showModal((onClose) => (
+      <AddCollaboratorModal
+        onSubmit={stageCollaboratorAdd}
+        onClose={onClose}
+      />
+    ))
+  }, [showModal, stageCollaboratorAdd])
 
   const handleReassign = useCallback(
     async (targetOrgId: string | null) => {
@@ -1907,12 +2021,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           )}
 
           <CollaboratorManager
-            state={collaboratorState}
+            state={savedCollaboratorState}
+            rows={collaboratorRows}
+            projectedTotalCount={projectedCollaboratorTotalCount}
             error={collaboratorError}
-            busy={collaboratorBusy}
-            onAdd={handleCollaboratorAdd}
-            onRemove={handleCollaboratorRemove}
-            onCancelInvite={handleCollaboratorCancelInvite}
+            busy={saving}
+            onAdd={openAddCollaboratorModal}
+            onRemove={stageCollaboratorRemove}
             onConfirmAction={openConfirmAction}
           />
         </div>
@@ -2294,155 +2409,69 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
 
 type CollaboratorManagerProps = {
   state: CollaboratorState
+  rows: CollaboratorTableRow[]
+  projectedTotalCount: number
   error: string | null
   busy: boolean
-  onAdd: (email: string) => Promise<void>
-  onRemove: (collaboratorId: string) => Promise<void>
-  onCancelInvite: (inviteId: string) => Promise<void>
+  onAdd: () => void
+  onRemove: (row: CollaboratorTableRow) => void
   onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function CollaboratorManager({ state, error, busy, onAdd, onRemove, onCancelInvite, onConfirmAction }: CollaboratorManagerProps) {
-  const [email, setEmail] = useState('')
+function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction }: CollaboratorManagerProps) {
   const canManage = state.canManage
   const totalLimit = state.maxContacts ?? 'Unlimited'
 
-  const handleInvite = async () => {
-    if (!email.trim()) {
-      return
-    }
-    try {
-      await onAdd(email.trim())
-      setEmail('')
-    } catch (inviteError) {
-      console.error(inviteError)
-    }
-  }
-
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-sky-100 bg-sky-50/60 p-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-sky-600 text-white">
-            <Users className="h-4 w-4" aria-hidden="true" />
-          </div>
-          <div>
-            <h4 className="text-sm font-semibold text-slate-800">Collaborators</h4>
-            <p className="text-xs text-slate-600">
-              Invite coworkers to chat and exchange files. Collaborators can upload and download files only.
-            </p>
-            <p className="mt-2 text-xs text-slate-600">
-              Contact slots used: {state.totalCount} / {totalLimit}
-            </p>
-          </div>
-        </div>
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <p className="text-xs text-slate-600">
+          Invite coworkers to chat and exchange files. Collaborators can upload and download files only.
+        </p>
+        <p className="text-xs text-slate-600">Contact slots used: {state.totalCount} / {totalLimit}</p>
       </div>
 
-      {canManage ? (
-        <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-            <UserPlus className="h-4 w-4 text-emerald-600" aria-hidden="true" />
-            Invite a collaborator
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-700">Collaborators</h4>
+            <p className="text-xs text-slate-500">
+              {projectedTotalCount} total
+              {projectedTotalCount !== state.totalCount ? ` (currently ${state.totalCount})` : ''}
+            </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              type="email"
-              placeholder="name@company.com"
-              value={email}
-              onChange={(event) => setEmail(event.currentTarget.value)}
-              className="flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:ring-emerald-500"
-            />
+          <div className="flex items-center gap-3">
+            {!canManage && <span className="text-xs text-slate-500">Managed by owner/admin</span>}
             <button
               type="button"
-              onClick={handleInvite}
-              disabled={busy || !email.trim()}
+              onClick={onAdd}
+              disabled={busy || !canManage}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
             >
-              Send invite
+              <span className="inline-flex items-center gap-2">
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                Add Collaborator
+              </span>
             </button>
           </div>
-          {error && <div className="text-xs text-rose-600">{error}</div>}
         </div>
-      ) : (
-        <p className="text-xs text-slate-600">Only owners and organization admins can invite collaborators.</p>
-      )}
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h5 className="text-sm font-semibold text-slate-700">Active collaborators</h5>
-          <span className="text-xs text-slate-500">{state.activeCount} active</span>
-        </div>
-        {state.entries.length > 0 ? (
-          <div className="space-y-2">
-            {state.entries.map((collaborator) => (
-              <div key={collaborator.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium text-slate-800">{collaborator.name || collaborator.email}</p>
-                  <p className="text-xs text-slate-500">{collaborator.email}</p>
-                </div>
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onConfirmAction({
-                        title: 'Remove collaborator',
-                        body: `Remove ${collaborator.email} from this agent?`,
-                        tone: 'danger',
-                        confirmLabel: 'Remove',
-                        onConfirm: () => onRemove(collaborator.id),
-                      })
-                    }
-                    className="text-xs font-semibold text-rose-600 hover:text-rose-700"
-                    disabled={busy}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No collaborators yet.</p>
-        )}
-      </div>
+        {error && <div className="text-xs text-rose-600">{error}</div>}
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h5 className="text-sm font-semibold text-slate-700">Pending invites</h5>
-          <span className="text-xs text-slate-500">{state.pendingCount} pending</span>
-        </div>
-        {state.pendingInvites.length > 0 ? (
-          <div className="space-y-2">
-            {state.pendingInvites.map((invite) => (
-              <div key={invite.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium text-slate-800">{invite.email}</p>
-                  <p className="text-xs text-slate-500">Invite pending</p>
-                </div>
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onConfirmAction({
-                        title: 'Cancel invite',
-                        body: `Cancel the invite for ${invite.email}?`,
-                        tone: 'danger',
-                        confirmLabel: 'Cancel invite',
-                        onConfirm: () => onCancelInvite(invite.id),
-                      })
-                    }
-                    className="text-xs font-semibold text-rose-600 hover:text-rose-700"
-                    disabled={busy}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No pending invites.</p>
-        )}
+        <CollaboratorsTable
+          rows={rows}
+          disabled={busy}
+          canManage={canManage}
+          onRemove={(row) =>
+            onConfirmAction({
+              title: row.kind === 'active' ? 'Remove collaborator' : 'Cancel invite',
+              body: row.kind === 'active' ? 'Remove this collaborator from this agent?' : 'Cancel this collaborator invite?',
+              tone: 'danger',
+              confirmLabel: row.kind === 'active' ? 'Remove' : 'Cancel invite',
+              onConfirm: () => onRemove(row),
+            })
+          }
+        />
       </div>
     </div>
   )
