@@ -647,7 +647,13 @@ export function AgentChatPage({
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey; charterOverride?: string | null } | null>(null)
+  const pendingCreateRef = useRef<{
+    body: string
+    attachments: File[]
+    tier: IntelligenceTierKey
+    charterOverride?: string | null
+    selectedPipedreamAppSlugs?: string[]
+  } | null>(null)
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
 
   const handleContextSwitched = useCallback(
@@ -2327,10 +2333,20 @@ export function AgentChatPage({
   }, [ensureAuthenticated, onboardingTarget, requiresTrialPlanSelection, upgradeModalSource])
 
   const createNewAgent = useCallback(
-    async (body: string, tier: IntelligenceTierKey, charterOverride?: string | null) => {
+    async (
+      body: string,
+      tier: IntelligenceTierKey,
+      charterOverride?: string | null,
+      selectedPipedreamAppSlugs?: string[],
+    ) => {
       setCreateAgentError(null)
       try {
-        const result = await createAgent(body, tier, charterOverride)
+        const result = await createAgent(
+          body,
+          tier,
+          charterOverride,
+          selectedPipedreamAppSlugs,
+        )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
         const createdAgentEntry: AgentRosterEntry = {
@@ -2703,13 +2719,19 @@ export function AgentChatPage({
       setDraftIntelligenceTier(tierToUse)
     }
     closeGate()
-    void createNewAgent(pending.body, tierToUse, pending.charterOverride)
+    void createNewAgent(
+      pending.body,
+      tierToUse,
+      pending.charterOverride,
+      pending.selectedPipedreamAppSlugs,
+    )
   }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
 
   const handleSend = useCallback(async (
     body: string,
     attachments: File[] = [],
     charterOverride?: string | null,
+    selectedPipedreamAppSlugs?: string[],
   ) => {
     if (!activeAgentId && !isNewAgent) {
       return
@@ -2766,7 +2788,13 @@ export function AgentChatPage({
           burnRatePerDay,
           currentPlan,
         })
-        pendingCreateRef.current = { body, attachments, tier: selectedTier, charterOverride }
+        pendingCreateRef.current = {
+          body,
+          attachments,
+          tier: selectedTier,
+          charterOverride,
+          selectedPipedreamAppSlugs,
+        }
         setIntelligenceGate({
           reason: 'credits',
           selectedTier,
@@ -2777,7 +2805,7 @@ export function AgentChatPage({
         })
         return
       }
-      await createNewAgent(body, selectedTier, charterOverride)
+      await createNewAgent(body, selectedTier, charterOverride, selectedPipedreamAppSlugs)
       return
     }
     if (activeAgentId) {
@@ -2910,7 +2938,12 @@ export function AgentChatPage({
     }
 
     spawnIntentAutoSubmittedRef.current = true
-    const sendPromise = handleSend(spawnIntent.charter, [], spawnIntent.charter_override)
+    const sendPromise = handleSend(
+      spawnIntent.charter,
+      [],
+      spawnIntent.charter_override,
+      spawnIntent.selected_pipedream_app_slugs,
+    )
     sendPromise.finally(() => setSpawnIntentStatus('done'))
   }, [
     contextReady,

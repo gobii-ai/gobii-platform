@@ -25,7 +25,9 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
-from api.models import UserPreference
+from api.models import MCPServerConfig, PipedreamAppSelection, UserPreference
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
+from api.services.pipedream_apps import get_owner_apps_state
 
 
 @tag("batch_console_agents")
@@ -1077,6 +1079,37 @@ class ConsoleViewsTest(TestCase):
             TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
         self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
+
+    @override_settings(
+        PIPEDREAM_PREFETCH_APPS="trello",
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
+    )
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @tag("batch_console_agents")
+    def test_quick_spawn_enables_selected_pipedream_apps_from_session(self, _mock_delay):
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["notion"],
+        )
+
+        session = self.client.session
+        session["agent_charter"] = "Help with tasks"
+        session[AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack", "notion", "trello"]
+        session.save()
+
+        response = self.client.get(reverse("agent_quick_spawn"))
+
+        self.assertEqual(response.status_code, 302)
+        selection = PipedreamAppSelection.objects.get(user=self.user)
+        self.assertEqual(selection.selected_app_slugs, ["notion", "slack"])
+        self.assertNotIn(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, self.client.session)
+
+        owner_state = get_owner_apps_state(
+            MCPServerConfig.Scope.USER,
+            self.user.get_full_name() or self.user.username,
+            owner_user=self.user,
+        )
+        self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
 
     @tag("batch_console_agents")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')

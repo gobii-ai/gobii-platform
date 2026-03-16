@@ -8,6 +8,13 @@ export type UpdateAgentPayload = {
   preferred_llm_tier?: string
 }
 
+type CreateAgentPayload = {
+  message: string
+  preferred_llm_tier?: string
+  charter_override?: string
+  selected_pipedream_app_slugs?: string[]
+}
+
 export type CreateAgentResponse = {
   agent_id: string
   agent_name: string
@@ -93,10 +100,18 @@ export function updateAgent(agentId: string, payload: UpdateAgentPayload): Promi
   })
 }
 
-export async function createAgent(message: string, preferredLlmTier?: string, charterOverride?: string | null): Promise<CreateAgentResponse> {
-  const payload: Record<string, string | undefined> = { message, preferred_llm_tier: preferredLlmTier }
+export async function createAgent(
+  message: string,
+  preferredLlmTier?: string,
+  charterOverride?: string | null,
+  selectedPipedreamAppSlugs?: string[],
+): Promise<CreateAgentResponse> {
+  const payload: CreateAgentPayload = { message, preferred_llm_tier: preferredLlmTier }
   if (charterOverride) {
     payload.charter_override = charterOverride
+  }
+  if (selectedPipedreamAppSlugs && selectedPipedreamAppSlugs.length > 0) {
+    payload.selected_pipedream_app_slugs = selectedPipedreamAppSlugs
   }
   return jsonFetch<CreateAgentResponse>('/console/api/agents/create/', {
     method: 'POST',

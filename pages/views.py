@@ -59,6 +59,7 @@ from util.urls import (
 )
 from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
 from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService
+from api.pipedream_app_utils import normalize_app_slugs
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -70,6 +71,7 @@ from .homepage_cache import (
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
+from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -554,7 +556,12 @@ class HomePage(TemplateView):
                 "homepage_integrations_modal_props": {
                     "builtins": builtin_integrations,
                     "initialSearchTerm": (self.request.GET.get("integration_search") or "").strip(),
+                    "initialSelectedAppSlugs": normalize_app_slugs(
+                        self.request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY)
+                        or []
+                    ),
                     "searchUrl": reverse("pages:homepage_integrations_search"),
+                    "selectedFieldsContainerId": "homepage-integrations-selected-fields",
                 },
             }
         )
@@ -653,6 +660,15 @@ class HomeAgentSpawnView(TemplateView):
         from django.contrib.auth.views import redirect_to_login
         
         form = PersistentAgentCharterForm(request.POST)
+        selected_pipedream_app_slugs = normalize_app_slugs(
+            request.POST.getlist("selected_pipedream_app_slugs")
+        )
+        if selected_pipedream_app_slugs:
+            request.session[AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = (
+                selected_pipedream_app_slugs
+            )
+        else:
+            request.session.pop(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, None)
         trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
         trial_onboarding_target = normalize_trial_onboarding_target(
             request.POST.get("trial_onboarding_target"),

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Boxes, Loader2, Search } from 'lucide-react'
+import { Boxes, Check, Loader2, Search, X } from 'lucide-react'
 
-import { mapPipedreamApp, searchPipedreamApps } from '../../api/mcp'
+import { mapPipedreamApp, searchPipedreamApps, type PipedreamAppSummary } from '../../api/mcp'
 import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
 import { Modal } from '../common/Modal'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from '../mcp/PipedreamAppsShared'
@@ -17,18 +18,36 @@ type HomepageIntegrationsModalAppDTO = {
 export type HomepageIntegrationsModalProps = {
   builtins: HomepageIntegrationsModalAppDTO[]
   initialSearchTerm: string
+  initialSelectedAppSlugs: string[]
   searchUrl: string
+  selectedFieldsContainerId: string
+}
+
+function fallbackAppForSlug(slug: string): PipedreamAppSummary {
+  return {
+    slug,
+    name: slug.replace(/[_-]+/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase()),
+    description: '',
+    iconUrl: '',
+  }
 }
 
 export function HomepageIntegrationsModal({
   builtins,
   initialSearchTerm,
+  initialSelectedAppSlugs,
   searchUrl,
+  selectedFieldsContainerId,
 }: HomepageIntegrationsModalProps) {
   const [open, setOpen] = useState(Boolean(initialSearchTerm))
   const [isMobile, setIsMobile] = useState(false)
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm)
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(initialSearchTerm.trim())
+  const [selectedSlugs, setSelectedSlugs] = useState<string[]>(() => initialSelectedAppSlugs)
+  const [knownApps, setKnownApps] = useState<Record<string, PipedreamAppSummary>>(() => {
+    const builtinApps = builtins.map(mapPipedreamApp)
+    return Object.fromEntries(builtinApps.map((app) => [app.slug, app]))
+  })
 
   useEffect(() => {
     const checkMobile = () => {
@@ -63,6 +82,7 @@ export function HomepageIntegrationsModal({
   }, [])
 
   const builtinApps = useMemo(() => builtins.map(mapPipedreamApp), [builtins])
+  const builtinSlugSet = useMemo(() => new Set(builtinApps.map((app) => app.slug)), [builtinApps])
 
   const searchQuery = useQuery({
     queryKey: ['homepage-pipedream-app-search', searchUrl, debouncedSearchTerm],
@@ -73,10 +93,59 @@ export function HomepageIntegrationsModal({
   const searchResults = searchQuery.data ?? []
   const resultsCountLabel = `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}`
 
+  useEffect(() => {
+    const nextEntries = [...builtinApps, ...searchResults]
+    if (nextEntries.length === 0) {
+      return
+    }
+    setKnownApps((current) => {
+      const next = { ...current }
+      let changed = false
+      nextEntries.forEach((app) => {
+        if (!next[app.slug]) {
+          next[app.slug] = app
+          changed = true
+        }
+      })
+      return changed ? next : current
+    })
+  }, [builtinApps, searchResults])
+
+  const selectedApps = useMemo(
+    () => selectedSlugs.map((slug) => knownApps[slug] ?? fallbackAppForSlug(slug)),
+    [knownApps, selectedSlugs],
+  )
+
   const clearSearch = () => {
     setSearchTerm('')
     setDebouncedSearchTerm('')
   }
+
+  const toggleSelection = (slug: string) => {
+    if (builtinSlugSet.has(slug)) {
+      return
+    }
+    setSelectedSlugs((current) => {
+      if (current.includes(slug)) {
+        return current.filter((item) => item !== slug)
+      }
+      return [...current, slug]
+    })
+  }
+
+  const hiddenFieldsContainer =
+    typeof document === 'undefined' ? null : document.getElementById(selectedFieldsContainerId)
+
+  const hiddenFieldsPortal = hiddenFieldsContainer
+    ? createPortal(
+        <>
+          {selectedSlugs.map((slug) => (
+            <input key={slug} type="hidden" name="selected_pipedream_app_slugs" value={slug} />
+          ))}
+        </>,
+        hiddenFieldsContainer,
+      )
+    : null
 
   const body = (
     <div className="space-y-6">
@@ -102,6 +171,38 @@ export function HomepageIntegrationsModal({
           </div>
         </div>
       </div>
+
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Apps to enable</h3>
+            <p className="text-sm text-slate-600">Selected apps will be enabled when you spawn this agent.</p>
+          </div>
+          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+            {selectedSlugs.length} selected
+          </span>
+        </div>
+        {selectedApps.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {selectedApps.map((app) => (
+              <button
+                type="button"
+                key={app.slug}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 transition hover:border-indigo-300 hover:text-indigo-700"
+                onClick={() => toggleSelection(app.slug)}
+              >
+                <PipedreamAppIcon app={app} size="sm" />
+                <span>{app.name}</span>
+                <X className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
+            Search below and pick any additional apps you want enabled for this agent.
+          </div>
+        )}
+      </section>
 
       <section className="space-y-3">
         <label htmlFor="homepage-integrations-modal-search" className="block text-sm font-medium text-slate-600">
@@ -150,23 +251,57 @@ export function HomepageIntegrationsModal({
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">Results</p>
             <h4 className="mt-2 text-xl font-semibold text-slate-900">Matches for &quot;{searchTerm.trim()}&quot;</h4>
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            {searchResults.map((app) => (
-              <div key={app.slug} className="flex items-start gap-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
-                <PipedreamAppIcon app={app} />
-                <div className="min-w-0">
-                  <p className="text-base font-semibold text-slate-900">{app.name}</p>
-                  {app.description ? (
-                    <p className="mt-1 text-sm leading-relaxed text-slate-600">{app.description}</p>
-                  ) : (
-                    <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                      No short description is available for this integration yet.
-                    </p>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          <ul className="space-y-3">
+            {searchResults.map((app) => {
+              const isSelected = selectedSlugs.includes(app.slug)
+              const isBuiltin = builtinSlugSet.has(app.slug)
+              return (
+                <li key={app.slug}>
+                  <button
+                    type="button"
+                    className="flex w-full items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 text-left transition hover:border-indigo-200 hover:bg-indigo-50/40"
+                    onClick={() => toggleSelection(app.slug)}
+                    disabled={isBuiltin}
+                  >
+                    <div className="flex min-w-0 items-start gap-4">
+                      <PipedreamAppIcon app={app} />
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-base font-semibold text-slate-900">{app.name}</p>
+                          <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            {app.slug}
+                          </span>
+                        </div>
+                        {app.description ? (
+                          <p className="mt-1 text-sm leading-relaxed text-slate-600">{app.description}</p>
+                        ) : (
+                          <p className="mt-1 text-sm leading-relaxed text-slate-500">
+                            No short description is available for this integration yet.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <span
+                      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
+                        isSelected || isBuiltin
+                          ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                          : 'border-slate-200 text-slate-500'
+                      }`}
+                    >
+                      {isSelected || isBuiltin ? (
+                        <>
+                          <Check className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                          {isBuiltin ? 'Included' : 'Selected'}
+                        </>
+                      ) : (
+                        'Enable'
+                      )}
+                    </span>
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
         </div>
       ) : !searchQuery.isFetching ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
@@ -178,34 +313,42 @@ export function HomepageIntegrationsModal({
 
   if (isMobile) {
     return (
-      <AgentChatMobileSheet
-        open={open}
-        onClose={() => setOpen(false)}
-        title="Search more integrations"
-        subtitle="Built-in apps are ready immediately. Search the wider integration catalog from here."
-        icon={Search}
-        ariaLabel="Search more integrations"
-        bodyPadding={false}
-      >
-        <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-6">
-          {body}
-        </div>
-      </AgentChatMobileSheet>
+      <>
+        {hiddenFieldsPortal}
+        <AgentChatMobileSheet
+          open={open}
+          onClose={() => setOpen(false)}
+          title="Search more integrations"
+          subtitle="Built-in apps are ready immediately. Search and enable additional apps for this agent here."
+          icon={Search}
+          ariaLabel="Search more integrations"
+          bodyPadding={false}
+        >
+          <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-6">
+            {body}
+          </div>
+        </AgentChatMobileSheet>
+      </>
     )
   }
 
-  return open ? (
-    <Modal
-      title="Search more integrations"
-      subtitle="Built-in apps are ready immediately. Search the wider integration catalog from here."
-      onClose={() => setOpen(false)}
-      widthClass="sm:max-w-3xl"
-      icon={Boxes}
-      iconBgClass="bg-indigo-100"
-      iconColorClass="text-indigo-600"
-      bodyClassName="max-h-[75vh]"
-    >
-      {body}
-    </Modal>
-  ) : null
+  return (
+    <>
+      {hiddenFieldsPortal}
+      {open ? (
+        <Modal
+          title="Search more integrations"
+          subtitle="Built-in apps are ready immediately. Search and enable additional apps for this agent here."
+          onClose={() => setOpen(false)}
+          widthClass="sm:max-w-3xl"
+          icon={Boxes}
+          iconBgClass="bg-indigo-100"
+          iconColorClass="text-indigo-600"
+          bodyClassName="max-h-[75vh]"
+        >
+          {body}
+        </Modal>
+      ) : null}
+    </>
+  )
 }

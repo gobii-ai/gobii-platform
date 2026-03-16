@@ -232,7 +232,9 @@ class HomePageTests(TestCase):
             {
                 "builtins": _mock_integrations.return_value["builtins"],
                 "initialSearchTerm": "",
+                "initialSelectedAppSlugs": [],
                 "searchUrl": reverse("pages:homepage_integrations_search"),
+                "selectedFieldsContainerId": "homepage-integrations-selected-fields",
             },
         )
         self.assertEqual(
@@ -532,6 +534,47 @@ class HomePageTests(TestCase):
             TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
         self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+
+    @tag("batch_pages")
+    def test_home_spawn_stores_selected_pipedream_apps_in_session(self):
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Custom charter",
+                "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertEqual(
+            session.get(page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "trello"],
+        )
+
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={"enabled": True, "builtins": []},
+    )
+    @tag("batch_pages")
+    def test_home_page_uses_session_selected_pipedream_apps_in_modal_props(self, _mock_integrations):
+        session = self.client.session
+        session[page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack", "trello"]
+        session.save()
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context.get("homepage_integrations_modal_props"),
+            {
+                "builtins": [],
+                "initialSearchTerm": "",
+                "initialSelectedAppSlugs": ["slack", "trello"],
+                "searchUrl": reverse("pages:homepage_integrations_search"),
+                "selectedFieldsContainerId": "homepage-integrations-selected-fields",
+            },
+        )
 
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
@@ -1080,8 +1123,28 @@ class AgentSpawnIntentApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("charter"), "Draft charter")
         self.assertEqual(payload.get("preferred_llm_tier"), "premium")
+        self.assertEqual(payload.get("selected_pipedream_app_slugs"), [])
         self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
         self.assertTrue(payload.get("requires_plan_selection"))
+
+    @tag("batch_pages")
+    def test_spawn_intent_includes_selected_pipedream_app_slugs(self):
+        user = get_user_model().objects.create_user(
+            email="spawn-intent-apps@test.com",
+            password="pw",
+            username="spawn_intent_apps_user",
+        )
+        self.client.force_login(user)
+
+        session = self.client.session
+        session["agent_charter"] = "Draft charter"
+        session[page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack", "trello"]
+        session.save()
+
+        response = self.client.get(reverse("console_agent_spawn_intent"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
 
     @tag("batch_pages")
     def test_spawn_intent_restores_onboarding_fields_from_oauth_cookie(self):

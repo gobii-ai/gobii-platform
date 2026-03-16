@@ -3,7 +3,6 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 import './index.css'
-import './styles/agentChatLegacy.css'
 
 import { HomepageIntegrationsModal, type HomepageIntegrationsModalProps } from './components/homepage/HomepageIntegrationsModal'
 

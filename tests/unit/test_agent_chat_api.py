@@ -31,11 +31,14 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    MCPServerConfig,
+    PipedreamAppSelection,
     build_web_agent_address,
     build_web_user_address,
 )
 from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 from api.agent.tools.web_chat_sender import execute_send_chat_message
+from api.services.pipedream_apps import get_owner_apps_state
 from api.services.web_sessions import start_web_session
 from console.agent_chat.kanban_events import persist_kanban_event
 from console.agent_chat.timeline import build_processing_snapshot
@@ -206,6 +209,36 @@ class AgentChatAPITests(TestCase):
         created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
         self.assertIsNotNone(created_agent.preferred_llm_tier)
         self.assertEqual(created_agent.preferred_llm_tier.key, "standard")
+
+    @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
+    @tag("batch_agent_chat")
+    def test_quick_create_enables_selected_pipedream_apps(self):
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["notion"],
+        )
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps(
+                {
+                    "message": "Create with integrations",
+                    "selected_pipedream_app_slugs": ["slack", "notion", "trello"],
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        selection = PipedreamAppSelection.objects.get(user=self.user)
+        self.assertEqual(selection.selected_app_slugs, ["notion", "slack"])
+
+        owner_state = get_owner_apps_state(
+            MCPServerConfig.Scope.USER,
+            self.user.get_full_name() or self.user.username,
+            owner_user=self.user,
+        )
+        self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
 
     @tag("batch_agent_chat")
     def test_timeline_endpoint_returns_expected_events(self):

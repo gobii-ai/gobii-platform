@@ -7,7 +7,6 @@ from agents.services import PretrainedWorkerTemplateService
 from api.models import MCPServerConfig
 from api.services.pipedream_apps import (
     PIPEDREAM_RUNTIME_NAME,
-    PipedreamCatalogError,
     PipedreamCatalogService,
     get_platform_pipedream_app_slugs,
 )
@@ -139,14 +138,10 @@ def _build_homepage_integrations_payload() -> dict[str, object]:
     if not app_slugs:
         return {"enabled": True, "builtins": []}
 
-    try:
-        builtins = [
-            app.to_dict()
-            for app in PipedreamCatalogService().get_apps(app_slugs)
-        ]
-    except PipedreamCatalogError:
-        logger.warning("Failed to build homepage Pipedream integrations payload", exc_info=True)
-        builtins = []
+    builtins = [
+        app.to_dict()
+        for app in PipedreamCatalogService().get_apps(app_slugs)
+    ]
 
     return {
         "enabled": True,
