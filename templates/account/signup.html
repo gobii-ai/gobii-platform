@@ -14,7 +14,7 @@
           })
         );
 
-      fp.then(fp => fp.get()).then(result => console.log(result.visitorId));
+      fp.then(fp => fp.get()).then(result => console.log(result.visitorId, result.requestId));
     </script>
   {% endif %}
 {% endblock %}
