@@ -125,13 +125,9 @@ export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
   const fallbackResult =
     status
       ? null
-      : typeof entry.result === 'string'
-        ? entry.result
-        : resultObject
-          ? stringify(resultObject)
-          : entry.result
-            ? stringify(entry.result)
-            : null
+      : entry.result
+        ? stringify(entry.result)
+        : null
 
   return (
     <div className="space-y-3 text-sm text-slate-600">

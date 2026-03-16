@@ -203,7 +203,8 @@ function buildToolEntryDisplay(
 }
 
 function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
-  const descriptor = descriptorFor(entry.toolName)
+  const sqliteToolName = entry.toolName ?? entry.meta?.label ?? 'sqlite_batch'
+  const descriptor = descriptorFor(sqliteToolName)
   const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
   const statements = extractSqlStatementsFromParameters(parameters)
   if (!statements.length) {
@@ -227,11 +228,13 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
   }
 
   const entries: ToolEntryDisplay[] = []
+  let handledAgentConfigIndexes = new Set<number>()
   if (configStatementIndexes.length) {
     const configStatements = configStatementIndexes.map((index) => statements[index]).filter(Boolean)
     const configEntry = buildAgentConfigEntry(clusterCursor, entry, configStatements, configStatementIndexes)
     if (configEntry) {
       entries.push(configEntry)
+      handledAgentConfigIndexes = new Set(configStatementIndexes)
     }
   }
 
@@ -239,7 +242,7 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
   const leftoverIndexes: number[] = []
 
   for (const classification of classifications) {
-    if (kanbanStatementIndexes.has(classification.index) || classification.reservedTableKind === 'agentConfig') {
+    if (kanbanStatementIndexes.has(classification.index) || handledAgentConfigIndexes.has(classification.index)) {
       continue
     }
 
