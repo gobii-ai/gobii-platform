@@ -6,6 +6,7 @@ from api.models import PersistentAgent
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.tools.attachment_guidance import build_attachment_result_message
 from api.agent.tools.agent_variables import set_agent_variable
 from api.services.system_settings import get_max_file_size
 from .sqlite_query_runner import run_sqlite_select
@@ -125,6 +126,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     var_ref = f"$[{file_path}]"
     return {
         "status": "ok",
+        "message": build_attachment_result_message(var_ref),
         "file": var_ref,
         "inline": f"[Download]({var_ref})",
         "inline_html": f"<a href='{var_ref}'>Download</a>",

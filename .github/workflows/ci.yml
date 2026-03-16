@@ -114,6 +114,8 @@ jobs:
             tag: batch_email_verification
           - batch: email_sender_db
             tag: batch_email_sender_db
+          - batch: attachment_guidance
+            tag: batch_attachment_guidance
           - batch: outbound_delivery
             tag: batch_outbound_delivery
           - batch: outbound_dedupe

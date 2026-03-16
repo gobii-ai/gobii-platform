@@ -29,6 +29,7 @@ from ..files.attachment_helpers import (
 )
 from ..files.filespace_service import broadcast_message_attachment_update
 from api.services.email_verification import require_verified_email, EmailVerificationError
+from .attachment_guidance import SEND_EMAIL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or $[/path] variables from the default filespace. Pass attachments here; do not paste file paths into the email body unless you want them shown as text.",
+                        "description": SEND_EMAIL_ATTACHMENTS_DESCRIPTION,
                     },
                     "will_continue_work": {
                         "type": "boolean",
