@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Boxes, Check, Loader2, Search, X } from 'lucide-react'
+import { Check, Loader2, Search, Sparkles, X } from 'lucide-react'
 
 import { mapPipedreamApp, searchPipedreamApps, type PipedreamAppSummary } from '../../api/mcp'
 import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
@@ -91,7 +91,6 @@ export function HomepageIntegrationsModal({
   })
 
   const searchResults = searchQuery.data ?? []
-  const resultsCountLabel = `${searchResults.length} result${searchResults.length === 1 ? '' : 's'}`
 
   useEffect(() => {
     const nextEntries = [...builtinApps, ...searchResults]
@@ -147,38 +146,53 @@ export function HomepageIntegrationsModal({
       )
     : null
 
+  const actions = (
+    <Fragment>
+      <button
+        type="button"
+        className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm"
+        onClick={() => setOpen(false)}
+      >
+        Done
+      </button>
+    </Fragment>
+  )
+
   const body = (
-    <div className="space-y-6">
-      <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-5 text-slate-900">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-5 p-1">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-indigo-500">Built In</p>
-            <p className="mt-2 text-sm leading-relaxed text-slate-600">
-              These apps come from the active platform integration configuration.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {builtinApps.length > 0 ? (
-              builtinApps.map((app) => (
-                <div key={app.slug} className="inline-flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-                  <PipedreamAppIcon app={app} />
-                  <span className="text-sm font-medium text-slate-900">{app.name}</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-slate-500">No built-in integrations are configured right now.</p>
-            )}
+            <h3 className="text-sm font-semibold text-slate-900">Built-in apps</h3>
+            <p className="text-sm text-slate-600">These apps are included automatically for this agent.</p>
           </div>
         </div>
-      </div>
+        {builtinApps.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {builtinApps.map((app) => (
+              <span
+                key={app.slug}
+                className="inline-flex items-center gap-2 rounded-full border border-blue-200 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+              >
+                <PipedreamAppIcon app={app} size="sm" />
+                <span>{app.name}</span>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+            No built-in apps configured.
+          </div>
+        )}
+      </section>
 
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900">Apps to enable</h3>
+            <h3 className="text-sm font-semibold text-slate-900">Added apps</h3>
             <p className="text-sm text-slate-600">Selected apps will be enabled when you spawn this agent.</p>
           </div>
-          <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">
+          <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
             {selectedSlugs.length} selected
           </span>
         </div>
@@ -188,103 +202,101 @@ export function HomepageIntegrationsModal({
               <button
                 type="button"
                 key={app.slug}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 transition hover:border-indigo-300 hover:text-indigo-700"
+                className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 transition hover:border-blue-300 hover:text-blue-700"
                 onClick={() => toggleSelection(app.slug)}
               >
-                <PipedreamAppIcon app={app} size="sm" />
+                <PipedreamAppIcon app={app} />
                 <span>{app.name}</span>
                 <X className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
               </button>
             ))}
           </div>
         ) : (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-            Search below and pick any additional apps you want enabled for this agent.
+          <div className="rounded-lg border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+            No additional apps enabled yet.
           </div>
         )}
       </section>
 
       <section className="space-y-3">
-        <label htmlFor="homepage-integrations-modal-search" className="block text-sm font-medium text-slate-600">
-          Search catalog
-        </label>
-        <label className="relative block text-sm text-slate-500">
-          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
-            {searchQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-          </span>
-          <input
-            id="homepage-integrations-modal-search"
-            type="search"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Slack, Notion, Salesforce..."
-            className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-base text-slate-900 shadow-sm focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-          />
-        </label>
-        {searchTerm.trim() ? (
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-slate-500">
-              {searchQuery.isError ? 'Search unavailable right now.' : resultsCountLabel}
-            </p>
+        <div className="flex items-center justify-between gap-3">
+          <label htmlFor="homepage-integrations-modal-search" className="text-sm font-semibold text-slate-900">
+            Search apps
+          </label>
+          {searchTerm.trim() ? (
             <button
               type="button"
-              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+              className="text-sm font-medium text-slate-500 transition hover:text-slate-700"
               onClick={clearSearch}
             >
               Clear
             </button>
-          </div>
-        ) : null}
-      </section>
+          ) : null}
+        </div>
+        <label className="relative block text-sm text-slate-500">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
+            {searchQuery.isFetching ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Search className="h-4 w-4" aria-hidden="true" />
+            )}
+          </span>
+          <input
+            id="homepage-integrations-modal-search"
+            type="search"
+            className="w-full rounded-lg border border-slate-300 py-3 pl-10 pr-3 text-sm text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
+            placeholder="Search apps"
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+          />
+        </label>
 
-      {searchTerm.trim().length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-          Start typing to search more integrations.
-        </div>
-      ) : searchQuery.isError ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
-          {resolvePipedreamAppsErrorMessage(searchQuery.error, 'Unable to search integrations right now.')}
-        </div>
-      ) : searchResults.length > 0 ? (
-        <div className="space-y-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-indigo-500">Results</p>
-            <h4 className="mt-2 text-xl font-semibold text-slate-900">Matches for &quot;{searchTerm.trim()}&quot;</h4>
+        {searchTerm.trim().length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+            Start typing to search available apps.
           </div>
-          <ul className="space-y-3">
+        ) : searchQuery.isError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {resolvePipedreamAppsErrorMessage(searchQuery.error, 'Unable to search apps.')}
+          </div>
+        ) : searchResults.length === 0 && !searchQuery.isFetching ? (
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+            No apps matched your search.
+          </div>
+        ) : (
+          <ul className={`overflow-y-auto rounded-lg border border-slate-200 ${isMobile ? 'bg-white' : 'max-h-96'}`}>
             {searchResults.map((app) => {
               const isSelected = selectedSlugs.includes(app.slug)
               const isBuiltin = builtinSlugSet.has(app.slug)
               return (
-                <li key={app.slug}>
+                <li key={app.slug} className="border-b border-slate-200 last:border-b-0">
                   <button
                     type="button"
-                    className="flex w-full items-start justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4 text-left transition hover:border-indigo-200 hover:bg-indigo-50/40"
+                    className="flex w-full items-start justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-50"
                     onClick={() => toggleSelection(app.slug)}
                     disabled={isBuiltin}
                   >
-                    <div className="flex min-w-0 items-start gap-4">
+                    <div className="flex min-w-0 items-start gap-3">
                       <PipedreamAppIcon app={app} />
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-base font-semibold text-slate-900">{app.name}</p>
+                          <p className="text-sm font-semibold text-slate-900">{app.name}</p>
                           <span className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                             {app.slug}
                           </span>
+                          {isBuiltin ? (
+                            <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                              Included
+                            </span>
+                          ) : null}
                         </div>
-                        {app.description ? (
-                          <p className="mt-1 text-sm leading-relaxed text-slate-600">{app.description}</p>
-                        ) : (
-                          <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                            No short description is available for this integration yet.
-                          </p>
-                        )}
+                        {app.description ? <p className="mt-1 text-sm text-slate-600">{app.description}</p> : null}
                       </div>
                     </div>
                     <span
                       className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-semibold ${
                         isSelected || isBuiltin
-                          ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                          ? 'border-blue-200 bg-blue-50 text-blue-700'
                           : 'border-slate-200 text-slate-500'
                       }`}
                     >
@@ -294,7 +306,7 @@ export function HomepageIntegrationsModal({
                           {isBuiltin ? 'Included' : 'Selected'}
                         </>
                       ) : (
-                        'Enable'
+                        'Select'
                       )}
                     </span>
                   </button>
@@ -302,12 +314,8 @@ export function HomepageIntegrationsModal({
               )
             })}
           </ul>
-        </div>
-      ) : !searchQuery.isFetching ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-600">
-          No matching integrations found outside the built-in list.
-        </div>
-      ) : null}
+        )}
+      </section>
     </div>
   )
 
@@ -318,14 +326,19 @@ export function HomepageIntegrationsModal({
         <AgentChatMobileSheet
           open={open}
           onClose={() => setOpen(false)}
-          title="Search more integrations"
-          subtitle="Built-in apps are ready immediately. Search and enable additional apps for this agent here."
-          icon={Search}
-          ariaLabel="Search more integrations"
+          title="Manage integrations"
+          subtitle="Search available apps and enable additional ones."
+          icon={Sparkles}
+          ariaLabel="Manage integrations"
           bodyPadding={false}
         >
           <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-6">
-            {body}
+            <div className="pt-4">
+              {body}
+            </div>
+            <div className="flex flex-col gap-3 pb-2 pt-5">
+              {actions}
+            </div>
           </div>
         </AgentChatMobileSheet>
       </>
@@ -337,14 +350,14 @@ export function HomepageIntegrationsModal({
       {hiddenFieldsPortal}
       {open ? (
         <Modal
-          title="Search more integrations"
-          subtitle="Built-in apps are ready immediately. Search and enable additional apps for this agent here."
+          title="Manage integrations"
+          subtitle="Search available apps and enable additional ones."
           onClose={() => setOpen(false)}
-          widthClass="sm:max-w-3xl"
-          icon={Boxes}
-          iconBgClass="bg-indigo-100"
-          iconColorClass="text-indigo-600"
-          bodyClassName="max-h-[75vh]"
+          footer={actions}
+          widthClass="sm:max-w-4xl"
+          icon={Sparkles}
+          iconBgClass="bg-blue-100"
+          iconColorClass="text-blue-700"
         >
           {body}
         </Modal>

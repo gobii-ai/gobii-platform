@@ -576,6 +576,50 @@ class HomePageTests(TestCase):
             },
         )
 
+    @patch(
+        "pages.views.get_owner_selected_app_slugs",
+        return_value=["notion", "slack"],
+    )
+    @patch(
+        "pages.views.get_homepage_integrations_payload",
+        return_value={"enabled": True, "builtins": []},
+    )
+    @tag("batch_pages")
+    def test_home_page_merges_context_enabled_and_session_selected_pipedream_apps(
+        self,
+        _mock_integrations,
+        mock_get_owner_selected_app_slugs,
+    ):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="homepage-apps@example.com",
+            email="homepage-apps@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+        session = self.client.session
+        session[page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["trello", "slack"]
+        session.save()
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.context.get("homepage_integrations_modal_props"),
+            {
+                "builtins": [],
+                "initialSearchTerm": "",
+                "initialSelectedAppSlugs": ["notion", "slack", "trello"],
+                "searchUrl": reverse("pages:homepage_integrations_search"),
+                "selectedFieldsContainerId": "homepage-integrations-selected-fields",
+            },
+        )
+        mock_get_owner_selected_app_slugs.assert_called_once_with(
+            page_views.MCPServerConfig.Scope.USER,
+            owner_user=user,
+            owner_org=None,
+        )
+
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
     @tag("batch_pages")

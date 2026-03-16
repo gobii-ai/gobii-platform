@@ -17,7 +17,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
-from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
+from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
@@ -58,7 +58,11 @@ from util.urls import (
     normalize_return_to,
 )
 from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
-from api.services.pipedream_apps import PipedreamCatalogError, PipedreamCatalogService
+from api.services.pipedream_apps import (
+    PipedreamCatalogError,
+    PipedreamCatalogService,
+    get_owner_selected_app_slugs,
+)
 from api.pipedream_app_utils import normalize_app_slugs
 from .utils_markdown import (
     load_page,
@@ -549,6 +553,24 @@ class HomePage(TemplateView):
         ]
         integrations_enabled = bool(integrations_payload.get("enabled"))
 
+        initial_selected_pipedream_app_slugs = normalize_app_slugs(
+            self.request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY) or []
+        )
+        if integrations_enabled and self.request.user.is_authenticated:
+            owner_scope = (
+                MCPServerConfig.Scope.ORGANIZATION
+                if organization is not None
+                else MCPServerConfig.Scope.USER
+            )
+            enabled_pipedream_app_slugs = get_owner_selected_app_slugs(
+                owner_scope,
+                owner_user=None if organization is not None else self.request.user,
+                owner_org=organization,
+            )
+            initial_selected_pipedream_app_slugs = normalize_app_slugs(
+                [*enabled_pipedream_app_slugs, *initial_selected_pipedream_app_slugs]
+            )
+
         context.update(
             {
                 "homepage_integrations_enabled": integrations_enabled,
@@ -556,10 +578,7 @@ class HomePage(TemplateView):
                 "homepage_integrations_modal_props": {
                     "builtins": builtin_integrations,
                     "initialSearchTerm": (self.request.GET.get("integration_search") or "").strip(),
-                    "initialSelectedAppSlugs": normalize_app_slugs(
-                        self.request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY)
-                        or []
-                    ),
+                    "initialSelectedAppSlugs": initial_selected_pipedream_app_slugs,
                     "searchUrl": reverse("pages:homepage_integrations_search"),
                     "selectedFieldsContainerId": "homepage-integrations-selected-fields",
                 },

@@ -63,6 +63,8 @@ const ROSTER_REFRESH_INTERVAL_MS = 20_000
 const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
 const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
+const PIPEDREAM_APPS_SETTINGS_URL = '/console/api/mcp/pipedream/apps/'
+const PIPEDREAM_APP_SEARCH_URL = '/console/api/mcp/pipedream/apps/search/'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -3132,6 +3134,8 @@ export function AgentChatPage({
         composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
+        pipedreamAppsSettingsUrl={PIPEDREAM_APPS_SETTINGS_URL}
+        pipedreamAppSearchUrl={PIPEDREAM_APP_SEARCH_URL}
         pendingHumanInputRequests={pendingHumanInputRequests}
         events={timelineEvents}
         displayEvents={displayEvents}
