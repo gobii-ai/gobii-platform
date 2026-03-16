@@ -20,7 +20,7 @@ from api.models import (
     PersistentAgentMCPServer,
 )
 from console.forms import MCPServerConfigForm
-from api.services.pipedream_apps import PipedreamCatalogError
+from api.services.pipedream_apps import PipedreamCatalogError, enable_pipedream_apps_for_agent
 from util.analytics import AnalyticsEvent
 
 
@@ -601,6 +601,114 @@ class PipedreamAppsAPITests(TestCase):
         response = self.client.get(self.search_url, {"q": "trello"})
 
         self.assertEqual(response.status_code, 502)
+
+
+@tag("batch_console_mcp_servers")
+class PipedreamAppEnablementServiceTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="service-owner",
+            email="service-owner@example.com",
+            password="test-pass-123",
+        )
+        self.platform_server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            display_name="Pipedream",
+            url="https://remote.mcp.pipedream.net",
+            prefetch_apps=["google_sheets", "google_docs"],
+        )
+
+    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
+    def test_enable_pipedream_apps_for_user_agent_updates_selection(self, mock_get_mcp_manager):
+        agent = _create_console_test_agent(user=self.user, name="User Agent")
+
+        result = enable_pipedream_apps_for_agent(
+            agent,
+            ["slack"],
+            available_app_slugs=["slack", "hubspot"],
+        )
+
+        self.assertEqual(result["enabled"], ["slack"])
+        self.assertEqual(result["already_enabled"], [])
+        self.assertEqual(result["invalid"], [])
+        self.assertEqual(result["effective_apps"], ["google_sheets", "google_docs", "slack"])
+        selection = PipedreamAppSelection.objects.get(user=self.user)
+        self.assertEqual(selection.selected_app_slugs, ["slack"])
+        manager = mock_get_mcp_manager.return_value
+        manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(self.user.id))
+        manager.prewarm_pipedream_owner_cache.assert_called_once_with(
+            "user",
+            str(self.user.id),
+            app_slugs=["slack"],
+        )
+
+    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
+    def test_enable_pipedream_apps_for_org_agent_updates_org_selection(self, mock_get_mcp_manager):
+        org = Organization.objects.create(name="Acme Org", slug="acme-org-service", created_by=self.user)
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+        agent = _create_console_test_agent(user=self.user, organization=org, name="Org Agent")
+
+        result = enable_pipedream_apps_for_agent(
+            agent,
+            ["hubspot"],
+            available_app_slugs=["hubspot", "slack"],
+        )
+
+        self.assertEqual(result["enabled"], ["hubspot"])
+        self.assertEqual(result["effective_apps"], ["google_sheets", "google_docs", "hubspot"])
+        selection = PipedreamAppSelection.objects.get(organization=org)
+        self.assertEqual(selection.selected_app_slugs, ["hubspot"])
+        manager = mock_get_mcp_manager.return_value
+        manager.invalidate_pipedream_owner_cache.assert_called_once_with("organization", str(org.id))
+        manager.prewarm_pipedream_owner_cache.assert_called_once_with(
+            "organization",
+            str(org.id),
+            app_slugs=["hubspot"],
+        )
+
+    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
+    def test_enable_pipedream_apps_marks_repeated_and_platform_apps_as_already_enabled(self, mock_get_mcp_manager):
+        agent = _create_console_test_agent(user=self.user, name="Repeat Agent")
+        PipedreamAppSelection.objects.create(user=self.user, selected_app_slugs=["slack"])
+
+        result = enable_pipedream_apps_for_agent(
+            agent,
+            ["slack", "google_docs"],
+            available_app_slugs=["slack", "google_docs"],
+        )
+
+        self.assertEqual(result["enabled"], [])
+        self.assertEqual(result["already_enabled"], ["slack", "google_docs"])
+        self.assertEqual(result["effective_apps"], ["google_sheets", "google_docs", "slack"])
+        selection = PipedreamAppSelection.objects.get(user=self.user)
+        self.assertEqual(selection.selected_app_slugs, ["slack"])
+        manager = mock_get_mcp_manager.return_value
+        manager.invalidate_pipedream_owner_cache.assert_not_called()
+        manager.prewarm_pipedream_owner_cache.assert_not_called()
+
+    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
+    def test_enable_pipedream_apps_reports_invalid_without_mutation(self, mock_get_mcp_manager):
+        agent = _create_console_test_agent(user=self.user, name="Invalid Agent")
+
+        result = enable_pipedream_apps_for_agent(
+            agent,
+            ["unknown_app"],
+            available_app_slugs=["slack"],
+        )
+
+        self.assertEqual(result["enabled"], [])
+        self.assertEqual(result["already_enabled"], [])
+        self.assertEqual(result["invalid"], ["unknown_app"])
+        self.assertEqual(result["effective_apps"], ["google_sheets", "google_docs"])
+        self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
+        manager = mock_get_mcp_manager.return_value
+        manager.invalidate_pipedream_owner_cache.assert_not_called()
+        manager.prewarm_pipedream_owner_cache.assert_not_called()
 
 @tag("batch_console_mcp_servers")
 class MCPServerAssignmentAPITests(TestCase):

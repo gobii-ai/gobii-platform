@@ -788,6 +788,75 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.total_cost, Decimal("0.000045"))
         self.assertEqual(completion.total_tokens, 18)
 
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    def test_tool_search_completion_logged_for_enable_apps_path(self, mock_failover, mock_run_completion):
+        mock_failover.return_value = [("provider-key", "search-model", {})]
+
+        message = MagicMock()
+        message.content = "Enable Slack first."
+        message.tool_calls = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_apps",
+                    "arguments": json.dumps({"app_slugs": ["slack"]}),
+                },
+            }
+        ]
+        choice = MagicMock()
+        choice.message = message
+        response = make_completion_response(
+            content="Enable Slack first.",
+            prompt_tokens=10,
+            completion_tokens=5,
+            cached_tokens=2,
+            tool_names=[],
+            model="search-model",
+        )
+        response.choices = [choice]
+        mock_run_completion.return_value = response
+
+        def _enable(agent, names):
+            return {"status": "success", "enabled": names, "already_enabled": [], "evicted": [], "invalid": []}
+
+        def _enable_apps(agent, app_slugs):
+            return {
+                "status": "success",
+                "enabled": app_slugs,
+                "already_enabled": [],
+                "invalid": [],
+                "effective_apps": ["google_sheets", *app_slugs],
+            }
+
+        catalog = [{"full_name": "http_request", "description": "HTTP calls", "parameters": {}}]
+        app_catalog = [SimpleNamespace(slug="slack", name="Slack")]
+        with patch("api.agent.core.token_usage.litellm.get_model_info") as mock_get_model_info:
+            mock_get_model_info.side_effect = self._pricing_for_provider_hint
+            result = _search_with_llm(
+                agent=self.agent,
+                query="Use Slack",
+                provider_name="test",
+                catalog=catalog,
+                enable_callback=_enable,
+                empty_message="",
+                enable_apps_callback=_enable_apps,
+                pipedream_app_catalog=app_catalog,
+                enabled_app_slugs=[],
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["enabled_apps"], ["slack"])
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TOOL_SEARCH,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_model, "search-model")
+        self.assertEqual(completion.llm_provider, "provider-key")
+        self.assertEqual(completion.input_cost_total, Decimal("0.000018"))
+        self.assertEqual(completion.total_cost, Decimal("0.000038"))
+        self.assertEqual(completion.total_tokens, 15)
+
 
 if __name__ == '__main__':
     import django
