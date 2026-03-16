@@ -7,6 +7,11 @@ from django.shortcuts import redirect
 from drf_spectacular.views import (
     SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 )
+from config.account_views import (
+    PasswordResetBridgeConfirmView,
+    PasswordResetBridgeContinueView,
+    PasswordResetBridgeStartView,
+)
 from console.api_views import (
     LLMEndpointTestAPIView,
     AgentFsNodeDownloadAPIView,
@@ -531,6 +536,21 @@ urlpatterns = [
 
     # admin & auth
     path("admin/", admin.site.urls),
+    path(
+        "accounts/password/reset/link/confirm/",
+        PasswordResetBridgeConfirmView.as_view(),
+        name="account_reset_password_bridge_confirm",
+    ),
+    path(
+        "accounts/password/reset/link/continue/",
+        PasswordResetBridgeContinueView.as_view(),
+        name="account_reset_password_bridge_continue",
+    ),
+    path(
+        "accounts/password/reset/link/<str:key>/",
+        PasswordResetBridgeStartView.as_view(),
+        name="account_reset_password_bridge_start",
+    ),
     path("accounts/", include("allauth.urls")),
 
     # API docs
