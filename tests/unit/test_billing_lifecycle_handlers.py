@@ -43,8 +43,10 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         self.assertEqual(kwargs["user_id"], 42)
         self.assertEqual(kwargs["properties"]["stripe.subscription_id"], "sub_123")
 
+    @tag("batch_owner_billing")
+    @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")
     @patch("billing.lifecycle_handlers.Analytics.track_event")
-    def test_trial_ended_non_renewal_tracks_event(self, mock_track_event):
+    def test_trial_ended_non_renewal_tracks_event(self, mock_track_event, mock_pause_owner):
         emit_billing_lifecycle_event(
             TRIAL_ENDED_NON_RENEWAL,
             payload=BillingLifecyclePayload(
@@ -59,6 +61,9 @@ class BillingLifecycleHandlerTests(SimpleTestCase):
         kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_TRIAL_ENDED)
         self.assertEqual(kwargs["user_id"], 24)
+        mock_pause_owner.assert_called_once()
+        pause_args = mock_pause_owner.call_args.args
+        self.assertEqual(pause_args[:3], ("user", "24", "trial_ended_non_renewal"))
 
     @patch("billing.lifecycle_handlers.switch_is_active", return_value=True)
     @patch("billing.lifecycle_handlers.pause_owner_execution_by_ref")

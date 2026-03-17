@@ -40,6 +40,14 @@ from ...models import (
     build_web_user_address,
 )
 from api.services.system_settings import get_max_file_size
+from api.services.billing_pause_notifications import (
+    is_billing_execution_pause_reason,
+    send_billing_pause_auto_reply,
+)
+from api.services.owner_execution_pause import (
+    get_owner_execution_pause_state,
+    resolve_agent_owner,
+)
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
@@ -823,12 +831,35 @@ def ingest_inbound_message(
                 agent_obj = PersistentAgent.objects.alive().filter(id=owner_id).select_related("user").first()
 
             # Before triggering agent processing, check if the agent owner's
-            # account is out of credits. If so, send a reply email to the sender
-            # (only for email channel) and skip processing.
+            # account is billing-paused. If so, send a one-off auto-reply to the
+            # current sender and skip processing for this inbound attempt.
             should_skip_processing = False
+            pause_state = {"paused": False, "reason": "", "paused_at": None}
 
             try:
-                if agent_obj and agent_obj.user_id and channel_val == CommsChannel.EMAIL:
+                if agent_obj and channel_val in {CommsChannel.EMAIL, CommsChannel.SMS}:
+                    owner = resolve_agent_owner(agent_obj)
+                    pause_state = get_owner_execution_pause_state(owner)
+                    pause_reason = pause_state["reason"] or ""
+                    if pause_state["paused"] and is_billing_execution_pause_reason(pause_reason):
+                        should_skip_processing = True
+                        if parsed.sender and agent_obj.is_sender_whitelisted(channel_val, parsed.sender):
+                            try:
+                                send_billing_pause_auto_reply(
+                                    agent_obj,
+                                    from_ep,
+                                    reason=pause_reason,
+                                )
+                            except Exception:
+                                logging.exception(
+                                    "Failed sending billing pause auto-reply for agent %s",
+                                    agent_obj.id,
+                                )
+            except Exception:
+                logging.exception("Error during billing-pause pre-processing check")
+
+            try:
+                if not should_skip_processing and agent_obj and agent_obj.user_id and channel_val == CommsChannel.EMAIL:
                     from tasks.services import TaskCreditService
 
                     if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):

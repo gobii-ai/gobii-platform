@@ -3866,6 +3866,7 @@ class DecodoLowInventoryAlert(models.Model):
 class ExecutionPauseReasonChoices(models.TextChoices):
     BILLING_DELINQUENCY = "billing_delinquency", "Billing delinquency"
     TRIAL_CONVERSION_FAILED = "trial_conversion_failed", "Trial conversion failed"
+    TRIAL_ENDED_NON_RENEWAL = "trial_ended_non_renewal", "Trial ended without renewal"
     ADMIN_MANUAL_PAUSE = "admin_manual_pause", "Admin manual pause"
 
 

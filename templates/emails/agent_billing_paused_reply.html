@@ -1,0 +1,18 @@
+{% extends "emails/gobii_base.html" %}
+
+{% block content %}
+  <p style="margin: 0 0 16px; font-size: 16px; line-height: 1.6; color: #0f172a;">
+    {{ intro_text }}
+  </p>
+  <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #334155;">
+    {{ detail_text }}
+  </p>
+  {% if billing_url %}
+    <p style="margin: 0 0 20px; font-size: 15px; line-height: 1.6; color: #0f172a;">
+      Billing: <a href="{{ billing_url }}" style="color: #1d4ed8; text-decoration: none;">{{ billing_url }}</a>
+    </p>
+  {% endif %}
+  <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #0f172a;">
+    Best,<br>{{ agent.name }}
+  </p>
+{% endblock %}
