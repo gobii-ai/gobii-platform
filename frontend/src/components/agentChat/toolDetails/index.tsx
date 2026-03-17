@@ -1,7 +1,7 @@
 import type { ToolDetailComponent } from '../tooling/types'
 
 import { GenericToolDetail, McpToolDetail, UpdateCharterDetail } from './details/common'
-import { SqliteBatchDetail, EnableDatabaseDetail } from './details/sqlite'
+import { SqliteBatchDetail, EnableDatabaseDetail, SqliteInternalTableDetail } from './details/sqlite'
 import { SearchToolDetail } from './details/search'
 import { ApiRequestDetail } from './details/api'
 import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/files'
@@ -32,6 +32,7 @@ export {
   McpToolDetail,
   SqliteBatchDetail,
   EnableDatabaseDetail,
+  SqliteInternalTableDetail,
   SearchToolDetail,
   ApiRequestDetail,
   FileReadDetail,
@@ -69,6 +70,7 @@ export const TOOL_DETAIL_COMPONENTS = {
   default: GenericToolDetail,
   updateCharter: UpdateCharterDetail,
   sqliteBatch: SqliteBatchDetail,
+  sqliteInternalTable: SqliteInternalTableDetail,
   enableDatabase: EnableDatabaseDetail,
   search: SearchToolDetail,
   apiRequest: ApiRequestDetail,

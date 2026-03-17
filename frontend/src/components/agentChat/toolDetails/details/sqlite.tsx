@@ -114,3 +114,38 @@ export function EnableDatabaseDetail({ entry }: ToolDetailProps) {
     </div>
   )
 }
+
+export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
+  const sqliteInfo = entry.sqliteInfo
+  const resultObject = parseResultObject(entry.result)
+  const status =
+    entry.summary ??
+    (typeof resultObject?.message === 'string' && resultObject.message.trim().length ? resultObject.message : null) ??
+    (typeof resultObject?.status === 'string' && resultObject.status.trim().length ? resultObject.status : null)
+  const fallbackResult =
+    status
+      ? null
+      : entry.result
+        ? stringify(entry.result)
+        : null
+
+  return (
+    <div className="space-y-3 text-sm text-slate-600">
+      <KeyValueList
+        items={[
+          status ? { label: 'Status', value: status } : null,
+          sqliteInfo ? { label: 'Table', value: sqliteInfo.tableName } : null,
+          sqliteInfo ? { label: 'Operation', value: sqliteInfo.operationLabel } : null,
+          entry.label ? { label: 'Action', value: entry.label } : null,
+        ]}
+      />
+      {fallbackResult ? (
+        <Section title="Result">
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+            {typeof fallbackResult === 'string' ? fallbackResult : stringify(fallbackResult)}
+          </pre>
+        </Section>
+      ) : null}
+    </div>
+  )
+}

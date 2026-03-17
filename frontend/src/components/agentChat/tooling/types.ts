@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
+import type { SqliteInternalTableKind, SqliteStatementOperation } from '../../tooling/agentConfigSql'
 
 export type ToolDetailComponent = (props: ToolDetailProps) => ReactElement
 
@@ -30,6 +31,14 @@ export type ToolEntryDisplay = {
     serverLabel: string
     toolId: string
     toolLabel: string
+  }
+  sqliteInfo?: {
+    kind: SqliteInternalTableKind
+    tableName: string
+    operation: SqliteStatementOperation
+    operationLabel: string
+    purpose: string
+    statementIndex: number
   }
   separateFromPreview?: boolean
 }
@@ -62,6 +71,7 @@ export type ToolDescriptorTransform = {
   sqlStatements?: string[]
   summary?: string | null
   detailComponent?: ToolDetailComponent
+  sqliteInfo?: ToolEntryDisplay['sqliteInfo']
   /** If true, this tool entry should be hidden from the timeline */
   skip?: boolean
   /** If true, this entry should render outside the live preview stream */

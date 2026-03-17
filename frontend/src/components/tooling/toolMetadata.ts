@@ -36,9 +36,8 @@ import type { ToolCallEntry } from '../agentChat/types'
 import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooling/types'
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
 import type { DetailKind } from '../agentChat/toolDetails'
-import { AgentConfigUpdateDetail } from '../agentChat/toolDetails'
-import { expandSqlStatements, parseAgentConfigUpdates } from './agentConfigSql'
 import { extractBrightDataArray, extractBrightDataResultCount, extractBrightDataSearchQuery } from './brightdata'
+import { extractSqlStatementsFromParameters } from './sqliteDisplay'
 
 const COMMUNICATION_TOOL_NAMES = [
   'send_email',
@@ -199,117 +198,8 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-600',
     detailKind: 'sqliteBatch',
-    derive(entry, parameters) {
-      const sqlParam = parameters?.sql
-      const queryParam = parameters?.query
-      const queriesParam = parameters?.queries
-      let rawQueries: unknown[] = []
-      if (sqlParam !== undefined && sqlParam !== null) {
-        rawQueries = Array.isArray(sqlParam) ? sqlParam : [sqlParam]
-      } else if (queryParam !== undefined && queryParam !== null) {
-        rawQueries = Array.isArray(queryParam) ? queryParam : [queryParam]
-      } else if (queriesParam !== undefined && queriesParam !== null) {
-        rawQueries = Array.isArray(queriesParam) ? queriesParam : [queriesParam]
-      } else if (Array.isArray(parameters?.operations)) {
-        // Fallback for backward compatibility with older tool calls
-        rawQueries = parameters.operations
-      }
-
-      const statements = expandSqlStatements(rawQueries.map(String))
-      const agentConfigUpdate = parseAgentConfigUpdates(statements)
-
-      // Detect kanban-only SQL batches and transform them into a nice display
-      // instead of showing raw SQL (the KanbanEventCard handles the detailed view)
-      const isKanbanOnlyBatch = !agentConfigUpdate && statements.length > 0 && statements.every((stmt) => {
-        const normalized = stmt.trim().toUpperCase()
-        if (normalized.includes('__AGENT_CONFIG')) {
-          return false
-        }
-        // Match statements that operate on __kanban_cards table
-        return (
-          normalized.includes('__KANBAN_CARDS') ||
-          normalized.includes('__KANBAN_') ||
-          // Also match common kanban operations by pattern
-          /^\s*(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+['"`]?__kanban/i.test(stmt)
-        )
-      })
-
-      if (isKanbanOnlyBatch) {
-        return { skip: true }
-      }
-
-      if (agentConfigUpdate) {
-        const {
-          updatesCharter,
-          updatesSchedule,
-          charterValue,
-          scheduleValue,
-          scheduleCleared,
-        } = agentConfigUpdate
-        const scheduleKnown = scheduleCleared || scheduleValue !== null
-        const normalizedSchedule = scheduleCleared ? null : scheduleValue
-        const scheduleSummary = scheduleKnown ? summarizeSchedule(normalizedSchedule) : null
-        const scheduleCaption = scheduleCleared
-          ? 'Disabled'
-          : scheduleSummary ?? 'Schedule updated'
-        const scheduleSummaryText = scheduleCleared
-          ? 'Schedule disabled.'
-          : scheduleSummary
-            ? `Schedule set to ${scheduleSummary}.`
-            : 'Schedule updated.'
-        const baseTransform = {
-          detailComponent: AgentConfigUpdateDetail,
-          charterText: charterValue ?? undefined,
-          sqlStatements: statements,
-          separateFromPreview: true,
-        }
-
-        if (updatesCharter && updatesSchedule) {
-          const combinedScheduleCaption = scheduleCleared
-            ? 'Schedule disabled'
-            : scheduleSummary ?? 'Schedule updated'
-          const combinedSummary = scheduleCleared
-            ? 'Assignment updated. Schedule disabled.'
-            : scheduleSummary
-              ? `Assignment updated. Schedule set to ${scheduleSummary}.`
-              : 'Assignment and schedule updated.'
-          return {
-            label: 'Assignment and schedule updated',
-            caption: `Assignment updated • ${combinedScheduleCaption}`,
-            icon: Workflow,
-            iconBgClass: 'bg-indigo-100',
-            iconColorClass: 'text-indigo-600',
-            summary: combinedSummary,
-            ...baseTransform,
-          }
-        }
-
-        if (updatesCharter) {
-          const charterCaption = charterValue ? truncate(charterValue, 48) : null
-          return {
-            label: 'Assignment updated',
-            caption: charterCaption ?? entry.caption ?? 'Assignment updated',
-            icon: FileCheck2,
-            iconBgClass: 'bg-indigo-100',
-            iconColorClass: 'text-indigo-600',
-            summary: 'Assignment updated.',
-            ...baseTransform,
-          }
-        }
-
-        if (updatesSchedule) {
-          return {
-            label: 'Schedule updated',
-            caption: scheduleCaption,
-            icon: CalendarClock,
-            iconBgClass: 'bg-sky-100',
-            iconColorClass: 'text-sky-600',
-            summary: scheduleSummaryText,
-            ...baseTransform,
-          }
-        }
-      }
-
+    derive(_entry, parameters) {
+      const statements = extractSqlStatementsFromParameters(parameters)
       return {
         caption: statements.length ? `${statements.length} statement${statements.length === 1 ? '' : 's'}` : 'SQL batch',
         sqlStatements: statements,

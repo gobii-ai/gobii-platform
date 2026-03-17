@@ -14,8 +14,16 @@ import {
   coerceString,
   truncate,
 } from '../../tooling/toolMetadata'
+import { classifySqliteStatements } from '../../tooling/agentConfigSql'
+import {
+  extractSqlStatementsFromParameters,
+  extractSqliteStatementResult,
+  extractSqliteGroupedResult,
+  getSqliteInternalTableDisplay,
+} from '../../tooling/sqliteDisplay'
 import { ThinkingDetail } from '../toolDetails/details/common'
 import { KanbanUpdateDetail } from '../toolDetails/details/kanban'
+import { buildAgentConfigEntry, buildSqliteSyntheticId } from './sqliteEntries'
 
 const TOOL_DESCRIPTORS = buildToolDescriptorMap(resolveDetailComponent)
 
@@ -121,14 +129,12 @@ function deriveCaptionFallback(parameters: Record<string, unknown> | null): stri
   return null
 }
 
-function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay | null {
+function buildToolEntryDisplay(
+  clusterCursor: string,
+  entry: ToolCallEntry,
+  descriptor: ToolDescriptor,
+): ToolEntryDisplay | null {
   const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
-  const normalizedName = (toolName || '').toLowerCase()
-  if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
-    return null
-  }
-
-  const descriptor = descriptorFor(toolName)
   if (descriptor.skip) {
     return null
   }
@@ -192,7 +198,143 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
     sourceEntry: entry,
     mcpInfo: mcpInfo ?? undefined,
     separateFromPreview: transform.separateFromPreview ?? false,
+    sqliteInfo: transform.sqliteInfo,
   }
+}
+
+function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
+  const sqliteToolName = entry.toolName ?? entry.meta?.label ?? 'sqlite_batch'
+  const descriptor = descriptorFor(sqliteToolName)
+  const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
+  const statements = extractSqlStatementsFromParameters(parameters)
+  if (!statements.length) {
+    const fallback = buildToolEntryDisplay(clusterCursor, entry, descriptor)
+    return fallback ? [fallback] : []
+  }
+
+  const classifications = classifySqliteStatements(statements)
+  const configStatementIndexes = classifications
+    .filter((classification) => classification.reservedTableKind === 'agentConfig')
+    .map((classification) => classification.index)
+  const kanbanStatementIndexes = new Set(
+    classifications
+      .filter((classification) => classification.reservedTableKind === 'kanban')
+      .map((classification) => classification.index),
+  )
+  const nonKanbanCount = classifications.filter((classification) => !kanbanStatementIndexes.has(classification.index)).length
+
+  if (nonKanbanCount === 0) {
+    return []
+  }
+
+  const entries: ToolEntryDisplay[] = []
+  let handledAgentConfigIndexes = new Set<number>()
+  if (configStatementIndexes.length) {
+    const configStatements = configStatementIndexes.map((index) => statements[index]).filter(Boolean)
+    const configEntry = buildAgentConfigEntry(clusterCursor, entry, configStatements, configStatementIndexes)
+    if (configEntry) {
+      entries.push(configEntry)
+      handledAgentConfigIndexes = new Set(configStatementIndexes)
+    }
+  }
+
+  const leftoverStatements: string[] = []
+  const leftoverIndexes: number[] = []
+
+  for (const classification of classifications) {
+    if (kanbanStatementIndexes.has(classification.index) || handledAgentConfigIndexes.has(classification.index)) {
+      continue
+    }
+
+    if (!classification.internalTableKind || !classification.tableName) {
+      leftoverStatements.push(classification.statement)
+      leftoverIndexes.push(classification.index)
+      continue
+    }
+
+    const display = getSqliteInternalTableDisplay(
+      classification.internalTableKind,
+      classification.operation,
+      classification.statement,
+      extractSqliteStatementResult(entry.result, classification.index),
+    )
+
+    entries.push({
+      id: buildSqliteSyntheticId(entry.id, display.tableName.replace(/^_+/, ''), classification.index),
+      clusterCursor,
+      cursor: entry.cursor,
+      toolName: entry.toolName ?? 'sqlite_batch',
+      label: display.label,
+      caption: display.caption,
+      timestamp: entry.timestamp ?? null,
+      status: entry.status ?? null,
+      icon: display.icon,
+      iconBgClass: display.iconBgClass,
+      iconColorClass: display.iconColorClass,
+      parameters,
+      rawParameters: entry.parameters,
+      result: extractSqliteStatementResult(entry.result, classification.index),
+      summary: display.summary,
+      charterText: null,
+      sqlStatements: [classification.statement],
+      detailComponent: resolveDetailComponent(display.detailKind),
+      meta: entry.meta,
+      sourceEntry: entry,
+      sqliteInfo: {
+        kind: classification.internalTableKind,
+        tableName: display.tableName,
+        operation: classification.operation,
+        operationLabel: display.operationLabel,
+        purpose: display.purpose,
+        statementIndex: classification.index,
+      },
+    })
+  }
+
+  if (leftoverStatements.length) {
+    entries.push({
+      id: buildSqliteSyntheticId(entry.id, 'generic', statements.length),
+      clusterCursor,
+      cursor: entry.cursor,
+      toolName: entry.toolName ?? 'sqlite_batch',
+      label: descriptor.label,
+      caption: leftoverStatements.length === 1
+        ? '1 statement'
+        : `${leftoverStatements.length} statements`,
+      timestamp: entry.timestamp ?? null,
+      status: entry.status ?? null,
+      icon: descriptor.icon,
+      iconBgClass: descriptor.iconBgClass,
+      iconColorClass: descriptor.iconColorClass,
+      parameters,
+      rawParameters: entry.parameters,
+      result: extractSqliteGroupedResult(entry.result, leftoverIndexes),
+      summary: entry.summary ?? null,
+      charterText: null,
+      sqlStatements: leftoverStatements,
+      detailComponent: descriptor.detailComponent,
+      meta: entry.meta,
+      sourceEntry: entry,
+    })
+  }
+
+  return entries
+}
+
+function buildToolEntries(clusterCursor: string, entry: ToolCallEntry): ToolEntryDisplay[] {
+  const toolName = entry.toolName ?? entry.meta?.label ?? 'tool'
+  const normalizedName = (toolName || '').toLowerCase()
+  if (CHAT_SKIP_TOOL_NAMES.has(normalizedName as string)) {
+    return []
+  }
+
+  if (normalizedName === 'sqlite_batch') {
+    return buildSqliteEntries(clusterCursor, entry)
+  }
+
+  const descriptor = descriptorFor(toolName)
+  const transformed = buildToolEntryDisplay(clusterCursor, entry, descriptor)
+  return transformed ? [transformed] : []
 }
 
 function buildThinkingEntry(
@@ -269,12 +411,12 @@ export function transformToolCluster(
   const suppressedThinkingCursor = options?.suppressedThinkingCursor ?? null
 
   for (const entry of cluster.entries) {
-    const transformed = buildToolEntry(cluster.cursor, entry)
-    if (!transformed) {
+    const transformedEntries = buildToolEntries(cluster.cursor, entry)
+    if (!transformedEntries.length) {
       skippedCount += 1
       continue
     }
-    entries.push(transformed)
+    entries.push(...transformedEntries)
   }
 
   for (const entry of thinkingEntries) {
