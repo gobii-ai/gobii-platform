@@ -198,12 +198,12 @@ def _build_billing_pause_message_content(*, agent, reason: str, audience: str) -
 
     if audience == "owner":
         if is_trial_end:
-            subject = f"{agent.name} is paused because your trial ended"
+            subject = f"I am is paused because your trial ended"
             intro_text = "Your trial ended, so I'm paused for now."
             detail_text = "Restart billing to let me reply again."
             sms_body = f"My trial ended, so I'm paused. Restart billing to resume replies.{_sms_link_suffix(billing_url)}"
         else:
-            subject = f"{agent.name} is paused until billing is resolved"
+            subject = f"I am paused until billing is resolved"
             intro_text = "I'm paused until billing is resolved."
             detail_text = "Once billing is fixed, I'll be able to reply again."
             sms_body = f"I'm paused until billing is resolved. Update billing to resume replies.{_sms_link_suffix(billing_url)}"
@@ -223,19 +223,19 @@ def _build_billing_pause_message_content(*, agent, reason: str, audience: str) -
 
     if audience == "sender":
         if is_trial_end:
-            subject = f"{agent.name} can't reply right now"
-            intro_text = f"{agent.name} is paused because the trial ended."
+            subject = f"I can't reply right now"
+            intro_text = f"I am paused because the trial ended."
             detail_text = "If you're the account owner, restart billing to resume replies. Otherwise, contact the owner."
             sms_body = (
-                f"{agent.name} can't reply right now because the trial ended. "
+                f"I can't reply right now because the trial ended. "
                 f"If you're the account owner, restart billing.{_sms_link_suffix(billing_url)}"
             )
         else:
-            subject = f"{agent.name} can't reply right now"
-            intro_text = f"{agent.name} is paused because billing needs attention."
+            subject = f"I can't reply right now"
+            intro_text = f"I am paused because billing needs attention."
             detail_text = "If you're the account owner, update billing to resume replies. Otherwise, contact the owner."
             sms_body = (
-                f"{agent.name} can't reply right now because billing needs attention. "
+                f"I can't reply right now because billing needs attention. "
                 f"If you're the account owner, update billing.{_sms_link_suffix(billing_url)}"
             )
 
