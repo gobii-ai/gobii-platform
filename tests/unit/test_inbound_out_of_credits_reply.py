@@ -31,9 +31,24 @@ from config import settings
 User = get_user_model()
 
 
+class PauseOwnerMixin:
+    def _pause_owner(self, reason: str) -> None:
+        billing = self.owner.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = reason
+        billing.execution_paused_at = timezone.now()
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+
+
 @override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend')
 @tag("batch_email")
-class InboundOutOfCreditsReplyTests(TestCase):
+class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
             username="owner",
@@ -54,19 +69,6 @@ class InboundOutOfCreditsReplyTests(TestCase):
             channel=CommsChannel.EMAIL,
             address=f"agent@{default_domain}",
             is_primary=True,
-        )
-
-    def _pause_owner(self, reason: str) -> None:
-        billing = self.owner.billing
-        billing.execution_paused = True
-        billing.execution_pause_reason = reason
-        billing.execution_paused_at = timezone.now()
-        billing.save(
-            update_fields=[
-                "execution_paused",
-                "execution_pause_reason",
-                "execution_paused_at",
-            ]
         )
 
     @tag("batch_email")
@@ -285,9 +287,33 @@ class InboundOutOfCreditsReplyTests(TestCase):
         self.assertIn("billing needs attention", outbound.body.lower())
         self.assertNotIn("trial ended", outbound.body.lower())
 
+    @tag("batch_email")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_email")
+    def test_paused_agent_email_does_not_reply_to_non_whitelisted_sender(
+        self,
+        mock_deliver_email,
+        mock_delay,
+    ):
+        self._pause_owner(EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL)
+        parsed = ParsedMessage(
+            sender="external@example.com",
+            recipient=self.agent_email.address,
+            subject="Need help",
+            body="Hello",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.EMAIL,
+        )
+
+        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        mock_delay.assert_not_called()
+        mock_deliver_email.assert_not_called()
+
 
 @tag("batch_sms")
-class InboundDailyCreditsSmsTests(TestCase):
+class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
             username="owner_sms",
@@ -312,19 +338,6 @@ class InboundDailyCreditsSmsTests(TestCase):
             channel=CommsChannel.SMS,
             address="+15550009999",
             is_primary=True,
-        )
-
-    def _pause_owner(self, reason: str) -> None:
-        billing = self.owner.billing
-        billing.execution_paused = True
-        billing.execution_pause_reason = reason
-        billing.execution_paused_at = timezone.now()
-        billing.save(
-            update_fields=[
-                "execution_paused",
-                "execution_pause_reason",
-                "execution_paused_at",
-            ]
         )
 
     @tag("batch_sms")
@@ -386,6 +399,30 @@ class InboundDailyCreditsSmsTests(TestCase):
         self.assertEqual(outbound_msg.from_endpoint, self.sms_endpoint)
         self.assertEqual(outbound_msg.to_endpoint.address, self.owner_phone)
         self.assertIn("billing needs attention", outbound_msg.body.lower())
+
+    @tag("batch_sms")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
+    def test_paused_agent_sms_does_not_reply_to_non_whitelisted_sender(
+        self,
+        mock_deliver_sms,
+        mock_delay,
+    ):
+        self._pause_owner(EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY)
+        parsed = ParsedMessage(
+            sender="+15557654321",
+            recipient=self.sms_endpoint.address,
+            subject=None,
+            body="Ping",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.SMS,
+        )
+
+        ingest_inbound_message(CommsChannel.SMS, parsed)
+
+        mock_delay.assert_not_called()
+        mock_deliver_sms.assert_not_called()
 
 
 @tag("batch_agent_chat")

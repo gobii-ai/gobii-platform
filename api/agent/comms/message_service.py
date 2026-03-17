@@ -842,18 +842,19 @@ def ingest_inbound_message(
                     pause_state = get_owner_execution_pause_state(owner)
                     pause_reason = pause_state["reason"] or ""
                     if pause_state["paused"] and is_billing_execution_pause_reason(pause_reason):
-                        try:
-                            send_billing_pause_auto_reply(
-                                agent_obj,
-                                from_ep,
-                                reason=pause_reason,
-                            )
-                        except Exception:
-                            logging.exception(
-                                "Failed sending billing pause auto-reply for agent %s",
-                                agent_obj.id,
-                            )
                         should_skip_processing = True
+                        if parsed.sender and agent_obj.is_sender_whitelisted(channel_val, parsed.sender):
+                            try:
+                                send_billing_pause_auto_reply(
+                                    agent_obj,
+                                    from_ep,
+                                    reason=pause_reason,
+                                )
+                            except Exception:
+                                logging.exception(
+                                    "Failed sending billing pause auto-reply for agent %s",
+                                    agent_obj.id,
+                                )
             except Exception:
                 logging.exception("Error during billing-pause pre-processing check")
 
