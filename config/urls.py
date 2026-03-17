@@ -369,7 +369,7 @@ urlpatterns = [
     ),
     path("system-settings/api/", SystemSettingsListAPIView.as_view(), name="system_settings_list"),
     path("system-settings/api/<slug:key>/", SystemSettingDetailAPIView.as_view(), name="system_setting_detail"),
-    path("console/api/status/", SystemStatusAPIView.as_view(), name="console_status"),
+    path("console/api/status/", SystemStatusAPIView.as_view(), name="console-api-status"),
     path("console/api/llm/overview/", ConsoleLLMOverviewAPIView.as_view(), name="console_llm_overview"),
     path("console/api/llm/providers/", LLMProviderListCreateAPIView.as_view(), name="console_llm_providers"),
     path("console/api/llm/providers/<uuid:provider_id>/", LLMProviderDetailAPIView.as_view(), name="console_llm_provider_detail"),

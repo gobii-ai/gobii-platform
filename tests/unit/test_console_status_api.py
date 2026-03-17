@@ -38,7 +38,7 @@ class SystemStatusAPITests(TestCase):
             password="pass123",
         )
         self.client.force_login(self.staff)
-        self.url = reverse("console_status")
+        self.url = reverse("console-api-status")
 
     def _create_agent(self, name, *, execution_environment=None):
         browser_agent = BrowserUseAgent.objects.create(user=self.owner, name=f"{name} Browser")
