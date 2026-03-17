@@ -17,11 +17,13 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend = object.__new__(KubernetesSandboxBackend)
         backend._no_proxy = ""
         backend._namespace = "default"
+        backend._compute_api_token = "supervisor-token"
         backend._pod_image = "ghcr.io/example/sandbox:latest"
         backend._pod_runtime_class = "gvisor"
         backend._pod_service_account = "sandbox-sa"
         backend._pod_configmap = "sandbox-config"
         backend._pod_secret = "sandbox-secret"
+        backend._proxy_timeout = 30
         return backend
 
     def test_stdio_discovery_requires_agent_session(self):
@@ -129,6 +131,23 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(result.get("status"), "ok")
         mock_proxy_post.assert_called_once()
         self.assertEqual(mock_proxy_post.call_args.args[0], _pod_name(agent.id))
+
+    def test_proxy_post_forwards_supervisor_token_header(self):
+        backend = self._backend()
+        backend._client = SimpleNamespace(request_json=lambda *args, **kwargs: {"status": "ok"})
+
+        with patch.object(backend._client, "request_json", return_value={"status": "ok"}) as mock_request:
+            result = backend._proxy_post(
+                "sandbox-agent-agent-1",
+                "/sandbox/compute/run_command",
+                {"agent_id": "agent-1", "command": "pwd"},
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(
+            mock_request.call_args.kwargs["extra_headers"],
+            {"X-Sandbox-Compute-Token": "supervisor-token"},
+        )
 
 
 @tag("batch_agent_lifecycle")

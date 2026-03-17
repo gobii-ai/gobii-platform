@@ -469,6 +469,8 @@ class HttpSandboxBackend(SandboxComputeBackend):
     def __init__(self, base_url: str, token: str):
         if not base_url:
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_API_URL is required.")
+        if not token:
+            raise SandboxComputeUnavailable("SANDBOX_COMPUTE_API_TOKEN is required for HTTP sandbox backend.")
         self.base_url = base_url.rstrip("/")
         self.token = token
 

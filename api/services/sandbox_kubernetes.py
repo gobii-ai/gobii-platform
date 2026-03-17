@@ -48,9 +48,12 @@ class KubernetesApiClient:
         json_body: Optional[Dict[str, Any]] = None,
         timeout: Optional[int] = None,
         allow_404: bool = False,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         url = f"{self.base_url}{path}"
         headers = {"Authorization": f"Bearer {self.token}"}
+        if extra_headers:
+            headers.update(extra_headers)
         try:
             response = requests.request(
                 method,
@@ -85,6 +88,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         timeout = int(getattr(settings, "SANDBOX_COMPUTE_K8S_TIMEOUT_SECONDS", 30))
         self._client = KubernetesApiClient(base_url=base_url, token=token, ca_path=ca_path, timeout=timeout)
         self._namespace = _k8s_namespace()
+        self._compute_api_token = getattr(settings, "SANDBOX_COMPUTE_API_TOKEN", "") or ""
         self._pod_image = get_sandbox_compute_pod_image()
         self._pod_service_account = getattr(settings, "SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT", "") or ""
         self._pod_runtime_class = getattr(settings, "SANDBOX_COMPUTE_POD_RUNTIME_CLASS", "gvisor")
@@ -113,6 +117,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
         if not self._pod_image:
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_POD_IMAGE is required for kubernetes backend.")
+        if not self._compute_api_token:
+            raise SandboxComputeUnavailable("SANDBOX_COMPUTE_API_TOKEN is required for kubernetes backend.")
 
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         pod_name = _pod_name(agent.id)
@@ -397,6 +403,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 proxy_path,
                 json_body=payload,
                 timeout=timeout or self._proxy_timeout,
+                extra_headers={"X-Sandbox-Compute-Token": self._compute_api_token},
             )
         except KubernetesApiError as exc:
             return {"status": "error", "message": f"Sandbox proxy request failed: {exc}"}
