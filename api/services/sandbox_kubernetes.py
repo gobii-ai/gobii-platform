@@ -86,7 +86,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._client = KubernetesApiClient(base_url=base_url, token=token, ca_path=ca_path, timeout=timeout)
         self._namespace = _k8s_namespace()
         self._pod_image = get_sandbox_compute_pod_image()
-        self._pod_service_account = getattr(settings, "SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT", "gobii-sa")
+        self._pod_service_account = getattr(settings, "SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT", "") or ""
         self._pod_runtime_class = getattr(settings, "SANDBOX_COMPUTE_POD_RUNTIME_CLASS", "gvisor")
         self._pod_configmap = getattr(settings, "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME", "gobii-sandbox-common-env")
         self._pod_secret = getattr(settings, "SANDBOX_COMPUTE_POD_SECRET_NAME", "gobii-sandbox-env")
@@ -818,7 +818,7 @@ def _build_pod_manifest(
     }
     container["env"] = env
 
-    return {
+    manifest = {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
@@ -831,7 +831,7 @@ def _build_pod_manifest(
             },
         },
         "spec": {
-            "serviceAccountName": service_account,
+            "automountServiceAccountToken": False,
             "runtimeClassName": runtime_class,
             "terminationGracePeriodSeconds": 300,
             "securityContext": {
@@ -849,6 +849,9 @@ def _build_pod_manifest(
             ],
         },
     }
+    if service_account:
+        manifest["spec"]["serviceAccountName"] = service_account
+    return manifest
 
 
 def _build_proxy_env(*, proxy_url: Optional[str], no_proxy: Optional[str]) -> list[Dict[str, str]]:
@@ -897,6 +900,7 @@ def _build_egress_proxy_pod_manifest(
         labels["proxy_id"] = proxy_id
 
     spec: Dict[str, Any] = {
+        "automountServiceAccountToken": False,
         "terminationGracePeriodSeconds": 30,
         "securityContext": {
             "seccompProfile": {"type": "RuntimeDefault"},

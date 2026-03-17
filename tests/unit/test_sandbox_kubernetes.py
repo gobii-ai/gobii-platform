@@ -3,7 +3,12 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
-from api.services.sandbox_kubernetes import KubernetesSandboxBackend, _pod_name
+from api.services.sandbox_kubernetes import (
+    KubernetesSandboxBackend,
+    _build_egress_proxy_pod_manifest,
+    _build_pod_manifest,
+    _pod_name,
+)
 
 
 @tag("batch_agent_lifecycle")
@@ -124,3 +129,57 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(result.get("status"), "ok")
         mock_proxy_post.assert_called_once()
         self.assertEqual(mock_proxy_post.call_args.args[0], _pod_name(agent.id))
+
+
+@tag("batch_agent_lifecycle")
+class KubernetesSandboxPodManifestTests(SimpleTestCase):
+    def test_agent_pod_manifest_disables_service_account_token_automount(self):
+        manifest = _build_pod_manifest(
+            pod_name="sandbox-agent-agent-1",
+            pvc_name="sandbox-workspace-agent-1",
+            namespace="default",
+            image="ghcr.io/example/sandbox:latest",
+            runtime_class="gvisor",
+            service_account="",
+            configmap_name="sandbox-config",
+            secret_name="sandbox-secret",
+            agent_id="agent-1",
+            proxy_url=None,
+            no_proxy=None,
+        )
+
+        self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
+        self.assertNotIn("serviceAccountName", manifest["spec"])
+
+    def test_agent_pod_manifest_keeps_explicit_service_account_opt_in(self):
+        manifest = _build_pod_manifest(
+            pod_name="sandbox-agent-agent-2",
+            pvc_name="sandbox-workspace-agent-2",
+            namespace="default",
+            image="ghcr.io/example/sandbox:latest",
+            runtime_class="gvisor",
+            service_account="sandbox-sa",
+            configmap_name="sandbox-config",
+            secret_name="sandbox-secret",
+            agent_id="agent-2",
+            proxy_url=None,
+            no_proxy=None,
+        )
+
+        self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
+        self.assertEqual(manifest["spec"]["serviceAccountName"], "sandbox-sa")
+
+    def test_egress_proxy_pod_manifest_disables_service_account_token_automount(self):
+        manifest = _build_egress_proxy_pod_manifest(
+            pod_name="sandbox-egress-agent-1",
+            namespace="default",
+            image="ghcr.io/example/egress-proxy:latest",
+            runtime_class="gvisor",
+            service_account="",
+            agent_id="agent-1",
+            proxy_server=SimpleNamespace(host="proxy.example", port=8080, username="", password="", id="proxy-1"),
+            listen_port=3128,
+        )
+
+        self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
+        self.assertNotIn("serviceAccountName", manifest["spec"])
