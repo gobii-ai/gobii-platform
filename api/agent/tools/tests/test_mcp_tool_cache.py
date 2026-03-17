@@ -11,6 +11,7 @@ from api.agent.tools.mcp_manager import (
     MCPToolInfo,
     MCPToolManager,
     PipedreamToolCacheContext,
+    SandboxToolCacheContext,
 )
 from api.services.mcp_tool_cache import (
     get_cached_mcp_tool_definitions,
@@ -124,6 +125,36 @@ class MCPToolCacheTests(SimpleTestCase):
 
         self.assertNotEqual(first, second)
 
+    def test_sandbox_stdio_fingerprint_is_agent_scoped(self):
+        manager = MCPToolManager()
+        runtime = replace(self._runtime(), command="npx", args=["-y", "@dummy/server"], url=None, scope="user")
+
+        first = manager._build_tool_cache_fingerprint(
+            runtime,
+            sandbox_context=SandboxToolCacheContext(agent_cache_key="agent-one"),
+        )
+        second = manager._build_tool_cache_fingerprint(
+            runtime,
+            sandbox_context=SandboxToolCacheContext(agent_cache_key="agent-two"),
+        )
+
+        self.assertNotEqual(first, second)
+
+    def test_http_fingerprint_is_not_agent_scoped(self):
+        manager = MCPToolManager()
+        runtime = self._runtime()
+
+        first = manager._build_tool_cache_fingerprint(
+            runtime,
+            sandbox_context=SandboxToolCacheContext(agent_cache_key="agent-one"),
+        )
+        second = manager._build_tool_cache_fingerprint(
+            runtime,
+            sandbox_context=SandboxToolCacheContext(agent_cache_key="agent-two"),
+        )
+
+        self.assertEqual(first, second)
+
     def test_ensure_runtime_registered_allows_pipedream_without_shared_client(self):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream")
@@ -156,7 +187,15 @@ class MCPToolCacheTests(SimpleTestCase):
         manager = MCPToolManager()
         runtime = self._runtime()
 
-        def _fake_register(server, *, agent=None, force_local=False, prefer_cache=True, pipedream_context=None):
+        def _fake_register(
+            server,
+            *,
+            agent=None,
+            force_local=False,
+            prefer_cache=True,
+            pipedream_context=None,
+            sandbox_context=None,
+        ):
             manager._tools_cache[server.config_id] = [self._tool(server.config_id, "mcp_example_first")]
             if force_local:
                 manager._clients[server.config_id] = object()
@@ -221,6 +260,21 @@ class MCPToolCacheTests(SimpleTestCase):
         self.assertEqual([tool.full_name for tool in agent_one_tools], ["trello-create-card"])
         self.assertEqual([tool.full_name for tool in agent_two_tools], ["slack-send-message"])
 
+    def test_tool_cache_slot_key_is_agent_scoped_for_sandbox_stdio(self):
+        manager = MCPToolManager()
+        runtime = replace(self._runtime(), command="npx", url=None, scope="user")
+
+        first = manager._tool_cache_slot_key(
+            runtime,
+            sandbox_context=SandboxToolCacheContext(agent_cache_key="agent-one"),
+        )
+        second = manager._tool_cache_slot_key(
+            runtime,
+            sandbox_context=SandboxToolCacheContext(agent_cache_key="agent-two"),
+        )
+
+        self.assertNotEqual(first, second)
+
     def test_ensure_runtime_registered_reregisters_when_pipedream_apps_change_for_same_owner(self):
         manager = MCPToolManager()
         runtime = replace(self._runtime(), name="pipedream", config_id="pd-config")
@@ -245,7 +299,15 @@ class MCPToolCacheTests(SimpleTestCase):
         ]
         manager._tool_cache_fingerprints[slot_key] = manager._build_tool_cache_fingerprint(runtime, original_context)
 
-        def _fake_register(server, *, agent=None, force_local=False, prefer_cache=True, pipedream_context=None):
+        def _fake_register(
+            server,
+            *,
+            agent=None,
+            force_local=False,
+            prefer_cache=True,
+            pipedream_context=None,
+            sandbox_context=None,
+        ):
             new_slot_key = manager._tool_cache_slot_key(server, pipedream_context)
             manager._tools_cache[new_slot_key] = [
                 MCPToolInfo(

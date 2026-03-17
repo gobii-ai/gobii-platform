@@ -9,9 +9,14 @@ import requests
 from django.conf import settings
 
 from api.models import AgentComputeSession, MCPServerConfig
-from api.proxy_selection import select_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
-from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate
+from api.services.sandbox_compute import (
+    SandboxComputeBackend,
+    SandboxComputeUnavailable,
+    SandboxSessionUpdate,
+    _proxy_env_for_session,
+    _requires_agent_pod_discovery,
+)
 from api.services.system_settings import (
     get_sandbox_compute_pod_image,
     get_sandbox_compute_require_proxy,
@@ -44,9 +49,12 @@ class KubernetesApiClient:
         json_body: Optional[Dict[str, Any]] = None,
         timeout: Optional[int] = None,
         allow_404: bool = False,
+        extra_headers: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         url = f"{self.base_url}{path}"
         headers = {"Authorization": f"Bearer {self.token}"}
+        if extra_headers:
+            headers.update(extra_headers)
         try:
             response = requests.request(
                 method,
@@ -81,8 +89,9 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         timeout = int(getattr(settings, "SANDBOX_COMPUTE_K8S_TIMEOUT_SECONDS", 30))
         self._client = KubernetesApiClient(base_url=base_url, token=token, ca_path=ca_path, timeout=timeout)
         self._namespace = _k8s_namespace()
+        self._compute_api_token = getattr(settings, "SANDBOX_COMPUTE_API_TOKEN", "") or ""
         self._pod_image = get_sandbox_compute_pod_image()
-        self._pod_service_account = getattr(settings, "SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT", "gobii-sa")
+        self._pod_service_account = getattr(settings, "SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT", "") or ""
         self._pod_runtime_class = getattr(settings, "SANDBOX_COMPUTE_POD_RUNTIME_CLASS", "gvisor")
         self._pod_configmap = getattr(settings, "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME", "gobii-sandbox-common-env")
         self._pod_secret = getattr(settings, "SANDBOX_COMPUTE_POD_SECRET_NAME", "gobii-sandbox-env")
@@ -109,6 +118,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
         if not self._pod_image:
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_POD_IMAGE is required for kubernetes backend.")
+        if not self._compute_api_token:
+            raise SandboxComputeUnavailable("SANDBOX_COMPUTE_API_TOKEN is required for kubernetes backend.")
 
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         pod_name = _pod_name(agent.id)
@@ -332,80 +343,51 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         server_config_id: str,
         *,
         reason: str,
+        agent=None,
+        session: Optional[AgentComputeSession] = None,
         server_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not server_payload:
             return {"status": "error", "message": "Missing MCP server payload for discovery."}
-        if not _requires_discovery_pod(server_payload):
+        if not _requires_agent_pod_discovery(server_payload):
             from api.agent.tools.mcp_manager import get_mcp_manager
 
             manager = get_mcp_manager()
-            ok = manager.discover_tools_for_server(server_config_id)
+            ok = manager.discover_tools_for_server(server_config_id, agent=agent)
             return {
                 "status": "ok" if ok else "error",
                 "reason": reason,
-                "message": "Discovery pod skipped for non-sandboxed MCP server.",
+                "message": "Agent pod discovery skipped for non-sandboxed MCP server.",
             }
 
-        proxy_url: Optional[str] = None
-        no_proxy: Optional[str] = None
-        proxy_required = get_sandbox_compute_require_proxy()
-        try:
-            proxy = select_proxy(
-                allow_no_proxy_in_debug=not proxy_required,
-                context_id=f"sandbox_mcp_discovery_{server_config_id}",
-            )
-        except RuntimeError as exc:
-            if proxy_required:
-                return {"status": "error", "message": f"No proxy server available for MCP discovery: {exc}"}
-            logger.warning(
-                "MCP discovery proxy selection failed for server=%s; continuing without proxy: %s",
-                server_config_id,
-                exc,
-            )
-            proxy = None
+        if agent is None or session is None:
+            return {"status": "error", "message": "Sandboxed stdio discovery requires an agent session."}
 
-        if proxy_required and proxy is None:
-            return {"status": "error", "message": "No proxy server available for MCP discovery."}
-        if proxy is not None:
-            proxy_url = proxy.proxy_url
-            no_proxy = _merge_no_proxy_values(
-                self._no_proxy,
-                "localhost",
-                "127.0.0.1",
-                ".svc",
-                ".cluster.local",
-            )
+        pod_name = session.pod_name or _pod_name(agent.id)
+        payload = {
+            "agent_id": str(agent.id),
+            "server_id": server_config_id,
+            "reason": reason,
+            "server": server_payload,
+        }
+        proxy_env = _proxy_env_for_session(session)
+        if proxy_env:
+            payload["proxy_env"] = proxy_env
 
-        pod_name = _discovery_pod_name(server_config_id)
-        try:
-            self._create_discovery_pod(pod_name, proxy_url=proxy_url, no_proxy=no_proxy)
-        except KubernetesApiError as exc:
-            return {"status": "error", "message": f"Discovery pod create failed: {exc}"}
-
-        if not self._wait_for_pod_ready(pod_name):
-            self._delete_pod(pod_name)
-            return {"status": "error", "message": "Discovery pod did not become ready in time."}
-
-        payload = {"server_id": server_config_id, "reason": reason, "server": server_payload}
-        try:
-            response = self._proxy_post(
-                pod_name,
-                "/sandbox/compute/discover_mcp_tools",
-                payload,
-                timeout=getattr(
+        return self._proxy_post(
+            pod_name,
+            "/sandbox/compute/discover_mcp_tools",
+            payload,
+            timeout=getattr(
+                self,
+                "_discovery_timeout",
+                getattr(
                     self,
-                    "_discovery_timeout",
-                    getattr(
-                        self,
-                        "_proxy_timeout",
-                        int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180)),
-                    ),
+                    "_proxy_timeout",
+                    int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180)),
                 ),
-            )
-            return response
-        finally:
-            self._delete_pod(pod_name)
+            ),
+        )
 
     def _proxy_post(
         self,
@@ -422,6 +404,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 proxy_path,
                 json_body=payload,
                 timeout=timeout or self._proxy_timeout,
+                extra_headers={"X-Sandbox-Compute-Token": self._compute_api_token},
             )
         except KubernetesApiError as exc:
             return {"status": "error", "message": f"Sandbox proxy request failed: {exc}"}
@@ -505,30 +488,6 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             configmap_name=self._pod_configmap,
             secret_name=self._pod_secret,
             agent_id=agent_id,
-            proxy_url=proxy_url,
-            no_proxy=no_proxy,
-        )
-        try:
-            self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
-        except KubernetesApiError as exc:
-            if exc.status_code != 409:
-                raise
-
-    def _create_discovery_pod(
-        self,
-        pod_name: str,
-        *,
-        proxy_url: Optional[str] = None,
-        no_proxy: Optional[str] = None,
-    ) -> None:
-        body = _build_discovery_pod_manifest(
-            pod_name=pod_name,
-            namespace=self._namespace,
-            image=self._pod_image,
-            runtime_class=self._pod_runtime_class,
-            service_account=self._pod_service_account,
-            configmap_name=self._pod_configmap,
-            secret_name=self._pod_secret,
             proxy_url=proxy_url,
             no_proxy=no_proxy,
         )
@@ -724,19 +683,6 @@ def _pod_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-agent-{agent_id}")
 
 
-def _discovery_pod_name(config_id: Any) -> str:
-    return _slugify(f"sandbox-discovery-{config_id}")
-
-
-def _requires_discovery_pod(server_payload: Dict[str, Any]) -> bool:
-    scope = str(server_payload.get("scope") or "").strip()
-    command = str(server_payload.get("command") or "").strip()
-    url = str(server_payload.get("url") or "").strip()
-    if scope == MCPServerConfig.Scope.PLATFORM:
-        return False
-    return bool(command) and not bool(url)
-
-
 def _pvc_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-workspace-{agent_id}")
 
@@ -871,7 +817,7 @@ def _build_pod_manifest(
     }
     container["env"] = env
 
-    return {
+    manifest = {
         "apiVersion": "v1",
         "kind": "Pod",
         "metadata": {
@@ -884,7 +830,7 @@ def _build_pod_manifest(
             },
         },
         "spec": {
-            "serviceAccountName": service_account,
+            "automountServiceAccountToken": False,
             "runtimeClassName": runtime_class,
             "terminationGracePeriodSeconds": 300,
             "securityContext": {
@@ -902,79 +848,9 @@ def _build_pod_manifest(
             ],
         },
     }
-
-
-def _build_discovery_pod_manifest(
-    *,
-    pod_name: str,
-    namespace: str,
-    image: str,
-    runtime_class: str,
-    service_account: str,
-    configmap_name: str,
-    secret_name: str,
-    proxy_url: Optional[str],
-    no_proxy: Optional[str],
-) -> Dict[str, Any]:
-    env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
-    env.extend(_build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy))
-
-    container: Dict[str, Any] = {
-        "name": "sandbox-supervisor",
-        "image": image,
-        "imagePullPolicy": "IfNotPresent",
-        "ports": [{"containerPort": 8080}],
-        "envFrom": [
-            {"secretRef": {"name": secret_name}},
-            {"configMapRef": {"name": configmap_name}},
-        ],
-        "securityContext": {
-            "allowPrivilegeEscalation": False,
-            "runAsNonRoot": True,
-            "runAsUser": 1000,
-            "runAsGroup": 1000,
-            "capabilities": {"drop": ["ALL"]},
-        },
-        "volumeMounts": [
-            {"name": "workspace", "mountPath": "/workspace"},
-            {"name": "runtime-cache", "mountPath": "/runtime-cache"},
-        ],
-        "readinessProbe": {
-            "httpGet": {"path": "/healthz", "port": 8080},
-            "initialDelaySeconds": 10,
-            "periodSeconds": 10,
-            "failureThreshold": 3,
-        },
-    }
-    container["env"] = env
-
-    return {
-        "apiVersion": "v1",
-        "kind": "Pod",
-        "metadata": {
-            "name": pod_name,
-            "namespace": namespace,
-            "labels": {
-                "app": "sandbox-compute",
-                "component": "sandbox-discovery",
-            },
-        },
-        "spec": {
-            "serviceAccountName": service_account,
-            "runtimeClassName": runtime_class,
-            "terminationGracePeriodSeconds": 120,
-            "securityContext": {
-                "fsGroup": 1000,
-                "fsGroupChangePolicy": "OnRootMismatch",
-                "seccompProfile": {"type": "RuntimeDefault"},
-            },
-            "containers": [container],
-            "volumes": [
-                {"name": "workspace", "emptyDir": {}},
-                {"name": "runtime-cache", "emptyDir": {}},
-            ],
-        },
-    }
+    if service_account:
+        manifest["spec"]["serviceAccountName"] = service_account
+    return manifest
 
 
 def _build_proxy_env(*, proxy_url: Optional[str], no_proxy: Optional[str]) -> list[Dict[str, str]]:
@@ -1023,6 +899,7 @@ def _build_egress_proxy_pod_manifest(
         labels["proxy_id"] = proxy_id
 
     spec: Dict[str, Any] = {
+        "automountServiceAccountToken": False,
         "terminationGracePeriodSeconds": 30,
         "securityContext": {
             "seccompProfile": {"type": "RuntimeDefault"},

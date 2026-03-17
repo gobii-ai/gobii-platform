@@ -322,6 +322,8 @@ class SandboxComputeBackend:
         server_config_id: str,
         *,
         reason: str,
+        agent: Optional[PersistentAgent] = None,
+        session: Optional[AgentComputeSession] = None,
         server_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         raise NotImplementedError
@@ -452,12 +454,14 @@ class LocalSandboxBackend(SandboxComputeBackend):
         server_config_id: str,
         *,
         reason: str,
+        agent: Optional[PersistentAgent] = None,
+        session: Optional[AgentComputeSession] = None,
         server_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         from api.agent.tools.mcp_manager import get_mcp_manager
 
         manager = get_mcp_manager()
-        ok = manager.discover_tools_for_server(server_config_id)
+        ok = manager.discover_tools_for_server(server_config_id, agent=agent)
         return {"status": "ok" if ok else "error", "reason": reason}
 
 
@@ -465,6 +469,8 @@ class HttpSandboxBackend(SandboxComputeBackend):
     def __init__(self, base_url: str, token: str):
         if not base_url:
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_API_URL is required.")
+        if not token:
+            raise SandboxComputeUnavailable("SANDBOX_COMPUTE_API_TOKEN is required for HTTP sandbox backend.")
         self.base_url = base_url.rstrip("/")
         self.token = token
 
@@ -613,9 +619,17 @@ class HttpSandboxBackend(SandboxComputeBackend):
         server_config_id: str,
         *,
         reason: str,
+        agent: Optional[PersistentAgent] = None,
+        session: Optional[AgentComputeSession] = None,
         server_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         payload = {"server_id": server_config_id, "reason": reason}
+        if agent is not None:
+            payload["agent_id"] = str(agent.id)
+        if session is not None:
+            proxy_env = _proxy_env_for_session(session)
+            if proxy_env:
+                payload["proxy_env"] = proxy_env
         if server_payload:
             payload["server"] = server_payload
         return self._post("sandbox/compute/discover_mcp_tools", payload, timeout=_discovery_timeout_seconds())
@@ -850,6 +864,22 @@ def _build_mcp_server_payload(
         "scope": runtime.scope,
     }
     return payload, runtime
+
+
+def _requires_agent_pod_discovery(runtime: Any) -> bool:
+    if runtime is None:
+        return False
+    if isinstance(runtime, dict):
+        scope = runtime.get("scope")
+        command = runtime.get("command")
+        url = runtime.get("url")
+    else:
+        scope = getattr(runtime, "scope", None)
+        command = getattr(runtime, "command", None)
+        url = getattr(runtime, "url", None)
+    if scope == MCPServerConfig.Scope.PLATFORM:
+        return False
+    return bool(command) and not bool(url)
 
 
 def _post_sync_queue_key(agent_id: str) -> str:
@@ -1229,14 +1259,28 @@ class SandboxComputeService:
             "stopped": True,
         }
 
-    def discover_mcp_tools(self, server_config_id: str, *, reason: str) -> Dict[str, Any]:
-        server_payload, runtime = _build_mcp_server_payload(server_config_id)
+    def discover_mcp_tools(
+        self,
+        server_config_id: str,
+        *,
+        reason: str,
+        agent: Optional[PersistentAgent] = None,
+    ) -> Dict[str, Any]:
+        server_payload, runtime = _build_mcp_server_payload(server_config_id, agent=agent)
         if not server_payload or runtime is None:
             return {"status": "error", "message": "MCP server config not available."}
+
+        session: Optional[AgentComputeSession] = None
+        if _requires_agent_pod_discovery(runtime):
+            if agent is None:
+                return {"status": "skipped", "message": "Sandboxed stdio discovery requires an agent context."}
+            session = self._ensure_session(agent, source="discover_mcp_tools")
 
         result = self._backend.discover_mcp_tools(
             server_config_id,
             reason=reason,
+            agent=agent,
+            session=session,
             server_payload=server_payload,
         )
         if isinstance(result, dict) and result.get("status") == "ok":
@@ -1245,7 +1289,8 @@ class SandboxComputeService:
                 from api.agent.tools.mcp_manager import get_mcp_manager
 
                 manager = get_mcp_manager()
-                fingerprint = manager._build_tool_cache_fingerprint(runtime)
+                sandbox_context = manager._sandbox_cache_context_for_runtime(runtime, agent)
+                fingerprint = manager._build_tool_cache_fingerprint(runtime, sandbox_context=sandbox_context)
                 set_cached_mcp_tool_definitions(server_config_id, fingerprint, tools)
         return result
 

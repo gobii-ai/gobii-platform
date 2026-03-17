@@ -199,6 +199,13 @@ class PipedreamToolCacheContext:
     effective_app_slugs: List[str]
 
 
+@dataclass(frozen=True)
+class SandboxToolCacheContext:
+    """Agent-scoped discovery inputs for sandboxed stdio tool catalogs."""
+
+    agent_cache_key: str
+
+
 class GobiiStdioTransport(FastMCPStdioTransport):
     """Custom stdio transport that guarantees an errlog with a real fileno."""
 
@@ -529,15 +536,16 @@ class MCPToolManager:
         force_local: bool = False,
         require_client: bool = False,
         pipedream_context: Optional[PipedreamToolCacheContext] = None,
+        sandbox_context: Optional[SandboxToolCacheContext] = None,
     ) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
-        slot_key = self._tool_cache_slot_key(runtime, pipedream_context)
+        slot_key = self._tool_cache_slot_key(runtime, pipedream_context, sandbox_context)
         uses_per_agent_client = self._runtime_uses_per_agent_client(runtime)
         needs_shared_client = require_client and not uses_per_agent_client
         if slot_key in self._tools_cache:
-            if runtime.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
-                cache_fingerprint = self._build_tool_cache_fingerprint(runtime, pipedream_context)
+            if pipedream_context is not None or sandbox_context is not None:
+                cache_fingerprint = self._build_tool_cache_fingerprint(runtime, pipedream_context, sandbox_context)
                 cached_fingerprint = self._tool_cache_fingerprints.get(slot_key)
                 if cached_fingerprint and cached_fingerprint != cache_fingerprint:
                     self._tools_cache.pop(slot_key, None)
@@ -558,6 +566,7 @@ class MCPToolManager:
                 agent=agent,
                 force_local=force_local or needs_shared_client,
                 pipedream_context=pipedream_context,
+                sandbox_context=sandbox_context,
             )
         except Exception:
             logger.exception("Failed to register MCP server %s", runtime.name)
@@ -628,7 +637,12 @@ class MCPToolManager:
             )
             self._safe_register_runtime(existing_runtime)
 
-    def discover_tools_for_server(self, config_id: str) -> bool:
+    def discover_tools_for_server(
+        self,
+        config_id: str,
+        *,
+        agent: Optional[PersistentAgent] = None,
+    ) -> bool:
         """Fetch tool definitions for a server and populate the cache."""
         if not config_id:
             return False
@@ -647,8 +661,15 @@ class MCPToolManager:
             return False
 
         runtime = self._build_runtime_from_config(cfg)
+        sandbox_context = self._sandbox_cache_context_for_runtime(runtime, agent)
         try:
-            self._register_server(runtime, force_local=True, prefer_cache=False)
+            self._register_server(
+                runtime,
+                agent=agent,
+                force_local=True,
+                prefer_cache=False,
+                sandbox_context=sandbox_context,
+            )
         except (ValueError, RuntimeError):
             logger.exception("Failed to discover MCP tools for %s", config_id)
             return False
@@ -1016,10 +1037,24 @@ class MCPToolManager:
         self,
         server: MCPServerRuntime,
         pipedream_context: Optional[PipedreamToolCacheContext] = None,
+        sandbox_context: Optional[SandboxToolCacheContext] = None,
     ) -> str:
         if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None:
             return f"{server.config_id}:{pipedream_context.owner_cache_key}"
+        if sandbox_context is not None:
+            return f"{server.config_id}:agent:{sandbox_context.agent_cache_key}"
         return server.config_id
+
+    def _sandbox_cache_context_for_runtime(
+        self,
+        server: MCPServerRuntime,
+        agent: Optional[PersistentAgent],
+    ) -> Optional[SandboxToolCacheContext]:
+        if not agent or not self._should_route_runtime_via_sandbox(server, agent=agent):
+            return None
+        if not self._is_stdio_runtime(server):
+            return None
+        return SandboxToolCacheContext(agent_cache_key=str(agent.id))
 
     def _effective_prefetch_apps(
         self,
@@ -1039,6 +1074,7 @@ class MCPToolManager:
         self,
         server: MCPServerRuntime,
         pipedream_context: Optional[PipedreamToolCacheContext] = None,
+        sandbox_context: Optional[SandboxToolCacheContext] = None,
     ) -> Dict[str, Any]:
         def _normalize_mapping(values: Dict[str, str]) -> Dict[str, str]:
             return {
@@ -1066,6 +1102,11 @@ class MCPToolManager:
                 if server.name == self.PIPEDREAM_RUNTIME_NAME and pipedream_context is not None
                 else ""
             ),
+            "sandbox_agent_cache_key": (
+                sandbox_context.agent_cache_key
+                if sandbox_context is not None and self._is_stdio_runtime(server)
+                else ""
+            ),
             "headers": _normalize_mapping(server.headers or {}),
             "env": _normalize_mapping(server.env or {}),
         }
@@ -1074,8 +1115,9 @@ class MCPToolManager:
         self,
         server: MCPServerRuntime,
         pipedream_context: Optional[PipedreamToolCacheContext] = None,
+        sandbox_context: Optional[SandboxToolCacheContext] = None,
     ) -> str:
-        payload = self._tool_cache_fingerprint_payload(server, pipedream_context)
+        payload = self._tool_cache_fingerprint_payload(server, pipedream_context, sandbox_context)
         return build_mcp_tool_cache_fingerprint(payload)
 
     def _serialize_tools_for_cache(self, tools: List["MCPToolInfo"]) -> List[Dict[str, Any]]:
@@ -1125,6 +1167,7 @@ class MCPToolManager:
         *,
         sandbox_mode: bool = False,
         pipedream_context: Optional[PipedreamToolCacheContext] = None,
+        sandbox_context: Optional[SandboxToolCacheContext] = None,
     ) -> bool:
         cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
         if not cached_payload:
@@ -1134,7 +1177,7 @@ class MCPToolManager:
         if not cached_tools:
             return False
 
-        slot_key = self._tool_cache_slot_key(server, pipedream_context)
+        slot_key = self._tool_cache_slot_key(server, pipedream_context, sandbox_context)
         self._tools_cache[slot_key] = cached_tools
         self._tool_cache_fingerprints[slot_key] = cache_fingerprint
         if sandbox_mode:
@@ -1157,16 +1200,18 @@ class MCPToolManager:
         force_local: bool = False,
         prefer_cache: bool = True,
         pipedream_context: Optional[PipedreamToolCacheContext] = None,
+        sandbox_context: Optional[SandboxToolCacheContext] = None,
     ):
         """Register an MCP server and cache its tools."""
 
         sandbox_mode = self._should_route_runtime_via_sandbox(server, agent=agent) and not force_local
-        cache_fingerprint = self._build_tool_cache_fingerprint(server, pipedream_context)
+        cache_fingerprint = self._build_tool_cache_fingerprint(server, pipedream_context, sandbox_context)
         if prefer_cache and self._load_cached_tools(
             server,
             cache_fingerprint,
             sandbox_mode=sandbox_mode,
             pipedream_context=pipedream_context,
+            sandbox_context=sandbox_context,
         ):
             if not force_local:
                 return
@@ -1178,7 +1223,15 @@ class MCPToolManager:
                     server.name,
                     server.config_id,
                 )
-                schedule_mcp_tool_discovery(server.config_id, reason="cache_miss")
+                schedule_mcp_tool_discovery(server.config_id, reason="cache_miss", agent=agent)
+                if self._load_cached_tools(
+                    server,
+                    cache_fingerprint,
+                    sandbox_mode=sandbox_mode,
+                    pipedream_context=pipedream_context,
+                    sandbox_context=sandbox_context,
+                ):
+                    return
                 self._discard_client(server.config_id)
                 return
             logger.info(
@@ -1245,7 +1298,12 @@ class MCPToolManager:
         client = Client(transport)
         self._clients[server.config_id] = client
 
-        if prefer_cache and self._load_cached_tools(server, cache_fingerprint, pipedream_context=pipedream_context):
+        if prefer_cache and self._load_cached_tools(
+            server,
+            cache_fingerprint,
+            pipedream_context=pipedream_context,
+            sandbox_context=sandbox_context,
+        ):
             return
 
         loop = self._ensure_event_loop()
@@ -1254,7 +1312,7 @@ class MCPToolManager:
             tools = loop.run_until_complete(
                 self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
             )
-        slot_key = self._tool_cache_slot_key(server, pipedream_context)
+        slot_key = self._tool_cache_slot_key(server, pipedream_context, sandbox_context)
         self._tools_cache[slot_key] = tools
         self._tool_cache_fingerprints[slot_key] = cache_fingerprint
         if tools:
@@ -1458,11 +1516,19 @@ class MCPToolManager:
             if not runtime:
                 continue
             pipedream_context = None
+            sandbox_context = None
             if runtime.name == self.PIPEDREAM_RUNTIME_NAME:
                 pipedream_context = self._pipedream_cache_context_for_agent(agent)
-            if not self._ensure_runtime_registered(runtime, agent=agent, pipedream_context=pipedream_context):
+            else:
+                sandbox_context = self._sandbox_cache_context_for_runtime(runtime, agent)
+            if not self._ensure_runtime_registered(
+                runtime,
+                agent=agent,
+                pipedream_context=pipedream_context,
+                sandbox_context=sandbox_context,
+            ):
                 continue
-            slot_key = self._tool_cache_slot_key(runtime, pipedream_context)
+            slot_key = self._tool_cache_slot_key(runtime, pipedream_context, sandbox_context)
             server_tools = self._tools_cache.get(slot_key)
             if server_tools:
                 tools.extend(server_tools)
