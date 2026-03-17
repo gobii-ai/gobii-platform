@@ -5603,6 +5603,13 @@ class ConsoleUsageView(ConsoleViewMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class ConsoleStatusView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/system_status.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
+
+
 class SystemSettingsView(SystemAdminRequiredMixin, TemplateView):
     template_name = "system_settings.html"
 

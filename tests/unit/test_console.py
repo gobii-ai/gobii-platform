@@ -111,6 +111,46 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
 
     @tag("batch_console_agents")
+    def test_staff_status_page_renders_react_mount(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-status@example.com",
+            email="admin-status@example.com",
+            password="testpass123",
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("console-status"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-app="system-status"')
+        self.assertNotContains(response, 'id="console-submenu"')
+
+    @tag("batch_console_agents")
+    def test_staff_status_page_requires_staff(self):
+        response = self.client.get(reverse("console-status"))
+        self.assertEqual(response.status_code, 403)
+
+    @tag("batch_console_agents")
+    def test_staff_nav_shows_status_link_only_for_staff(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-status-nav@example.com",
+            email="admin-status-nav@example.com",
+            password="testpass123",
+        )
+
+        staff_client = Client()
+        staff_client.force_login(admin_user)
+        staff_response = staff_client.get(reverse("usage"))
+        self.assertEqual(staff_response.status_code, 200)
+        self.assertContains(staff_response, 'href="/console/status/"')
+
+        nonstaff_response = self.client.get(reverse("usage"))
+        self.assertEqual(nonstaff_response.status_code, 200)
+        self.assertNotContains(nonstaff_response, 'href="/console/status/"')
+
+    @tag("batch_console_agents")
     def test_admin_action_can_undelete_soft_deleted_agent(self):
         from api.models import BrowserUseAgent, PersistentAgent
 

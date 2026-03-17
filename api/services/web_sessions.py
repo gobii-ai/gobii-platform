@@ -305,6 +305,41 @@ def get_active_web_sessions(
             _mark_session_ended(session)
 
 
+def get_live_web_sessions_for_environment(
+    execution_environment: str,
+    *,
+    ttl_seconds: int = WEB_SESSION_TTL_SECONDS,
+    now: Optional[timezone.datetime] = None,
+) -> Iterable[PersistentAgentWebSession]:
+    stamp = now or _now()
+    threshold = stamp - timedelta(seconds=ttl_seconds)
+    (
+        PersistentAgentWebSession.objects.filter(
+            ended_at__isnull=True,
+            last_seen_at__lt=threshold,
+            agent__execution_environment=execution_environment,
+            agent__is_deleted=False,
+        )
+        .update(ended_at=stamp)
+    )
+    sessions = (
+        PersistentAgentWebSession.objects.filter(
+            ended_at__isnull=True,
+            last_seen_at__gte=threshold,
+            agent__execution_environment=execution_environment,
+            agent__is_deleted=False,
+        )
+        .select_related("agent", "user")
+        .order_by("-last_seen_at")
+    )
+
+    for session in sessions:
+        if _is_session_live(session, ttl_seconds=ttl_seconds, now=stamp):
+            yield session
+        else:
+            _mark_session_ended(session, ended_at=stamp)
+
+
 def has_active_web_session(
     agent: PersistentAgent,
     *,
@@ -373,6 +408,7 @@ __all__ = [
     "touch_web_session",
     "get_active_web_session",
     "get_active_web_sessions",
+    "get_live_web_sessions_for_environment",
     "has_active_web_session",
     "delete_expired_sessions",
 ]
