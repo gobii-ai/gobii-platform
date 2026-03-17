@@ -27,7 +27,7 @@ from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
-from constants.plans import PlanNames
+from constants.plans import PlanNames, PlanSlugs
 from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
 from tasks.services import TaskCreditService
@@ -222,6 +222,18 @@ def _trial_topoff_amount(
         as_of=as_of,
         plan_id=plan_id,
     )
+
+
+def _trial_start_credit_amount(*, plan_id: str | None, monthly_credits: int) -> Decimal:
+    """Return the initial trial grant amount for a plan.
+
+    Scale trials intentionally start smaller to limit abuse; conversion top-off
+    logic later restores the account to the full monthly allowance.
+    """
+    normalized_plan = str(plan_id or "").strip().lower()
+    if normalized_plan in {PlanNames.SCALE, PlanSlugs.SCALE}:
+        return Decimal(monthly_credits) / Decimal(4)
+    return Decimal(monthly_credits)
 
 
 def _owner_plan_topoff_amount(
@@ -2625,6 +2637,22 @@ def handle_subscription_event(event, **kwargs):
                             billing_reason == "subscription_create"
                             or (billing_reason is None and event_type == "customer.subscription.created")
                         )
+                        monthly_credits = None
+                        if isinstance(plan, Mapping):
+                            monthly_credits = plan.get("monthly_task_credits")
+                        try:
+                            monthly_credits = int(monthly_credits) if monthly_credits is not None else None
+                        except (TypeError, ValueError):
+                            monthly_credits = None
+                        if monthly_credits is None:
+                            should_grant = False
+                        else:
+                            trial_credit_amount = _trial_start_credit_amount(
+                                plan_id=plan_value,
+                                monthly_credits=monthly_credits,
+                            )
+                            if trial_credit_amount != Decimal(monthly_credits):
+                                credit_override = trial_credit_amount
                         if not grant_invoice_id:
                             anchor_dt = trial_start_dt or current_period_start_dt
                             anchor = anchor_dt.date().isoformat() if anchor_dt else "start"
