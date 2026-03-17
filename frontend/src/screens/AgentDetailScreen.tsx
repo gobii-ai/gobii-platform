@@ -2,7 +2,6 @@ import type { FormEvent, ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
-  ArrowDownToLine,
   ArrowLeft,
   ArrowUpFromLine,
   Check,
@@ -20,12 +19,10 @@ import {
   ShieldAlert,
   Trash2,
   UserPlus,
-  Users,
   XCircle,
   Zap,
 } from 'lucide-react'
 import {
-  Checkbox as AriaCheckbox,
   ColorSwatch,
   ColorSwatchPicker,
   ColorSwatchPickerItem,
@@ -35,8 +32,19 @@ import {
   Switch as AriaSwitch,
 } from 'react-aria-components'
 import { Modal } from '../components/common/Modal'
+import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
+import { AddContactModal } from '../components/agentSettings/AddContactModal'
+import { AllowlistContactsTable } from '../components/agentSettings/AllowlistContactsTable'
+import { CollaboratorsTable } from '../components/agentSettings/CollaboratorsTable'
+import type {
+  AllowlistInput,
+  AllowlistTableRow,
+  CollaboratorTableRow,
+  PendingAllowlistAction,
+  PendingCollaboratorAction,
+} from '../components/agentSettings/contactTypes'
 import { useModal } from '../hooks/useModal'
 import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
 
@@ -320,15 +328,216 @@ type FormState = {
   agentColorHex: string
 }
 
-type AllowlistInput = {
-  address: string
-  channel: string
-  allowInbound: boolean
-  allowOutbound: boolean
-}
-
 const generateTempId = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+
+const normalizeAllowlistAddress = (value: string) => value.trim().toLowerCase()
+
+function isCreatePendingAction<TAction extends { type: string }>(action: TAction): action is Extract<TAction, PendingCreateAction> {
+  return action.type === 'create'
+}
+
+type PendingCreateAction = {
+  type: 'create'
+  tempId: string
+}
+
+type PendingIdAction = {
+  type: string
+  id: string
+}
+
+function isPendingRemoval(pendingType?: string): boolean {
+  return pendingType === 'remove' || pendingType === 'cancel_invite' || pendingType === 'delete'
+}
+
+function buildStagedRows<
+  TPendingAction extends PendingCreateAction | PendingIdAction,
+  TRow extends { id: string; pendingType?: TPendingAction['type']; temp?: boolean },
+>({
+  baseRows,
+  pendingActions,
+  createRow,
+  sortRows,
+}: {
+  baseRows: TRow[]
+  pendingActions: TPendingAction[]
+  createRow: (action: Extract<TPendingAction, PendingCreateAction>) => TRow
+  sortRows: (left: TRow, right: TRow) => number
+}): TRow[] {
+  const rows = new Map(baseRows.map((row) => [row.id, row] as const))
+
+  for (const action of pendingActions) {
+    if (isCreatePendingAction(action)) {
+      rows.set(action.tempId, createRow(action))
+      continue
+    }
+
+    if (!('id' in action)) {
+      continue
+    }
+
+    const row = rows.get(action.id)
+    if (!row) {
+      continue
+    }
+
+    rows.set(action.id, {
+      ...row,
+      pendingType: action.type,
+    })
+  }
+
+  return Array.from(rows.values()).sort(sortRows)
+}
+
+function stagePersistedRowActions<
+  TPendingAction extends PendingCreateAction | PendingIdAction,
+  TRow extends { id: string; temp?: boolean },
+>({
+  pendingActions,
+  rows,
+  getPersistedAction,
+}: {
+  pendingActions: TPendingAction[]
+  rows: TRow[]
+  getPersistedAction: (row: TRow) => Extract<TPendingAction, PendingIdAction> | null
+}): TPendingAction[] {
+  const tempIds = new Set(rows.filter((row) => row.temp).map((row) => row.id))
+  const persistedActions = rows
+    .filter((row) => !row.temp)
+    .map(getPersistedAction)
+    .filter((action): action is Extract<TPendingAction, PendingIdAction> => action !== null)
+  const persistedKeys = new Set(persistedActions.map((action) => `${action.type}:${action.id}`))
+
+  const next = pendingActions.filter((action) => {
+    if (isCreatePendingAction(action)) {
+      return !tempIds.has(action.tempId)
+    }
+
+    if (!('id' in action)) {
+      return true
+    }
+
+    return !persistedKeys.has(`${action.type}:${action.id}`)
+  })
+
+  return [...next, ...persistedActions] as TPendingAction[]
+}
+
+async function runPendingActionGroup<TAction>({
+  actions,
+  submitAction,
+  clearActions,
+  trimProcessedActions,
+}: {
+  actions: TAction[]
+  submitAction: (action: TAction) => Promise<void>
+  clearActions: () => void
+  trimProcessedActions: (processedCount: number) => void
+}) {
+  if (!actions.length) {
+    return
+  }
+
+  let processedCount = 0
+
+  try {
+    for (const action of actions) {
+      await submitAction(action)
+      processedCount += 1
+    }
+
+    clearActions()
+  } catch (error) {
+    if (processedCount > 0) {
+      trimProcessedActions(processedCount)
+    }
+    throw error
+  }
+}
+
+function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowlistAction[]): AllowlistTableRow[] {
+  return buildStagedRows({
+    baseRows: [
+      ...state.entries.map<AllowlistTableRow>((entry) => ({
+        id: entry.id,
+        kind: 'entry',
+        channel: entry.channel,
+        address: entry.address,
+        allowInbound: entry.allowInbound,
+        allowOutbound: entry.allowOutbound,
+      })),
+      ...state.pendingInvites.map<AllowlistTableRow>((invite) => ({
+        id: invite.id,
+        kind: 'invite',
+        channel: invite.channel,
+        address: invite.address,
+        allowInbound: invite.allowInbound,
+        allowOutbound: invite.allowOutbound,
+      })),
+    ],
+    pendingActions,
+    createRow: (action) => ({
+      id: action.tempId,
+      kind: 'entry',
+      channel: action.channel,
+      address: action.address,
+      allowInbound: action.allowInbound,
+      allowOutbound: action.allowOutbound,
+      temp: true,
+      pendingType: 'create',
+    }),
+    sortRows: (left, right) => {
+      const addressCompare = left.address.localeCompare(right.address, undefined, { sensitivity: 'base' })
+      if (addressCompare !== 0) {
+        return addressCompare
+      }
+      if (left.kind !== right.kind) {
+        return left.kind === 'entry' ? -1 : 1
+      }
+      return left.id.localeCompare(right.id)
+    },
+  })
+}
+
+function buildCollaboratorRows(state: CollaboratorState, pendingActions: PendingCollaboratorAction[]): CollaboratorTableRow[] {
+  return buildStagedRows({
+    baseRows: [
+      ...state.entries.map<CollaboratorTableRow>((entry) => ({
+        id: entry.id,
+        kind: 'active',
+        email: entry.email,
+        name: entry.name,
+      })),
+      ...state.pendingInvites.map<CollaboratorTableRow>((invite) => ({
+        id: invite.id,
+        kind: 'pending',
+        email: invite.email,
+        name: 'Invite pending',
+      })),
+    ],
+    pendingActions,
+    createRow: (action) => ({
+      id: action.tempId,
+      kind: 'pending',
+      email: action.email,
+      name: action.name,
+      temp: true,
+      pendingType: 'create',
+    }),
+    sortRows: (left, right) => {
+      const emailCompare = left.email.localeCompare(right.email, undefined, { sensitivity: 'base' })
+      if (emailCompare !== 0) {
+        return emailCompare
+      }
+      if (left.kind !== right.kind) {
+        return left.kind === 'active' ? -1 : 1
+      }
+      return left.id.localeCompare(right.id)
+    },
+  })
+}
 
 const normalizeWebhooks = (hooks: AgentWebhook[]): DisplayWebhook[] => hooks.map((hook) => ({ ...hook }))
 
@@ -412,6 +621,16 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [peerLinkCandidates, setPeerLinkCandidates] = useState(initialData.peerLinks.candidates)
   const [peerLinkDefaults, setPeerLinkDefaults] = useState(initialData.peerLinks.defaults)
   const [pendingPeerActions, setPendingPeerActions] = useState<PendingPeerLinkAction[]>([])
+  const [savedAllowlistState, setSavedAllowlistState] = useState(initialData.allowlist)
+  const [pendingAllowlistActions, setPendingAllowlistActions] = useState<PendingAllowlistAction[]>([])
+  const [savedCollaboratorState, setSavedCollaboratorState] = useState(initialData.collaborators)
+  const [pendingCollaboratorActions, setPendingCollaboratorActions] = useState<PendingCollaboratorAction[]>([])
+  const [collaboratorError, setCollaboratorError] = useState<string | null>(null)
+  const [selectedOrgId, setSelectedOrgId] = useState(initialData.reassignment.assignedOrg?.id ?? '')
+  const [reassignError, setReassignError] = useState<string | null>(null)
+  const [reassigning, setReassigning] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [modal, showModal] = useModal()
   const tierMultiplierByKey = useMemo(() => {
     const map = new Map<IntelligenceTierKey, number>()
     for (const option of initialData.llmIntelligence?.options ?? []) {
@@ -516,6 +735,16 @@ useEffect(() => {
     setPeerLinkDefaults(initialData.peerLinks.defaults)
     setPendingPeerActions([])
   }, [initialData.peerLinks])
+
+  useEffect(() => {
+    setSavedAllowlistState(initialData.allowlist)
+    setPendingAllowlistActions([])
+  }, [initialData.allowlist])
+
+  useEffect(() => {
+    setSavedCollaboratorState(initialData.collaborators)
+    setPendingCollaboratorActions([])
+  }, [initialData.collaborators])
 
 const mcpHasChanges = useMemo(
   () =>
@@ -747,9 +976,40 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     })
   }, [])
 
+  const allowlistRows = useMemo(
+    () => buildAllowlistRows(savedAllowlistState, pendingAllowlistActions),
+    [pendingAllowlistActions, savedAllowlistState],
+  )
+  const collaboratorRows = useMemo(
+    () => buildCollaboratorRows(savedCollaboratorState, pendingCollaboratorActions),
+    [pendingCollaboratorActions, savedCollaboratorState],
+  )
+  const projectedAllowlistEntryCount = useMemo(
+    () => allowlistRows.filter((row) => row.kind === 'entry' && row.pendingType !== 'remove').length,
+    [allowlistRows],
+  )
+  const projectedAllowlistInviteCount = useMemo(
+    () => allowlistRows.filter((row) => row.kind === 'invite' && row.pendingType !== 'cancel_invite').length,
+    [allowlistRows],
+  )
+  const projectedCollaboratorActiveCount = useMemo(
+    () => collaboratorRows.filter((row) => row.kind === 'active' && row.pendingType !== 'remove').length,
+    [collaboratorRows],
+  )
+  const projectedCollaboratorPendingCount = useMemo(
+    () => collaboratorRows.filter((row) => row.kind === 'pending' && row.pendingType !== 'cancel_invite').length,
+    [collaboratorRows],
+  )
+  const projectedCollaboratorTotalCount = projectedCollaboratorActiveCount + projectedCollaboratorPendingCount
+  const projectedContactSlots = useMemo(
+    () => projectedCollaboratorActiveCount + projectedCollaboratorPendingCount + projectedAllowlistEntryCount + projectedAllowlistInviteCount,
+    [projectedAllowlistEntryCount, projectedAllowlistInviteCount, projectedCollaboratorActiveCount, projectedCollaboratorPendingCount],
+  )
+  const allowlistDirty = pendingAllowlistActions.length > 0
+  const collaboratorDirty = pendingCollaboratorActions.length > 0
   const webhooksDirty = pendingWebhookActions.length > 0
   const peerLinksDirty = pendingPeerActions.length > 0
-  const hasAnyChanges = generalHasChanges || mcpHasChanges || webhooksDirty || peerLinksDirty
+  const hasAnyChanges = generalHasChanges || mcpHasChanges || allowlistDirty || collaboratorDirty || webhooksDirty || peerLinksDirty
 
   const applyPeerLinkPayload = useCallback((payload: PeerLinksInfo) => {
     setSavedPeerLinks(payload)
@@ -757,6 +1017,119 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setPeerLinkCandidates(payload.candidates)
     setPeerLinkDefaults(payload.defaults)
   }, [])
+
+  const submitAllowlistAction = useCallback(
+    async (action: PendingAllowlistAction) => {
+      const formData = new FormData()
+      formData.append('action', action.type === 'cancel_invite' ? 'cancel_invite' : action.type === 'remove' ? 'remove_allowlist' : 'add_allowlist')
+      if (action.type === 'create') {
+        formData.append('channel', action.channel)
+        formData.append('address', action.address)
+        formData.append('allow_inbound', String(action.allowInbound))
+        formData.append('allow_outbound', String(action.allowOutbound))
+      } else if (action.type === 'remove') {
+        formData.append('entry_id', action.id)
+      } else {
+        formData.append('invite_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.allowlist) {
+        applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
+      }
+      if (data?.collaborators) {
+        applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
+      }
+    },
+    [applyAllowlistPayload, applyCollaboratorPatch, submitFormData],
+  )
+
+  const submitCollaboratorAction = useCallback(
+    async (action: PendingCollaboratorAction) => {
+      const formData = new FormData()
+      formData.append(
+        'action',
+        action.type === 'cancel_invite'
+          ? 'cancel_collaborator_invite'
+          : action.type === 'remove'
+            ? 'remove_collaborator'
+            : 'add_collaborator',
+      )
+      if (action.type === 'create') {
+        formData.append('email', action.email)
+      } else if (action.type === 'remove') {
+        formData.append('collaborator_id', action.id)
+      } else {
+        formData.append('invite_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.collaborators) {
+        applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
+      }
+      if (data?.allowlist) {
+        applyAllowlistPayload(data.allowlist as Partial<AllowlistState>)
+      }
+    },
+    [applyAllowlistPayload, applyCollaboratorPatch, submitFormData],
+  )
+
+  const submitWebhookAction = useCallback(
+    async (action: PendingWebhookAction) => {
+      const formData = new FormData()
+      if (action.type === 'create') {
+        formData.append('webhook_action', 'create')
+        formData.append('webhook_name', action.name)
+        formData.append('webhook_url', action.url)
+      } else if (action.type === 'update') {
+        formData.append('webhook_action', 'update')
+        formData.append('webhook_id', action.id)
+        formData.append('webhook_name', action.name)
+        formData.append('webhook_url', action.url)
+      } else {
+        formData.append('webhook_action', 'delete')
+        formData.append('webhook_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.webhooks) {
+        const normalized = normalizeWebhooks(data.webhooks as AgentWebhook[])
+        setSavedWebhooks(data.webhooks as AgentWebhook[])
+        setWebhooksState(normalized)
+      }
+    },
+    [submitFormData],
+  )
+
+  const submitPeerAction = useCallback(
+    async (action: PendingPeerLinkAction) => {
+      const formData = new FormData()
+      if (action.type === 'create') {
+        formData.append('peer_link_action', 'create')
+        formData.append('peer_agent_id', action.peerAgentId)
+        formData.append('messages_per_window', String(action.messagesPerWindow))
+        formData.append('window_hours', String(action.windowHours))
+      } else if (action.type === 'update') {
+        formData.append('peer_link_action', 'update')
+        formData.append('link_id', action.id)
+        formData.append('messages_per_window', String(action.messagesPerWindow))
+        formData.append('window_hours', String(action.windowHours))
+        formData.append('feature_flag', action.featureFlag)
+        if (action.isEnabled) {
+          formData.append('is_enabled', 'on')
+        }
+      } else {
+        formData.append('peer_link_action', 'delete')
+        formData.append('link_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.peerLinks) {
+        applyPeerLinkPayload(data.peerLinks as PeerLinksInfo)
+      }
+    },
+    [applyPeerLinkPayload, submitFormData],
+  )
 
   const resetForm = useCallback(() => {
     setFormState(savedFormState)
@@ -766,12 +1139,15 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     resetForm()
     setSelectedOrgServers(new Set(savedOrgServers))
     setSelectedPersonalServers(new Set(savedPersonalServers))
+    setPendingAllowlistActions([])
+    setPendingCollaboratorActions([])
     setPendingWebhookActions([])
     setWebhooksState(normalizeWebhooks(savedWebhooks))
     setPendingPeerActions([])
     setPeerLinksState(savedPeerLinks.entries)
     setPeerLinkCandidates(savedPeerLinks.candidates)
     setPeerLinkDefaults(savedPeerLinks.defaults)
+    setCollaboratorError(null)
     setSaveError(null)
     setSaveNotice(null)
     resetAvatarState()
@@ -784,8 +1160,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setSaving(true)
     setSaveError(null)
     setSaveNotice(null)
-    let processedWebhookActions = 0
-    let processedPeerActions = 0
     try {
       if (generalHasChanges && generalFormRef.current) {
         const data = await submitFormData(new FormData(generalFormRef.current))
@@ -837,76 +1211,43 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         }
       }
 
-      if (pendingWebhookActions.length) {
-        for (const action of pendingWebhookActions) {
-          const formData = new FormData()
-          if (action.type === 'create') {
-            formData.append('webhook_action', 'create')
-            formData.append('webhook_name', action.name)
-            formData.append('webhook_url', action.url)
-          } else if (action.type === 'update') {
-            formData.append('webhook_action', 'update')
-            formData.append('webhook_id', action.id)
-            formData.append('webhook_name', action.name)
-            formData.append('webhook_url', action.url)
-          } else {
-            formData.append('webhook_action', 'delete')
-            formData.append('webhook_id', action.id)
-          }
-          const data = await submitFormData(formData)
-          if (data?.webhooks) {
-            const normalized = normalizeWebhooks(data.webhooks as AgentWebhook[])
-            setSavedWebhooks(data.webhooks as AgentWebhook[])
-            setWebhooksState(normalized)
-          }
-          processedWebhookActions += 1
-        }
-        setPendingWebhookActions([])
-      }
+      await runPendingActionGroup({
+        actions: pendingAllowlistActions,
+        submitAction: submitAllowlistAction,
+        clearActions: () => setPendingAllowlistActions([]),
+        trimProcessedActions: (processedCount) => setPendingAllowlistActions((prev) => prev.slice(processedCount)),
+      })
 
-      if (pendingPeerActions.length) {
-        for (const action of pendingPeerActions) {
-          const formData = new FormData()
-          if (action.type === 'create') {
-            formData.append('peer_link_action', 'create')
-            formData.append('peer_agent_id', action.peerAgentId)
-            formData.append('messages_per_window', String(action.messagesPerWindow))
-            formData.append('window_hours', String(action.windowHours))
-          } else if (action.type === 'update') {
-            formData.append('peer_link_action', 'update')
-            formData.append('link_id', action.id)
-            formData.append('messages_per_window', String(action.messagesPerWindow))
-            formData.append('window_hours', String(action.windowHours))
-            formData.append('feature_flag', action.featureFlag)
-            if (action.isEnabled) {
-              formData.append('is_enabled', 'on')
-            }
-          } else {
-            formData.append('peer_link_action', 'delete')
-            formData.append('link_id', action.id)
-          }
-          const data = await submitFormData(formData)
-          if (data?.peerLinks) {
-            applyPeerLinkPayload(data.peerLinks as PeerLinksInfo)
-          }
-          processedPeerActions += 1
-        }
-        setPendingPeerActions([])
-      }
+      await runPendingActionGroup({
+        actions: pendingCollaboratorActions,
+        submitAction: submitCollaboratorAction,
+        clearActions: () => setPendingCollaboratorActions([]),
+        trimProcessedActions: (processedCount) => setPendingCollaboratorActions((prev) => prev.slice(processedCount)),
+      })
+
+      await runPendingActionGroup({
+        actions: pendingWebhookActions,
+        submitAction: submitWebhookAction,
+        clearActions: () => setPendingWebhookActions([]),
+        trimProcessedActions: (processedCount) => setPendingWebhookActions((prev) => prev.slice(processedCount)),
+      })
+
+      await runPendingActionGroup({
+        actions: pendingPeerActions,
+        submitAction: submitPeerAction,
+        clearActions: () => setPendingPeerActions([]),
+        trimProcessedActions: (processedCount) => setPendingPeerActions((prev) => prev.slice(processedCount)),
+      })
 
       setSaveError(null)
     } catch (error) {
-      if (processedWebhookActions > 0) {
-        setPendingWebhookActions((prev) => prev.slice(processedWebhookActions))
-      }
-      if (processedPeerActions > 0) {
-        setPendingPeerActions((prev) => prev.slice(processedPeerActions))
-      }
       setSaveError(error instanceof Error ? error.message : 'Failed to save changes. Please try again.')
     } finally {
       setSaving(false)
     }
   }, [
+    applyAllowlistPayload,
+    applyCollaboratorPatch,
     applyPeerLinkPayload,
     avatarInputRef,
     clearAvatarPreviewUrl,
@@ -917,25 +1258,20 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     hasAnyChanges,
     initialData.llmIntelligence?.options,
     mcpHasChanges,
+    pendingAllowlistActions,
+    pendingCollaboratorActions,
     pendingPeerActions,
     pendingWebhookActions,
     savedAvatarUrl,
     selectedOrgServers,
     selectedPersonalServers,
     sliderEmptyValue,
+    submitAllowlistAction,
+    submitCollaboratorAction,
+    submitPeerAction,
     submitFormData,
+    submitWebhookAction,
   ])
-  const [allowlistState, setAllowlistState] = useState(initialData.allowlist)
-  const [allowlistError, setAllowlistError] = useState<string | null>(null)
-  const [allowlistBusy, setAllowlistBusy] = useState(false)
-  const [collaboratorState, setCollaboratorState] = useState(initialData.collaborators)
-  const [collaboratorError, setCollaboratorError] = useState<string | null>(null)
-  const [collaboratorBusy, setCollaboratorBusy] = useState(false)
-  const [selectedOrgId, setSelectedOrgId] = useState(initialData.reassignment.assignedOrg?.id ?? '')
-  const [reassignError, setReassignError] = useState<string | null>(null)
-  const [reassigning, setReassigning] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [modal, showModal] = useModal()
   const openConfirmAction = useCallback(
     (config: ConfirmActionConfig) => {
       showModal((onClose) => <ConfirmActionDialog {...config} onClose={onClose} />)
@@ -1045,25 +1381,30 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     })
   }, [])
 
-  const applyAllowlistPatch = useCallback((payload?: Partial<AllowlistState>) => {
+  function applyAllowlistPayload(payload?: Partial<AllowlistState>) {
     if (!payload) {
       return
     }
-    setAllowlistState((prev) => ({
+    setSavedAllowlistState((prev) => ({
       ...prev,
-      entries: payload.entries ?? prev.entries,
-      pendingInvites: payload.pendingInvites ?? prev.pendingInvites,
+      show: typeof payload.show === 'boolean' ? payload.show : prev.show,
       ownerEmail: payload.ownerEmail ?? prev.ownerEmail,
       ownerPhone: payload.ownerPhone ?? prev.ownerPhone,
+      entries: payload.entries ?? prev.entries,
+      pendingInvites: payload.pendingInvites ?? prev.pendingInvites,
       activeCount: typeof payload.activeCount === 'number' ? payload.activeCount : prev.activeCount,
+      maxContacts: payload.maxContacts ?? prev.maxContacts,
+      pendingContactRequests:
+        typeof payload.pendingContactRequests === 'number' ? payload.pendingContactRequests : prev.pendingContactRequests,
+      emailVerified: typeof payload.emailVerified === 'boolean' ? payload.emailVerified : prev.emailVerified,
     }))
-  }, [])
+  }
 
-  const applyCollaboratorPatch = useCallback((payload?: Partial<CollaboratorState>) => {
+  function applyCollaboratorPatch(payload?: Partial<CollaboratorState>) {
     if (!payload) {
       return
     }
-    setCollaboratorState((prev) => ({
+    setSavedCollaboratorState((prev) => ({
       ...prev,
       entries: payload.entries ?? prev.entries,
       pendingInvites: payload.pendingInvites ?? prev.pendingInvites,
@@ -1073,140 +1414,179 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       maxContacts: payload.maxContacts ?? prev.maxContacts,
       canManage: typeof payload.canManage === 'boolean' ? payload.canManage : prev.canManage,
     }))
+  }
+
+  const stageAllowlistAdd = useCallback(
+    async (input: AllowlistInput) => {
+      const normalizedAddress = normalizeAllowlistAddress(input.address)
+      const hasDuplicate = allowlistRows.some(
+        (row) =>
+          row.channel === input.channel
+          && normalizeAllowlistAddress(row.address) === normalizedAddress
+          && !isPendingRemoval(row.pendingType),
+      )
+
+      if (hasDuplicate) {
+        throw new Error('This address is already listed for this agent.')
+      }
+
+      if (typeof savedAllowlistState.maxContacts === 'number' && savedAllowlistState.maxContacts > 0 && projectedContactSlots >= savedAllowlistState.maxContacts) {
+        throw new Error(`Contact limit reached. Maximum ${savedAllowlistState.maxContacts} contacts allowed.`)
+      }
+
+      const tempId = generateTempId()
+      setPendingAllowlistActions((prev) => [
+        ...prev,
+        {
+          type: 'create',
+          tempId,
+          channel: input.channel,
+          address: input.address.trim(),
+          allowInbound: input.allowInbound,
+          allowOutbound: input.allowOutbound,
+        },
+      ])
+    },
+    [allowlistRows, projectedContactSlots, savedAllowlistState.maxContacts],
+  )
+
+  const stageAllowlistRemoveRows = useCallback((rows: AllowlistTableRow[]) => {
+    if (!rows.length) {
+      return
+    }
+
+    setPendingAllowlistActions((prev) =>
+      stagePersistedRowActions({
+        pendingActions: prev,
+        rows,
+        getPersistedAction: (row) => {
+          if (row.kind === 'entry' && row.pendingType !== 'remove') {
+            return { type: 'remove', id: row.id }
+          }
+          if (row.kind === 'invite' && row.pendingType !== 'cancel_invite') {
+            return { type: 'cancel_invite', id: row.id }
+          }
+          return null
+        },
+      }),
+    )
   }, [])
 
-  const postAllowlistAction = useCallback(
-    async (body: Record<string, string | Blob>) => {
-      setAllowlistBusy(true)
-      setAllowlistError(null)
-      try {
-        const formData = new FormData()
-        formData.append('csrfmiddlewaretoken', initialData.csrfToken)
-        for (const [key, value] of Object.entries(body)) {
-          formData.append(key, value)
-        }
-        const response = await fetch(initialData.urls.detail, {
-          method: 'POST',
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          body: formData,
-        })
-        const data = await response.json()
-        if (data.allowlist) {
-          applyAllowlistPatch(data.allowlist as Partial<AllowlistState>)
-        }
-        if (data.collaborators) {
-          applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
-        }
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || 'Request failed. Please try again.')
-        }
-      } catch (error) {
-        setAllowlistError(error instanceof Error ? error.message : 'Request failed. Please try again.')
-        throw error
-      } finally {
-        setAllowlistBusy(false)
+  const openAddContactModal = useCallback(() => {
+    showModal((onClose) => (
+      <AddContactModal
+        onSubmit={stageAllowlistAdd}
+        onClose={onClose}
+      />
+    ))
+  }, [showModal, stageAllowlistAdd])
+
+  const confirmAllowlistRemoval = useCallback(
+    (rows: AllowlistTableRow[]) => {
+      if (!rows.length) {
+        return
       }
-    },
-    [applyAllowlistPatch, initialData.csrfToken, initialData.urls.detail],
-  )
 
-  const handleAllowlistAdd = useCallback(
-    async (input: AllowlistInput) => {
-      await postAllowlistAction({
-        action: 'add_allowlist',
-        channel: input.channel,
-        address: input.address,
-        allow_inbound: String(input.allowInbound),
-        allow_outbound: String(input.allowOutbound),
-      })
-    },
-    [postAllowlistAction],
-  )
+      const removableCount = rows.filter((row) => row.kind === 'entry').length
+      const cancellableCount = rows.filter((row) => row.kind === 'invite').length
+      const label =
+        rows.length === 1
+          ? rows[0].kind === 'invite'
+            ? 'Cancel invite'
+            : 'Remove contact'
+          : 'Remove selected'
 
-  const handleAllowlistRemove = useCallback(
-    async (entryId: string) => {
-      await postAllowlistAction({
-        action: 'remove_allowlist',
-        entry_id: entryId,
-      })
-    },
-    [postAllowlistAction],
-  )
-
-  const handleCancelInvite = useCallback(
-    async (inviteId: string) => {
-      await postAllowlistAction({
-        action: 'cancel_invite',
-        invite_id: inviteId,
-      })
-    },
-    [postAllowlistAction],
-  )
-
-  const postCollaboratorAction = useCallback(
-    async (body: Record<string, string | Blob>) => {
-      setCollaboratorBusy(true)
-      setCollaboratorError(null)
-      try {
-        const formData = new FormData()
-        formData.append('csrfmiddlewaretoken', initialData.csrfToken)
-        for (const [key, value] of Object.entries(body)) {
-          formData.append(key, value)
+      let body: ReactNode
+      if (rows.length === 1) {
+        body =
+          rows[0].kind === 'invite'
+            ? `Cancel the pending invite for ${rows[0].address}?`
+            : `Remove ${rows[0].address} from the allowlist?`
+      } else {
+        const parts = []
+        if (removableCount > 0) {
+          parts.push(`${removableCount} contact${removableCount === 1 ? '' : 's'}`)
         }
-        const response = await fetch(initialData.urls.detail, {
-          method: 'POST',
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
-          body: formData,
-        })
-        const data = await response.json()
-        if (data.collaborators) {
-          applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
+        if (cancellableCount > 0) {
+          parts.push(`${cancellableCount} invite${cancellableCount === 1 ? '' : 's'}`)
         }
-        if (data.allowlist) {
-          applyAllowlistPatch(data.allowlist as Partial<AllowlistState>)
-        }
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || 'Request failed. Please try again.')
-        }
-      } catch (error) {
-        setCollaboratorError(error instanceof Error ? error.message : 'Request failed. Please try again.')
-        throw error
-      } finally {
-        setCollaboratorBusy(false)
+        body = `Remove ${parts.join(' and ')} from this agent?`
       }
+
+      openConfirmAction({
+        title: label,
+        body,
+        confirmLabel: label,
+        tone: 'danger',
+        onConfirm: () => stageAllowlistRemoveRows(rows),
+      })
     },
-    [applyAllowlistPatch, applyCollaboratorPatch, initialData.csrfToken, initialData.urls.detail],
+    [openConfirmAction, stageAllowlistRemoveRows],
   )
 
-  const handleCollaboratorAdd = useCallback(
+  const stageCollaboratorAdd = useCallback(
     async (email: string) => {
-      await postCollaboratorAction({
-        action: 'add_collaborator',
-        email,
-      })
+      const normalizedEmail = email.trim().toLowerCase()
+      const hasDuplicate = collaboratorRows.some(
+        (row) =>
+          row.email.trim().toLowerCase() === normalizedEmail
+          && !isPendingRemoval(row.pendingType),
+      )
+
+      if (hasDuplicate) {
+        throw new Error('This collaborator already has access or a pending invite.')
+      }
+
+      if (
+        typeof savedCollaboratorState.maxContacts === 'number'
+        && savedCollaboratorState.maxContacts > 0
+        && projectedContactSlots >= savedCollaboratorState.maxContacts
+      ) {
+        throw new Error(`Contact limit reached. Maximum ${savedCollaboratorState.maxContacts} contacts allowed.`)
+      }
+
+      setCollaboratorError(null)
+      const tempId = generateTempId()
+      setPendingCollaboratorActions((prev) => [
+        ...prev,
+        {
+          type: 'create',
+          tempId,
+          email: normalizedEmail,
+          name: 'Invite pending',
+        },
+      ])
     },
-    [postCollaboratorAction],
+    [collaboratorRows, projectedContactSlots, savedCollaboratorState.maxContacts],
   )
 
-  const handleCollaboratorRemove = useCallback(
-    async (collaboratorId: string) => {
-      await postCollaboratorAction({
-        action: 'remove_collaborator',
-        collaborator_id: collaboratorId,
-      })
-    },
-    [postCollaboratorAction],
-  )
+  const stageCollaboratorRemove = useCallback((row: CollaboratorTableRow) => {
+    setCollaboratorError(null)
+    setPendingCollaboratorActions((prev) =>
+      stagePersistedRowActions({
+        pendingActions: prev,
+        rows: [row],
+        getPersistedAction: (currentRow) => {
+          if (currentRow.kind === 'active' && currentRow.pendingType !== 'remove') {
+            return { type: 'remove', id: currentRow.id }
+          }
+          if (currentRow.kind === 'pending' && currentRow.pendingType !== 'cancel_invite') {
+            return { type: 'cancel_invite', id: currentRow.id }
+          }
+          return null
+        },
+      }),
+    )
+  }, [])
 
-  const handleCollaboratorCancelInvite = useCallback(
-    async (inviteId: string) => {
-      await postCollaboratorAction({
-        action: 'cancel_collaborator_invite',
-        invite_id: inviteId,
-      })
-    },
-    [postCollaboratorAction],
-  )
+  const openAddCollaboratorModal = useCallback(() => {
+    showModal((onClose) => (
+      <AddCollaboratorModal
+        onSubmit={stageCollaboratorAdd}
+        onClose={onClose}
+      />
+    ))
+  }, [showModal, stageCollaboratorAdd])
 
   const handleReassign = useCallback(
     async (targetOrgId: string | null) => {
@@ -1720,24 +2100,24 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
 
           {initialData.allowlist.show && (
             <AllowlistManager
-              state={allowlistState}
-              error={allowlistError}
-              busy={allowlistBusy}
-              onAdd={handleAllowlistAdd}
-              onRemove={handleAllowlistRemove}
-              onCancelInvite={handleCancelInvite}
+              state={savedAllowlistState}
+              rows={allowlistRows}
+              projectedSlotsUsed={projectedContactSlots}
+              saving={saving}
+              onAddContact={openAddContactModal}
+              onRemoveRows={confirmAllowlistRemoval}
               contactRequestsUrl={initialData.urls.contactRequests}
-              onConfirmAction={openConfirmAction}
             />
           )}
 
           <CollaboratorManager
-            state={collaboratorState}
+            state={savedCollaboratorState}
+            rows={collaboratorRows}
+            projectedTotalCount={projectedCollaboratorTotalCount}
             error={collaboratorError}
-            busy={collaboratorBusy}
-            onAdd={handleCollaboratorAdd}
-            onRemove={handleCollaboratorRemove}
-            onCancelInvite={handleCollaboratorCancelInvite}
+            busy={saving}
+            onAdd={openAddCollaboratorModal}
+            onRemove={stageCollaboratorRemove}
             onConfirmAction={openConfirmAction}
           />
         </div>
@@ -2009,47 +2389,28 @@ function PrimaryContacts({ primaryEmail, primarySms, emailSettingsUrl, smsEnable
 
 type AllowlistManagerProps = {
   state: AllowlistState
-  error: string | null
-  busy: boolean
-  onAdd: (input: AllowlistInput) => Promise<void>
-  onRemove: (entryId: string) => Promise<void>
-  onCancelInvite: (inviteId: string) => Promise<void>
+  rows: AllowlistTableRow[]
+  projectedSlotsUsed: number
+  saving: boolean
+  onAddContact: () => void
+  onRemoveRows: (rows: AllowlistTableRow[]) => void
   contactRequestsUrl: string
-  onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite, contactRequestsUrl, onConfirmAction }: AllowlistManagerProps) {
-  const [channel, setChannel] = useState('email')
-  const [address, setAddress] = useState('')
-  const [allowInbound, setAllowInbound] = useState(true)
-  const [allowOutbound, setAllowOutbound] = useState(true)
-
-  const handleSubmit = async () => {
-    if (!address.trim()) {
-      return
-    }
-    try {
-      await onAdd({ channel, address: address.trim(), allowInbound, allowOutbound })
-      setAddress('')
-      setAllowInbound(true)
-      setAllowOutbound(true)
-    } catch (error) {
-      // Errors are surfaced via allowlistError state
-      console.error(error)
-    }
-  }
-
+function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl }: AllowlistManagerProps) {
+  const contactCapReached = typeof state.maxContacts === 'number' && state.maxContacts > 0 && projectedSlotsUsed >= state.maxContacts
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-gray-500">
-        By default, the agent owner and organization members can communicate with this agent. You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
-      </p>
-      <p className="text-xs text-slate-600">
-        Contact slots include allowlist entries and collaborators.
-      </p>
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <p className="text-xs text-gray-500">
+          By default, the agent owner and organization members can communicate with this agent. You can add additional contacts below.
+          Note: Multi-recipient messaging is limited to email only.
+        </p>
+        <p className="text-xs text-slate-600">Contact slots include allowlist entries and collaborators.</p>
+      </div>
 
       {!state.emailVerified && (
-        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
           <Mail className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
           <div className="text-sm text-amber-800">
             <span className="font-medium">Email verification required.</span>{' '}
@@ -2059,265 +2420,78 @@ function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite,
         </div>
       )}
 
-      <div className="space-y-4">
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
-          <h4 className="text-sm font-medium text-gray-700">Add Allowed Contact</h4>
-          <div className="flex gap-2">
-            <select
-              id="allowlist-channel"
-              name="channel"
-              value={channel}
-              onChange={(event) => setChannel(event.target.value)}
-              className="py-1.5 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
-            >
-              <option value="email">Email</option>
-            </select>
-            <input
-              type="email"
-              id="allowlist-address"
-              name="address"
-              placeholder="email@example.com"
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              className="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
-            />
-          </div>
-          <div className="flex gap-4 items-center">
-            <AriaCheckbox
-              isSelected={allowInbound}
-              onChange={setAllowInbound}
-              className="group inline-flex items-center gap-2 text-sm text-gray-700"
-            >
-              {({ isSelected }) => (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className={`flex h-4 w-4 items-center justify-center rounded border transition ${
-                      isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
-                    }`}
-                  >
-                    <Check className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                  <span className="flex flex-col leading-tight">
-                    <span>Allow Inbound</span>
-                    <span className="text-xs text-gray-500">(can send to agent)</span>
-                  </span>
-                </>
-              )}
-            </AriaCheckbox>
-            <AriaCheckbox
-              isSelected={allowOutbound}
-              onChange={setAllowOutbound}
-              className="group inline-flex items-center gap-2 text-sm text-gray-700"
-            >
-              {({ isSelected }) => (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className={`flex h-4 w-4 items-center justify-center rounded border transition ${
-                      isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
-                    }`}
-                  >
-                    <Check className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                  <span className="flex flex-col leading-tight">
-                    <span>Allow Outbound</span>
-                    <span className="text-xs text-gray-500">(agent can send to)</span>
-                  </span>
-                </>
-              )}
-            </AriaCheckbox>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={busy || !address.trim()}
-              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              Add
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAddress('')
-                setAllowInbound(true)
-                setAllowOutbound(true)
-              }}
-              className="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
-            >
-              Cancel
-            </button>
-          </div>
-          {error && <div className="text-xs text-red-600">{error}</div>}
-        </div>
-
-        {state.pendingContactRequests > 0 && (
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-yellow-600" aria-hidden="true" />
-                <span className="text-sm font-medium text-yellow-800">
-                  {state.pendingContactRequests} Contact Request{state.pendingContactRequests === 1 ? '' : 's'} Pending
-                </span>
-              </div>
-              <a href={contactRequestsUrl} className="text-sm font-medium text-yellow-700 hover:text-yellow-900 underline">
-                Review
-              </a>
-            </div>
-          </div>
-        )}
-
-        <div className="p-3 bg-gray-50 rounded-lg">
-          <div className="flex justify-between items-center mb-2">
-            <h4 className="text-sm font-medium text-gray-700">Contact slots used</h4>
-            <span className="text-xs text-gray-500">
-              {state.activeCount} / {state.maxContacts ?? 'Unlimited'} contacts
-            </span>
-          </div>
-          <AllowlistEntries state={state} onRemove={onRemove} onCancelInvite={onCancelInvite} onConfirmAction={onConfirmAction} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type AllowlistEntriesProps = {
-  state: AllowlistState
-  onRemove: (entryId: string) => Promise<void>
-  onCancelInvite: (inviteId: string) => Promise<void>
-  onConfirmAction: (config: ConfirmActionConfig) => void
-}
-
-function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: AllowlistEntriesProps) {
-  const hasContacts = state.entries.length > 0 || state.pendingInvites.length > 0
-  const renderChannelIcon = (channel: string, className = 'w-4 h-4 text-gray-400') =>
-    channel?.toLowerCase() === 'sms' ? (
-      <Phone className={className} aria-hidden="true" />
-    ) : (
-      <Mail className={className} aria-hidden="true" />
-    )
-
-  return (
-    <div className="space-y-2">
-      {(state.ownerEmail || state.ownerPhone) && (
-        <div className="text-xs text-gray-500 mb-2">
-          <div className="font-medium">Owner (always allowed in Default mode):</div>
-          {state.ownerEmail && (
-            <div className="flex items-center justify-between py-1 px-2">
-              <span className="flex items-center gap-2">
-                <Mail className="w-3 h-3 text-gray-400" aria-hidden="true" />
-                {state.ownerEmail}
+      {state.pendingContactRequests > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600" aria-hidden="true" />
+              <span className="text-sm font-medium text-amber-800">
+                {state.pendingContactRequests} Contact Request{state.pendingContactRequests === 1 ? '' : 's'} Pending
               </span>
+            </div>
+            <a href={contactRequestsUrl} className="text-sm font-medium text-amber-700 hover:text-amber-900 underline">
+              Review
+            </a>
+          </div>
+        </div>
+      )}
+
+      {(state.ownerEmail || state.ownerPhone) && (
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner Endpoints</div>
+          <p className="mt-1 text-xs text-slate-600">Owner endpoints are always allowed in default mode.</p>
+          {state.ownerEmail && (
+            <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                <Mail className="w-4 h-4" aria-hidden="true" />
+              </span>
+              <span className="font-medium">{state.ownerEmail}</span>
             </div>
           )}
           {state.ownerPhone && (
-            <div className="flex items-center justify-between py-1 px-2">
-              <span className="flex items-center gap-2">
-                <Phone className="w-3 h-3 text-gray-400" aria-hidden="true" />
-                {state.ownerPhone}
+            <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                <Phone className="w-4 h-4" aria-hidden="true" />
               </span>
+              <span className="font-medium">{state.ownerPhone}</span>
             </div>
           )}
-          <div className="border-t border-gray-200 my-2" />
         </div>
       )}
 
-      {state.pendingInvites.length > 0 && (
-        <div>
-          <div className="text-xs text-gray-500 mb-2 font-medium">Pending Invitations:</div>
-          {state.pendingInvites.map((invite) => (
-            <div key={invite.id} className="py-2 px-3 bg-yellow-50 rounded-lg border border-yellow-200 mb-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium flex items-center gap-2">
-                  {renderChannelIcon(invite.channel, 'w-4 h-4 text-gray-400')}
-                  {invite.address}
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-yellow-700 font-medium">Pending</span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onConfirmAction({
-                        title: 'Cancel invitation',
-                        body: `Cancel the allowlist invitation for ${invite.address}?`,
-                        confirmLabel: 'Cancel invitation',
-                        tone: 'danger',
-                        onConfirm: () => onCancelInvite(invite.id),
-                      })
-                    }
-                    className="text-red-600 hover:text-red-800 text-xs font-medium"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-              <AllowlistDirectionFlags allowInbound={invite.allowInbound} allowOutbound={invite.allowOutbound} labelColor="text-yellow-700" />
-            </div>
-          ))}
-          <div className="border-t border-gray-200 my-2" />
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-700">Contacts</h4>
+            <p className="text-xs text-slate-500">
+              {projectedSlotsUsed} / {state.maxContacts ?? 'Unlimited'} contact slots
+              {projectedSlotsUsed !== state.activeCount ? ` (currently ${state.activeCount})` : ''}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {contactCapReached && (
+              <span className="text-xs font-medium text-amber-700">
+                Remove contacts or collaborators before adding more.
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onAddContact}
+              disabled={saving || contactCapReached}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" aria-hidden="true" />
+              Add Contact
+            </button>
+          </div>
         </div>
-      )}
 
-      {state.entries.length > 0 && (
-        <div>
-          <div className="text-xs text-gray-500 mb-2 font-medium">Allowed Contacts:</div>
-          {state.entries.map((entry) => (
-            <div key={entry.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg group hover:bg-gray-100 border border-gray-200 mb-2">
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium flex items-center gap-2">
-                    {renderChannelIcon(entry.channel, 'w-4 h-4 text-gray-400')}
-                    {entry.address}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onConfirmAction({
-                        title: 'Remove contact',
-                        body: `Remove ${entry.address} from the allowlist?`,
-                        confirmLabel: 'Remove contact',
-                        tone: 'danger',
-                        onConfirm: () => onRemove(entry.id),
-                      })
-                    }
-                    className="text-xs text-red-600 hover:text-red-800 opacity-0 group-hover:opacity-100 transition-opacity ml-2"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <AllowlistDirectionFlags allowInbound={entry.allowInbound} allowOutbound={entry.allowOutbound} />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {!hasContacts && <div className="text-sm text-gray-500 py-2">No additional contacts configured yet.</div>}
-    </div>
-  )
-}
-
-type AllowlistDirectionFlagsProps = {
-  allowInbound: boolean
-  allowOutbound: boolean
-  labelColor?: string
-}
-
-function AllowlistDirectionFlags({ allowInbound, allowOutbound, labelColor }: AllowlistDirectionFlagsProps) {
-  const inboundClass = allowInbound ? 'text-green-700' : 'text-gray-400 line-through'
-  const outboundClass = allowOutbound ? 'text-blue-700' : 'text-gray-400 line-through'
-  const colorClass = labelColor ?? 'text-gray-500'
-
-  return (
-    <div className="flex flex-wrap gap-3 mt-1 ml-6">
-      <div className={`flex items-center gap-1 text-xs ${colorClass}`}>
-        <ArrowDownToLine className={`w-4 h-4 ${allowInbound ? 'text-green-600' : 'text-gray-400'}`} aria-hidden="true" />
-        <span className={`text-xs ${inboundClass}`}>Receives from contact</span>
-      </div>
-      <div className={`flex items-center gap-1 text-xs ${colorClass}`}>
-        <ArrowUpFromLine className={`w-4 h-4 ${allowOutbound ? 'text-blue-600' : 'text-gray-400'}`} aria-hidden="true" />
-        <span className={`text-xs ${outboundClass}`}>Sends to contact</span>
+        <AllowlistContactsTable
+          rows={rows}
+          disabled={saving}
+          onRemoveRow={(row) => onRemoveRows([row])}
+          onRemoveRows={onRemoveRows}
+        />
       </div>
     </div>
   )
@@ -2325,155 +2499,69 @@ function AllowlistDirectionFlags({ allowInbound, allowOutbound, labelColor }: Al
 
 type CollaboratorManagerProps = {
   state: CollaboratorState
+  rows: CollaboratorTableRow[]
+  projectedTotalCount: number
   error: string | null
   busy: boolean
-  onAdd: (email: string) => Promise<void>
-  onRemove: (collaboratorId: string) => Promise<void>
-  onCancelInvite: (inviteId: string) => Promise<void>
+  onAdd: () => void
+  onRemove: (row: CollaboratorTableRow) => void
   onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function CollaboratorManager({ state, error, busy, onAdd, onRemove, onCancelInvite, onConfirmAction }: CollaboratorManagerProps) {
-  const [email, setEmail] = useState('')
+function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction }: CollaboratorManagerProps) {
   const canManage = state.canManage
   const totalLimit = state.maxContacts ?? 'Unlimited'
 
-  const handleInvite = async () => {
-    if (!email.trim()) {
-      return
-    }
-    try {
-      await onAdd(email.trim())
-      setEmail('')
-    } catch (inviteError) {
-      console.error(inviteError)
-    }
-  }
-
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-sky-100 bg-sky-50/60 p-4">
-        <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-sky-600 text-white">
-            <Users className="h-4 w-4" aria-hidden="true" />
-          </div>
-          <div>
-            <h4 className="text-sm font-semibold text-slate-800">Collaborators</h4>
-            <p className="text-xs text-slate-600">
-              Invite coworkers to chat and exchange files. Collaborators can upload and download files only.
-            </p>
-            <p className="mt-2 text-xs text-slate-600">
-              Contact slots used: {state.totalCount} / {totalLimit}
-            </p>
-          </div>
-        </div>
+    <div className="space-y-5">
+      <div className="space-y-1">
+        <p className="text-xs text-slate-600">
+          Invite coworkers to chat and exchange files. Collaborators can upload and download files only.
+        </p>
+        <p className="text-xs text-slate-600">Contact slots used: {state.totalCount} / {totalLimit}</p>
       </div>
 
-      {canManage ? (
-        <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 p-4 space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
-            <UserPlus className="h-4 w-4 text-emerald-600" aria-hidden="true" />
-            Invite a collaborator
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-700">Collaborators</h4>
+            <p className="text-xs text-slate-500">
+              {projectedTotalCount} total
+              {projectedTotalCount !== state.totalCount ? ` (currently ${state.totalCount})` : ''}
+            </p>
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <input
-              type="email"
-              placeholder="name@company.com"
-              value={email}
-              onChange={(event) => setEmail(event.currentTarget.value)}
-              className="flex-1 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-emerald-500 focus:ring-emerald-500"
-            />
+          <div className="flex items-center gap-3">
+            {!canManage && <span className="text-xs text-slate-500">Managed by owner/admin</span>}
             <button
               type="button"
-              onClick={handleInvite}
-              disabled={busy || !email.trim()}
+              onClick={onAdd}
+              disabled={busy || !canManage}
               className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
             >
-              Send invite
+              <span className="inline-flex items-center gap-2">
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                Add Collaborator
+              </span>
             </button>
           </div>
-          {error && <div className="text-xs text-rose-600">{error}</div>}
         </div>
-      ) : (
-        <p className="text-xs text-slate-600">Only owners and organization admins can invite collaborators.</p>
-      )}
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h5 className="text-sm font-semibold text-slate-700">Active collaborators</h5>
-          <span className="text-xs text-slate-500">{state.activeCount} active</span>
-        </div>
-        {state.entries.length > 0 ? (
-          <div className="space-y-2">
-            {state.entries.map((collaborator) => (
-              <div key={collaborator.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium text-slate-800">{collaborator.name || collaborator.email}</p>
-                  <p className="text-xs text-slate-500">{collaborator.email}</p>
-                </div>
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onConfirmAction({
-                        title: 'Remove collaborator',
-                        body: `Remove ${collaborator.email} from this agent?`,
-                        tone: 'danger',
-                        confirmLabel: 'Remove',
-                        onConfirm: () => onRemove(collaborator.id),
-                      })
-                    }
-                    className="text-xs font-semibold text-rose-600 hover:text-rose-700"
-                    disabled={busy}
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No collaborators yet.</p>
-        )}
-      </div>
+        {error && <div className="text-xs text-rose-600">{error}</div>}
 
-      <div className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h5 className="text-sm font-semibold text-slate-700">Pending invites</h5>
-          <span className="text-xs text-slate-500">{state.pendingCount} pending</span>
-        </div>
-        {state.pendingInvites.length > 0 ? (
-          <div className="space-y-2">
-            {state.pendingInvites.map((invite) => (
-              <div key={invite.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-100 px-3 py-2">
-                <div>
-                  <p className="text-sm font-medium text-slate-800">{invite.email}</p>
-                  <p className="text-xs text-slate-500">Invite pending</p>
-                </div>
-                {canManage && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      onConfirmAction({
-                        title: 'Cancel invite',
-                        body: `Cancel the invite for ${invite.email}?`,
-                        tone: 'danger',
-                        confirmLabel: 'Cancel invite',
-                        onConfirm: () => onCancelInvite(invite.id),
-                      })
-                    }
-                    className="text-xs font-semibold text-rose-600 hover:text-rose-700"
-                    disabled={busy}
-                  >
-                    Cancel
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">No pending invites.</p>
-        )}
+        <CollaboratorsTable
+          rows={rows}
+          disabled={busy}
+          canManage={canManage}
+          onRemove={(row) =>
+            onConfirmAction({
+              title: row.kind === 'active' ? 'Remove collaborator' : 'Cancel invite',
+              body: row.kind === 'active' ? 'Remove this collaborator from this agent?' : 'Cancel this collaborator invite?',
+              tone: 'danger',
+              confirmLabel: row.kind === 'active' ? 'Remove' : 'Cancel invite',
+              onConfirm: () => onRemove(row),
+            })
+          }
+        />
       </div>
     </div>
   )
