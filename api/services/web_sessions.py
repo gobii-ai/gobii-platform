@@ -287,10 +287,12 @@ def get_active_web_sessions(
     *,
     ttl_seconds: int = WEB_SESSION_TTL_SECONDS,
 ) -> Iterable[PersistentAgentWebSession]:
+    threshold = _now() - timedelta(seconds=ttl_seconds)
     sessions = (
         PersistentAgentWebSession.objects.filter(
             agent=agent,
             ended_at__isnull=True,
+            last_seen_at__gte=threshold,
         )
         .select_related("user")
         .order_by("-last_seen_at")
@@ -310,9 +312,20 @@ def get_live_web_sessions_for_environment(
     now: Optional[timezone.datetime] = None,
 ) -> Iterable[PersistentAgentWebSession]:
     stamp = now or _now()
+    threshold = stamp - timedelta(seconds=ttl_seconds)
+    (
+        PersistentAgentWebSession.objects.filter(
+            ended_at__isnull=True,
+            last_seen_at__lt=threshold,
+            agent__execution_environment=execution_environment,
+            agent__is_deleted=False,
+        )
+        .update(ended_at=stamp)
+    )
     sessions = (
         PersistentAgentWebSession.objects.filter(
             ended_at__isnull=True,
+            last_seen_at__gte=threshold,
             agent__execution_environment=execution_environment,
             agent__is_deleted=False,
         )

@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -10,11 +11,13 @@ from django.utils import timezone
 
 from api.models import (
     BrowserUseAgent,
+    BrowserUseAgentTask,
     PersistentAgent,
     PersistentAgentWebSession,
     ProxyHealthCheckResult,
     ProxyHealthCheckSpec,
     ProxyServer,
+    TaskCredit,
 )
 from config.redis_client import _FakeRedis
 
@@ -203,3 +206,50 @@ class SystemStatusAPITests(TestCase):
         self.assertFalse(payload["sections"]["proxies"]["available"])
         self.assertEqual(payload["sections"]["proxies"]["status"], "critical")
         self.assertEqual(payload["sections"]["proxies"]["error"], "Temporarily unavailable.")
+
+    @patch("console.system_status.get_redis_client")
+    def test_browser_task_section_only_counts_tasks_for_current_environment(self, mock_get_redis_client):
+        current_agent = self._create_agent("Current Browser Agent")
+        other_env_agent = self._create_agent("Other Env Browser Agent", execution_environment="staging")
+        loose_browser_agent = BrowserUseAgent.objects.create(user=self.owner, name="Loose Browser Agent")
+        TaskCredit.objects.create(
+            user=self.owner,
+            credits=Decimal("10"),
+            credits_used=Decimal("0"),
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=30),
+            additional_task=True,
+        )
+
+        BrowserUseAgentTask.objects.create(
+            agent=current_agent.browser_use_agent,
+            user=self.owner,
+            status=BrowserUseAgentTask.StatusChoices.PENDING,
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=other_env_agent.browser_use_agent,
+            user=self.owner,
+            status=BrowserUseAgentTask.StatusChoices.PENDING,
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=loose_browser_agent,
+            user=self.owner,
+            status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+        )
+        BrowserUseAgentTask.objects.create(
+            agent=None,
+            user=self.owner,
+            status=BrowserUseAgentTask.StatusChoices.FAILED,
+        )
+        mock_get_redis_client.return_value = _FakeRedis()
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        section = response.json()["sections"]["browserTasks"]
+        self.assertEqual(section["summary"]["pendingCount"], 1)
+        self.assertEqual(section["summary"]["inProgressCount"], 0)
+        self.assertEqual(section["summary"]["failedCount"], 0)
+        self.assertEqual(section["summary"]["activeCount"], 1)
+        self.assertEqual(len(section["rows"]), 1)
+        self.assertEqual(section["rows"][0]["agentName"], "Current Browser Agent Browser")

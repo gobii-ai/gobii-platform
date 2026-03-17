@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from uuid import UUID
 
 from django.conf import settings
-from django.db.models import CharField, Count, DateTimeField, IntegerField, OuterRef, Q, Subquery
+from django.db.models import CharField, Count, DateTimeField, IntegerField, OuterRef, Subquery
 from django.utils import timezone
 
 from api.agent.core.processing_flags import pending_set_key
@@ -398,9 +398,8 @@ def _collect_browser_task_section(*, now):
     task_queryset = (
         BrowserUseAgentTask.objects.alive()
         .filter(
-            Q(agent__persistent_agent__execution_environment=current_env)
-            | Q(agent__persistent_agent__isnull=True)
-            | Q(agent__isnull=True)
+            agent__persistent_agent__execution_environment=current_env,
+            agent__persistent_agent__is_deleted=False,
         )
         .filter(
             status__in=[
