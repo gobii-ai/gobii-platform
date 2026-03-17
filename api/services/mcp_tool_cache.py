@@ -38,6 +38,18 @@ def _index_cache_key(config_id: str) -> str:
     return f"{CACHE_PREFIX}:index:{config_id}"
 
 
+def _parse_index_payload(payload: Any) -> List[str]:
+    if not isinstance(payload, (str, bytes)):
+        return []
+    try:
+        parsed = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if item]
+
+
 def get_cached_mcp_tool_definitions(
     config_id: str,
     fingerprint: str,
@@ -76,15 +88,7 @@ def set_cached_mcp_tool_definitions(
         redis_client = get_redis_client()
         payload = json.dumps(tools, ensure_ascii=True, separators=(",", ":"))
         index_key = _index_cache_key(config_id)
-        index_payload = redis_client.get(index_key)
-        known_keys: List[str] = []
-        if isinstance(index_payload, str):
-            try:
-                parsed = json.loads(index_payload)
-                if isinstance(parsed, list):
-                    known_keys = [str(item) for item in parsed if item]
-            except json.JSONDecodeError:
-                known_keys = []
+        known_keys = _parse_index_payload(redis_client.get(index_key))
         if key not in known_keys:
             known_keys.append(key)
         pipe = redis_client.pipeline()
@@ -106,14 +110,7 @@ def invalidate_mcp_tool_cache(config_id: str) -> None:
         cached_key = redis_client.get(latest_key)
         if cached_key:
             keys_to_delete.append(cached_key)
-        index_payload = redis_client.get(index_key)
-        if isinstance(index_payload, str):
-            try:
-                parsed = json.loads(index_payload)
-                if isinstance(parsed, list):
-                    keys_to_delete.extend(str(item) for item in parsed if item)
-            except json.JSONDecodeError:
-                pass
+        keys_to_delete.extend(_parse_index_payload(redis_client.get(index_key)))
         for key in dict.fromkeys(keys_to_delete):
             redis_client.delete(key)
     except redis.exceptions.RedisError:

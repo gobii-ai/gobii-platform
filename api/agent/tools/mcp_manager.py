@@ -1224,6 +1224,14 @@ class MCPToolManager:
                     server.config_id,
                 )
                 schedule_mcp_tool_discovery(server.config_id, reason="cache_miss", agent=agent)
+                if self._load_cached_tools(
+                    server,
+                    cache_fingerprint,
+                    sandbox_mode=sandbox_mode,
+                    pipedream_context=pipedream_context,
+                    sandbox_context=sandbox_context,
+                ):
+                    return
                 self._discard_client(server.config_id)
                 return
             logger.info(

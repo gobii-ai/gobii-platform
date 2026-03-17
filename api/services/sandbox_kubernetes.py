@@ -15,6 +15,7 @@ from api.services.sandbox_compute import (
     SandboxComputeUnavailable,
     SandboxSessionUpdate,
     _proxy_env_for_session,
+    _requires_agent_pod_discovery,
 )
 from api.services.system_settings import (
     get_sandbox_compute_pod_image,
@@ -680,15 +681,6 @@ def _slugify(value: str) -> str:
 
 def _pod_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-agent-{agent_id}")
-
-
-def _requires_agent_pod_discovery(server_payload: Dict[str, Any]) -> bool:
-    scope = str(server_payload.get("scope") or "").strip()
-    command = str(server_payload.get("command") or "").strip()
-    url = str(server_payload.get("url") or "").strip()
-    if scope == MCPServerConfig.Scope.PLATFORM:
-        return False
-    return bool(command) and not bool(url)
 
 
 def _pvc_name(agent_id: Any) -> str:

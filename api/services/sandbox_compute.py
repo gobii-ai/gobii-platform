@@ -869,9 +869,17 @@ def _build_mcp_server_payload(
 def _requires_agent_pod_discovery(runtime: Any) -> bool:
     if runtime is None:
         return False
-    if getattr(runtime, "scope", None) == MCPServerConfig.Scope.PLATFORM:
+    if isinstance(runtime, dict):
+        scope = runtime.get("scope")
+        command = runtime.get("command")
+        url = runtime.get("url")
+    else:
+        scope = getattr(runtime, "scope", None)
+        command = getattr(runtime, "command", None)
+        url = getattr(runtime, "url", None)
+    if scope == MCPServerConfig.Scope.PLATFORM:
         return False
-    return bool(getattr(runtime, "command", None)) and not bool(getattr(runtime, "url", None))
+    return bool(command) and not bool(url)
 
 
 def _post_sync_queue_key(agent_id: str) -> str:

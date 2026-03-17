@@ -36,6 +36,7 @@ from api.agent.tools.mcp_manager import (
     MCPToolManager,
     MCPToolInfo,
     MCPServerRuntime,
+    SandboxToolCacheContext,
     get_mcp_manager,
     execute_mcp_tool,
 )
@@ -435,6 +436,62 @@ class MCPToolManagerTests(TestCase):
         mock_schedule.assert_not_called()
         self.assertIn(runtime.config_id, self.manager._clients)
         self.assertIn(runtime.config_id, self.manager._tools_cache)
+
+    @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=False)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.mcp_manager.schedule_mcp_tool_discovery")
+    def test_register_server_loads_inline_discovery_cache_for_first_agent_lookup(
+        self,
+        mock_schedule,
+        _mock_sandbox_enabled_for_agent,
+    ):
+        agent = SimpleNamespace(id=str(uuid.uuid4()))
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="cache-warmed-server",
+            display_name="Cache Warmed Server",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.USER,
+            organization_id=None,
+            user_id=str(uuid.uuid4()),
+            updated_at=datetime.now(UTC),
+        )
+        slot_key = self.manager._tool_cache_slot_key(
+            runtime,
+            sandbox_context=SandboxToolCacheContext(agent_cache_key=str(agent.id)),
+        )
+
+        load_attempts = {"count": 0}
+
+        def _fake_load(*args, **kwargs):
+            load_attempts["count"] += 1
+            if load_attempts["count"] == 1:
+                return False
+            self.manager._tools_cache[slot_key] = []
+            self.manager._tool_cache_fingerprints[slot_key] = "fingerprint"
+            return True
+
+        with patch.object(self.manager, "_load_cached_tools", side_effect=_fake_load), patch.object(
+            self.manager,
+            "_discard_client",
+        ) as mock_discard_client:
+            self.manager._register_server(
+                runtime,
+                agent=agent,
+                sandbox_context=SandboxToolCacheContext(agent_cache_key=str(agent.id)),
+            )
+
+        mock_schedule.assert_called_once_with(runtime.config_id, reason="cache_miss", agent=agent)
+        mock_discard_client.assert_not_called()
+        self.assertEqual(load_attempts["count"], 2)
+        self.assertIn(slot_key, self.manager._tools_cache)
 
     @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=False)
     def test_get_tools_for_agent_passes_agent_to_runtime_registration(self, _mock_sandbox_enabled):
