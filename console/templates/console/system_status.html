@@ -1,11 +1,13 @@
-{% extends "console_page.html" %}
+{% extends "base.html" %}
 {% load vite_tags %}
 
-{% block console_content %}
-<div id="gobii-frontend-root"
-     class="min-h-[50vh]"
-     data-app="system-status">
-</div>
+{% block content %}
+  <div class="mx-auto w-full max-w-7xl px-4 py-8">
+    <div id="gobii-frontend-root"
+         class="min-h-[60vh]"
+         data-app="system-status">
+    </div>
+  </div>
 {% endblock %}
 
 {% block extra_js %}

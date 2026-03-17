@@ -124,6 +124,7 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-app="system-status"')
+        self.assertNotContains(response, 'id="console-submenu"')
 
     @tag("batch_console_agents")
     def test_staff_status_page_requires_staff(self):
