@@ -132,6 +132,7 @@ from console.agent_context import resolve_context_override_for_agent
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
+from console.system_status import build_system_status_payload
 from console.views import build_llm_intelligence_props
 from console.simplified_chat import resolve_simplified_chat_state
 from console.agent_addons import (
@@ -3140,6 +3141,13 @@ class SystemSettingsListAPIView(SystemAdminAPIView):
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         return JsonResponse({"settings": list_system_settings()})
+
+
+class SystemStatusAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse(build_system_status_payload())
 
 
 class SystemSettingDetailAPIView(SystemAdminAPIView):

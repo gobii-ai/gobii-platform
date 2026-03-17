@@ -15,6 +15,7 @@ const AgentDetailScreen = lazy(async () => ({ default: (await import('./screens/
 const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/DiagnosticsScreen')).DiagnosticsScreen }))
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
+const SystemStatusScreen = lazy(async () => ({ default: (await import('./screens/SystemStatusScreen')).SystemStatusScreen }))
 const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
 const LibraryScreen = lazy(async () => ({ default: (await import('./screens/LibraryScreen')).LibraryScreen }))
 const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
@@ -166,6 +167,9 @@ switch (appName) {
     break
   case 'usage':
     screen = <UsageScreen />
+    break
+  case 'system-status':
+    screen = <SystemStatusScreen />
     break
   case 'persistent-agents': {
     const propsId = mountNode.dataset.propsJsonId

@@ -9,6 +9,7 @@ Provides a centralized, production-ready Redis client for all use cases:
 All operations use the same underlying Redis instance configured via REDIS_URL.
 """
 import logging
+import fnmatch
 from functools import lru_cache
 from typing import Final, Any, Dict, Optional
 import os
@@ -214,6 +215,18 @@ class _FakeRedis:
 
     def smembers(self, key: str) -> set:
         return set(self._sets.get(key, set()))
+
+    def llen(self, key: str) -> int:
+        return len(self._lists.get(key, []))
+
+    def keys(self, pattern: str = "*") -> list[str]:
+        all_keys = set(self._kv.keys()) | set(self._hash.keys()) | set(self._lists.keys()) | set(self._sets.keys())
+        return sorted(key for key in all_keys if fnmatch.fnmatch(key, pattern))
+
+    def scan_iter(self, match: str | None = None):
+        pattern = match or "*"
+        for key in self.keys(pattern):
+            yield key
 
 
 @lru_cache(maxsize=1)
