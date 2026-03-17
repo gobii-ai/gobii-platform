@@ -988,6 +988,45 @@ class SubscriptionSignalTests(TestCase):
         self.assertTrue(identify_args[1].get("is_trial"))
 
     @tag("batch_pages")
+    def test_scale_trialing_subscription_grants_quarter_credits(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=1, subscriber=fresh_user)
+        sub.status = "trialing"
+        sub.latest_invoice = None
+        sub.stripe_data["latest_invoice"] = None
+
+        start_dt = timezone.make_aware(datetime(2025, 9, 1, 8, 0, 0), timezone=dt_timezone.utc)
+        end_dt = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        sub.stripe_data["current_period_start"] = str(start_dt)
+        sub.stripe_data["current_period_end"] = str(end_dt)
+        sub.stripe_data["billing_reason"] = "subscription_create"
+        sub.billing_reason = "subscription_create"
+        sub.stripe_data["items"]["data"][0]["price"]["product"] = "prod_scale"
+
+        plan_payload = {"id": PlanNamesChoices.SCALE.value, "monthly_task_credits": 10000}
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value=plan_payload), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.assertTrue(mock_grant.called)
+        grant_kwargs = mock_grant.call_args.kwargs
+        self.assertEqual(grant_kwargs["credit_override"], Decimal("2500"))
+        self.assertTrue(grant_kwargs["invoice_id"].startswith("trial:sub_123"))
+        self.assertEqual(grant_kwargs["expiration_date"], end_dt + relativedelta(months=1))
+        self.assertTrue(grant_kwargs["free_trial_start"])
+
+    @tag("batch_pages")
     def test_trial_conversion_topoffs_credits(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="active", billing_reason="subscription_cycle", invoice_id="in_paid")
