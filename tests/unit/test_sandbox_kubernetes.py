@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase, tag
 
-from api.services.sandbox_kubernetes import KubernetesSandboxBackend, _discovery_pod_name
+from api.services.sandbox_kubernetes import KubernetesSandboxBackend, _pod_name
 
 
 @tag("batch_agent_lifecycle")
@@ -19,93 +19,49 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._pod_secret = "sandbox-secret"
         return backend
 
-    def test_discovery_fails_when_proxy_required_and_none_available(self):
+    def test_stdio_discovery_requires_agent_session(self):
         backend = self._backend()
 
-        with patch("api.services.sandbox_kubernetes.get_sandbox_compute_require_proxy", return_value=True), patch(
-            "api.services.sandbox_kubernetes.select_proxy",
-            return_value=None,
-        ), patch.object(backend, "_create_discovery_pod") as mock_create_pod:
-            result = backend.discover_mcp_tools(
-                "cfg-1",
-                reason="unit-test",
-                server_payload={"config_id": "cfg-1", "scope": "user", "command": "npx"},
-            )
+        result = backend.discover_mcp_tools(
+            "cfg-1",
+            reason="unit-test",
+            server_payload={"config_id": "cfg-1", "scope": "user", "command": "npx"},
+        )
 
         self.assertEqual(result.get("status"), "error")
-        self.assertIn("No proxy server available", result.get("message", ""))
-        mock_create_pod.assert_not_called()
+        self.assertIn("requires an agent session", result.get("message", ""))
 
-    def test_discovery_routes_via_selected_proxy_and_cleans_up_pod(self):
+    def test_stdio_discovery_routes_via_agent_pod(self):
         backend = self._backend()
-        selected_proxy = SimpleNamespace(proxy_url="http://proxy.example:3128")
+        agent = SimpleNamespace(id="agent-1")
+        session = SimpleNamespace(pod_name="sandbox-agent-agent-1", proxy_server=SimpleNamespace(proxy_url="http://proxy.example:3128"))
 
-        with patch("api.services.sandbox_kubernetes.get_sandbox_compute_require_proxy", return_value=True), patch(
-            "api.services.sandbox_kubernetes.select_proxy",
-            return_value=selected_proxy,
-        ), patch.object(backend, "_create_discovery_pod") as mock_create_pod, patch.object(
-            backend,
-            "_wait_for_pod_ready",
-            return_value=True,
-        ), patch.object(
+        with patch.object(
             backend,
             "_proxy_post",
             return_value={"status": "ok", "tools": []},
-        ) as mock_proxy_post, patch.object(backend, "_delete_pod") as mock_delete_pod:
+        ) as mock_proxy_post:
             result = backend.discover_mcp_tools(
                 "cfg-2",
                 reason="unit-test",
+                agent=agent,
+                session=session,
                 server_payload={"config_id": "cfg-2", "scope": "user", "command": "npx"},
             )
 
         self.assertEqual(result.get("status"), "ok")
-        mock_create_pod.assert_called_once()
-        create_args = mock_create_pod.call_args
-        self.assertEqual(create_args.args[0], _discovery_pod_name("cfg-2"))
-        self.assertEqual(create_args.kwargs.get("proxy_url"), selected_proxy.proxy_url)
-        self.assertIn(".svc", create_args.kwargs.get("no_proxy", ""))
-
         mock_proxy_post.assert_called_once()
         proxy_args = mock_proxy_post.call_args.args
-        self.assertEqual(proxy_args[0], _discovery_pod_name("cfg-2"))
+        self.assertEqual(proxy_args[0], session.pod_name)
         self.assertEqual(proxy_args[1], "/sandbox/compute/discover_mcp_tools")
-
-        mock_delete_pod.assert_called_once_with(_discovery_pod_name("cfg-2"))
-
-    def test_discovery_continues_without_proxy_when_not_required(self):
-        backend = self._backend()
-
-        with patch("api.services.sandbox_kubernetes.get_sandbox_compute_require_proxy", return_value=False), patch(
-            "api.services.sandbox_kubernetes.select_proxy",
-            side_effect=RuntimeError("no active proxy"),
-        ), patch.object(backend, "_create_discovery_pod") as mock_create_pod, patch.object(
-            backend,
-            "_wait_for_pod_ready",
-            return_value=True,
-        ), patch.object(
-            backend,
-            "_proxy_post",
-            return_value={"status": "ok", "tools": []},
-        ), patch.object(backend, "_delete_pod") as mock_delete_pod:
-            result = backend.discover_mcp_tools(
-                "cfg-3",
-                reason="unit-test",
-                server_payload={"config_id": "cfg-3", "scope": "user", "command": "npx"},
-            )
-
-        self.assertEqual(result.get("status"), "ok")
-        create_args = mock_create_pod.call_args
-        self.assertEqual(create_args.args[0], _discovery_pod_name("cfg-3"))
-        self.assertIsNone(create_args.kwargs.get("proxy_url"))
-        self.assertIsNone(create_args.kwargs.get("no_proxy"))
-        mock_delete_pod.assert_called_once_with(_discovery_pod_name("cfg-3"))
+        payload = mock_proxy_post.call_args.args[2]
+        self.assertEqual(payload["agent_id"], str(agent.id))
+        self.assertEqual(payload["proxy_env"]["HTTP_PROXY"], session.proxy_server.proxy_url)
 
     def test_discovery_uses_local_discovery_for_user_scope_http_server(self):
         backend = self._backend()
 
-        with patch.object(backend, "_create_discovery_pod") as mock_create_pod, patch(
-            "api.agent.tools.mcp_manager.get_mcp_manager"
-        ) as mock_get_manager:
+        with patch("api.agent.tools.mcp_manager.get_mcp_manager") as mock_get_manager:
             mock_get_manager.return_value.discover_tools_for_server.return_value = True
             result = backend.discover_mcp_tools(
                 "cfg-4",
@@ -119,29 +75,44 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             )
 
         self.assertEqual(result.get("status"), "ok")
-        mock_get_manager.return_value.discover_tools_for_server.assert_called_once_with("cfg-4")
-        mock_create_pod.assert_not_called()
-
-    def test_discovery_uses_pod_for_org_scope_stdio_server(self):
+        mock_get_manager.return_value.discover_tools_for_server.assert_called_once_with("cfg-4", agent=None)
+ 
+    def test_http_discovery_passes_agent_when_available(self):
         backend = self._backend()
+        agent = SimpleNamespace(id="agent-4")
 
-        with patch("api.services.sandbox_kubernetes.get_sandbox_compute_require_proxy", return_value=False), patch(
-            "api.services.sandbox_kubernetes.select_proxy",
-            return_value=None,
-        ), patch.object(backend, "_create_discovery_pod") as mock_create_pod, patch.object(
-            backend,
-            "_wait_for_pod_ready",
-            return_value=True,
-        ), patch.object(
+        with patch("api.agent.tools.mcp_manager.get_mcp_manager") as mock_get_manager:
+            mock_get_manager.return_value.discover_tools_for_server.return_value = True
+            result = backend.discover_mcp_tools(
+                "cfg-4b",
+                reason="unit-test",
+                agent=agent,
+                server_payload={
+                    "config_id": "cfg-4b",
+                    "scope": "user",
+                    "url": "https://example.com/mcp",
+                    "command": "",
+                },
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        mock_get_manager.return_value.discover_tools_for_server.assert_called_once_with("cfg-4b", agent=agent)
+
+    def test_stdio_discovery_falls_back_to_default_agent_pod_name(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-5")
+        session = SimpleNamespace(pod_name="", proxy_server=None)
+
+        with patch.object(
             backend,
             "_proxy_post",
             return_value={"status": "ok", "tools": []},
-        ) as mock_proxy_post, patch.object(backend, "_delete_pod") as mock_delete_pod, patch(
-            "api.agent.tools.mcp_manager.get_mcp_manager"
-        ) as mock_get_manager:
+        ) as mock_proxy_post:
             result = backend.discover_mcp_tools(
                 "cfg-5",
                 reason="unit-test",
+                agent=agent,
+                session=session,
                 server_payload={
                     "config_id": "cfg-5",
                     "scope": "organization",
@@ -151,7 +122,5 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             )
 
         self.assertEqual(result.get("status"), "ok")
-        mock_create_pod.assert_called_once_with(_discovery_pod_name("cfg-5"), proxy_url=None, no_proxy=None)
         mock_proxy_post.assert_called_once()
-        mock_delete_pod.assert_called_once_with(_discovery_pod_name("cfg-5"))
-        mock_get_manager.assert_not_called()
+        self.assertEqual(mock_proxy_post.call_args.args[0], _pod_name(agent.id))

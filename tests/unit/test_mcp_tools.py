@@ -356,6 +356,7 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(transport.headers.get("Authorization"), "Bearer token-123")
 
     @override_settings(SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP=False)
+    @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.mcp_manager.sandbox_compute_enabled", return_value=True)
     @patch("api.agent.tools.mcp_manager.schedule_mcp_tool_discovery")
     @patch("api.agent.tools.mcp_manager.get_cached_mcp_tool_definitions", return_value=None)
@@ -363,8 +364,10 @@ class MCPToolManagerTests(TestCase):
         self,
         _mock_cache_get,
         mock_schedule,
+        _mock_sandbox_enabled_for_agent,
         _mock_sandbox_enabled,
     ):
+        agent = SimpleNamespace(id=str(uuid.uuid4()))
         runtime = MCPServerRuntime(
             config_id=str(uuid.uuid4()),
             name="cache-miss-server",
@@ -384,9 +387,9 @@ class MCPToolManagerTests(TestCase):
         )
 
         with patch.object(self.manager, "_ensure_event_loop") as mock_loop_factory:
-            self.manager._register_server(runtime)
+            self.manager._register_server(runtime, agent=agent)
 
-        mock_schedule.assert_called_once_with(runtime.config_id, reason="cache_miss")
+        mock_schedule.assert_called_once_with(runtime.config_id, reason="cache_miss", agent=agent)
         mock_loop_factory.assert_not_called()
         self.assertNotIn(runtime.config_id, self.manager._clients)
         self.assertNotIn(runtime.config_id, self.manager._tools_cache)
@@ -465,6 +468,7 @@ class MCPToolManagerTests(TestCase):
             force_local=False,
             prefer_cache=True,
             pipedream_context=None,
+            sandbox_context=None,
         ):
             observed_agents.append(agent)
             self.manager._tools_cache[_runtime.config_id] = []

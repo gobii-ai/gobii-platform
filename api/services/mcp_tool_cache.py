@@ -34,6 +34,10 @@ def _latest_cache_key(config_id: str) -> str:
     return f"{CACHE_PREFIX}:latest:{config_id}"
 
 
+def _index_cache_key(config_id: str) -> str:
+    return f"{CACHE_PREFIX}:index:{config_id}"
+
+
 def get_cached_mcp_tool_definitions(
     config_id: str,
     fingerprint: str,
@@ -71,9 +75,22 @@ def set_cached_mcp_tool_definitions(
     try:
         redis_client = get_redis_client()
         payload = json.dumps(tools, ensure_ascii=True, separators=(",", ":"))
+        index_key = _index_cache_key(config_id)
+        index_payload = redis_client.get(index_key)
+        known_keys: List[str] = []
+        if isinstance(index_payload, str):
+            try:
+                parsed = json.loads(index_payload)
+                if isinstance(parsed, list):
+                    known_keys = [str(item) for item in parsed if item]
+            except json.JSONDecodeError:
+                known_keys = []
+        if key not in known_keys:
+            known_keys.append(key)
         pipe = redis_client.pipeline()
         pipe.set(key, payload, ex=CACHE_TTL_SECONDS)
         pipe.set(_latest_cache_key(config_id), key, ex=CACHE_TTL_SECONDS)
+        pipe.set(index_key, json.dumps(known_keys, ensure_ascii=True, separators=(",", ":")), ex=CACHE_TTL_SECONDS)
         pipe.execute()
     except redis.exceptions.RedisError:
         logger.debug("Failed to write MCP tool cache for %s", config_id, exc_info=True)
@@ -82,11 +99,22 @@ def set_cached_mcp_tool_definitions(
 
 def invalidate_mcp_tool_cache(config_id: str) -> None:
     latest_key = _latest_cache_key(config_id)
+    index_key = _index_cache_key(config_id)
     try:
         redis_client = get_redis_client()
+        keys_to_delete = [latest_key, index_key]
         cached_key = redis_client.get(latest_key)
         if cached_key:
-            redis_client.delete(cached_key)
-        redis_client.delete(latest_key)
+            keys_to_delete.append(cached_key)
+        index_payload = redis_client.get(index_key)
+        if isinstance(index_payload, str):
+            try:
+                parsed = json.loads(index_payload)
+                if isinstance(parsed, list):
+                    keys_to_delete.extend(str(item) for item in parsed if item)
+            except json.JSONDecodeError:
+                pass
+        for key in dict.fromkeys(keys_to_delete):
+            redis_client.delete(key)
     except redis.exceptions.RedisError:
         logger.debug("Failed to invalidate MCP tool cache for %s", config_id, exc_info=True)

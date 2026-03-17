@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(name="api.tasks.sandbox_compute.discover_mcp_tools")
-def discover_mcp_tools(config_id: str, reason: str = "") -> dict:
+def discover_mcp_tools(config_id: str, reason: str = "", agent_id: str = "") -> dict:
     if not sandbox_compute_enabled():
         return {"status": "skipped", "message": "Sandbox compute disabled"}
 
@@ -28,7 +28,13 @@ def discover_mcp_tools(config_id: str, reason: str = "") -> dict:
     except SandboxComputeUnavailable as exc:
         return {"status": "error", "message": str(exc)}
 
-    return service.discover_mcp_tools(config_id, reason=reason)
+    agent = None
+    if agent_id:
+        agent = PersistentAgent.objects.filter(id=agent_id).first()
+        if not agent:
+            return {"status": "skipped", "message": "Agent not found"}
+
+    return service.discover_mcp_tools(config_id, reason=reason, agent=agent)
 
 
 @shared_task(name="api.tasks.sandbox_compute.sync_filespace_after_call", max_retries=0)
