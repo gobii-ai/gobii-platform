@@ -16,7 +16,7 @@ from api.models import (
     CommsChannel,
     DeliveryStatus,
 )
-from api.agent.tools.email_sender import execute_send_email
+from api.agent.tools.email_sender import execute_send_email, get_send_email_tool
 from config import settings
 
 
@@ -65,6 +65,15 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         message.latest_sent_at = timezone.now()
         message.latest_error_message = ""
         message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+
+    def test_send_email_tool_requires_html_tables(self):
+        description = get_send_email_tool()["function"]["description"]
+
+        self.assertIn("<table>", description)
+        self.assertIn("<tr>", description)
+        self.assertIn("<th>", description)
+        self.assertIn("<td>", description)
+        self.assertIn("do NOT use Markdown pipe tables", description)
 
     def test_execute_send_email_retries_on_operational_error(self):
         """

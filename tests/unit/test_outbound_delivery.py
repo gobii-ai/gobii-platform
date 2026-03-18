@@ -663,6 +663,38 @@ class EmailDeliveryTests(TestCase):
 
 @tag("batch_outbound_delivery")
 class EmailContentRenderingTests(TestCase):
+    def test_markdown_tables_render_as_valid_styled_html(self):
+        body = (
+            "| Name | Value |\n"
+            "| --- | --- |\n"
+            "| Total | 100 |\n\n"
+            "Next paragraph"
+        )
+
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<table style=", html_snippet)
+        self.assertIn("<thead>", html_snippet)
+        self.assertIn("<th style=", html_snippet)
+        self.assertIn("<td style=", html_snippet)
+        self.assertNotIn(">ead>", html_snippet)
+        self.assertIn("Name", plaintext)
+        self.assertIn("Total", plaintext)
+        self.assertIn("100", plaintext)
+
+    def test_tables_insert_structural_spacing_only_when_content_follows(self):
+        body_with_followup = (
+            "<table><tr><th>Name</th></tr><tr><td>Total</td></tr></table>"
+            "<p>Next paragraph</p>"
+        )
+        html_with_followup, _ = convert_body_to_html_and_plaintext(body_with_followup)
+        self.assertRegex(html_with_followup, r"</table><br />\s*<p>Next paragraph</p>")
+
+        body_without_followup = "<table><tr><th>Name</th></tr><tr><td>Total</td></tr></table>"
+        html_without_followup, _ = convert_body_to_html_and_plaintext(body_without_followup)
+        self.assertTrue(html_without_followup.endswith("</table>"))
+        self.assertFalse(html_without_followup.endswith("</table><br />"))
+
     def test_markdown_with_inline_html_renders_cleanly(self):
         body = (
             "Today's scan\n\n"

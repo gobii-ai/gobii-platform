@@ -100,32 +100,58 @@ INLINE_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 INLINE_BOLD_UNDER_RE = re.compile(r"__(.+?)__")
 INLINE_ITALIC_STAR_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
 INLINE_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")
+TABLE_CLOSE_RE = re.compile(r"</table>", re.IGNORECASE)
 
 
 def _add_table_styles(html_content: str) -> str:
     """Add inline styles to table elements for email compatibility."""
     # Style tables
     html_content = re.sub(
-        r'<table(?![^>]*style=)([^>]*)>',
+        r'<table\b(?![^>]*style=)([^>]*)>',
         f'<table style="{TABLE_STYLE}"\\1>',
         html_content,
         flags=re.IGNORECASE
     )
     # Style th elements
     html_content = re.sub(
-        r'<th(?![^>]*style=)([^>]*)>',
+        r'<th\b(?![^>]*style=)([^>]*)>',
         f'<th style="{TH_STYLE}"\\1>',
         html_content,
         flags=re.IGNORECASE
     )
     # Style td elements
     html_content = re.sub(
-        r'<td(?![^>]*style=)([^>]*)>',
+        r'<td\b(?![^>]*style=)([^>]*)>',
         f'<td style="{TD_STYLE}"\\1>',
         html_content,
         flags=re.IGNORECASE
     )
     return html_content
+
+
+def _add_spacing_after_tables(html_content: str) -> str:
+    """Insert a structural spacer after tables when visible content follows."""
+    output: list[str] = []
+    cursor = 0
+
+    for match in TABLE_CLOSE_RE.finditer(html_content):
+        output.append(html_content[cursor:match.end()])
+        remainder = html_content[match.end():]
+        trimmed = remainder.lstrip()
+        lowered = trimmed.lower()
+
+        if (
+            trimmed
+            and not trimmed.startswith("</")
+            and not lowered.startswith("<br")
+            and not lowered.startswith("<table")
+        ):
+            output.append("<br />")
+
+        cursor = match.end()
+
+    output.append(html_content[cursor:])
+    return "".join(output)
 
 
 logger = logging.getLogger(__name__)
@@ -321,6 +347,7 @@ def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> 
         repaired = _apply_inline_markdown_in_html(html_snippet)
         html_snippet = _replace_horizontal_rules(repaired)
         html_snippet = _add_table_styles(html_snippet)
+        html_snippet = _add_spacing_after_tables(html_snippet)
         plaintext = get_text(html_snippet, config).strip()
         _log(
             "Rich content processing complete. HTML length: %d, plaintext length: %d.",
