@@ -530,6 +530,34 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("RIGHT: send_email(..., attachments=[result.attach])", content)
         self.assertIn("Prior sends: verify via __messages.attachment_count", content)
 
+    def test_prompt_does_not_add_attachment_suffix_to_inbound_messages(self):
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Can you resend the file?",
+            raw_payload={"subject": "Inbound follow-up"},
+            seq=f"INBOUND{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn(
+            f"On email, you received a message from {self.external_endpoint.address}:",
+            content,
+        )
+        self.assertNotIn(
+            f"On email, you received a message from {self.external_endpoint.address} [attachments:",
+            content,
+        )
+
     def test_messages_sqlite_snapshot_includes_full_bodies_up_to_budget(self):
         base = timezone.now()
         oldest = PersistentAgentMessage.objects.create(
