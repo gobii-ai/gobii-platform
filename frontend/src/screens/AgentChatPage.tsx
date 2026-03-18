@@ -597,6 +597,7 @@ const STREAMING_REFRESH_INTERVAL_MS = 6000
 const AUTO_SCROLL_REPIN_SUPPRESSION_MS = 1500
 const BOTTOM_REPIN_THRESHOLD_PX = 50
 const NEAR_BOTTOM_THRESHOLD_PX = 100
+const TOP_LOAD_THRESHOLD_PX = 96
 const UNPIN_DISTANCE_FROM_BOTTOM_PX = 12
 const PROGRAMMATIC_SCROLL_GUARD_MS = 150
 const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES
@@ -807,6 +808,8 @@ export function AgentChatPage({
   const virtualItems = virtualizer.getVirtualItems()
   const firstVisibleIndex = virtualItems.length > 0 ? virtualItems[0].index : null
   useEffect(() => {
+    const container = scrollContainerRef.current
+    const nearTopByScroll = container ? container.scrollTop <= TOP_LOAD_THRESHOLD_PX : false
     if (
       !didInitialScrollRef.current
       || initialLoading
@@ -817,8 +820,7 @@ export function AgentChatPage({
       return
     }
     if (
-      firstVisibleIndex !== null
-      && firstVisibleIndex <= 2
+      (nearTopByScroll || (firstVisibleIndex !== null && firstVisibleIndex <= 2))
       && timelineQuery.hasPreviousPage
       && !timelineQuery.isFetchingPreviousPage
       && !timelineQuery.isFetchPreviousPageError
@@ -1316,6 +1318,19 @@ export function AgentChatPage({
     const handleScroll = () => {
       const nextScrollTop = container.scrollTop
       const distanceFromBottom = syncNearBottomState(container)
+      if (
+        didInitialScrollRef.current
+        && !initialLoading
+        && !isNewAgent
+        && !switchingAgentId
+        && timelineEvents.length
+        && nextScrollTop <= TOP_LOAD_THRESHOLD_PX
+        && timelineQuery.hasPreviousPage
+        && !timelineQuery.isFetchingPreviousPage
+        && !timelineQuery.isFetchPreviousPageError
+      ) {
+        void timelineQuery.fetchPreviousPage()
+      }
       // Don't try to re-pin while user is actively touching — let their scroll intent take priority
       if (!userTouchActiveRef.current) {
         repinAutoScrollIfAtBottom(container)
@@ -1407,7 +1422,19 @@ export function AgentChatPage({
       container.removeEventListener('touchcancel', handleTouchEnd)
       window.removeEventListener('keydown', handleKeyDown)
     }
-  }, [repinAutoScrollIfAtBottom, syncNearBottomState, unpinAutoScrollFromUserGesture])
+  }, [
+    initialLoading,
+    isNewAgent,
+    repinAutoScrollIfAtBottom,
+    switchingAgentId,
+    syncNearBottomState,
+    timelineEvents.length,
+    timelineQuery.fetchPreviousPage,
+    timelineQuery.hasPreviousPage,
+    timelineQuery.isFetchingPreviousPage,
+    timelineQuery.isFetchPreviousPageError,
+    unpinAutoScrollFromUserGesture,
+  ])
 
   // Unpin auto-scroll when processing ends so user's reading position is preserved
   const prevProcessingRef = useRef(timelineProcessingActive)
