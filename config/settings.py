@@ -419,6 +419,11 @@ VITE_DEV_SERVER_URL = env('VITE_DEV_SERVER_URL', default='http://127.0.0.1:5173'
 VITE_USE_DEV_SERVER = env.bool('VITE_USE_DEV_SERVER', default=DEBUG)
 VITE_ASSET_ENTRY = env('VITE_ASSET_ENTRY', default='src/main.tsx')
 VITE_MANIFEST_PATH = Path(env('VITE_MANIFEST_PATH', default=str(BASE_DIR / 'static' / 'frontend' / 'manifest.json')))
+VITE_ASSET_BASE_URL = env('VITE_ASSET_BASE_URL', default='')
+VITE_ASSET_RELEASE_ID = env('VITE_ASSET_RELEASE_ID', default='')
+VITE_ASSET_RELEASE_ID_FILE = Path(
+    env('VITE_ASSET_RELEASE_ID_FILE', default=str(BASE_DIR / '.git-commit'))
+)
 MEDIA_URL = "/media/"
 MEDIA_ROOT = env('MEDIA_ROOT', default=BASE_DIR / 'mediafiles')
 

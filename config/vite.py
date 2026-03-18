@@ -1,11 +1,8 @@
-from __future__ import annotations
-
 import json
 import posixpath
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Tuple
 
 from django.conf import settings
 
@@ -22,17 +19,52 @@ class ViteAssetNotFound(ViteManifestError):
     pass
 
 
+class ViteAssetReleaseNotFound(ViteManifestError):
+    pass
+
+
 @dataclass(frozen=True)
 class ViteAsset:
-    scripts: Tuple[str, ...]
-    styles: Tuple[str, ...]
-    inline_modules: Tuple[str, ...] = ()
+    scripts: tuple[str, ...]
+    styles: tuple[str, ...]
+    inline_modules: tuple[str, ...] = ()
 
 
 def _static_url(relative_path: str) -> str:
     base = settings.STATIC_URL.rstrip('/')
     joined = posixpath.join(base or '/', 'frontend', relative_path)
     return joined if joined.startswith('/') else f'/{joined}'
+
+
+def _release_asset_url(relative_path: str) -> str:
+    base_url = settings.VITE_ASSET_BASE_URL.strip().rstrip('/')
+    if not base_url:
+        return _static_url(relative_path)
+
+    release_id = _get_release_id()
+    return f"{base_url}/{release_id}/{relative_path.lstrip('/')}"
+
+
+@lru_cache(maxsize=1)
+def _get_release_id() -> str:
+    explicit_release_id = settings.VITE_ASSET_RELEASE_ID.strip()
+    if explicit_release_id:
+        return explicit_release_id
+
+    release_file: Path = settings.VITE_ASSET_RELEASE_ID_FILE
+    if release_file.exists():
+        release_id = release_file.read_text(encoding='utf-8').strip()
+        if release_id:
+            return release_id
+
+    message = (
+        "Vite asset release ID is required when VITE_ASSET_BASE_URL is configured. "
+        f"Checked VITE_ASSET_RELEASE_ID and {release_file}."
+    )
+    if settings.DEBUG:
+        return ""
+
+    raise ViteAssetReleaseNotFound(message)
 
 
 @lru_cache(maxsize=1)
@@ -49,6 +81,7 @@ def _load_manifest() -> dict[str, dict]:
 
 def clear_manifest_cache() -> None:
     _load_manifest.cache_clear()
+    _get_release_id.cache_clear()
 
 
 def get_vite_asset(entry: str | None = None) -> ViteAsset:
@@ -80,7 +113,19 @@ def get_vite_asset(entry: str | None = None) -> ViteAsset:
     except KeyError as exc:
         raise ViteAssetNotFound(f"No manifest entry for {entry_point}") from exc
 
-    file_url = _static_url(chunk['file'])
-    css_urls = tuple(_static_url(path) for path in chunk.get('css', []))
+    file_path = chunk['file']
+    css_paths = tuple(chunk.get('css', []))
+
+    if settings.VITE_ASSET_BASE_URL.strip():
+        release_id = _get_release_id()
+        if release_id:
+            file_url = _release_asset_url(file_path)
+            css_urls = tuple(_release_asset_url(path) for path in css_paths)
+        else:
+            file_url = _static_url(file_path)
+            css_urls = tuple(_static_url(path) for path in css_paths)
+    else:
+        file_url = _static_url(file_path)
+        css_urls = tuple(_static_url(path) for path in css_paths)
 
     return ViteAsset(scripts=(file_url,), styles=css_urls)

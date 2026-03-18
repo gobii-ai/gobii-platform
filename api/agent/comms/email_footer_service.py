@@ -160,4 +160,10 @@ def _append_section(existing: str, addition: str, *, separator: str = "\n") -> s
         return existing
     if not existing.strip():
         return addition
+    if (
+        separator == "\n"
+        and existing.rstrip().lower().endswith("</table>")
+        and addition.lower().startswith("<table")
+    ):
+        return f"{existing}<br />{addition}"
     return f"{existing}{separator}{addition}"
