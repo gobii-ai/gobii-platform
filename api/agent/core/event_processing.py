@@ -54,6 +54,7 @@ from .processing_flags import (
     claim_pending_drain_slot,
     clear_processing_heartbeat,
     clear_processing_queued_flag,
+    clear_processing_work_state,
     enqueue_pending_agent,
     get_pending_drain_settings,
     is_agent_pending,
@@ -1454,7 +1455,32 @@ def _runtime_exceeded(started_at: float, max_runtime_seconds: int) -> bool:
     return (time.monotonic() - started_at) >= max_runtime_seconds
 
 
-def _should_abort_for_deleted_agent(
+def _get_processing_abort_reason(agent_id: Union[str, UUID]) -> str | None:
+    try:
+        close_old_connections()
+        lifecycle_state = (
+            PersistentAgent.objects.filter(id=agent_id)
+            .values("is_deleted", "is_active")
+            .first()
+        )
+    except DatabaseError:
+        logger.debug(
+            "Lifecycle guard lookup failed for agent %s; continuing processing.",
+            agent_id,
+            exc_info=True,
+        )
+        return None
+
+    if lifecycle_state is None:
+        return "missing"
+    if lifecycle_state["is_deleted"]:
+        return "soft_deleted"
+    if not lifecycle_state["is_active"]:
+        return "inactive"
+    return None
+
+
+def _should_abort_for_inactive_or_deleted_agent(
     agent: PersistentAgent,
     *,
     budget_ctx: Optional[BudgetContext],
@@ -1462,43 +1488,98 @@ def _should_abort_for_deleted_agent(
     span: Any,
     check_context: str,
 ) -> bool:
-    """
-    Return True when the agent has been deleted during processing.
-
-    We poll fresh DB state so an in-flight event-processing cycle can stop
-    promptly after a user deletes the agent.
-    """
-    try:
-        close_old_connections()
-        deleted_state = PersistentAgent.objects.filter(id=agent.id).values_list("is_deleted", flat=True).first()
-    except DatabaseError:
-        logger.debug(
-            "Deletion guard lookup failed for agent %s; continuing processing.",
-            agent.id,
-            exc_info=True,
-        )
+    reason = _get_processing_abort_reason(agent.id)
+    if reason is None:
         return False
 
-    if deleted_state is False:
-        return False
-
-    reason = "missing" if deleted_state is None else "soft_deleted"
+    clear_processing_work_state(agent.id)
     logger.info(
-        "Agent %s was deleted during processing (%s, reason=%s); aborting loop.",
+        "Agent %s became unavailable during processing (%s, reason=%s); aborting loop.",
         agent.id,
         check_context,
         reason,
     )
     try:
         span.add_event(
-            "Agent deleted during processing",
+            "Agent processing aborted by lifecycle state",
             {"context": check_context, "reason": reason},
         )
     except Exception:
         pass
     if heartbeat:
-        heartbeat.touch("agent_deleted")
+        heartbeat.touch(f"agent_{reason}")
     _attempt_cycle_close_for_sleep(agent, budget_ctx)
+    return True
+
+
+def _close_active_cycle_for_skipped_agent(
+    agent_id: Union[str, UUID],
+    *,
+    budget_id: str | None,
+    span: Any,
+    check_context: str,
+) -> None:
+    if not budget_id:
+        return
+
+    try:
+        status = AgentBudgetManager.get_cycle_status(agent_id=str(agent_id))
+        active_id = AgentBudgetManager.get_active_budget_id(agent_id=str(agent_id))
+        if status == "active" and active_id == str(budget_id):
+            AgentBudgetManager.close_cycle(agent_id=str(agent_id), budget_id=str(budget_id))
+            logger.info(
+                "Closed active budget cycle for skipped agent %s (%s, budget_id=%s).",
+                agent_id,
+                check_context,
+                budget_id,
+            )
+            try:
+                span.add_event(
+                    "Closed active budget cycle for skipped agent",
+                    {"context": check_context, "budget_id": str(budget_id)},
+                )
+            except Exception:
+                pass
+    except Exception:
+        logger.debug(
+            "Failed to close active budget cycle for skipped agent %s (%s).",
+            agent_id,
+            check_context,
+            exc_info=True,
+        )
+
+
+def _should_skip_processing_for_inactive_or_deleted_agent(
+    agent_id: Union[str, UUID],
+    *,
+    budget_id: str | None,
+    span: Any,
+    check_context: str,
+) -> bool:
+    reason = _get_processing_abort_reason(agent_id)
+    if reason is None:
+        return False
+
+    clear_processing_work_state(agent_id)
+    _close_active_cycle_for_skipped_agent(
+        agent_id,
+        budget_id=budget_id,
+        span=span,
+        check_context=check_context,
+    )
+    logger.info(
+        "Skipping event processing for agent %s (%s, reason=%s).",
+        agent_id,
+        check_context,
+        reason,
+    )
+    try:
+        span.add_event(
+            "Agent processing skipped by lifecycle state",
+            {"context": check_context, "reason": reason},
+        )
+    except Exception:
+        pass
     return True
 
 
@@ -2602,6 +2683,14 @@ def process_agent_events(
                 "Failed to clear burn-rate follow-up token for agent %s: %s", persistent_agent_id, e, exc_info=True
             )
 
+    if _should_skip_processing_for_inactive_or_deleted_agent(
+        persistent_agent_id,
+        budget_id=budget_id,
+        span=span,
+        check_context="entry",
+    ):
+        return
+
     # Guard against reviving expired/closed cycles when a follow‑up arrives after TTL expiry
     if budget_id is not None:
         status = AgentBudgetManager.get_cycle_status(agent_id=str(persistent_agent_id))
@@ -2817,6 +2906,7 @@ def _process_agent_events_locked(
     heartbeat: Optional[_ProcessingHeartbeat] = None,
 ) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
+    budget_ctx = get_budget_context()
     try:
         agent = (
             PersistentAgent.objects.alive().select_related(
@@ -2831,8 +2921,28 @@ def _process_agent_events_locked(
             .get(id=persistent_agent_id)
         )
     except PersistentAgent.DoesNotExist:
+        clear_processing_work_state(persistent_agent_id)
+        _close_active_cycle_for_skipped_agent(
+            persistent_agent_id,
+            budget_id=getattr(budget_ctx, "budget_id", None),
+            span=span,
+            check_context="locked_missing",
+        )
         logger.warning("Persistent agent %s not found; skipping processing.", persistent_agent_id)
         return None
+
+    if not agent.is_active:
+        clear_processing_work_state(agent.id)
+        _close_active_cycle_for_skipped_agent(
+            agent.id,
+            budget_id=getattr(budget_ctx, "budget_id", None),
+            span=span,
+            check_context="locked_inactive",
+        )
+        logger.info("Persistent agent %s is inactive; skipping processing.", persistent_agent_id)
+        span.add_event("Agent processing skipped - inactive")
+        span.set_attribute("persistent_agent.is_active", False)
+        return agent
 
     # Broadcast processing state at start of processing (when lock is acquired)
     try:
@@ -3200,7 +3310,7 @@ def _run_agent_loop(
                 agent,
                 has_active_web_session_now=had_active_web_session_at_start,
             )
-            if _should_abort_for_deleted_agent(
+            if _should_abort_for_inactive_or_deleted_agent(
                 agent,
                 budget_ctx=budget_ctx,
                 heartbeat=heartbeat,
@@ -3771,7 +3881,7 @@ def _run_agent_loop(
 
                 for idx, call in enumerate(tool_calls, start=1):
                     with tracer.start_as_current_span("Execute Tool") as tool_span:
-                        if _should_abort_for_deleted_agent(
+                        if _should_abort_for_inactive_or_deleted_agent(
                             agent,
                             budget_ctx=budget_ctx,
                             heartbeat=heartbeat,

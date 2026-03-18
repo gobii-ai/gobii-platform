@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, override_settings, tag
 from django.db import transaction
@@ -71,3 +71,28 @@ class PersistentAgentShutdownTriggersTests(TestCase):
                     agent.life_state = PersistentAgent.LifeState.EXPIRED
                     agent.save(update_fields=["life_state"])
                 self.assertIn((str(agent.id), "SOFT_EXPIRE"), calls)
+
+    @override_settings(GOBII_RELEASE_ENV="test")
+    def test_pause_transition_clears_processing_work_state(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="pause-clears@example.com")
+        bua = _create_browser_agent(user)
+
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="pause-clear",
+            charter="c",
+            browser_use_agent=bua,
+            schedule="0 * * * *",
+        )
+        fake_redis = MagicMock()
+
+        with patch("django.db.transaction.on_commit", side_effect=lambda fn: fn()):
+            with patch("api.agent.core.processing_flags.get_redis_client", return_value=fake_redis):
+                with patch("api.services.agent_lifecycle.AgentLifecycleService.shutdown"):
+                    with transaction.atomic():
+                        agent.is_active = False
+                        agent.save(update_fields=["is_active"])
+
+        fake_redis.delete.assert_any_call(f"agent-event-processing:queued:{agent.id}")
+        fake_redis.srem.assert_called_with("agent-event-processing:pending", str(agent.id))

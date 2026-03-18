@@ -83,7 +83,8 @@ class PersistentAgentAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Trigger Event Processing")
         self.assertContains(response, "Persistent Agent IDs")
-        self.assertContains(response, 'id="id_only_active" value="1" checked')
+        self.assertContains(response, "Inactive agents are always skipped.")
+        self.assertNotContains(response, 'id="id_only_active"')
         self.assertContains(response, 'id="id_only_with_user" value="1" checked')
         self.assertNotContains(response, 'id="id_skip_expired" value="1" checked')
 
@@ -108,7 +109,7 @@ class PersistentAgentAdminTests(TestCase):
         messages = list(response.context["messages"])
         self.assertTrue(any("Skipped inactive agent ID(s)" in message.message for message in messages))
 
-    def test_trigger_processing_processes_inactive_agent_when_checkbox_off(self):
+    def test_trigger_processing_skips_inactive_agents_even_when_checkbox_off(self):
         inactive_agent = self._create_agent(is_active=False, name="Inactive Agent")
         url = reverse("admin:api_persistentagent_trigger_processing")
 
@@ -123,7 +124,9 @@ class PersistentAgentAdminTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        mock_delay.assert_called_once_with(str(inactive_agent.id))
+        mock_delay.assert_not_called()
+        messages = list(response.context["messages"])
+        self.assertTrue(any("Skipped inactive agent ID(s)" in message.message for message in messages))
 
     def test_persistent_agent_admin_includes_skill_inline(self):
         model_admin = admin.site._registry[PersistentAgent]

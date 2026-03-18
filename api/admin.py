@@ -2841,7 +2841,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         default_context = {
             "title": "Trigger Event Processing",
             "agent_ids": "",
-            "only_active": True,
             "only_with_user": True,
             "skip_expired": False,
         }
@@ -2854,7 +2853,6 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             )
 
         raw_ids = request.POST.get('agent_ids', '')
-        only_active = request.POST.get('only_active') is not None
         only_with_user = request.POST.get('only_with_user') is not None
         skip_expired = request.POST.get('skip_expired') is not None
         parsed_ids: list[str] = []
@@ -2899,7 +2897,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
         for agent_id in existing_ids:
             agent = agents_by_id[agent_id]
-            if only_active and not agent.is_active:
+            if not agent.is_active:
                 skipped_inactive.append(agent_id)
                 continue
             if skip_expired and agent.life_state == PersistentAgent.LifeState.EXPIRED:

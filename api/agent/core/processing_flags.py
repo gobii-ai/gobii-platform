@@ -56,6 +56,27 @@ def clear_processing_queued_flag(agent_id: Union[str, UUID]) -> None:
         logger.exception("Failed to clear processing queued flag for agent %s", agent_id)
 
 
+def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None:
+    """Clear queued and pending processing state for a single agent."""
+    redis_client = client
+    if redis_client is None:
+        try:
+            redis_client = get_redis_client()
+        except Exception:
+            logger.exception("Failed to acquire Redis client while clearing processing state for agent %s", agent_id)
+            return
+
+    try:
+        redis_client.delete(_queued_key(agent_id))
+    except Exception:
+        logger.exception("Failed to clear queued processing state for agent %s", agent_id)
+
+    try:
+        redis_client.srem(_PENDING_SET_KEY, str(agent_id))
+    except Exception:
+        logger.exception("Failed to clear pending processing state for agent %s", agent_id)
+
+
 def is_processing_queued(agent_id: Union[str, UUID], client=None) -> bool:
     """Check whether the agent currently has queued processing work."""
     try:

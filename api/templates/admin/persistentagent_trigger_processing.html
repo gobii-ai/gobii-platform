@@ -23,10 +23,7 @@
     </fieldset>
     <fieldset class="module aligned">
       <div class="form-row">
-        <label for="id_only_active">
-          <input type="checkbox" name="only_active" id="id_only_active" value="1" {% if only_active %}checked{% endif %}>
-          Only queue if <code>is_active = True</code>
-        </label>
+        <p>Inactive agents are always skipped.</p>
       </div>
       <div class="form-row">
         <label for="id_only_with_user">

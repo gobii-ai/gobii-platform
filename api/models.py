@@ -6423,6 +6423,17 @@ class PersistentAgent(models.Model):
         if is_new or sync_needed:
             transaction.on_commit(self._sync_celery_beat_task)
 
+        if "PAUSE" in shutdown_reasons:
+            def _clear_processing_state():
+                try:
+                    from api.agent.core.processing_flags import clear_processing_work_state
+
+                    clear_processing_work_state(str(self.id))
+                except Exception:
+                    logger.exception("Failed to clear processing work state for paused agent %s", self.id)
+
+            transaction.on_commit(_clear_processing_state)
+
         # If any shutdown reasons were detected, enqueue centralized cleanup
         if shutdown_reasons:
             def _enqueue_cleanup():

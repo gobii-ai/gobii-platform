@@ -212,6 +212,49 @@ class AgentEventProcessingTests(TestCase):
             # Verify the agent loop was NOT called due to agent not found
             mock_loop.assert_not_called()
 
+    @patch('api.agent.core.processing_flags.get_redis_client')
+    @patch('api.agent.core.event_processing.close_old_connections')
+    @patch('api.agent.core.event_processing.get_redis_client')
+    def test_process_agent_events_skips_inactive_agents(
+        self,
+        mock_event_processing_redis_client,
+        mock_close_old_connections,
+        mock_processing_flags_redis_client,
+    ):
+        """Inactive agents should not enter the processing pipeline."""
+        from api.agent.core.event_processing import process_agent_events
+
+        PersistentAgent.objects.filter(pk=self.agent.pk).update(is_active=False)
+        fake_redis = MagicMock()
+        fake_redis.get.return_value = None
+        mock_event_processing_redis_client.return_value = fake_redis
+        mock_processing_flags_redis_client.return_value = fake_redis
+
+        with patch('api.agent.core.event_processing._process_agent_events_locked') as mock_locked, \
+             patch('pottery.Redlock') as mock_redlock:
+            process_agent_events(self.agent.id)
+
+        mock_locked.assert_not_called()
+        mock_redlock.assert_not_called()
+        fake_redis.delete.assert_any_call(f"agent-event-processing:queued:{self.agent.id}")
+        fake_redis.srem.assert_called_with("agent-event-processing:pending", str(self.agent.id))
+
+    def test_process_agent_events_closes_active_cycle_for_inactive_follow_up(self):
+        """Skipping an inactive follow-up should close the inherited budget cycle."""
+        from api.agent.core.budget import AgentBudgetManager
+        from api.agent.core.event_processing import process_agent_events
+
+        agent_id = str(self.agent.id)
+        budget_id, _max_steps, _max_depth = AgentBudgetManager.find_or_start_cycle(agent_id=agent_id)
+        branch_id = AgentBudgetManager.create_branch(agent_id=agent_id, budget_id=budget_id, depth=0)
+        PersistentAgent.objects.filter(pk=self.agent.pk).update(is_active=False)
+
+        process_agent_events(self.agent.id, budget_id=budget_id, branch_id=branch_id, depth=0)
+
+        self.assertEqual(AgentBudgetManager.get_cycle_status(agent_id=agent_id), "closed")
+        next_budget_id, _next_max_steps, _next_max_depth = AgentBudgetManager.find_or_start_cycle(agent_id=agent_id)
+        self.assertNotEqual(next_budget_id, budget_id)
+
 
 @tag("batch_api_persistent_agents")
 class ScheduleUpdaterTests(TestCase):
