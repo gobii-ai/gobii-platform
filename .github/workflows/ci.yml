@@ -397,12 +397,13 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
-      id-token: write
     env:
-      GCP_PROJECT_ID: browser-use-458714
       STATIC_BUCKET: gobii-platform-static
-      SERVICE_ACCOUNT_EMAIL: github-static-publisher@browser-use-458714.iam.gserviceaccount.com
-      WORKLOAD_IDENTITY_PROVIDER: projects/902171736304/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+      STATIC_ASSET_BASE_URL: https://static.gobii.ai/frontend/releases
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -414,20 +415,14 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ env.SERVICE_ACCOUNT_EMAIL }}
-
-      - name: Install gcloud SDK
-        uses: google-github-actions/setup-gcloud@v2
-        with:
-          project_id: ${{ env.GCP_PROJECT_ID }}
+      - name: Install AWS CLI
+        run: |
+          python3 -m pip install --user awscli
 
       - name: Build frontend assets
         run: |
           set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
           npm ci --prefix frontend
           npm run build --prefix frontend
           test -f static/frontend/manifest.json
@@ -438,36 +433,39 @@ jobs:
 
       - name: Upload immutable release assets
         env:
-          RELEASE_PREFIX: gs://${{ env.STATIC_BUCKET }}/frontend/releases/${{ github.sha }}
+          RELEASE_PREFIX: s3://${{ env.STATIC_BUCKET }}/frontend/releases/${{ github.sha }}
         run: |
           set -euo pipefail
-          gcloud storage cp --recursive static/frontend/assets "${RELEASE_PREFIX}/assets"
-          gcloud storage cp static/frontend/manifest.json "${RELEASE_PREFIX}/manifest.json"
-
-      - name: Set object cache headers
-        env:
-          RELEASE_PREFIX: gs://${{ env.STATIC_BUCKET }}/frontend/releases/${{ github.sha }}
-          ASSET_CACHE_CONTROL: public, max-age=31536000, immutable
-          MANIFEST_CACHE_CONTROL: no-cache, max-age=0, must-revalidate
-        run: |
-          set -euo pipefail
-          while IFS= read -r relative_path; do
-            gcloud storage objects update "${RELEASE_PREFIX}/${relative_path}" \
-              --cache-control="${ASSET_CACHE_CONTROL}"
-          done < vite_release_paths.txt
-
-          gcloud storage objects update "${RELEASE_PREFIX}/manifest.json" \
-            --cache-control="${MANIFEST_CACHE_CONTROL}"
+          export PATH="$HOME/.local/bin:$PATH"
+          aws s3 sync static/frontend/assets "${RELEASE_PREFIX}/assets" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp static/frontend/manifest.json "${RELEASE_PREFIX}/manifest.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "no-cache, max-age=0, must-revalidate" \
+            --content-type "application/json"
 
       - name: Verify uploaded release assets
         env:
-          RELEASE_PREFIX: gs://${{ env.STATIC_BUCKET }}/frontend/releases/${{ github.sha }}
+          RELEASE_PREFIX: frontend/releases/${{ github.sha }}
         run: |
           set -euo pipefail
-          gcloud storage ls "${RELEASE_PREFIX}/manifest.json" >/dev/null
+          export PATH="$HOME/.local/bin:$PATH"
+          aws s3api head-object \
+            --bucket "${STATIC_BUCKET}" \
+            --key "${RELEASE_PREFIX}/manifest.json" \
+            --endpoint-url "${R2_ENDPOINT}" >/dev/null
           while IFS= read -r relative_path; do
-            gcloud storage ls "${RELEASE_PREFIX}/${relative_path}" >/dev/null
+            aws s3api head-object \
+              --bucket "${STATIC_BUCKET}" \
+              --key "${RELEASE_PREFIX}/${relative_path}" \
+              --endpoint-url "${R2_ENDPOINT}" >/dev/null
           done < vite_release_paths.txt
+
+      - name: Verify public asset URL
+        run: |
+          set -euo pipefail
+          curl -fsSI "${STATIC_ASSET_BASE_URL}/${GITHUB_SHA}/manifest.json" >/dev/null
 
   trigger-preview:
     name: Dispatch Preview Deployment
