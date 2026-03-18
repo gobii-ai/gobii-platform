@@ -125,8 +125,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
-  onSimplifiedChatSelect?: (enabled: boolean) => void
-  simplifiedChatTogglePending?: boolean
   onSendMessage?: (
     body: string,
     attachments?: File[],
@@ -251,8 +249,6 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onShare,
-  onSimplifiedChatSelect,
-  simplifiedChatTogglePending = false,
   onSendMessage,
   onComposerFocus,
   autoScrollPinned = true,
@@ -287,7 +283,7 @@ export function AgentChatLayout({
   pendingHumanInputRequests = [],
   onRespondHumanInputRequest,
 }: AgentChatLayoutProps) {
-  const { enabled: simplifiedChat, toggleAvailable: simplifiedChatToggleAvailable } = useSimplifiedChat()
+  const { enabled: simplifiedChat } = useSimplifiedChat()
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -805,10 +801,6 @@ export function AgentChatLayout({
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
-          simplifiedChatEnabled={simplifiedChat}
-          simplifiedChatToggleAvailable={simplifiedChatToggleAvailable}
-          simplifiedChatTogglePending={simplifiedChatTogglePending}
-          onSimplifiedChatSelect={onSimplifiedChatSelect}
           onClose={onClose}
           onShare={onShare}
 	          sidebarCollapsed={sidebarCollapsed}

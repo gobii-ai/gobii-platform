@@ -7,10 +7,8 @@ import { respondToHumanInputRequest, respondToHumanInputRequestsBatch } from '..
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
   updateUserPreferences,
-  parseBooleanPreference,
   parseFavoriteAgentIdsPreference,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
-  USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
 } from '../api/userPreferences'
 import type { ConsoleContext } from '../api/context'
@@ -795,10 +793,7 @@ export function AgentChatPage({
   // Simplified-chat mode collapses non-message events for the virtualizer
   const {
     enabled: simplifiedChat,
-    toggleAvailable: simplifiedChatToggleAvailable,
-    setEnabled: setSimplifiedChatEnabled,
   } = useSimplifiedChat()
-  const [simplifiedChatUpdating, setSimplifiedChatUpdating] = useState(false)
   const displayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
 
   // Set up virtualizer
@@ -1124,36 +1119,6 @@ export function AgentChatPage({
     },
     [favoriteAgentIds, updateFavoriteAgentIdsInRosterCache],
   )
-
-  const handleSelectSimplifiedChat = useCallback((nextValue: boolean) => {
-    if (!simplifiedChatToggleAvailable || simplifiedChatUpdating || nextValue === simplifiedChat) {
-      return
-    }
-
-    const previousValue = simplifiedChat
-    setSimplifiedChatEnabled(nextValue)
-    setSimplifiedChatUpdating(true)
-
-    void updateUserPreferences({
-      preferences: {
-        [USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED]: nextValue,
-      },
-    }).then((response) => {
-      const persistedValue = parseBooleanPreference(
-        response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_SIMPLIFIED_ENABLED],
-      )
-      setSimplifiedChatEnabled(persistedValue)
-    }).catch(() => {
-      setSimplifiedChatEnabled(previousValue)
-    }).finally(() => {
-      setSimplifiedChatUpdating(false)
-    })
-  }, [
-    setSimplifiedChatEnabled,
-    simplifiedChat,
-    simplifiedChatToggleAvailable,
-    simplifiedChatUpdating,
-  ])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3098,8 +3063,6 @@ export function AgentChatPage({
         currentContext={effectiveContext}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
-        onSimplifiedChatSelect={simplifiedChatToggleAvailable ? handleSelectSimplifiedChat : undefined}
-        simplifiedChatTogglePending={simplifiedChatUpdating}
         dailyCredits={dailyCreditsInfo}
         dailyCreditsStatus={dailyCreditsStatus}
         dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}

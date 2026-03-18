@@ -51,6 +51,7 @@ export const CollapsedActivityCard = memo(function CollapsedActivityCard({
           <ActivityEntryList
             entries={entries}
             limit={INLINE_ACTIVITY_ENTRY_LIMIT}
+            limitStrategy="tail"
             onViewAll={entries.length > INLINE_ACTIVITY_ENTRY_LIMIT ? () => setViewerOpen(true) : undefined}
           />
         </div>

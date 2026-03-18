@@ -279,10 +279,7 @@ function extractSqliteTargetLabel(
         extractFieldFromResult(result, ['subject', 'conversation_address', 'from_address', 'to_address', 'channel'])
       )
     case 'toolResults':
-      return (
-        extractFieldFromSql(statement, ['tool_name', 'result_id', 'legacy_result_id']) ??
-        extractFieldFromResult(result, ['tool_name', 'result_id', 'legacy_result_id'])
-      )
+      return null
     case 'agentSkills':
       return extractFieldFromSql(statement, ['name']) ?? extractFieldFromResult(result, ['name'])
     case 'files':
@@ -341,7 +338,7 @@ export function getSqliteInternalTableDisplay(
   result?: unknown,
 ): {
   label: string
-  caption: string
+  caption: string | null
   summary: string | null
   operationLabel: string
   purpose: string
@@ -373,7 +370,7 @@ export function getSqliteInternalTableDisplay(
 
   return {
     label: `${descriptor.labelPrefix} ${summaryKind}`,
-    caption: targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix,
+    caption: kind === 'toolResults' ? null : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix),
     summary: statusSummary,
     operationLabel: sqliteOperationDisplayLabel(operation),
     purpose,

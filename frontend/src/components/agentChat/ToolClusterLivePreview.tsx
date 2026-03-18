@@ -3,11 +3,10 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ExternalLink, Search } from 'lucide-react'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
-import { toFriendlyToolName, getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
+import type { FriendlyToolInfo } from '../tooling/toolMetadata'
 import { extractBrightDataSearchQuery } from '../tooling/brightdata'
 import { ToolIconSlot } from './ToolIconSlot'
 import { deriveSemanticPreview } from './tooling/clusterPreviewText'
-import { parseToolSearchResult } from './tooling/searchUtils'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 
 type ToolClusterLivePreviewProps = {
@@ -724,17 +723,17 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
   const scrapeTargets = activity.kind === 'linkedin' ? [] : extractScrapeTargets(entry)
 
   if (TOOL_SEARCH_TOOL_NAMES.has(toolName)) {
-    const outcome = parseToolSearchResult(entry.result)
-    const toolCount = outcome.toolCount
-    const badge = toolCount !== null
-      ? `${toolCount} tool${toolCount === 1 ? '' : 's'}`
-      : outcome.enabledTools.length
-        ? `${outcome.enabledTools.length} enabled`
-        : null
-    const enabledPreview = outcome.enabledTools.slice(0, 3).map(toFriendlyToolName).join(', ')
-    const snippet = enabledPreview ? clampText(`Enabled: ${enabledPreview}`, 96) : null
-    const enabledToolInfos = outcome.enabledTools.map(getFriendlyToolInfo)
-    return { badge, snippet, linkedInProfile: null, searchItems: [], searchTotal: null, enabledToolInfos, scrapeTargets: [], previewImageUrl: null, pageTitle: null }
+    return {
+      badge: null,
+      snippet: null,
+      linkedInProfile: null,
+      searchItems: [],
+      searchTotal: null,
+      enabledToolInfos: [],
+      scrapeTargets: [],
+      previewImageUrl: null,
+      pageTitle: null,
+    }
   }
 
   if (activity.kind === 'search') {
@@ -883,7 +882,7 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
     return {
       kind,
       label,
-      detail: query ? `“${query}”` : null,
+      detail: isToolSearch ? null : (query ? `“${query}”` : null),
     }
   }
 
