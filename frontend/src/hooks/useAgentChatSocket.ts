@@ -53,6 +53,13 @@ function computeReconnectDelay(attempt: number): number {
   return base + jitter
 }
 
+function isPageVisible(): boolean {
+  if (typeof document === 'undefined') {
+    return true
+  }
+  return document.visibilityState === 'visible'
+}
+
 export function useAgentChatSocket(
   agentId: string | null,
   options: {
@@ -504,6 +511,9 @@ export function useAgentChatSocket(
     if (syncIntervalRef.current === null) {
       syncIntervalRef.current = window.setInterval(() => {
         if (pauseReasonRef.current !== null) {
+          return
+        }
+        if (!isPageVisible()) {
           return
         }
         syncNow()
