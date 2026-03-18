@@ -15,7 +15,6 @@ const RESYNC_THROTTLE_MS = 4000
 const BACKGROUND_SYNC_INTERVAL_MS = 30000
 const PING_INTERVAL_MS = 20000
 const PONG_TIMEOUT_MS = 8000
-const SOCKET_IDLE_TIMEOUT_MS = 60000
 const CONNECT_TIMEOUT_MS = 10000
 
 export type AgentChatSocketStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'error'
@@ -54,14 +53,11 @@ function computeReconnectDelay(attempt: number): number {
   return base + jitter
 }
 
-function isPageActive(): boolean {
+function isPageVisible(): boolean {
   if (typeof document === 'undefined') {
     return true
   }
-  if (document.visibilityState !== 'visible') {
-    return false
-  }
-  return true
+  return document.visibilityState === 'visible'
 }
 
 export function useAgentChatSocket(
@@ -101,15 +97,13 @@ export function useAgentChatSocket(
   const syncIntervalRef = useRef<number | null>(null)
   const pingIntervalRef = useRef<number | null>(null)
   const pongTimeoutRef = useRef<number | null>(null)
-  const idleTimeoutRef = useRef<number | null>(null)
   const connectTimeoutRef = useRef<number | null>(null)
   const scheduleConnectRef = useRef<(delay: number) => void>(() => undefined)
   const closeSocketRef = useRef<() => void>(() => undefined)
   const closingSocketRef = useRef<WebSocket | null>(null)
-  const pauseReasonRef = useRef<'offline' | 'hidden' | null>(null)
+  const pauseReasonRef = useRef<'offline' | null>(null)
   const lastSyncAtRef = useRef(0)
   const lastActivityAtRef = useRef(0)
-  const idleTriggeredRef = useRef(false)
   const agentIdRef = useRef<string | null>(agentId)
   const subscribedAgentIdRef = useRef<string | null>(null)
   const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>({
@@ -176,7 +170,7 @@ export function useAgentChatSocket(
   )
 
   const sendPing = useCallback(() => {
-    if (pauseReasonRef.current !== null || !isPageActive()) {
+    if (pauseReasonRef.current !== null) {
       return
     }
     const sentAt = Date.now()
@@ -199,36 +193,12 @@ export function useAgentChatSocket(
     clearPingTimers()
   }, [clearPingTimers])
 
-  const clearIdleTimeout = useCallback(() => {
-    if (idleTimeoutRef.current !== null) {
-      clearTimeout(idleTimeoutRef.current)
-      idleTimeoutRef.current = null
-    }
-    idleTriggeredRef.current = false
-  }, [])
-
   const clearConnectTimeout = useCallback(() => {
     if (connectTimeoutRef.current !== null) {
       clearTimeout(connectTimeoutRef.current)
       connectTimeoutRef.current = null
     }
   }, [])
-
-  const scheduleIdleTimeout = useCallback(() => {
-    if (idleTimeoutRef.current !== null) {
-      return
-    }
-    idleTimeoutRef.current = window.setTimeout(() => {
-      idleTimeoutRef.current = null
-      if (isPageActive()) {
-        return
-      }
-      idleTriggeredRef.current = true
-      stopPingLoop()
-      closeSocketRef.current()
-      updateSnapshot({ status: 'idle', lastError: null })
-    }, SOCKET_IDLE_TIMEOUT_MS)
-  }, [stopPingLoop, updateSnapshot])
 
   const syncNow = useCallback(() => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -284,14 +254,6 @@ export function useAgentChatSocket(
   }, [agentId, updateSubscription])
 
   const handleResume = useCallback((reason: PageLifecycleResumeReason) => {
-    clearIdleTimeout()
-    idleTriggeredRef.current = false
-    if (!isPageActive()) {
-      if (pauseReasonRef.current !== 'offline') {
-        pauseReasonRef.current = 'hidden'
-      }
-      return
-    }
     if (pauseReasonRef.current === 'offline' && reason !== 'online') {
       return
     }
@@ -312,7 +274,7 @@ export function useAgentChatSocket(
     updateSnapshot({ status: 'connecting', lastError: null })
     scheduleConnectRef.current(0)
     syncNow()
-  }, [clearIdleTimeout, startPingLoop, syncNow, updateSnapshot])
+  }, [startPingLoop, syncNow, updateSnapshot])
 
   const handleSuspend = useCallback((reason: PageLifecycleSuspendReason) => {
     if (reason === 'offline') {
@@ -320,7 +282,6 @@ export function useAgentChatSocket(
       retryRef.current = 0
       updateSnapshot({ status: 'offline', lastError: 'Network connection lost.' })
       stopPingLoop()
-      clearIdleTimeout()
       if (timeoutRef.current !== null) {
         clearTimeout(timeoutRef.current)
         timeoutRef.current = null
@@ -328,16 +289,7 @@ export function useAgentChatSocket(
       closeSocketRef.current()
       return
     }
-    if (pauseReasonRef.current !== 'offline') {
-      pauseReasonRef.current = 'hidden'
-    }
-    stopPingLoop()
-    scheduleIdleTimeout()
-    if (timeoutRef.current !== null) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-  }, [clearIdleTimeout, scheduleIdleTimeout, stopPingLoop, updateSnapshot])
+  }, [stopPingLoop, updateSnapshot])
 
   usePageLifecycle({ onResume: handleResume, onSuspend: handleSuspend })
 
@@ -373,7 +325,7 @@ export function useAgentChatSocket(
     closeSocketRef.current = closeSocket
 
     const openSocket = () => {
-      if (pauseReasonRef.current !== null || !isPageActive()) {
+      if (pauseReasonRef.current !== null) {
         return
       }
       const existing = socketRef.current
@@ -549,9 +501,6 @@ export function useAgentChatSocket(
     }
 
     pauseReasonRef.current = null
-    if (!isPageActive()) {
-      pauseReasonRef.current = 'hidden'
-    }
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       pauseReasonRef.current = 'offline'
       updateSnapshot({ status: 'offline', lastError: 'Network connection lost.' })
@@ -564,7 +513,7 @@ export function useAgentChatSocket(
         if (pauseReasonRef.current !== null) {
           return
         }
-        if (!isPageActive()) {
+        if (!isPageVisible()) {
           return
         }
         syncNow()
@@ -580,14 +529,12 @@ export function useAgentChatSocket(
         clearInterval(syncIntervalRef.current)
         syncIntervalRef.current = null
       }
-      clearIdleTimeout()
       clearConnectTimeout()
       stopPingLoop()
       closeSocket()
     }
   }, [
     clearConnectTimeout,
-    clearIdleTimeout,
     markActivity,
     startPingLoop,
     stopPingLoop,

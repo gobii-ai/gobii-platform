@@ -320,15 +320,15 @@ class ConsoleUserPreferencesApiTests(TestCase):
             response = self.client.get(reverse("console_session"))
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertFalse(payload.get("simplified_chat_ui"))
-        self.assertTrue(payload.get("simplified_chat_toggle_available"))
+        self.assertTrue(payload.get("simplified_chat_ui"))
+        self.assertFalse(payload.get("simplified_chat_toggle_available"))
 
         with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=True):
             default_response = self.client.get(reverse("console_session"))
         self.assertEqual(default_response.status_code, 200)
         default_payload = default_response.json()
         self.assertTrue(default_payload.get("simplified_chat_ui"))
-        self.assertTrue(default_payload.get("simplified_chat_toggle_available"))
+        self.assertFalse(default_payload.get("simplified_chat_toggle_available"))
 
         UserPreference.update_known_preferences(
             self.user,
@@ -340,7 +340,7 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertEqual(enabled_response.status_code, 200)
         enabled_payload = enabled_response.json()
         self.assertTrue(enabled_payload.get("simplified_chat_ui"))
-        self.assertTrue(enabled_payload.get("simplified_chat_toggle_available"))
+        self.assertFalse(enabled_payload.get("simplified_chat_toggle_available"))
 
         UserPreference.update_known_preferences(
             self.user,
@@ -351,8 +351,8 @@ class ConsoleUserPreferencesApiTests(TestCase):
             saved_false_response = self.client.get(reverse("console_session"))
         self.assertEqual(saved_false_response.status_code, 200)
         saved_false_payload = saved_false_response.json()
-        self.assertFalse(saved_false_payload.get("simplified_chat_ui"))
-        self.assertTrue(saved_false_payload.get("simplified_chat_toggle_available"))
+        self.assertTrue(saved_false_payload.get("simplified_chat_ui"))
+        self.assertFalse(saved_false_payload.get("simplified_chat_toggle_available"))
 
     def test_profile_page_updates_timezone_preference(self):
         response = self.client.post(

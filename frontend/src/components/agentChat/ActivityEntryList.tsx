@@ -12,6 +12,7 @@ type ActivityEntryListProps = {
   entries: ToolEntryDisplay[]
   initialOpenEntryId?: string | null
   limit?: number
+  limitStrategy?: 'head' | 'tail'
   onViewAll?: () => void
 }
 
@@ -19,24 +20,41 @@ export function ActivityEntryList({
   entries,
   initialOpenEntryId = null,
   limit,
+  limitStrategy = 'head',
   onViewAll,
 }: ActivityEntryListProps) {
   const entryRowRefs = useRef<Record<string, HTMLLIElement | null>>({})
+  const initialOpenEntryIdRef = useRef<string | null>(null)
   const [openEntryId, setOpenEntryId] = useState<string | null>(null)
   const visibleEntries = useMemo(
-    () => (typeof limit === 'number' ? entries.slice(0, limit) : entries),
-    [entries, limit],
+    () => {
+      if (typeof limit !== 'number') {
+        return entries
+      }
+      return limitStrategy === 'tail' ? entries.slice(-limit) : entries.slice(0, limit)
+    },
+    [entries, limit, limitStrategy],
   )
   const hasMoreEntries = typeof limit === 'number' && entries.length > limit
 
   useEffect(() => {
-    if (!initialOpenEntryId) {
-      setOpenEntryId(null)
+    if (!initialOpenEntryId || initialOpenEntryIdRef.current === initialOpenEntryId) {
       return
     }
+    initialOpenEntryIdRef.current = initialOpenEntryId
     const hasTarget = visibleEntries.some((entry) => entry.id === initialOpenEntryId)
     setOpenEntryId(hasTarget ? initialOpenEntryId : null)
   }, [initialOpenEntryId, visibleEntries])
+
+  useEffect(() => {
+    if (!openEntryId) {
+      return
+    }
+    const hasOpenEntry = visibleEntries.some((entry) => entry.id === openEntryId)
+    if (!hasOpenEntry) {
+      setOpenEntryId(null)
+    }
+  }, [openEntryId, visibleEntries])
 
   useEffect(() => {
     if (!openEntryId) {
