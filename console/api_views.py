@@ -1465,6 +1465,9 @@ class StaffAgentProcessEventsAPIView(SystemAdminAPIView):
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        if not agent.is_active:
+            processing_active = compute_processing_status(agent)
+            return JsonResponse({"queued": False, "processing_active": processing_active}, status=202)
         try:
             process_agent_events_task.delay(str(agent.id))
             queued = True
