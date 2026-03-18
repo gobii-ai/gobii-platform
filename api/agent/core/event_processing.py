@@ -1512,9 +1512,47 @@ def _should_abort_for_inactive_or_deleted_agent(
     return True
 
 
+def _close_active_cycle_for_skipped_agent(
+    agent_id: Union[str, UUID],
+    *,
+    budget_id: str | None,
+    span: Any,
+    check_context: str,
+) -> None:
+    if not budget_id:
+        return
+
+    try:
+        status = AgentBudgetManager.get_cycle_status(agent_id=str(agent_id))
+        active_id = AgentBudgetManager.get_active_budget_id(agent_id=str(agent_id))
+        if status == "active" and active_id == str(budget_id):
+            AgentBudgetManager.close_cycle(agent_id=str(agent_id), budget_id=str(budget_id))
+            logger.info(
+                "Closed active budget cycle for skipped agent %s (%s, budget_id=%s).",
+                agent_id,
+                check_context,
+                budget_id,
+            )
+            try:
+                span.add_event(
+                    "Closed active budget cycle for skipped agent",
+                    {"context": check_context, "budget_id": str(budget_id)},
+                )
+            except Exception:
+                pass
+    except Exception:
+        logger.debug(
+            "Failed to close active budget cycle for skipped agent %s (%s).",
+            agent_id,
+            check_context,
+            exc_info=True,
+        )
+
+
 def _should_skip_processing_for_inactive_or_deleted_agent(
     agent_id: Union[str, UUID],
     *,
+    budget_id: str | None,
     span: Any,
     check_context: str,
 ) -> bool:
@@ -1523,6 +1561,12 @@ def _should_skip_processing_for_inactive_or_deleted_agent(
         return False
 
     clear_processing_work_state(agent_id)
+    _close_active_cycle_for_skipped_agent(
+        agent_id,
+        budget_id=budget_id,
+        span=span,
+        check_context=check_context,
+    )
     logger.info(
         "Skipping event processing for agent %s (%s, reason=%s).",
         agent_id,
@@ -2641,6 +2685,7 @@ def process_agent_events(
 
     if _should_skip_processing_for_inactive_or_deleted_agent(
         persistent_agent_id,
+        budget_id=budget_id,
         span=span,
         check_context="entry",
     ):
@@ -2861,6 +2906,7 @@ def _process_agent_events_locked(
     heartbeat: Optional[_ProcessingHeartbeat] = None,
 ) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
+    budget_ctx = get_budget_context()
     try:
         agent = (
             PersistentAgent.objects.alive().select_related(
@@ -2876,11 +2922,23 @@ def _process_agent_events_locked(
         )
     except PersistentAgent.DoesNotExist:
         clear_processing_work_state(persistent_agent_id)
+        _close_active_cycle_for_skipped_agent(
+            persistent_agent_id,
+            budget_id=getattr(budget_ctx, "budget_id", None),
+            span=span,
+            check_context="locked_missing",
+        )
         logger.warning("Persistent agent %s not found; skipping processing.", persistent_agent_id)
         return None
 
     if not agent.is_active:
         clear_processing_work_state(agent.id)
+        _close_active_cycle_for_skipped_agent(
+            agent.id,
+            budget_id=getattr(budget_ctx, "budget_id", None),
+            span=span,
+            check_context="locked_inactive",
+        )
         logger.info("Persistent agent %s is inactive; skipping processing.", persistent_agent_id)
         span.add_event("Agent processing skipped - inactive")
         span.set_attribute("persistent_agent.is_active", False)

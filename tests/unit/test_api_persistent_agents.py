@@ -239,6 +239,22 @@ class AgentEventProcessingTests(TestCase):
         fake_redis.delete.assert_any_call(f"agent-event-processing:queued:{self.agent.id}")
         fake_redis.srem.assert_called_with("agent-event-processing:pending", str(self.agent.id))
 
+    def test_process_agent_events_closes_active_cycle_for_inactive_follow_up(self):
+        """Skipping an inactive follow-up should close the inherited budget cycle."""
+        from api.agent.core.budget import AgentBudgetManager
+        from api.agent.core.event_processing import process_agent_events
+
+        agent_id = str(self.agent.id)
+        budget_id, _max_steps, _max_depth = AgentBudgetManager.find_or_start_cycle(agent_id=agent_id)
+        branch_id = AgentBudgetManager.create_branch(agent_id=agent_id, budget_id=budget_id, depth=0)
+        PersistentAgent.objects.filter(pk=self.agent.pk).update(is_active=False)
+
+        process_agent_events(self.agent.id, budget_id=budget_id, branch_id=branch_id, depth=0)
+
+        self.assertEqual(AgentBudgetManager.get_cycle_status(agent_id=agent_id), "closed")
+        next_budget_id, _next_max_steps, _next_max_depth = AgentBudgetManager.find_or_start_cycle(agent_id=agent_id)
+        self.assertNotEqual(next_budget_id, budget_id)
+
 
 @tag("batch_api_persistent_agents")
 class ScheduleUpdaterTests(TestCase):
