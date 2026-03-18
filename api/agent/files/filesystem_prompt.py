@@ -6,9 +6,9 @@ access in its default filespace. Output is capped to ~30KB to keep
 prompt size under control, similar to the SQLite schema helper.
 
 Note: URLs are NOT shown to prevent LLM from copying/corrupting them.
-Use $[/path] placeholders for embeds. For attachments, pass $[/path] via the
-attachments param on send_chat_message/send_email/send_sms/send_agent_message.
-Charts/exports are referenced as file variables like $[/charts/...] and $[/exports/...].
+Use $[/path] placeholders for embeds. Attach files only via a send tool's
+attachments param with the exact $[/path]. Charts/exports are referenced as
+file variables like $[/charts/...] and $[/exports/...].
 """
 import logging
 from typing import List, Sequence
@@ -76,12 +76,12 @@ def format_agent_filesystem_prompt(
     if total_files is not None and total_files > display_count:
         header = (
             f"Most recent files in agent filespace (showing {display_count} of {total_files}; "
-            "use read_file for contents; for attachments, pass $[/path] via the attachments param on send_chat_message/send_email/send_sms/send_agent_message):"
+            "use read_file for contents; attach files only via a send tool's attachments param with the exact $[/path]):"
         )
     else:
         header = (
             f"Most recent files in agent filespace (up to {max_rows}; "
-            "use read_file for contents; for attachments, pass $[/path] via the attachments param on send_chat_message/send_email/send_sms/send_agent_message):"
+            "use read_file for contents; attach files only via a send tool's attachments param with the exact $[/path]):"
         )
     lines: List[str] = [header]
     total_bytes = len(header.encode("utf-8"))

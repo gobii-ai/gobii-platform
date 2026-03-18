@@ -3671,8 +3671,8 @@ def _get_system_instruction(
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
             "- Peer agents: `send_agent_message()`\n\n"
-            "For file attachments, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms/send_agent_message; "
-            "do not paste file paths into the message body unless you want them shown as text.\n\n"
+            "Attach files only via a send tool's `attachments` param using the exact $[/path]. "
+            "Body text never attaches files.\n\n"
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
@@ -3699,8 +3699,8 @@ def _get_system_instruction(
             "Use send_chat_message for web chat - it broadcasts to all active web chat users for this agent (owners and collaborators) regardless of send address, "
             "and send_email/send_sms/send_agent_message for other channels. "
             "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most recently active non-web channel from unified history/recent contacts. "
-            "To attach files, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms/send_agent_message; "
-            "do not paste file paths into message text unless you want them shown. "
+            "Attach files only via a send tool's `attachments` param using the exact $[/path]. "
+            "Body text never attaches files. "
             "Focus on tool calls—text alone is not delivered.\n\n"
         )
         response_structure = (
@@ -4218,11 +4218,19 @@ def _get_system_instruction(
         "```\n\n"
 
         "```\n"
+        "# Attachment pre-flight\n"
+        "file tools return result.attach = \"$[/exports/file.csv]\"\n"
+        "RIGHT: send_email(..., attachments=[result.attach])\n"
+        "WRONG: say 'attached' when attachments=[] or omitted\n"
+        "Prior sends: verify via __messages.attachment_count or unified history attachment labels\n"
+        "```\n\n"
+
+        "```\n"
         "# File exports\n"
         "Use create_file for text-based formats.\n"
         "If exporting CSV or PDF, use create_csv or create_pdf instead. You may need to search for these tools if you need them but don't have them available."
         "create_csv can take raw CSV or query='SELECT ...' to export from SQLite. \n"
-        "CSV export: create_csv(file_path='/exports/your-file.csv'); add to message as an attachment.\n"
+        "CSV export: create_csv(file_path='/exports/your-file.csv'); pass result.attach to a send tool's attachments.\n"
         "```\n\n"
         f"{image_generation_skill}"
 
@@ -4729,6 +4737,10 @@ def _extract_attachment_paths_from_raw_payload(raw_payload: object) -> List[str]
     return paths
 
 
+def _format_outbound_attachment_status_suffix(attachment_paths: Sequence[str]) -> str:
+    return f" [attachments: {len(attachment_paths)}]"
+
+
 def _build_message_sqlite_record(
     message: PersistentAgentMessage,
     *,
@@ -5163,6 +5175,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         if raw_payload:
             subject = (raw_payload.get("subject") or "").strip()
         event_prefix = f"message_{'outbound' if m.is_outbound else 'inbound'}"
+        attachment_paths = _get_message_attachment_paths(m)
+        attachment_status_suffix = (
+            _format_outbound_attachment_status_suffix(attachment_paths)
+            if m.is_outbound
+            else ""
+        )
 
         # Determine if this inbound message needs a trust reminder
         needs_trust_reminder = False
@@ -5181,7 +5199,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             peer_name = getattr(m.peer_agent, "name", "linked agent")
             if m.is_outbound:
                 header = (
-                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} Peer DM sent to {peer_name}:"
+                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} Peer DM sent to {peer_name}"
+                    f"{attachment_status_suffix}:"
                 )
             else:
                 header = (
@@ -5203,7 +5222,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
                 if channel == CommsChannel.WEB and m.to_endpoint_id:
                     to_addr = _format_web_party(to_addr, m.to_endpoint_id)
-                header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you sent a message to {to_addr}:"
+                header = (
+                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, "
+                    f"you sent a message to {to_addr}{attachment_status_suffix}:"
+                )
             else:
                 header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you received a message from {from_addr}:"
 
@@ -5238,7 +5260,6 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                     content = f"{content}\n{trust_reminder}"
                 components["content"] = content
 
-        attachment_paths = _get_message_attachment_paths(m)
         if attachment_paths:
             components["attachments"] = "\n".join(f"- $[{path}]" for path in attachment_paths)
 
