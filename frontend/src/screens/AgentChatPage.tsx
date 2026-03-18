@@ -803,6 +803,32 @@ export function AgentChatPage({
     events: displayEvents,
     scrollContainerRef,
   })
+  const olderPageRequestInFlightRef = useRef(false)
+
+  const requestPreviousPage = useCallback(() => {
+    if (
+      olderPageRequestInFlightRef.current
+      || !timelineQuery.hasPreviousPage
+      || timelineQuery.isFetchingPreviousPage
+      || timelineQuery.isFetchPreviousPageError
+    ) {
+      return
+    }
+
+    olderPageRequestInFlightRef.current = true
+    void timelineQuery.fetchPreviousPage().finally(() => {
+      olderPageRequestInFlightRef.current = false
+    })
+  }, [
+    timelineQuery.fetchPreviousPage,
+    timelineQuery.hasPreviousPage,
+    timelineQuery.isFetchingPreviousPage,
+    timelineQuery.isFetchPreviousPageError,
+  ])
+
+  useEffect(() => {
+    olderPageRequestInFlightRef.current = false
+  }, [activeAgentId])
 
   // Auto-trigger older loading when scrolled near top
   const virtualItems = virtualizer.getVirtualItems()
@@ -821,22 +847,16 @@ export function AgentChatPage({
     }
     if (
       (nearTopByScroll || (firstVisibleIndex !== null && firstVisibleIndex <= 2))
-      && timelineQuery.hasPreviousPage
-      && !timelineQuery.isFetchingPreviousPage
-      && !timelineQuery.isFetchPreviousPageError
     ) {
-      void timelineQuery.fetchPreviousPage()
+      requestPreviousPage()
     }
   }, [
     firstVisibleIndex,
     initialLoading,
     isNewAgent,
+    requestPreviousPage,
     switchingAgentId,
     timelineEvents.length,
-    timelineQuery.hasPreviousPage,
-    timelineQuery.isFetchingPreviousPage,
-    timelineQuery.isFetchPreviousPageError,
-    timelineQuery.fetchPreviousPage,
   ])
 
   // Scroll position preservation when loading older pages
@@ -1325,11 +1345,8 @@ export function AgentChatPage({
         && !switchingAgentId
         && timelineEvents.length
         && nextScrollTop <= TOP_LOAD_THRESHOLD_PX
-        && timelineQuery.hasPreviousPage
-        && !timelineQuery.isFetchingPreviousPage
-        && !timelineQuery.isFetchPreviousPageError
       ) {
-        void timelineQuery.fetchPreviousPage()
+        requestPreviousPage()
       }
       // Don't try to re-pin while user is actively touching — let their scroll intent take priority
       if (!userTouchActiveRef.current) {
@@ -1426,13 +1443,10 @@ export function AgentChatPage({
     initialLoading,
     isNewAgent,
     repinAutoScrollIfAtBottom,
+    requestPreviousPage,
     switchingAgentId,
     syncNearBottomState,
     timelineEvents.length,
-    timelineQuery.fetchPreviousPage,
-    timelineQuery.hasPreviousPage,
-    timelineQuery.isFetchingPreviousPage,
-    timelineQuery.isFetchPreviousPageError,
     unpinAutoScrollFromUserGesture,
   ])
 
