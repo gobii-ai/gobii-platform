@@ -18,7 +18,7 @@ import zstandard as zstd
 from allauth.account.models import EmailAddress
 
 from api.agent.core.event_processing import (
-    _gate_send_chat_tool_for_session,
+    _gate_send_chat_tool_for_delivery,
     build_prompt_context,
     _get_completed_process_run_count,
     _run_agent_loop,
@@ -705,7 +705,7 @@ class PromptContextBuilderTests(TestCase):
             primary=True,
         )
         tools = get_agent_tools(self.agent)
-        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        gated_tools = _gate_send_chat_tool_for_delivery(tools, self.agent)
         tool_names = [
             entry.get("function", {}).get("name")
             for entry in gated_tools
@@ -715,7 +715,7 @@ class PromptContextBuilderTests(TestCase):
 
     def test_session_tool_gating_includes_send_chat_message_without_active_web_session_when_no_verified_fallback(self):
         tools = get_agent_tools(self.agent)
-        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        gated_tools = _gate_send_chat_tool_for_delivery(tools, self.agent)
         tool_names = [
             entry.get("function", {}).get("name")
             for entry in gated_tools
@@ -726,7 +726,7 @@ class PromptContextBuilderTests(TestCase):
     def test_session_tool_gating_includes_send_chat_message_with_active_web_session(self):
         start_web_session(self.agent, self.user)
         tools = get_agent_tools(self.agent)
-        gated_tools = _gate_send_chat_tool_for_session(tools, self.agent)
+        gated_tools = _gate_send_chat_tool_for_delivery(tools, self.agent)
         tool_names = [
             entry.get("function", {}).get("name")
             for entry in gated_tools
@@ -1200,7 +1200,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(retry_props.get("retry_strategy"), "discard_and_rerun_once")
         self.assertEqual(retry_props.get("retry_switch_active"), True)
         self.assertEqual(retry_props.get("retry_performed"), True)
-        self.assertEqual(retry_props.get("had_active_web_session_at_start"), False)
+        self.assertEqual(retry_props.get("had_deliverable_web_target_at_start"), False)
 
     def test_web_session_activation_retry_does_not_run_when_switch_off(self):
         """When switch is off, completion output is processed normally."""
@@ -1299,7 +1299,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(props.get("retry_strategy"), "discard_and_rerun_once")
         self.assertEqual(props.get("retry_switch_active"), True)
         self.assertEqual(props.get("retry_performed"), True)
-        self.assertEqual(props.get("had_active_web_session_at_start"), False)
+        self.assertEqual(props.get("had_deliverable_web_target_at_start"), False)
 
     def test_web_session_activation_retry_skips_when_no_iterations_remaining(self):
         """If no loop iteration remains, process current completion instead of dropping it."""
