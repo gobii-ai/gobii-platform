@@ -50,7 +50,7 @@ from util.onboarding import (
 )
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
-from constants.stripe import CHECKOUT_PAYMENT_METHOD_TYPES, EXCLUDED_PAYMENT_METHOD_TYPES
+from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
