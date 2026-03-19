@@ -44,6 +44,7 @@ import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } 
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
+import type { StatusExpansionTargets } from './statusExpansion'
 
 type TaskQuotaInfo = {
   available: number
@@ -56,6 +57,7 @@ const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
+  statusExpansionTargets?: StatusExpansionTargets
   agentId?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
@@ -176,6 +178,7 @@ export function AgentChatLayout({
   agentFirstName,
   events,
   displayEvents,
+  statusExpansionTargets,
   agentId,
   agentColorHex,
   agentAvatarUrl,
@@ -913,6 +916,7 @@ export function AgentChatLayout({
                             viewerUserId={viewerUserId ?? null}
                             viewerEmail={viewerEmail ?? null}
                             suppressedThinkingCursor={suppressedThinkingCursor}
+                            statusExpansionTargets={statusExpansionTargets}
                           />
                         </div>
                       )

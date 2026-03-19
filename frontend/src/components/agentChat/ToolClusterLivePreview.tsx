@@ -3,11 +3,12 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { ExternalLink, Search } from 'lucide-react'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
-import type { FriendlyToolInfo } from '../tooling/toolMetadata'
+import { getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
 import { extractBrightDataSearchQuery } from '../tooling/brightdata'
 import { ToolIconSlot } from './ToolIconSlot'
 import { deriveSemanticPreview } from './tooling/clusterPreviewText'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
+import { parseToolSearchResult } from './tooling/searchUtils'
 
 type ToolClusterLivePreviewProps = {
   cluster: ToolClusterTransform
@@ -723,13 +724,42 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
   const scrapeTargets = activity.kind === 'linkedin' ? [] : extractScrapeTargets(entry)
 
   if (TOOL_SEARCH_TOOL_NAMES.has(toolName)) {
+    const searchPreview = extractSearchPreviewItems(entry.result)
+    if (searchPreview.items.length > 0) {
+      const count = pickResultCount(entry.result)
+      const effectiveTotal = count !== null ? Math.max(count, searchPreview.total) : searchPreview.total || null
+      const badge = effectiveTotal !== null ? `${effectiveTotal} result${effectiveTotal === 1 ? '' : 's'}` : null
+      return {
+        badge,
+        snippet: pickSearchSnippet(entry.result),
+        linkedInProfile: null,
+        searchItems: searchPreview.items,
+        searchTotal: effectiveTotal,
+        enabledToolInfos: [],
+        scrapeTargets: [],
+        previewImageUrl: null,
+        pageTitle: null,
+      }
+    }
+
+    const outcome = parseToolSearchResult(entry.result)
+    const enabledToolNames = [
+      ...outcome.enabledTools,
+      ...outcome.alreadyEnabledTools,
+    ]
+    const enabledToolInfos = enabledToolNames.map((rawName) => getFriendlyToolInfo(rawName))
+    const badge = enabledToolInfos.length
+      ? `${enabledToolInfos.length} enabled`
+      : outcome.toolCount !== null
+        ? `${outcome.toolCount} match${outcome.toolCount === 1 ? '' : 'es'}`
+        : null
     return {
-      badge: null,
-      snippet: null,
+      badge,
+      snippet: outcome.message,
       linkedInProfile: null,
       searchItems: [],
       searchTotal: null,
-      enabledToolInfos: [],
+      enabledToolInfos,
       scrapeTargets: [],
       previewImageUrl: null,
       pageTitle: null,

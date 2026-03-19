@@ -18,6 +18,7 @@ import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelli
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
+import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
@@ -35,7 +36,7 @@ import {
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
 } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
-import { useSimplifiedTimeline } from '../hooks/useSimplifiedTimeline'
+import { collapseDetailedStatusRuns, useSimplifiedTimeline } from '../hooks/useSimplifiedTimeline'
 import { useSimplifiedChat } from '../contexts/SimplifiedChatContext'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
@@ -795,7 +796,17 @@ export function AgentChatPage({
   const {
     enabled: simplifiedChat,
   } = useSimplifiedChat()
-  const displayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
+  const statusExpansionTargets = useMemo(
+    () => findLatestStatusExpansionTargets(timelineEvents),
+    [timelineEvents],
+  )
+  const simplifiedDisplayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
+  const displayEvents = useMemo(
+    () => (simplifiedChat
+      ? simplifiedDisplayEvents
+      : collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets)),
+    [simplifiedChat, simplifiedDisplayEvents, timelineEvents, statusExpansionTargets],
+  )
 
   // Set up virtualizer
   const scrollContainerRef = useRef<HTMLElement | null>(null)
@@ -3143,6 +3154,7 @@ export function AgentChatPage({
         pendingHumanInputRequests={pendingHumanInputRequests}
         events={timelineEvents}
         displayEvents={displayEvents}
+        statusExpansionTargets={statusExpansionTargets}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
