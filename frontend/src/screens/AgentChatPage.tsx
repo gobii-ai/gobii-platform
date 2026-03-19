@@ -36,8 +36,7 @@ import {
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
 } from '../hooks/useTimelineCacheInjector'
 import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
-import { collapseDetailedStatusRuns, useSimplifiedTimeline } from '../hooks/useSimplifiedTimeline'
-import { useSimplifiedChat } from '../contexts/SimplifiedChatContext'
+import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
@@ -792,20 +791,13 @@ export function AgentChatPage({
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
 
-  // Simplified-chat mode collapses non-message events for the virtualizer
-  const {
-    enabled: simplifiedChat,
-  } = useSimplifiedChat()
   const statusExpansionTargets = useMemo(
     () => findLatestStatusExpansionTargets(timelineEvents),
     [timelineEvents],
   )
-  const simplifiedDisplayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
   const displayEvents = useMemo(
-    () => (simplifiedChat
-      ? simplifiedDisplayEvents
-      : collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets)),
-    [simplifiedChat, simplifiedDisplayEvents, timelineEvents, statusExpansionTargets],
+    () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets),
+    [timelineEvents, statusExpansionTargets],
   )
 
   // Set up virtualizer

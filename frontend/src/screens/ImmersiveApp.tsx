@@ -4,7 +4,6 @@ import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
-import { SimplifiedChatProvider } from '../contexts/SimplifiedChatContext'
 import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
@@ -28,8 +27,6 @@ type LocationSnapshot = {
 type ConsoleSessionPayload = {
   user_id?: string
   email?: string
-  simplified_chat_ui?: boolean
-  simplified_chat_toggle_available?: boolean
 }
 
 function readLocation(): LocationSnapshot {
@@ -301,8 +298,6 @@ export function ImmersiveApp() {
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
-  const [simplifiedChatUi, setSimplifiedChatUi] = useState(false)
-  const [simplifiedChatToggleAvailable, setSimplifiedChatToggleAvailable] = useState(false)
   const hasSkippedInitialSegmentPage = useRef(false)
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
@@ -370,16 +365,12 @@ export function ImmersiveApp() {
         const numeric = raw ? Number(raw) : null
         setViewerUserId(Number.isFinite(numeric) ? numeric : null)
         setViewerEmail(payload?.email ? payload.email : null)
-        setSimplifiedChatUi(Boolean(payload?.simplified_chat_ui))
-        setSimplifiedChatToggleAvailable(Boolean(payload?.simplified_chat_toggle_available))
       } catch (err) {
         if (controller.signal.aborted) {
           return
         }
         setViewerUserId(null)
         setViewerEmail(null)
-        setSimplifiedChatUi(false)
-        setSimplifiedChatToggleAvailable(false)
       }
     }
     void loadViewer()
@@ -412,44 +403,42 @@ export function ImmersiveApp() {
   }, [])
 
   return (
-    <SimplifiedChatProvider initialEnabled={simplifiedChatUi} toggleAvailable={simplifiedChatToggleAvailable}>
-      <div className="immersive-shell">
-        <div className="immersive-shell__content">
-          {route.kind === 'agent-chat' ? (
-            <AgentChatPage
-              agentId={route.agentId}
-              viewerUserId={viewerUserId}
-              viewerEmail={viewerEmail}
-              onClose={embed ? handleEmbeddedClose : handleClose}
-              onCreateAgent={handleNavigateToNewAgent}
-              onAgentCreated={handleAgentCreated}
-              showContextSwitcher
-              persistContextSession={false}
-              onContextSwitch={handleContextSwitch}
-            />
-          ) : null}
-          {route.kind === 'agent-select' ? (
-            <AgentChatPage
-              viewerUserId={viewerUserId}
-              viewerEmail={viewerEmail}
-              onClose={embed ? handleEmbeddedClose : handleClose}
-              onCreateAgent={handleNavigateToNewAgent}
-              onAgentCreated={handleAgentCreated}
-              showContextSwitcher
-              persistContextSession={false}
-              onContextSwitch={handleContextSwitch}
-            />
-          ) : null}
-          {route.kind === 'command-center' ? (
-            <CommandCenter
-              hasAgents={hasAgents}
-              isLoading={rosterQuery.isLoading}
-              onCreateAgent={handleNavigateToNewAgent}
-            />
-          ) : null}
-          {route.kind === 'not-found' ? <NotFound /> : null}
-        </div>
+    <div className="immersive-shell">
+      <div className="immersive-shell__content">
+        {route.kind === 'agent-chat' ? (
+          <AgentChatPage
+            agentId={route.agentId}
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+          />
+        ) : null}
+        {route.kind === 'agent-select' ? (
+          <AgentChatPage
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+          />
+        ) : null}
+        {route.kind === 'command-center' ? (
+          <CommandCenter
+            hasAgents={hasAgents}
+            isLoading={rosterQuery.isLoading}
+            onCreateAgent={handleNavigateToNewAgent}
+          />
+        ) : null}
+        {route.kind === 'not-found' ? <NotFound /> : null}
       </div>
-    </SimplifiedChatProvider>
+    </div>
   )
 }

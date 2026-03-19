@@ -3,8 +3,6 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
 import type { Virtualizer } from '@tanstack/react-virtual'
 import '../../styles/agentChatLegacy.css'
-import '../../styles/simplifiedChat.css'
-import { useSimplifiedChat } from '../../contexts/SimplifiedChatContext'
 import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -26,7 +24,6 @@ import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
-import { shouldShowStreamingThinking } from './simplifiedChatPresentation'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
@@ -286,7 +283,6 @@ export function AgentChatLayout({
   pendingHumanInputRequests = [],
   onRespondHumanInputRequest,
 }: AgentChatLayoutProps) {
-  const { enabled: simplifiedChat } = useSimplifiedChat()
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -536,15 +532,9 @@ export function AgentChatLayout({
   // Un-suppress the static thinking entry once streaming completes so it appears in its chronological position
   const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
   const showStreamingSlot = hasStreamingContent && isStreaming
-  // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
-  // In simplified mode, the typing indicator covers this state instead
-  const showStreamingThinking = shouldShowStreamingThinking({
-    enabled: simplifiedChat,
-    isStreaming,
-    hasReasoning: Boolean(streaming?.reasoning?.trim()),
-    hasStreamingContent,
-    hasMoreNewer: Boolean(hasMoreNewer),
-  })
+  const showStreamingThinking = Boolean(
+    isStreaming && streaming?.reasoning?.trim() && !hasStreamingContent && !hasMoreNewer,
+  )
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -860,7 +850,7 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" className={simplifiedChat ? 'simplified-chat' : undefined} data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
@@ -896,8 +886,6 @@ export function AgentChatLayout({
                         <div
                           key={virtualItem.key}
                           data-index={virtualItem.index}
-                          data-animate-entry={simplifiedChat && isLatestEvent ? 'true' : undefined}
-                          className={simplifiedChat ? 'simplified-chat-vitem' : undefined}
                           ref={virtualizer.measureElement}
                           style={{
                             position: 'absolute',
