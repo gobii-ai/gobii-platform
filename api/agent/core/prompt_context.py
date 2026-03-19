@@ -343,8 +343,9 @@ analysis_json → optional hints (not the data)
 do not invent columns; only use those listed above
 
 # __messages (special table)
-__messages.columns = {message_id, seq, timestamp, channel, is_outbound, direction, from_address, to_address, conversation_id, conversation_address, is_peer_dm, peer_agent_id, subject, body, body_bytes, body_is_truncated, body_truncated_bytes, attachment_paths_json, attachment_count, latest_status, latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, is_hidden_in_chat}
+__messages.columns = {message_id, seq, timestamp, channel, is_outbound, direction, from_address, to_address, conversation_id, conversation_address, is_peer_dm, peer_agent_id, subject, body, body_bytes, body_is_truncated, body_truncated_bytes, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, is_hidden_in_chat}
 attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json)
+rejected_attachments_json → JSON array of inbound attachments that were attempted but rejected before storage
 freshness_check → do NOT query __messages for "anything new"; new inbound messages are already injected into this run's unified history
 use_case → query __messages only for structured analysis, filtering/aggregation, or historical lookup
 __messages is per-cycle snapshot: newest→oldest full bodies up to ~5MB total; dropped before persistence
@@ -4223,6 +4224,7 @@ def _get_system_instruction(
         "RIGHT: send_email(..., attachments=[result.attach])\n"
         "WRONG: say 'attached' when attachments=[] or omitted\n"
         "Prior sends: verify via __messages.attachment_count or unified history attachment labels\n"
+        "If an inbound __messages.rejected_attachments_json is non-empty, explicitly tell the user the attachment was attempted but unavailable because it exceeded platform limits.\n"
         "```\n\n"
 
         "```\n"
@@ -4737,6 +4739,40 @@ def _extract_attachment_paths_from_raw_payload(raw_payload: object) -> List[str]
     return paths
 
 
+def _extract_rejected_attachments_from_raw_payload(raw_payload: object) -> List[Dict[str, Any]]:
+    if not isinstance(raw_payload, dict):
+        return []
+
+    raw_items = raw_payload.get("rejected_attachments")
+    if not isinstance(raw_items, list):
+        return []
+
+    attachments: List[Dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+
+        filename = str(item.get("filename") or "").strip() or "attachment"
+        metadata: Dict[str, Any] = {"filename": filename}
+
+        for key in ("reason_code", "channel"):
+            value = str(item.get(key) or "").strip()
+            if value:
+                metadata[key] = value
+
+        for key in ("size_bytes", "limit_bytes"):
+            value = item.get(key)
+            try:
+                if value is not None:
+                    metadata[key] = int(value)
+            except (TypeError, ValueError):
+                continue
+
+        attachments.append(metadata)
+
+    return attachments
+
+
 def _format_outbound_attachment_status_suffix(attachment_paths: Sequence[str]) -> str:
     return f" [attachments: {len(attachment_paths)}]"
 
@@ -4748,6 +4784,7 @@ def _build_message_sqlite_record(
     subject: str,
     body: str,
     attachment_paths: Sequence[str],
+    rejected_attachments: Sequence[Dict[str, Any]],
     raw_payload: Dict[str, Any],
 ) -> MessageSQLiteRecord:
     to_address = ""
@@ -4776,6 +4813,7 @@ def _build_message_sqlite_record(
         subject=subject,
         body=body,
         attachment_paths=attachment_paths,
+        rejected_attachments=rejected_attachments,
         latest_status=message.latest_status or "",
         latest_sent_at=latest_sent_at,
         latest_delivered_at=latest_delivered_at,
@@ -4853,6 +4891,7 @@ def _build_sqlite_messages_snapshot_records(
                 continue
             attachment_paths.append(path)
             seen_paths.add(path)
+        rejected_attachments = _extract_rejected_attachments_from_raw_payload(raw_payload)
 
         records.append(
             _build_message_sqlite_record(
@@ -4861,6 +4900,7 @@ def _build_sqlite_messages_snapshot_records(
                 subject=subject,
                 body=body,
                 attachment_paths=attachment_paths,
+                rejected_attachments=rejected_attachments,
                 raw_payload=raw_payload,
             )
         )

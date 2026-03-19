@@ -23,6 +23,7 @@ from .adapters import (
     _extract_forward_sections,
 )
 from .attachment_filters import is_signature_image_attachment
+from .rejected_attachments import build_rejected_attachment_metadata
 from config.settings import EMAIL_STRIP_REPLIES
 from api.services.system_settings import get_max_file_size
 import logging
@@ -102,12 +103,13 @@ def _choose_body(msg: email.message.EmailMessage) -> Tuple[str, str]:
             return "", "fallback/empty"
 
 
-def _collect_attachments(msg: email.message.EmailMessage) -> List[Any]:
+def _collect_attachments(msg: email.message.EmailMessage) -> Tuple[List[Any], List[dict[str, Any]]]:
     """Collect attachments (including inline) as ContentFile objects.
 
     Applies MAX_FILE_SIZE filtering best-effort based on decoded bytes length.
     """
     files: List[Any] = []
+    rejected_attachments: List[dict[str, Any]] = []
     max_bytes = get_max_file_size()
 
     for part in msg.walk():
@@ -127,6 +129,15 @@ def _collect_attachments(msg: email.message.EmailMessage) -> List[Any]:
                 continue
             if max_bytes and len(raw) > int(max_bytes):
                 logger.warning("IMAP attachment exceeds max size; skipping (size=%d, limit=%d)", len(raw), max_bytes)
+                rejected_attachments.append(
+                    build_rejected_attachment_metadata(
+                        filename=part.get_filename() or "attachment",
+                        channel=CommsChannel.EMAIL,
+                        limit_bytes=max_bytes,
+                        reason_code="too_large",
+                        size_bytes=len(raw),
+                    )
+                )
                 continue
 
             filename = part.get_filename() or "attachment"
@@ -153,7 +164,7 @@ def _collect_attachments(msg: email.message.EmailMessage) -> List[Any]:
             logger.debug("Failed to decode attachment part", exc_info=True)
             continue
 
-    return files
+    return files, rejected_attachments
 
 
 @dataclass
@@ -191,7 +202,7 @@ class ImapEmailAdapter:
                 elif pre:
                     body_text = pre
 
-        attachments = _collect_attachments(msg)
+        attachments, rejected_attachments = _collect_attachments(msg)
 
         # Build raw payload for diagnostics
         hdr_map: MutableMapping[str, str] = {}
@@ -212,6 +223,8 @@ class ImapEmailAdapter:
                 raw_payload["imap_uid"] = str(ctx.uid)
             if ctx.folder:
                 raw_payload["imap_folder"] = str(ctx.folder)
+        if rejected_attachments:
+            raw_payload["rejected_attachments"] = rejected_attachments
 
         return ParsedMessage(
             sender=sender_email,

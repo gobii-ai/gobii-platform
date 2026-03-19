@@ -37,6 +37,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
                 subject="Hello",
                 body="Need an update",
                 attachment_paths=["/reports/daily.csv"],
+                rejected_attachments=[],
                 latest_status="queued",
                 latest_sent_at=None,
                 latest_delivered_at=None,
@@ -56,7 +57,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
 
             cur.execute(
                 """
-                SELECT message_id, channel, is_outbound, direction, subject, attachment_paths_json, attachment_count
+                SELECT message_id, channel, is_outbound, direction, subject, attachment_paths_json, attachment_count, rejected_attachments_json
                 FROM "__messages"
                 WHERE message_id='msg-1';
                 """
@@ -71,6 +72,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
             self.assertEqual(row[4], "Hello")
             self.assertEqual(json.loads(row[5]), ["/reports/daily.csv"])
             self.assertEqual(row[6], 1)
+            self.assertEqual(json.loads(row[7]), [])
         finally:
             conn.close()
 
@@ -90,6 +92,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
             subject="",
             body="first",
             attachment_paths=[],
+            rejected_attachments=[],
             latest_status="sent",
             latest_sent_at="2026-01-01T00:00:01+00:00",
             latest_delivered_at=None,
@@ -112,6 +115,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
             subject="",
             body="second",
             attachment_paths=[],
+            rejected_attachments=[],
             latest_status="delivered",
             latest_sent_at="2026-01-02T00:00:01+00:00",
             latest_delivered_at="2026-01-02T00:00:01+00:00",
@@ -149,6 +153,9 @@ class SqliteMessagesTableTests(SimpleTestCase):
             subject="",
             body="ééé",
             attachment_paths=[],
+            rejected_attachments=[
+                {"filename": "deck.pdf", "reason_code": "too_large", "limit_bytes": 1024, "channel": "email"}
+            ],
             latest_status="failed",
             latest_sent_at=None,
             latest_delivered_at=None,
@@ -165,7 +172,7 @@ class SqliteMessagesTableTests(SimpleTestCase):
             cur.execute(
                 """
                 SELECT body, body_is_truncated, body_truncated_bytes, conversation_id, peer_agent_id,
-                       latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message
+                       latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, rejected_attachments_json
                 FROM "__messages"
                 WHERE message_id='msg-trunc';
                 """
@@ -182,5 +189,9 @@ class SqliteMessagesTableTests(SimpleTestCase):
             self.assertIsNone(row[6])
             self.assertIsNone(row[7])
             self.assertIsNone(row[8])
+            self.assertEqual(
+                json.loads(row[9]),
+                [{"filename": "deck.pdf", "reason_code": "too_large", "limit_bytes": 1024, "channel": "email"}],
+            )
         finally:
             conn.close()

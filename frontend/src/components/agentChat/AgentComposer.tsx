@@ -12,6 +12,7 @@ import { INSIGHT_TIMING } from '../../types/insight'
 import { useLocalStorageState } from '../../hooks/useLocalStorageState'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
+import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
@@ -150,6 +151,7 @@ type AgentComposerProps = {
   canManageAgent?: boolean
   submitError?: string | null
   showSubmitErrorUpgrade?: boolean
+  maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
 }
@@ -185,11 +187,13 @@ export const AgentComposer = memo(function AgentComposer({
   canManageAgent = true,
   submitError = null,
   showSubmitErrorUpgrade = false,
+  maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   const [activeHumanInputRequestId, setActiveHumanInputRequestId] = useState<string | null>(null)
@@ -208,8 +212,8 @@ export const AgentComposer = memo(function AgentComposer({
   const [countdownProgress, setCountdownProgress] = useState(0)
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRotationTimeRef = useRef<number>(Date.now())
-  const feedbackMessage = disabledReason || submitError
-  const showSubmitErrorAlert = Boolean(submitError && !disabledReason)
+  const feedbackMessage = disabledReason || attachmentError || submitError
+  const showSubmitErrorAlert = Boolean((attachmentError || submitError) && !disabledReason)
 
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
@@ -663,19 +667,23 @@ export const AgentComposer = memo(function AgentComposer({
     if (onSubmit) {
       try {
         setIsSending(true)
+        await onSubmit(trimmed, attachmentsSnapshot)
         setBody('')
         setAttachments([])
+        setAttachmentError(null)
         if (fileInputRef.current) {
           fileInputRef.current.value = ''
         }
         requestAnimationFrame(() => adjustTextareaHeight(true))
-        await onSubmit(trimmed, attachmentsSnapshot)
+      } catch {
+        return
       } finally {
         setIsSending(false)
       }
     } else {
       setBody('')
       setAttachments([])
+      setAttachmentError(null)
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
       }
@@ -726,8 +734,24 @@ export const AgentComposer = memo(function AgentComposer({
     if (!files.length) {
       return
     }
-    setAttachments((current) => [...current, ...files])
-  }, [disabled, isSending])
+    const acceptedFiles = maxAttachmentBytes
+      ? files.filter((file) => file.size <= maxAttachmentBytes)
+      : files
+    const rejectedFile = maxAttachmentBytes
+      ? files.find((file) => file.size > maxAttachmentBytes) ?? null
+      : null
+
+    if (rejectedFile && maxAttachmentBytes) {
+      setAttachmentError(`"${rejectedFile.name}" is too large. Max file size is ${formatBytes(maxAttachmentBytes)}.`)
+    } else {
+      setAttachmentError(null)
+    }
+
+    if (!acceptedFiles.length) {
+      return
+    }
+    setAttachments((current) => [...current, ...acceptedFiles])
+  }, [disabled, isSending, maxAttachmentBytes])
 
   const handleAttachmentChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? [])

@@ -9,6 +9,7 @@ from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -1103,8 +1104,50 @@ class AgentChatAPITests(TestCase):
         )
         self.assertIsNotNone(stored)
         self.assertEqual(stored.from_endpoint.address, self.user_address)
+
+    @override_settings(MAX_FILE_SIZE=20)
+    @tag("batch_agent_chat")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_message_post_accepts_under_limit_attachment(self, mock_delay):
+        attachment = SimpleUploadedFile("notes.txt", b"hello world", content_type="text/plain")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/messages/",
+                data={"body": "Attached", "attachments": attachment},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["event"]["kind"], "message")
+        self.assertEqual(payload["event"]["message"]["bodyText"], "Attached")
+        self.assertEqual(len(payload["event"]["message"]["attachments"]), 1)
+        stored = (
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, body="Attached")
+            .order_by("-timestamp")
+            .first()
+        )
+        self.assertIsNotNone(stored)
         self.assertEqual(stored.conversation.address, self.user_address)
-        mock_delay.assert_called_once()
+        mock_delay.assert_called()
+
+    @override_settings(MAX_FILE_SIZE=5)
+    @tag("batch_agent_chat")
+    def test_message_post_rejects_over_limit_attachment(self):
+        attachment = SimpleUploadedFile("report.pdf", b"hello-bytes", content_type="application/pdf")
+        before_count = PersistentAgentMessage.objects.filter(owner_agent=self.agent).count()
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/",
+            data={"body": "Attached", "attachments": attachment},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"error": '"report.pdf" is too large. Max file size is 5 bytes.'},
+        )
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), before_count)
 
     @tag("batch_agent_chat")
     def test_send_chat_tool_creates_outbound_message(self):
