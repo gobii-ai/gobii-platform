@@ -1,12 +1,14 @@
 """Tests for implied send behavior in event processing."""
+from datetime import timedelta
 import json
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.utils import timezone
 
 from api.agent.core import event_processing as ep
-from api.agent.core.prompt_context import INTERNAL_REASONING_PREFIX
+from api.agent.core.prompt_context import INTERNAL_REASONING_PREFIX, _get_implied_send_context
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -15,6 +17,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentKanbanCard,
     PersistentAgentMessage,
+    PersistentAgentWebSession,
     PersistentAgentStep,
     PersistentAgentToolCall,
     UserQuota,
@@ -223,61 +226,29 @@ class ImpliedSendTests(TestCase):
         ).first()
         self.assertIsNotNone(correction_step)
 
-    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
-    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
-    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
-    @patch("api.agent.core.event_processing.build_prompt_context")
-    @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_prefers_active_web_session(
-        self,
-        mock_completion,
-        mock_build_prompt,
-        mock_send_chat,
-        mock_send_email,
-        _mock_credit,
-    ):
-        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
-
-        prior_step = PersistentAgentStep.objects.create(
-            agent=self.agent,
-            description="Tool call: send_email",
-        )
-        PersistentAgentToolCall.objects.create(
-            step=prior_step,
-            tool_name="send_email",
-            tool_params={
-                "to_address": "owner@example.com",
-                "subject": "Old subject",
-                "mobile_first_html": "old",
-            },
-            result="{}",
-        )
-
+    def test_implied_send_prefers_deliverable_web_session(self):
         start_web_session(self.agent, self.user)
 
-        resp = self._mock_completion("Hello via web")
-        mock_completion.return_value = (
-            resp,
-            {
-                "prompt_tokens": 10,
-                "completion_tokens": 5,
-                "total_tokens": 15,
-                "model": "m",
-                "provider": "p",
-            },
-        )
+        context = _get_implied_send_context(self.agent)
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
-            ep._run_agent_loop(self.agent, is_first_run=False)
-
-        self.assertTrue(mock_send_chat.called)
-        params = mock_send_chat.call_args[0][1]
+        self.assertIsNotNone(context)
+        self.assertEqual(context["channel"], "web")
         self.assertEqual(
-            params.get("to_address"),
+            context["to_address"],
             build_web_user_address(self.user.id, self.agent.id),
         )
-        self.assertEqual(params.get("body"), "Hello via web")
-        self.assertFalse(mock_send_email.called)
+
+    def test_implied_send_ignores_hidden_session_after_visibility_grace(self):
+        result = start_web_session(self.agent, self.user)
+        PersistentAgentWebSession.objects.filter(pk=result.session.pk).update(
+            is_visible=False,
+            last_seen_at=timezone.now() - timedelta(seconds=30),
+            last_visible_at=timezone.now() - timedelta(seconds=61),
+        )
+
+        context = _get_implied_send_context(self.agent)
+
+        self.assertIsNone(context)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})

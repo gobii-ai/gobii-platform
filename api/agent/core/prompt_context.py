@@ -66,7 +66,7 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
-from ...services.web_sessions import get_active_web_sessions
+from ...services.web_sessions import get_deliverable_web_sessions
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
@@ -3398,7 +3398,7 @@ def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
     """
     # Priority 1: Active web chat session
     try:
-        for session in get_active_web_sessions(agent):
+        for session in get_deliverable_web_sessions(agent):
             if session.user_id is not None:
                 to_address = build_web_user_address(session.user_id, agent.id)
                 return {

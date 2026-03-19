@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import timedelta
 import json
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import MagicMock, patch
@@ -10,6 +11,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
+from django.utils import timezone
 
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
@@ -31,6 +33,7 @@ from api.models import (
     PersistentAgentMessageAttachment,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    PersistentAgentWebSession,
     MCPServerConfig,
     PipedreamAppSelection,
     build_web_agent_address,
@@ -39,7 +42,7 @@ from api.models import (
 from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.pipedream_apps import get_owner_apps_state
-from api.services.web_sessions import start_web_session
+from api.services.web_sessions import heartbeat_web_session, start_web_session
 from console.agent_chat.kanban_events import persist_kanban_event
 from console.agent_chat.timeline import build_processing_snapshot
 from console.agent_chat.timeline import fetch_timeline_window
@@ -737,19 +740,21 @@ class AgentChatAPITests(TestCase):
     def test_web_session_api_flow(self):
         start_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/start/",
-            data=json.dumps({}),
+            data=json.dumps({"is_visible": True}),
             content_type="application/json",
         )
         self.assertEqual(start_response.status_code, 200)
         start_payload = start_response.json()
         session_key = start_payload["session_key"]
+        self.assertTrue(start_payload["is_visible"])
 
         heartbeat_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/heartbeat/",
-            data=json.dumps({"session_key": session_key}),
+            data=json.dumps({"session_key": session_key, "is_visible": False}),
             content_type="application/json",
         )
         self.assertEqual(heartbeat_response.status_code, 200)
+        self.assertFalse(heartbeat_response.json()["is_visible"])
 
         end_response = self.client.post(
             f"/console/api/agents/{self.agent.id}/web-sessions/end/",
@@ -946,6 +951,77 @@ class AgentChatAPITests(TestCase):
         )
 
         self.assertEqual(markdown_event["message"].get("bodyHtml"), "")
+
+    @tag("batch_agent_chat")
+    def test_web_chat_tool_allows_during_visibility_grace_window(self):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+            is_primary=True,
+        )
+        result = start_web_session(self.agent, self.user)
+        heartbeat_web_session(
+            result.session.session_key,
+            self.agent,
+            self.user,
+            is_visible=False,
+        )
+
+        success = execute_send_chat_message(
+            self.agent,
+            {"body": "Still here", "to_address": self.user_address},
+        )
+        self.assertEqual(success["status"], "ok")
+
+    @tag("batch_agent_chat")
+    def test_web_chat_tool_rejects_after_visibility_grace_when_other_channels_exist(self):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+            is_primary=True,
+        )
+        result = start_web_session(self.agent, self.user)
+        PersistentAgentWebSession.objects.filter(pk=result.session.pk).update(
+            is_visible=False,
+            last_seen_at=timezone.now() - timedelta(seconds=30),
+            last_visible_at=timezone.now() - timedelta(seconds=61),
+        )
+
+        rejected = execute_send_chat_message(
+            self.agent,
+            {"body": "Still here", "to_address": self.user_address},
+        )
+        self.assertEqual(rejected["status"], "error")
+        self.assertIn("No active web chat session", rejected["message"])
+
+    @tag("batch_agent_chat")
+    def test_web_chat_tool_allows_after_visibility_grace_when_web_is_only_channel(self):
+        result = start_web_session(self.agent, self.user)
+        PersistentAgentWebSession.objects.filter(pk=result.session.pk).update(
+            is_visible=False,
+            last_seen_at=timezone.now() - timedelta(seconds=30),
+            last_visible_at=timezone.now() - timedelta(seconds=61),
+        )
+
+        allowed = execute_send_chat_message(
+            self.agent,
+            {"body": "Still here", "to_address": self.user_address},
+        )
+        self.assertEqual(allowed["status"], "ok")
 
     @tag("batch_agent_chat")
     def test_web_chat_tool_allows_without_session_when_no_other_channels(self):

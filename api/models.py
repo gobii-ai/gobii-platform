@@ -9521,6 +9521,8 @@ class PersistentAgentWebSession(models.Model):
     started_at = models.DateTimeField(default=timezone.now)
     last_seen_at = models.DateTimeField(default=timezone.now)
     last_seen_source = models.CharField(max_length=32, blank=True)
+    is_visible = models.BooleanField(default=True)
+    last_visible_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -9529,6 +9531,7 @@ class PersistentAgentWebSession(models.Model):
         unique_together = ("agent", "user")
         indexes = [
             models.Index(fields=["agent", "last_seen_at"], name="pa_web_session_agent_idx"),
+            models.Index(fields=["agent", "is_visible", "last_visible_at"], name="pa_web_session_visibility_idx"),
             models.Index(fields=["session_key"], name="pa_web_session_key_idx"),
             models.Index(fields=["ended_at", "last_seen_at"], name="pa_web_session_end_idx"),
         ]

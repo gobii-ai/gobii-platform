@@ -10,7 +10,9 @@ from django.utils import timezone
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentWebSession
 from api.services.web_sessions import (
     end_web_session,
+    get_deliverable_web_session,
     get_active_web_session,
+    has_deliverable_web_session,
     heartbeat_web_session,
     start_web_session,
 )
@@ -38,10 +40,51 @@ class WebSessionServiceTests(TestCase):
         result = start_web_session(self.agent, self.user)
         session = result.session
         first_seen = session.last_seen_at
+        first_visible = session.last_visible_at
 
         refreshed = heartbeat_web_session(session.session_key, self.agent, self.user)
         self.assertGreater(refreshed.session.last_seen_at, first_seen)
+        self.assertGreater(refreshed.session.last_visible_at, first_visible)
+        self.assertTrue(refreshed.session.is_visible)
         self.assertIsNone(refreshed.session.ended_at)
+
+    @tag("batch_agent_chat")
+    def test_hidden_heartbeat_marks_session_non_visible_but_keeps_it_live(self):
+        result = start_web_session(self.agent, self.user)
+        session = result.session
+        first_visible = session.last_visible_at
+
+        refreshed = heartbeat_web_session(
+            session.session_key,
+            self.agent,
+            self.user,
+            is_visible=False,
+        )
+        self.assertFalse(refreshed.session.is_visible)
+        self.assertEqual(refreshed.session.last_visible_at, first_visible)
+        self.assertIsNotNone(get_active_web_session(self.agent, self.user))
+
+    @tag("batch_agent_chat")
+    def test_deliverable_session_respects_visibility_grace(self):
+        result = start_web_session(self.agent, self.user)
+        session = result.session
+        now = timezone.now()
+
+        PersistentAgentWebSession.objects.filter(pk=session.pk).update(
+            is_visible=False,
+            last_seen_at=now - timedelta(seconds=30),
+            last_visible_at=now - timedelta(seconds=30),
+        )
+        self.assertIsNotNone(get_deliverable_web_session(self.agent, self.user))
+        self.assertTrue(has_deliverable_web_session(self.agent))
+
+        PersistentAgentWebSession.objects.filter(pk=session.pk).update(
+            is_visible=False,
+            last_seen_at=now - timedelta(seconds=30),
+            last_visible_at=now - timedelta(seconds=61),
+        )
+        self.assertIsNone(get_deliverable_web_session(self.agent, self.user))
+        self.assertFalse(has_deliverable_web_session(self.agent))
 
     @tag("batch_agent_chat")
     def test_expired_session_is_marked_and_unavailable(self):

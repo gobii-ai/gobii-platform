@@ -40,6 +40,7 @@ export type AgentWebSessionSnapshot = {
   expires_at: string
   last_seen_at: string
   last_seen_source: string | null
+  is_visible: boolean
   ended_at?: string
 }
 
@@ -275,6 +276,7 @@ export async function fetchProcessingStatus(agentId: string): Promise<Processing
 type WebSessionPayload = {
   session_key?: string
   ttl_seconds?: number
+  is_visible?: boolean
 }
 
 async function postWebSession(
@@ -292,17 +294,26 @@ async function postWebSession(
   })
 }
 
-export function startAgentWebSession(agentId: string, ttlSeconds?: number): Promise<AgentWebSessionSnapshot> {
-  return postWebSession(agentId, 'start', ttlSeconds ? { ttl_seconds: ttlSeconds } : {})
+export function startAgentWebSession(
+  agentId: string,
+  ttlSeconds?: number,
+  isVisible?: boolean,
+): Promise<AgentWebSessionSnapshot> {
+  const payload: WebSessionPayload = {}
+  if (ttlSeconds) payload.ttl_seconds = ttlSeconds
+  if (typeof isVisible === 'boolean') payload.is_visible = isVisible
+  return postWebSession(agentId, 'start', payload)
 }
 
 export function heartbeatAgentWebSession(
   agentId: string,
   sessionKey: string,
   ttlSeconds?: number,
+  isVisible?: boolean,
 ): Promise<AgentWebSessionSnapshot> {
   const payload: WebSessionPayload = { session_key: sessionKey }
   if (ttlSeconds) payload.ttl_seconds = ttlSeconds
+  if (typeof isVisible === 'boolean') payload.is_visible = isVisible
   return postWebSession(agentId, 'heartbeat', payload)
 }
 
