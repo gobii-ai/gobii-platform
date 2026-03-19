@@ -16,7 +16,7 @@ from api.models import (
     ProxyServer,
     UserBilling,
 )
-from constants.stripe import CHECKOUT_PAYMENT_METHOD_TYPES
+from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES
 
 
 def create_persistent_agent(user, name: str, *, organization: Organization | None = None) -> PersistentAgent:
@@ -304,7 +304,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
     )
     @patch("console.billing_update_service.get_stripe_settings")
     @patch("console.billing_update_service.stripe_status")
-    def test_org_seat_checkout_redirect_limits_payment_methods(
+    def test_org_seat_checkout_redirect_excludes_disabled_payment_methods(
         self,
         mock_stripe_status,
         mock_get_stripe_settings,
@@ -333,7 +333,11 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertTrue(payload.get("ok"))
         self.assertEqual(payload.get("redirectUrl"), "https://stripe.test/org-seat-checkout")
         _, kwargs = mock_session_create.call_args
-        self.assertEqual(kwargs["payment_method_types"], CHECKOUT_PAYMENT_METHOD_TYPES)
+        self.assertEqual(
+            kwargs["excluded_payment_method_types"],
+            EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(kwargs["line_items"], [{"price": "price_org_team", "quantity": 2}])
 
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)

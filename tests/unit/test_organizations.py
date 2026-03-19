@@ -22,7 +22,7 @@ from unittest.mock import patch, MagicMock
 from config.stripe_config import get_stripe_settings
 import stripe
 from constants.stripe import (
-    CHECKOUT_PAYMENT_METHOD_TYPES,
+    EXCLUDED_PAYMENT_METHOD_TYPES,
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
@@ -226,7 +226,11 @@ class OrganizationInvitesTest(TestCase):
         _, kwargs = mock_session.call_args
         line_items = kwargs.get("line_items")
         self.assertIsNotNone(line_items)
-        self.assertEqual(kwargs["payment_method_types"], CHECKOUT_PAYMENT_METHOD_TYPES)
+        self.assertEqual(
+            kwargs["excluded_payment_method_types"],
+            EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(line_items[0]["price"], stripe_settings.org_team_price_id)
         self.assertEqual(line_items[0]["quantity"], 1)
         overage_price = stripe_settings.org_team_additional_task_price_id
@@ -862,7 +866,7 @@ class OrganizationInvitesTest(TestCase):
 @tag("batch_organizations")
 class OrganizationBillingCheckoutHelpersTest(TestCase):
     @patch("console.views.stripe.checkout.Session.create")
-    def test_start_addon_checkout_session_limits_payment_methods(self, mock_session_create):
+    def test_start_addon_checkout_session_excludes_disabled_payment_methods(self, mock_session_create):
         mock_session_create.return_value = MagicMock(url="https://stripe.test/addon-checkout")
 
         with patch.object(console_views.stripe, "api_key", "sk_test_checkout"):
@@ -876,7 +880,11 @@ class OrganizationBillingCheckoutHelpersTest(TestCase):
 
         self.assertEqual(checkout_url, "https://stripe.test/addon-checkout")
         _, kwargs = mock_session_create.call_args
-        self.assertEqual(kwargs["payment_method_types"], CHECKOUT_PAYMENT_METHOD_TYPES)
+        self.assertEqual(
+            kwargs["excluded_payment_method_types"],
+            EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_addon", "quantity": 3}],
