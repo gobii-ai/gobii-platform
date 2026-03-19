@@ -26,6 +26,7 @@ const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
 const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
 const AgentEmailSettingsScreen = lazy(async () => ({ default: (await import('./screens/AgentEmailSettingsScreen')).AgentEmailSettingsScreen }))
+const AgentSlackSettingsScreen = lazy(async () => ({ default: (await import('./screens/AgentSlackSettingsScreen')).AgentSlackSettingsScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
 const LoadingFallback = () => (
@@ -158,6 +159,24 @@ switch (appName) {
         emailSettingsUrl={emailSettingsUrl}
         ensureAccountUrl={ensureAccountUrl}
         testUrl={testUrl}
+      />
+    )
+    break
+  }
+  case 'agent-slack-settings': {
+    if (!agentId) {
+      throw new Error('Agent identifier is required for Slack settings')
+    }
+    const slackSettingsUrl = mountNode.dataset.slackSettingsUrl
+    const slackTestUrl = mountNode.dataset.slackSettingsTestUrl
+    if (!slackSettingsUrl || !slackTestUrl) {
+      throw new Error('Slack settings API endpoints are required')
+    }
+    screen = (
+      <AgentSlackSettingsScreen
+        agentId={agentId}
+        slackSettingsUrl={slackSettingsUrl}
+        testUrl={slackTestUrl}
       />
     )
     break

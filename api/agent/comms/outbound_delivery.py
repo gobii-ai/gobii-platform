@@ -1269,3 +1269,204 @@ def deliver_agent_sms(message: PersistentAgentMessage):
     message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
 
     return send_result
+
+
+def _convert_markdown_to_slack_mrkdwn(text: str) -> str:
+    """Best-effort conversion from Markdown to Slack's mrkdwn format.
+
+    Slack's mrkdwn differs from standard Markdown:
+    - Bold: **text** → *text*
+    - Italic: *text* or _text_ → _text_
+    - Links: [text](url) → <url|text>
+    - Code blocks and inline code are the same
+    """
+    if not text:
+        return ""
+
+    # Links: [text](url) → <url|text>
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"<\2|\1>", text)
+    # Bold: **text** → *text*
+    text = re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
+
+    return text
+
+
+def deliver_agent_slack(message: PersistentAgentMessage):
+    """Post a Slack message and record the delivery attempt.
+
+    Thread behaviour is controlled by the ``AgentSlackConfig.thread_policy``
+    attached to the originating endpoint:
+
+    * ``always`` — always reply in-thread using the inbound ``thread_ts`` or
+      ``ts`` from the triggering message's ``raw_payload``.
+    * ``never`` — post as a top-level channel message (no ``thread_ts``).
+    * ``auto`` (default) — reply in-thread only when the inbound message was
+      itself part of a thread.
+    """
+    from api.models import AgentSlackConfig
+
+    message.latest_status = DeliveryStatus.SENDING
+    message.save(update_fields=["latest_status"])
+
+    attempt = OutboundMessageAttempt.objects.create(
+        message=message,
+        provider="slack",
+        status=DeliveryStatus.SENDING,
+    )
+
+    # Resolve Slack config from the agent's endpoint
+    from_endpoint = message.from_endpoint
+    try:
+        slack_config = from_endpoint.slack_config
+    except (AgentSlackConfig.DoesNotExist, AttributeError):
+        slack_config = None
+
+    bot_token = slack_config.get_bot_token() if slack_config else settings.SLACK_BOT_TOKEN
+    if not bot_token:
+        logger.error("No Slack bot token available for message %s", message.id)
+        attempt.status = DeliveryStatus.FAILED
+        attempt.error_message = "No Slack bot token configured."
+        attempt.save(update_fields=["status", "error_message"])
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_message = "No Slack bot token configured."
+        message.save(update_fields=["latest_status", "latest_error_message"])
+        return False
+
+    # Determine target channel — prefer the conversation's inbound channel,
+    # fall back to the config's default channel.
+    target_channel = ""
+    inbound_raw = {}
+
+    # Walk back to the triggering inbound message to get channel + thread info
+    conversation = message.conversation
+    if conversation:
+        last_inbound = (
+            conversation.messages.filter(is_outbound=False)
+            .order_by("-timestamp")
+            .values_list("raw_payload", flat=True)
+            .first()
+        )
+        if last_inbound:
+            inbound_raw = last_inbound if isinstance(last_inbound, dict) else {}
+            target_channel = inbound_raw.get("channel", "")
+
+    if not target_channel and slack_config:
+        target_channel = slack_config.channel_id
+
+    if not target_channel:
+        logger.error("No Slack channel resolved for message %s", message.id)
+        attempt.status = DeliveryStatus.FAILED
+        attempt.error_message = "No target Slack channel."
+        attempt.save(update_fields=["status", "error_message"])
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_message = "No target Slack channel."
+        message.save(update_fields=["latest_status", "latest_error_message"])
+        return False
+
+    # Determine thread_ts based on policy
+    thread_ts = None
+    thread_policy = (
+        slack_config.thread_policy if slack_config else AgentSlackConfig.ThreadPolicy.AUTO
+    )
+
+    inbound_thread_ts = inbound_raw.get("thread_ts")
+    inbound_ts = inbound_raw.get("ts")
+
+    if thread_policy == AgentSlackConfig.ThreadPolicy.ALWAYS:
+        thread_ts = inbound_thread_ts or inbound_ts
+    elif thread_policy == AgentSlackConfig.ThreadPolicy.AUTO:
+        # Only thread if the inbound message was already in a thread
+        if inbound_thread_ts:
+            thread_ts = inbound_thread_ts
+    # NEVER: thread_ts stays None
+
+    # Convert body to Slack mrkdwn
+    body_text = _convert_markdown_to_slack_mrkdwn(message.body)
+
+    try:
+        from slack_sdk import WebClient
+        from slack_sdk.errors import SlackApiError
+
+        client = WebClient(token=bot_token)
+
+        kwargs = {
+            "channel": target_channel,
+            "text": body_text,
+        }
+        if thread_ts:
+            kwargs["thread_ts"] = thread_ts
+
+        response = client.chat_postMessage(**kwargs)
+
+        now = timezone.now()
+        provider_message_id = response.get("ts", "")
+
+        attempt.status = DeliveryStatus.SENT
+        attempt.provider_message_id = provider_message_id
+        attempt.sent_at = now
+        attempt.save(update_fields=["status", "provider_message_id", "sent_at"])
+
+        message.latest_status = DeliveryStatus.SENT
+        message.latest_sent_at = now
+        message.latest_error_message = ""
+
+        slack_props = Analytics.with_org_properties(
+            {
+                "agent_id": str(message.owner_agent_id),
+                "message_id": str(message.id),
+                "slack_ts": provider_message_id,
+                "channel": target_channel,
+                "thread_policy": thread_policy,
+                "threaded": bool(thread_ts),
+            },
+            organization=getattr(message.owner_agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=message.owner_agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SLACK_SENT,
+            source=AnalyticsSource.AGENT,
+            properties=slack_props.copy(),
+        )
+
+        # Handle file attachments
+        for attachment in message.attachments.select_related("filespace_node").all():
+            node = getattr(attachment, "filespace_node", None)
+            if not node:
+                continue
+            try:
+                file_content = node.read_bytes()
+                client.files_upload_v2(
+                    channel=target_channel,
+                    thread_ts=thread_ts or provider_message_id,
+                    content=file_content,
+                    filename=node.name,
+                )
+            except SlackApiError:
+                logger.warning(
+                    "Failed to upload attachment %s for message %s",
+                    node.name,
+                    message.id,
+                    exc_info=True,
+                )
+
+        message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+        return True
+
+    except SlackApiError as e:
+        logger.error("Slack API error sending message %s: %s", message.id, e, exc_info=True)
+        attempt.status = DeliveryStatus.FAILED
+        attempt.error_message = str(e)
+        attempt.save(update_fields=["status", "error_message"])
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_message = str(e)
+        message.save(update_fields=["latest_status", "latest_error_message"])
+        return False
+    except Exception as e:
+        logger.error("Unexpected error sending Slack message %s: %s", message.id, e, exc_info=True)
+        attempt.status = DeliveryStatus.FAILED
+        attempt.error_message = str(e)
+        attempt.save(update_fields=["status", "error_message"])
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_message = str(e)
+        message.save(update_fields=["latest_status", "latest_error_message"])
+        return False

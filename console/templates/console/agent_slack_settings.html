@@ -1,0 +1,17 @@
+{% extends "console_page.html" %}
+{% load vite_tags %}
+
+{% block console_content %}
+<div id="gobii-frontend-root"
+     class="space-y-6 pb-6"
+     data-app="agent-slack-settings"
+     data-agent-id="{{ agent.id }}"
+     data-slack-settings-url="{% url 'console_agent_slack_settings' agent.id %}"
+     data-slack-settings-test-url="{% url 'console_agent_slack_settings_test' agent.id %}">
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}

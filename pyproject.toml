@@ -114,10 +114,11 @@ dependencies = [
   "mail-parser==4.1.4",
   "mailchecker~=6.0.0",
   "exa-py==1.14.16",
-  # Email and SMS integration
+  # Email, SMS, and Slack integration
   "aiohttp-retry==2.9.1",
   "twilio==9.6.3",
   "phonenumbers==9.0.9",
+  "slack-sdk~=3.34.0",
   # Url matching
   "urlextract==1.9.0",
   "fastmcp>=2.11.3",

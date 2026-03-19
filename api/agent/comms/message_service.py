@@ -51,7 +51,7 @@ from api.services.owner_execution_pause import (
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
-from .outbound_delivery import deliver_agent_email, deliver_agent_sms
+from .outbound_delivery import deliver_agent_email, deliver_agent_slack, deliver_agent_sms
 from .email_endpoint_routing import (
     get_agent_primary_endpoint,
     resolve_agent_email_sender_endpoint_for_message,
@@ -420,6 +420,24 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
             )
             return True
 
+        if channel_value == CommsChannel.SLACK.value:
+            if not parsed.sender or sender_endpoint is None:
+                return False
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.SLACK)
+            if not from_endpoint:
+                logging.info("Agent %s has no Slack endpoint for daily credit notice.", agent.id)
+                return False
+            outbound = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                to_endpoint=sender_endpoint,
+                is_outbound=True,
+                body=message_text,
+                raw_payload={"kind": "daily_credit_limit_notice"},
+            )
+            deliver_agent_slack(outbound)
+            return True
+
         if channel_value == CommsChannel.WEB.value:
             if not parsed.sender or sender_endpoint is None:
                 return False
@@ -640,6 +658,20 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                 raw_payload={"kind": "daily_credit_hard_limit_owner_notice"},
             )
             deliver_agent_sms(message)
+        elif channel_value == CommsChannel.SLACK:
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.SLACK)
+            if not from_endpoint:
+                logging.info("Agent %s has no Slack endpoint for hard limit notice.", agent.id)
+                return False
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                to_endpoint=endpoint,
+                is_outbound=True,
+                body=text_body,
+                raw_payload={"kind": "daily_credit_hard_limit_owner_notice"},
+            )
+            deliver_agent_slack(message)
         elif channel_value == CommsChannel.WEB:
             agent_endpoint = _ensure_agent_web_endpoint(agent)
             conv = _get_or_create_conversation(

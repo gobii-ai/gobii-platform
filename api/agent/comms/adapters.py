@@ -338,6 +338,43 @@ class PostmarkEmailAdapter(EmailAdapter):
         )
 
 
+class SlackEventAdapter:
+    """Adapter that normalizes Slack Events API payloads."""
+
+    @staticmethod
+    @tracer.start_as_current_span("SLACK Event Parse")
+    def parse_event(event: dict, channel_address: str) -> ParsedMessage:
+        """Parse a Slack ``message`` event into a :class:`ParsedMessage`.
+
+        ``channel_address`` is the canonical endpoint address (e.g.
+        ``"slack:C0123ABC#T0123XYZ"``).
+        """
+        user_id = event.get("user", "unknown")
+        text = event.get("text", "")
+        channel_id = event.get("channel", "")
+
+        attachments: List[Any] = []
+        for f in event.get("files", []):
+            attachments.append({
+                "url": f.get("url_private_download") or f.get("url_private", ""),
+                "content_type": f.get("mimetype", ""),
+                "name": f.get("name", ""),
+                "size": f.get("size", 0),
+            })
+
+        raw: MutableMapping[str, Any] = dict(event)
+
+        return ParsedMessage(
+            sender=user_id,
+            recipient=channel_address,
+            subject=None,
+            body=text,
+            attachments=attachments,
+            raw_payload=raw,
+            msg_channel=CommsChannel.SLACK,
+        )
+
+
 class MailgunEmailAdapter(EmailAdapter):
     """Adapter that normalizes Mailgun inbound webhook payloads."""
 

@@ -8912,6 +8912,89 @@ class PersistentAgentSmsEndpoint(models.Model):
         return f"SmsEndpoint<{self.endpoint.address}>"
 
 
+class AgentSlackConfig(models.Model):
+    """Slack-specific configuration for a comms endpoint.
+
+    Stores per-agent Slack channel binding and thread behaviour policy.
+    The optional ``bot_token_encrypted`` field allows per-agent Slack app
+    tokens; when blank the global ``settings.SLACK_BOT_TOKEN`` is used.
+    """
+
+    class ThreadPolicy(models.TextChoices):
+        AUTO = "auto", "Auto (thread if inbound was threaded)"
+        ALWAYS = "always", "Always reply in thread"
+        NEVER = "never", "Never use threads"
+
+    endpoint = models.OneToOneField(
+        PersistentAgentCommsEndpoint,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="slack_config",
+    )
+    workspace_id = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Slack workspace (team) ID, e.g. T0123ABCDEF.",
+    )
+    channel_id = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Default Slack channel ID for outbound messages.",
+    )
+    bot_token_encrypted = models.BinaryField(
+        null=True,
+        blank=True,
+        help_text="Per-agent Bot User OAuth Token (xoxb-…). Falls back to global setting.",
+    )
+    thread_policy = models.CharField(
+        max_length=16,
+        choices=ThreadPolicy.choices,
+        default=ThreadPolicy.AUTO,
+    )
+    is_enabled = models.BooleanField(default=False, db_index=True)
+
+    # Health
+    connection_last_ok_at = models.DateTimeField(null=True, blank=True)
+    connection_error = models.TextField(blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["is_enabled"], name="agent_slack_enabled_idx"),
+        ]
+
+    def __str__(self):
+        owner = getattr(self.endpoint, "owner_agent", None)
+        return f"AgentSlackConfig<{self.endpoint.address}> for {getattr(owner, 'name', 'unknown')}"
+
+    def get_bot_token(self) -> str:
+        """Return per-agent token if set, otherwise the global token."""
+        if self.bot_token_encrypted:
+            from .encryption import SecretsEncryption
+
+            try:
+                return SecretsEncryption.decrypt_value(self.bot_token_encrypted)
+            except Exception:
+                pass
+        return getattr(settings, "SLACK_BOT_TOKEN", "")
+
+    def set_bot_token(self, value: str) -> None:
+        from .encryption import SecretsEncryption
+
+        self.bot_token_encrypted = SecretsEncryption.encrypt_value(value)
+
+    def clean(self):
+        super().clean()
+        if self.endpoint is None:
+            raise ValidationError({"endpoint": "Endpoint is required."})
+        if self.endpoint.channel != CommsChannel.SLACK:
+            raise ValidationError({"endpoint": "AgentSlackConfig must be attached to a Slack endpoint."})
+        if self.is_enabled and not self.channel_id:
+            raise ValidationError({"channel_id": "Channel ID is required when Slack is enabled."})
+
+
 class PersistentAgentConversation(models.Model):
     """A logical conversation / thread across any channel."""
 

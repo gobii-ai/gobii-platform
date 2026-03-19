@@ -161,6 +161,10 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_SMS_DELIVERED = 'Persistent Agent SMS Delivered'
     PERSISTENT_AGENT_SMS_FAILED = 'Persistent Agent SMS Failed'
 
+    # Slack Events
+    PERSISTENT_AGENT_SLACK_SENT = 'Persistent Agent Slack Sent'
+    PERSISTENT_AGENT_SLACK_RECEIVED = 'Persistent Agent Slack Received'
+
     # Persistent Agent Secrets Events
     PERSISTENT_AGENT_SECRETS_VIEWED = 'Persistent Agent Secrets Viewed'
     PERSISTENT_AGENT_SECRET_ADDED = 'Persistent Agent Secret Added'

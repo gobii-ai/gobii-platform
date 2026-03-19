@@ -1314,6 +1314,19 @@ SMS_MAX_BODY_LENGTH = env.int("SMS_MAX_BODY_LENGTH", default=1450)  # Max length
 # SMS Parsing
 EMAIL_STRIP_REPLIES = env.bool("EMAIL_STRIP_REPLIES", default=False)
 
+# Slack
+SLACK_BOT_TOKEN = env("SLACK_BOT_TOKEN", default="")
+SLACK_SIGNING_SECRET = env("SLACK_SIGNING_SECRET", default="")
+_SLACK_FEATURE_FLAG = env.bool("SLACK_ENABLED", default=False)
+SLACK_CREDENTIALS_PRESENT = bool(SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET)
+SLACK_ENABLED = _SLACK_FEATURE_FLAG and SLACK_CREDENTIALS_PRESENT
+SLACK_DISABLED_REASON = ""
+if not SLACK_ENABLED:
+    if not _SLACK_FEATURE_FLAG:
+        SLACK_DISABLED_REASON = "Slack disabled by configuration"
+    elif not SLACK_CREDENTIALS_PRESENT:
+        SLACK_DISABLED_REASON = "Slack credentials missing (SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET required)"
+
 # ────────── Pipedream MCP (Remote) ──────────
 # These are optional; when set, Gobii will enable the Pipedream MCP server.
 PIPEDREAM_CLIENT_ID = env("PIPEDREAM_CLIENT_ID", default="")

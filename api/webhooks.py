@@ -12,6 +12,7 @@ from api.agent.comms import (
     TwilioSmsAdapter,
     PostmarkEmailAdapter,
     MailgunEmailAdapter,
+    SlackEventAdapter,
 )
 from api.models import (
     CommsChannel,
@@ -561,6 +562,148 @@ def email_webhook_mailgun(request):
         )
     except Exception as e:
         logger.error(f"Error processing inbound Mailgun email webhook: {e}", exc_info=True)
+        return HttpResponse(status=500)
+
+
+def _verify_slack_signature(request) -> bool:
+    """Verify the request came from Slack using the signing secret."""
+    import hashlib
+    import hmac
+    import time as _time
+
+    signing_secret = settings.SLACK_SIGNING_SECRET
+    if not signing_secret:
+        return False
+
+    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    signature = request.headers.get("X-Slack-Signature", "")
+    if not timestamp or not signature:
+        return False
+
+    # Reject requests older than 5 minutes to prevent replay attacks
+    try:
+        if abs(_time.time() - float(timestamp)) > 60 * 5:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+    sig_basestring = f"v0:{timestamp}:{request.body.decode('utf-8')}"
+    computed = "v0=" + hmac.HMAC(
+        signing_secret.encode("utf-8"),
+        sig_basestring.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return hmac.compare_digest(computed, signature)
+
+
+@csrf_exempt
+@tracer.start_as_current_span("COMM slack_events_webhook")
+def slack_events_webhook(request):
+    """Handle Slack Events API requests.
+
+    Handles two cases:
+    1. ``url_verification`` challenge (GET-like, no auth needed)
+    2. ``event_callback`` with a ``message`` event (POST with signature)
+    """
+    from django.http import JsonResponse
+
+    if request.method not in ("POST",):
+        return HttpResponse(status=405)
+
+    try:
+        payload = json.loads(request.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return HttpResponse(status=400)
+
+    # Handle Slack's URL verification challenge
+    if payload.get("type") == "url_verification":
+        return JsonResponse({"challenge": payload.get("challenge", "")})
+
+    # All other requests must pass signature verification
+    if not _verify_slack_signature(request):
+        logger.warning("Slack webhook signature verification failed")
+        return HttpResponse(status=403)
+
+    if payload.get("type") != "event_callback":
+        return HttpResponse(status=200)
+
+    event = payload.get("event", {})
+    event_type = event.get("type", "")
+
+    # Only handle user messages (not bot messages, not message_changed, etc.)
+    if event_type != "message" or event.get("subtype"):
+        return HttpResponse(status=200)
+
+    # Ignore messages from bots to prevent loops
+    if event.get("bot_id") or event.get("bot_profile"):
+        return HttpResponse(status=200)
+
+    slack_channel_id = event.get("channel", "")
+    slack_team_id = payload.get("team_id", "")
+    sender_user_id = event.get("user", "")
+
+    # Build the canonical endpoint address
+    channel_address = f"slack:{slack_channel_id}#{slack_team_id}"
+
+    span = trace.get_current_span()
+    span.set_attribute("slack.channel_id", slack_channel_id)
+    span.set_attribute("slack.team_id", slack_team_id)
+    span.set_attribute("slack.user_id", sender_user_id)
+
+    with tracer.start_as_current_span("COMM slack endpoint lookup") as lookup_span:
+        try:
+            endpoint = PersistentAgentCommsEndpoint.objects.select_related(
+                "owner_agent__user"
+            ).get(
+                channel=CommsChannel.SLACK,
+                address__iexact=channel_address,
+                owner_agent__is_active=True,
+            )
+            agent = endpoint.owner_agent
+        except PersistentAgentCommsEndpoint.DoesNotExist:
+            logger.info("Discarding Slack message to unroutable channel: %s", channel_address)
+            lookup_span.add_event("Slack - Unroutable Channel", {"address": channel_address})
+            return HttpResponse(status=200)
+
+        if not agent or not agent.user:
+            logger.warning("Endpoint %s is not associated with a usable agent/user.", channel_address)
+            return HttpResponse(status=200)
+
+        if not agent.is_sender_whitelisted(CommsChannel.SLACK, sender_user_id):
+            logger.info(
+                "Discarding Slack message from non-whitelisted sender '%s' to agent '%s'.",
+                sender_user_id,
+                agent.name,
+            )
+            lookup_span.add_event("Slack - Sender Not Whitelisted", {
+                "user_id": sender_user_id,
+                "agent_id": str(agent.id),
+            })
+            return HttpResponse(status=200)
+
+    try:
+        parsed_message = SlackEventAdapter.parse_event(event, channel_address)
+        ingest_inbound_message(CommsChannel.SLACK, parsed_message)
+
+        props = Analytics.with_org_properties(
+            {
+                "agent_id": str(agent.id),
+                "agent_name": agent.name,
+                "slack_user_id": sender_user_id,
+                "slack_channel_id": slack_channel_id,
+            },
+            organization=getattr(agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=agent.user.id,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SLACK_RECEIVED,
+            source=AnalyticsSource.AGENT,
+            properties=props.copy(),
+        )
+
+        return HttpResponse(status=200)
+    except Exception as e:
+        logger.error("Error processing Slack event webhook: %s", e, exc_info=True)
         return HttpResponse(status=500)
 
 

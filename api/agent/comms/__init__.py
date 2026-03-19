@@ -8,6 +8,7 @@ provide an abstraction over outbound providers.
 from .adapters import (
     SmsAdapter,
     EmailAdapter,
+    SlackEventAdapter,
     TwilioSmsAdapter,
     PostmarkEmailAdapter,
     MailgunEmailAdapter,
@@ -20,6 +21,7 @@ __all__ = [
     "ParsedMessage",
     "SmsAdapter",
     "EmailAdapter",
+    "SlackEventAdapter",
     "TwilioSmsAdapter",
     "PostmarkEmailAdapter",
     "MailgunEmailAdapter",

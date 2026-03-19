@@ -13,6 +13,7 @@ from .webhooks import (
     sms_status_webhook,
     email_webhook_postmark,
     email_webhook_mailgun,
+    slack_events_webhook,
     open_and_link_webhook,
     pipedream_connect_webhook,
 )
@@ -78,6 +79,7 @@ urlpatterns = [
     path('webhooks/status/sms/', sms_status_webhook, name='sms_status_webhook'),
     path('webhooks/inbound/email/', email_webhook_postmark, name='email_webhook'),
     path('webhooks/inbound/email/mg/', email_webhook_mailgun, name='email_webhook_mailgun'),
+    path('webhooks/inbound/slack/', slack_events_webhook, name='slack_events_webhook'),
     # Pipedream Connect webhook (one-time)
     path('webhooks/pipedream/connect/<uuid:session_id>/', pipedream_connect_webhook, name='pipedream_connect_webhook'),
 

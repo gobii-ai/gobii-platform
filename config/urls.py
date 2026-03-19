@@ -142,6 +142,10 @@ from console.email_settings.views import (
     AgentEmailSettingsEnsureAccountAPIView,
     AgentEmailSettingsTestAPIView,
 )
+from console.slack_settings.views import (
+    AgentSlackSettingsAPIView,
+    AgentSlackSettingsTestAPIView,
+)
 from console.usage_views import (
     UsageSummaryAPIView,
     UsageBurnRateSnapshotAPIView,
@@ -231,6 +235,7 @@ from console.views import (
     grant_credits,
     task_detail_view,
     AgentEmailSettingsView,
+    AgentSlackSettingsView,
     AgentFilesView,
     console_billing_update,
 )
@@ -341,6 +346,12 @@ urlpatterns = [
         "console/api/agents/<uuid:agent_id>/email-settings/test/",
         AgentEmailSettingsTestAPIView.as_view(),
         name="console_agent_email_settings_test",
+    ),
+    path("console/api/agents/<uuid:agent_id>/slack-settings/", AgentSlackSettingsAPIView.as_view(), name="console_agent_slack_settings"),
+    path(
+        "console/api/agents/<uuid:agent_id>/slack-settings/test/",
+        AgentSlackSettingsTestAPIView.as_view(),
+        name="console_agent_slack_settings_test",
     ),
     path("console/api/agents/<uuid:agent_id>/addons/", AgentAddonsAPIView.as_view(), name="console_agent_addons"),
     path("console/api/agents/<uuid:agent_id>/quick-settings/", AgentQuickSettingsAPIView.as_view(), name="console_agent_quick_settings"),
@@ -474,6 +485,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/enable-sms/", AgentEnableSmsView.as_view(), name="agent_enable_sms"),
     path("console/agents/<uuid:pk>/delete/", AgentDeleteView.as_view(), name="agent_delete"),
     path("console/agents/<uuid:pk>/email/", AgentEmailSettingsView.as_view(), name="agent_email_settings"),
+    path("console/agents/<uuid:pk>/slack/", AgentSlackSettingsView.as_view(), name="agent_slack_settings"),
     path("console/agents/<uuid:pk>/files/", AgentFilesView.as_view(), name="agent_files"),
     # Agent secrets management
     path("console/agents/<uuid:pk>/secrets/", AgentSecretsView.as_view(), name="agent_secrets"),

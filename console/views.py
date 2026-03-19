@@ -6399,6 +6399,21 @@ class AgentSecretsDeleteView(LoginRequiredMixin, View):
         return redirect('agent_secrets', pk=agent.pk)
 
 
+class AgentSlackSettingsView(LoginRequiredMixin, TemplateView):
+    """Console page to configure Slack settings for an agent."""
+    template_name = "console/agent_slack_settings.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = get_object_or_404(
+            PersistentAgent.objects.non_eval().alive(),
+            pk=self.kwargs["pk"],
+            user=self.request.user,
+        )
+        context["agent"] = agent
+        return context
+
+
 class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
     """Simple console page to edit an agent-owned email account settings."""
     template_name = "console/agent_email_settings.html"
