@@ -596,7 +596,7 @@ const STREAMING_REFRESH_INTERVAL_MS = 6000
 const AUTO_SCROLL_REPIN_SUPPRESSION_MS = 1500
 const BOTTOM_REPIN_THRESHOLD_PX = 50
 const NEAR_BOTTOM_THRESHOLD_PX = 100
-const TOP_LOAD_THRESHOLD_PX = 96
+const TOP_LOAD_THRESHOLD_PX = 200
 const UNPIN_DISTANCE_FROM_BOTTOM_PX = 12
 const PROGRAMMATIC_SCROLL_GUARD_MS = 150
 const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES
@@ -799,6 +799,10 @@ export function AgentChatPage({
     [timelineEvents, statusExpansionTargets],
   )
 
+  const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
+  const prevScrollHeightRef = useRef(0)
+  const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
+  const preservePrependViewportRef = useRef(false)
   const olderPageRequestInFlightRef = useRef(false)
 
   const requestPreviousPage = useCallback(() => {
@@ -811,11 +815,15 @@ export function AgentChatPage({
       return
     }
 
+    prevPageCountRef.current = timelineQuery.data?.pages?.length ?? 0
+    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
+    preservePrependViewportRef.current = true
     olderPageRequestInFlightRef.current = true
     void timelineQuery.fetchPreviousPage().finally(() => {
       olderPageRequestInFlightRef.current = false
     })
   }, [
+    timelineQuery.data?.pages?.length,
     timelineQuery.fetchPreviousPage,
     timelineQuery.hasPreviousPage,
     timelineQuery.isFetchingPreviousPage,
@@ -850,24 +858,18 @@ export function AgentChatPage({
     timelineEvents.length,
   ])
 
-  // Scroll position preservation when loading older pages
-  const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
-  const prevScrollHeightRef = useRef(0)
-  const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
-  // Capture scroll height before older page arrives so we can preserve the viewport.
-  useEffect(() => {
-    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
-    prevPageCountRef.current = timelineQuery.data?.pages?.length ?? 0
-  })
+  // Preserve the viewport when older pages prepend above the current scroll position.
   useLayoutEffect(() => {
     const pageCount = timelineQuery.data?.pages?.length ?? 0
     if (prependTrackingAgentIdRef.current !== activeAgentId) {
       prependTrackingAgentIdRef.current = activeAgentId
+      preservePrependViewportRef.current = false
       prevPageCountRef.current = pageCount
       prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
       return
     }
-    if (pageCount > prevPageCountRef.current && prevPageCountRef.current > 0) {
+
+    if (preservePrependViewportRef.current && pageCount > prevPageCountRef.current && prevPageCountRef.current > 0) {
       const container = timelineRef.current
       if (container) {
         const newScrollHeight = container.scrollHeight
@@ -877,7 +879,15 @@ export function AgentChatPage({
         }
       }
     }
-  }, [activeAgentId, timelineQuery.data?.pages?.length])
+
+    if (preservePrependViewportRef.current && timelineQuery.isFetchingPreviousPage) {
+      return
+    }
+
+    preservePrependViewportRef.current = false
+    prevPageCountRef.current = pageCount
+    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
+  }, [activeAgentId, timelineQuery.data?.pages?.length, timelineQuery.isFetchingPreviousPage])
 
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)

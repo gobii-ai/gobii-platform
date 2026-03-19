@@ -115,7 +115,14 @@ export const ToolClusterCard = memo(function ToolClusterCard({
     }
     return classes.join(' ')
   }, [resolvedTransformed.collapsible])
+  const hasExpandedStatusEntry = useMemo(
+    () => resolvedTransformed.entries.some((entry) => isStatusDisplayEntry(entry) && entry.separateFromPreview),
+    [resolvedTransformed.entries],
+  )
   const shouldCollapse = useMemo(() => {
+    if (hasExpandedStatusEntry) {
+      return false
+    }
     if (resolvedTransformed.collapsible) {
       return true
     }
@@ -123,7 +130,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
       return false
     }
     return resolvedTransformed.entries.some((entry) => isStatusDisplayEntry(entry) && !entry.separateFromPreview)
-  }, [resolvedTransformed.collapsible, resolvedTransformed.entries, statusExpansionTargets])
+  }, [hasExpandedStatusEntry, resolvedTransformed.collapsible, resolvedTransformed.entries, statusExpansionTargets])
 
   if (!isClusterRenderable(resolvedTransformed)) {
     return null
