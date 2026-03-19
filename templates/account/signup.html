@@ -5,8 +5,12 @@
 {% block head_extras %}
   {% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
     <script>
-      const fp = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
+      const fp = import('{{ settings.FINGERPRINT_JS_URL }}')
         .then(({ load, defaultEndpoint }) => load({
+            apiKey: '{{ settings.FINGERPRINT_JS_API_KEY }}',
+            scriptUrlPattern: [
+              '{{ settings.FINGERPRINT_JS_URL }}?apiKey=<apiKey>&version=<version>&loaderVersion=<loaderVersion>',
+            ],
             endpoint: [
               '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL }}?region=us',
               defaultEndpoint
