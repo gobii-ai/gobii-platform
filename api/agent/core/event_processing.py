@@ -146,7 +146,11 @@ from api.services.owner_execution_pause import (
     get_owner_execution_pause_state,
     resolve_agent_owner,
 )
-from api.services.web_sessions import get_active_web_sessions, has_active_web_session
+from api.services.web_sessions import (
+    get_deliverable_web_sessions,
+    has_active_web_session,
+    has_deliverable_web_session,
+)
 from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
 from config import settings
 from config.redis_client import get_redis_client
@@ -1188,16 +1192,16 @@ def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
     return params
 
 
-def _gate_send_chat_tool_for_session(
+def _gate_send_chat_tool_for_delivery(
     tools: List[dict],
     agent: PersistentAgent,
     *,
-    has_active_web_session_now: Optional[bool] = None,
+    has_deliverable_web_target_now: Optional[bool] = None,
 ) -> List[dict]:
-    """Hide send_chat_message only when web is inactive and non-web fallback channels are available."""
-    if has_active_web_session_now is None:
-        has_active_web_session_now = has_active_web_session(agent)
-    if has_active_web_session_now:
+    """Hide send_chat_message only when no deliverable web target exists and non-web fallback channels are available."""
+    if has_deliverable_web_target_now is None:
+        has_deliverable_web_target_now = has_deliverable_web_session(agent)
+    if has_deliverable_web_target_now:
         return tools
     owner_user = getattr(agent, "user", None)
     if owner_user and not has_other_contact_channel(agent, owner_user):
@@ -1214,7 +1218,7 @@ def _gate_send_chat_tool_for_session(
     return filtered if len(filtered) < len(tools) else tools
 
 
-def _track_post_completion_web_session_activation(
+def _track_post_completion_deliverable_web_session_activation(
     agent: PersistentAgent,
     *,
     run_sequence_number: Optional[int],
@@ -1222,7 +1226,7 @@ def _track_post_completion_web_session_activation(
     retry_switch_active: bool,
     retry_performed: bool,
 ) -> None:
-    """Emit analytics when a web session becomes active after completion returns."""
+    """Emit analytics when a deliverable web session appears after completion returns."""
     if not agent.user_id:
         return
 
@@ -1235,7 +1239,7 @@ def _track_post_completion_web_session_activation(
         "retry_strategy": "discard_and_rerun_once" if retry_performed else "none",
         "retry_switch_active": retry_switch_active,
         "retry_performed": retry_performed,
-        "had_active_web_session_at_start": False,
+        "had_deliverable_web_target_at_start": False,
     }
     props_with_org = Analytics.with_org_properties(
         analytics_props,
@@ -1249,7 +1253,7 @@ def _track_post_completion_web_session_activation(
     )
 
 
-def _should_retry_after_post_completion_web_session_activation(
+def _should_retry_after_post_completion_deliverable_web_session_activation(
     agent: PersistentAgent,
     *,
     run_sequence_number: Optional[int],
@@ -1258,7 +1262,7 @@ def _should_retry_after_post_completion_web_session_activation(
     retry_used: bool,
 ) -> bool:
     """
-    Decide whether to retry once after web-session activation and emit analytics.
+    Decide whether to retry once after a deliverable web session appears and emit analytics.
 
     Returns True when the caller should discard current completion output and retry
     on the next loop iteration.
@@ -1284,7 +1288,7 @@ def _should_retry_after_post_completion_web_session_activation(
     )
 
     try:
-        _track_post_completion_web_session_activation(
+        _track_post_completion_deliverable_web_session_activation(
             agent,
             run_sequence_number=run_sequence_number,
             iteration_index=iteration_index,
@@ -1293,7 +1297,7 @@ def _should_retry_after_post_completion_web_session_activation(
         )
     except Exception:
         logger.exception(
-            "Failed to emit analytics for post-completion web-session activation (agent=%s)",
+            "Failed to emit analytics for post-completion deliverable web-session activation (agent=%s)",
             agent.id,
         )
 
@@ -1312,8 +1316,8 @@ def _should_retry_after_post_completion_web_session_activation(
     return False
 
 
-def _get_latest_active_web_session(agent: PersistentAgent):
-    for session in get_active_web_sessions(agent):
+def _get_latest_deliverable_web_session(agent: PersistentAgent):
+    for session in get_deliverable_web_sessions(agent):
         if session.user_id is not None:
             return session
     return None
@@ -1340,8 +1344,8 @@ def _build_implied_send_tool_call(
 
     channel = ctx.get("channel")
     to_address = ctx.get("to_address")
-    if not has_active_web_session(agent):
-        return None, "Implied send failed: no active web session."
+    if not has_deliverable_web_session(agent):
+        return None, "Implied send failed: no deliverable web session."
     if channel != "web":
         return None, "Implied send failed: active web session required."
 
@@ -3304,11 +3308,11 @@ def _run_agent_loop(
 
     try:
         for i in range(max_remaining):
-            had_active_web_session_at_start = has_active_web_session(agent)
-            iteration_tools = _gate_send_chat_tool_for_session(
+            had_deliverable_web_target_at_start = has_deliverable_web_session(agent)
+            iteration_tools = _gate_send_chat_tool_for_delivery(
                 tools,
                 agent,
-                has_active_web_session_now=had_active_web_session_at_start,
+                has_deliverable_web_target_now=had_deliverable_web_target_at_start,
             )
             if _should_abort_for_inactive_or_deleted_agent(
                 agent,
@@ -3459,7 +3463,7 @@ def _run_agent_loop(
                 )
 
                 # Select provider tiers based on the fitted token count
-                prefer_low_latency = had_active_web_session_at_start
+                prefer_low_latency = had_deliverable_web_target_at_start
                 try:
                     failover_configs = get_llm_config_with_failover(
                         agent_id=str(agent.id),
@@ -3548,11 +3552,11 @@ def _run_agent_loop(
                 # Persist completion immediately so token usage isn't lost if execution exits early
                 _ensure_completion()
 
-                web_session_activated_post_completion = (
-                    not had_active_web_session_at_start and has_active_web_session(agent)
+                deliverable_web_session_activated_post_completion = (
+                    not had_deliverable_web_target_at_start and has_deliverable_web_session(agent)
                 )
-                if web_session_activated_post_completion:
-                    if _should_retry_after_post_completion_web_session_activation(
+                if deliverable_web_session_activated_post_completion:
+                    if _should_retry_after_post_completion_deliverable_web_session_activation(
                         agent,
                         run_sequence_number=run_sequence_number,
                         iteration_index=i + 1,

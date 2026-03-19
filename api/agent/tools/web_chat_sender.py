@@ -29,7 +29,7 @@ from ...models import (
     parse_web_user_address,
 )
 from ...services.email_verification import has_verified_email
-from ...services.web_sessions import get_active_web_session
+from ...services.web_sessions import get_deliverable_web_session
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 
 
@@ -177,7 +177,10 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
 
         # If the user has other communication channels, we want to ensure we're sending to an active chat session
         # If the user does not have other communication channels, pass through to web because it's our only choice
-        if get_active_web_session(agent, recipient_user) is None and has_other_contact_channel(agent, recipient_user):
+        if (
+            get_deliverable_web_session(agent, recipient_user) is None
+            and has_other_contact_channel(agent, recipient_user)
+        ):
             return {
                 "status": "error",
                 "message": (

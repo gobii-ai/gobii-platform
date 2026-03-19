@@ -2541,6 +2541,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             source="message",
             create=True,
             ttl_seconds=WEB_SESSION_TTL_SECONDS,
+            is_visible=True,
         )
 
         if not agent.is_sender_whitelisted(CommsChannel.WEB, sender_address):
@@ -6347,6 +6348,21 @@ def _parse_session_key(payload: dict | None) -> str:
     return str(key)
 
 
+def _parse_session_visibility(payload: dict | None) -> bool:
+    if not payload or "is_visible" not in payload:
+        return True
+    raw = payload.get("is_visible")
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return True
+        if normalized in {"0", "false", "no"}:
+            return False
+    raise ValueError("is_visible must be a boolean")
+
+
 def _session_response(result) -> JsonResponse:
     session = result.session
     payload = {
@@ -6355,6 +6371,7 @@ def _session_response(result) -> JsonResponse:
         "expires_at": result.expires_at.isoformat(),
         "last_seen_at": session.last_seen_at.isoformat(),
         "last_seen_source": session.last_seen_source,
+        "is_visible": session.is_visible,
     }
     if session.ended_at:
         payload["ended_at"] = session.ended_at.isoformat()
@@ -6379,7 +6396,13 @@ class AgentWebSessionStartAPIView(ApiLoginRequiredMixin, View):
 
         try:
             ttl = _parse_ttl(body)
-            result = start_web_session(agent, request.user, ttl_seconds=ttl)
+            is_visible = _parse_session_visibility(body)
+            result = start_web_session(
+                agent,
+                request.user,
+                ttl_seconds=ttl,
+                is_visible=is_visible,
+            )
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
@@ -6418,11 +6441,13 @@ class AgentWebSessionHeartbeatAPIView(ApiLoginRequiredMixin, View):
         try:
             ttl = _parse_ttl(body)
             session_key = _parse_session_key(body)
+            is_visible = _parse_session_visibility(body)
             result = heartbeat_web_session(
                 session_key,
                 agent,
                 request.user,
                 ttl_seconds=ttl,
+                is_visible=is_visible,
             )
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))

@@ -16,6 +16,12 @@ const RESUME_THROTTLE_MS = 4000
 const SESSION_IDLE_TIMEOUT_MS = 60_000
 
 type WebSessionStatus = 'idle' | 'starting' | 'active' | 'error'
+type StartOptions = {
+  isVisible?: boolean
+}
+type HeartbeatOptions = {
+  isVisible?: boolean
+}
 
 function describeError(error: unknown): string {
   if (error instanceof HttpError) {
@@ -129,8 +135,8 @@ export function useAgentWebSession(agentId: string | null) {
     idleTriggeredRef.current = false
   }, [])
 
-  const performHeartbeatRef = useRef<() => Promise<void>>(async () => {})
-  const performStartRef = useRef<() => Promise<void>>(async () => {})
+  const performHeartbeatRef = useRef<(options?: HeartbeatOptions) => Promise<void>>(async () => {})
+  const performStartRef = useRef<(options?: StartOptions) => Promise<void>>(async () => {})
 
   const scheduleNextHeartbeat = useCallback((ttlSeconds: number) => {
     const interval = Math.max(MIN_HEARTBEAT_INTERVAL_MS, Math.floor(ttlSeconds * 1000 * 0.5))
@@ -175,31 +181,56 @@ export function useAgentWebSession(agentId: string | null) {
     }, SESSION_IDLE_TIMEOUT_MS)
   }, [clearHeartbeat, clearStartRetry])
 
-  const performStart = useCallback(async () => {
+  const applyVisibleSession = useCallback((next: AgentWebSessionSnapshot) => {
+    const ttlSeconds = requireValidTtlSeconds(next)
+    startRetryAttemptsRef.current = 0
+    setSession(next)
+    setStatus('active')
+    setError(null)
+    clearIdleTimeout()
+    scheduleNextHeartbeat(ttlSeconds)
+  }, [clearIdleTimeout, scheduleNextHeartbeat])
+
+  const applyHiddenSession = useCallback((next: AgentWebSessionSnapshot) => {
+    startRetryAttemptsRef.current = 0
+    setSession(next)
+    setStatus('active')
+    setError(null)
+    clearHeartbeat()
+    scheduleIdleTimeout()
+  }, [clearHeartbeat, scheduleIdleTimeout])
+
+  const clearSessionToIdle = useCallback((errorMessage: string | null = null) => {
+    snapshotRef.current = null
+    setSession(null)
+    setStatus('idle')
+    setError(errorMessage)
+  }, [])
+
+  const performStart = useCallback(async (options?: StartOptions) => {
     const currentAgentId = agentIdRef.current
     if (!currentAgentId) {
       return
     }
+    const isVisible = options?.isVisible ?? isPageActive()
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
     setStatus('starting')
 
     try {
-      const created = await startAgentWebSession(currentAgentId)
+      const created = await startAgentWebSession(currentAgentId, undefined, isVisible)
       if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
 
       startRetryAttemptsRef.current = 0
       clearStartRetry()
-
-      const ttlSeconds = requireValidTtlSeconds(created)
-      setSession(created)
-      setStatus('active')
-      setError(null)
-      clearIdleTimeout()
-      scheduleNextHeartbeat(ttlSeconds)
+      if (isVisible) {
+        applyVisibleSession(created)
+      } else {
+        applyHiddenSession(created)
+      }
     } catch (startError) {
       if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
@@ -224,30 +255,29 @@ export function useAgentWebSession(agentId: string | null) {
       clearStartRetry()
       clearHeartbeat()
     }
-  }, [clearHeartbeat, clearIdleTimeout, clearStartRetry, scheduleNextHeartbeat, scheduleStartRetry])
+  }, [applyHiddenSession, applyVisibleSession, clearHeartbeat, clearStartRetry, scheduleStartRetry])
 
-  const performHeartbeat = useCallback(async () => {
+  const performHeartbeat = useCallback(async (options?: HeartbeatOptions) => {
     const currentAgentId = agentIdRef.current
     const snapshot = snapshotRef.current
     if (!currentAgentId || !snapshot) {
       return
     }
+    const isVisible = options?.isVisible ?? isPageActive()
 
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
 
     try {
-      const next = await heartbeatAgentWebSession(currentAgentId, snapshot.session_key)
+      const next = await heartbeatAgentWebSession(currentAgentId, snapshot.session_key, undefined, isVisible)
       if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
-      startRetryAttemptsRef.current = 0
-      setStatus('active')
-      setError(null)
-      const ttlSeconds = requireValidTtlSeconds(next)
-      setSession(next)
-      clearIdleTimeout()
-      scheduleNextHeartbeat(ttlSeconds)
+      if (isVisible) {
+        applyVisibleSession(next)
+      } else {
+        applyHiddenSession(next)
+      }
     } catch (heartbeatError) {
       if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
@@ -257,7 +287,7 @@ export function useAgentWebSession(agentId: string | null) {
 
       if (heartbeatError instanceof HttpError && heartbeatError.status === 400) {
         startRetryAttemptsRef.current = 0
-        await performStartRef.current()
+        await performStartRef.current({ isVisible })
         return
       }
 
@@ -275,7 +305,49 @@ export function useAgentWebSession(agentId: string | null) {
       setError(message)
       clearStartRetry()
     }
-  }, [clearHeartbeat, clearIdleTimeout, clearStartRetry, scheduleNextHeartbeat, scheduleStartRetry])
+  }, [applyVisibleSession, clearHeartbeat, clearStartRetry, scheduleStartRetry])
+
+  const markSessionHidden = useCallback(async () => {
+    const currentAgentId = agentIdRef.current
+    const snapshot = snapshotRef.current
+    if (!currentAgentId || !snapshot) {
+      scheduleIdleTimeout()
+      return
+    }
+
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    clearHeartbeat()
+
+    try {
+      const next = await heartbeatAgentWebSession(currentAgentId, snapshot.session_key, undefined, false)
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
+        return
+      }
+      applyHiddenSession(next)
+    } catch (error) {
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
+        return
+      }
+
+      const message = describeError(error)
+      if (error instanceof HttpError && error.status === 400) {
+        clearSessionToIdle()
+        scheduleIdleTimeout()
+        return
+      }
+
+      if (shouldRetry(error)) {
+        clearSessionToIdle(message)
+        scheduleIdleTimeout()
+        return
+      }
+
+      setStatus('error')
+      setError(message)
+      scheduleIdleTimeout()
+    }
+  }, [applyHiddenSession, clearHeartbeat, clearSessionToIdle, scheduleIdleTimeout])
 
   useEffect(() => {
     performHeartbeatRef.current = performHeartbeat
@@ -306,7 +378,11 @@ export function useAgentWebSession(agentId: string | null) {
     idleTriggeredRef.current = false
 
     startRetryAttemptsRef.current = 0
-    void performStart()
+    if (isPageActive()) {
+      void performStart({ isVisible: true })
+    } else {
+      setStatus('idle')
+    }
 
     return () => {
       clearHeartbeat()
@@ -368,19 +444,23 @@ export function useAgentWebSession(agentId: string | null) {
       return
     }
     if (snapshotRef.current) {
-      void performHeartbeatRef.current()
+      void performHeartbeatRef.current({ isVisible: true })
       return
     }
-    void performStartRef.current()
+    void performStartRef.current({ isVisible: true })
   }, [clearIdleTimeout])
 
   const handleSuspend = useCallback((reason: PageLifecycleSuspendReason) => {
+    if (reason === 'blur') {
+      return
+    }
     clearHeartbeat()
     clearStartRetry()
-    if (reason !== 'offline') {
-      scheduleIdleTimeout()
+    if (reason === 'offline') {
+      return
     }
-  }, [clearHeartbeat, clearStartRetry, scheduleIdleTimeout])
+    void markSessionHidden()
+  }, [clearHeartbeat, clearStartRetry, markSessionHidden])
 
   usePageLifecycle(
     {
