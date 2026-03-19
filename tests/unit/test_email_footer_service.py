@@ -50,6 +50,19 @@ class PersistentAgentEmailFooterTests(TestCase):
         self.assertIn("HTML Footer", html)
         self.assertIn("Plain footer text", text)
 
+    def test_footer_table_is_separated_from_body_table(self):
+        agent = self._create_agent()
+
+        html, text = append_footer_if_needed(
+            agent,
+            "<table><tr><td>Body Table</td></tr></table>",
+            "Body Table",
+        )
+
+        self.assertIn("</table><br /><table>", html)
+        self.assertIn("HTML Footer", html)
+        self.assertEqual(text, "Body Table\n\nPlain footer text")
+
     def test_footer_added_for_org_without_seats(self):
         org = Organization.objects.create(
             name="Seatless Org",

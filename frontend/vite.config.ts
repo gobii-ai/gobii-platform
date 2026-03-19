@@ -4,6 +4,12 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRootDir = fileURLToPath(new URL('.', import.meta.url))
+const buildBaseUrl = process.env.VITE_BUILD_BASE_URL?.trim()
+const productionBase = buildBaseUrl
+  ? buildBaseUrl.endsWith('/')
+    ? buildBaseUrl
+    : `${buildBaseUrl}/`
+  : '/static/frontend/'
 
 export default defineConfig(({ mode }) => ({
   plugins: [
@@ -13,7 +19,7 @@ export default defineConfig(({ mode }) => ({
       },
     }),
   ],
-  base: mode === 'development' ? '/' : '/static/frontend/',
+  base: mode === 'development' ? '/' : productionBase,
   resolve: {
     alias: {
       '@': resolve(projectRootDir, './src'),

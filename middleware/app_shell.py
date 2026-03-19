@@ -9,9 +9,7 @@ from config.vite import ViteManifestError, get_vite_asset
 from util.fish_collateral import is_fish_collateral_enabled
 
 APP_PATH_PREFIX = "/app"
-APP_SHELL_CACHE_CONTROL = (
-    "public, max-age=300, s-maxage=3600, stale-while-revalidate=300, stale-if-error=86400"
-)
+APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 
 
 def _format_vite_tags() -> str:

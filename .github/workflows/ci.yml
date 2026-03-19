@@ -390,6 +390,84 @@ jobs:
           check_name: "Combined Test Results"
           comment_mode: off
 
+  publish-static-assets:
+    name: Publish Static Assets
+    runs-on: ubuntu-latest
+    needs: [tests]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    env:
+      STATIC_BUCKET: gobii-platform-static
+      STATIC_ASSET_BASE_URL: https://static.gobii.ai/frontend/releases
+      VITE_BUILD_BASE_URL: https://static.gobii.ai/frontend/releases/${{ github.sha }}/
+      AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install AWS CLI
+        run: |
+          python3 -m pip install --user awscli
+
+      - name: Build frontend assets
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          npm ci --prefix frontend
+          npm run build --prefix frontend
+          test -f static/frontend/manifest.json
+          python3 scripts/vite_release_manifest.py \
+            --manifest static/frontend/manifest.json \
+            --root static/frontend \
+            --check-local > vite_release_paths.txt
+
+      - name: Upload immutable release assets
+        env:
+          RELEASE_PREFIX: s3://${{ env.STATIC_BUCKET }}/frontend/releases/${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          aws s3 sync static/frontend/assets "${RELEASE_PREFIX}/assets" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp static/frontend/manifest.json "${RELEASE_PREFIX}/manifest.json" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --cache-control "no-cache, max-age=0, must-revalidate" \
+            --content-type "application/json"
+
+      - name: Verify uploaded release assets
+        env:
+          RELEASE_PREFIX: frontend/releases/${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          aws s3api head-object \
+            --bucket "${STATIC_BUCKET}" \
+            --key "${RELEASE_PREFIX}/manifest.json" \
+            --endpoint-url "${R2_ENDPOINT}" >/dev/null
+          while IFS= read -r relative_path; do
+            aws s3api head-object \
+              --bucket "${STATIC_BUCKET}" \
+              --key "${RELEASE_PREFIX}/${relative_path}" \
+              --endpoint-url "${R2_ENDPOINT}" >/dev/null
+          done < vite_release_paths.txt
+
+      - name: Verify public asset URL
+        run: |
+          set -euo pipefail
+          curl -fsSI "${STATIC_ASSET_BASE_URL}/${GITHUB_SHA}/manifest.json" >/dev/null
+
   trigger-preview:
     name: Dispatch Preview Deployment
     runs-on: ubuntu-latest
@@ -429,7 +507,7 @@ jobs:
   trigger-staging:
     name: Dispatch Staging Deployment
     runs-on: ubuntu-latest
-    needs: [tests]
+    needs: [tests, publish-static-assets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Generate GitHub App token
