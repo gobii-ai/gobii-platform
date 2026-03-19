@@ -57,9 +57,11 @@ FROM deps AS builder
 # True, staticfiles uses CompressedStaticFilesStorage (no manifest), which causes
 # runtime 500s with Manifest lookups. Setting these envs guarantees
 # CompressedManifestStaticFilesStorage during collectstatic.
+ARG VITE_BUILD_BASE_URL
 ENV IN_DOCKER=1 \
     GOBII_RELEASE_ENV=build \
-    DEBUG=0
+    DEBUG=0 \
+    VITE_BUILD_BASE_URL=${VITE_BUILD_BASE_URL}
 
 # Prime frontend dependencies before copying the rest of the repository so we
 # can leverage cached layers when only application code changes.
