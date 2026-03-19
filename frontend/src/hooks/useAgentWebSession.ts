@@ -273,7 +273,11 @@ export function useAgentWebSession(agentId: string | null) {
       if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
-      applyVisibleSession(next)
+      if (isVisible) {
+        applyVisibleSession(next)
+      } else {
+        applyHiddenSession(next)
+      }
     } catch (heartbeatError) {
       if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
@@ -311,16 +315,18 @@ export function useAgentWebSession(agentId: string | null) {
       return
     }
 
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
     clearHeartbeat()
 
     try {
       const next = await heartbeatAgentWebSession(currentAgentId, snapshot.session_key, undefined, false)
-      if (unmountedRef.current || agentIdRef.current !== currentAgentId) {
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
       applyHiddenSession(next)
     } catch (error) {
-      if (unmountedRef.current || agentIdRef.current !== currentAgentId) {
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
 

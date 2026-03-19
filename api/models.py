@@ -9528,9 +9528,9 @@ class PersistentAgentWebSession(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("agent", "user")
         indexes = [
             models.Index(fields=["agent", "last_seen_at"], name="pa_web_session_agent_idx"),
+            models.Index(fields=["agent", "user", "last_seen_at"], name="pa_web_session_user_seen_idx"),
             models.Index(fields=["agent", "is_visible", "last_visible_at"], name="pa_web_session_visibility_idx"),
             models.Index(fields=["session_key"], name="pa_web_session_key_idx"),
             models.Index(fields=["ended_at", "last_seen_at"], name="pa_web_session_end_idx"),

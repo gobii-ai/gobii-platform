@@ -1345,7 +1345,7 @@ def _build_implied_send_tool_call(
     channel = ctx.get("channel")
     to_address = ctx.get("to_address")
     if not has_deliverable_web_session(agent):
-        return None, "Implied send failed: no active web session."
+        return None, "Implied send failed: no deliverable web session."
     if channel != "web":
         return None, "Implied send failed: active web session required."
 

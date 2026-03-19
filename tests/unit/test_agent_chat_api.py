@@ -779,6 +779,30 @@ class AgentChatAPITests(TestCase):
         )
 
     @tag("batch_agent_chat")
+    def test_web_session_start_creates_distinct_sessions_per_tab(self):
+        first_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/start/",
+            data=json.dumps({"is_visible": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(first_response.status_code, 200)
+
+        second_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/start/",
+            data=json.dumps({"is_visible": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(second_response.status_code, 200)
+
+        first_key = first_response.json()["session_key"]
+        second_key = second_response.json()["session_key"]
+        self.assertNotEqual(first_key, second_key)
+        self.assertEqual(
+            PersistentAgentWebSession.objects.filter(agent=self.agent, user=self.user).count(),
+            2,
+        )
+
+    @tag("batch_agent_chat")
     @patch("console.api_views.Analytics.track_event")
     def test_session_analytics_emitted(self, mock_track_event):
         start_response = self.client.post(

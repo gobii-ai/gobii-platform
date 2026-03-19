@@ -3396,7 +3396,7 @@ def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
         dict with keys: channel, to_address, tool_name, display_name, tool_example
         or None if no implied send target available.
     """
-    # Priority 1: Active web chat session
+    # Priority 1: Deliverable web chat session
     try:
         for session in get_deliverable_web_sessions(agent):
             if session.user_id is not None:

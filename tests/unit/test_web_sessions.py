@@ -106,29 +106,39 @@ class WebSessionServiceTests(TestCase):
         session_key = result.session.session_key
         end_web_session(session_key, self.agent, self.user)
 
-        ended = PersistentAgentWebSession.objects.get(agent=self.agent, user=self.user)
+        ended = PersistentAgentWebSession.objects.get(session_key=session_key)
         self.assertIsNotNone(ended.ended_at)
 
     @tag("batch_agent_chat")
-    def test_start_reuses_active_session(self):
+    def test_start_creates_distinct_session_per_tab(self):
         first = start_web_session(self.agent, self.user)
-        original_key = first.session.session_key
-        original_started_at = first.session.started_at
 
         second = start_web_session(self.agent, self.user)
-        self.assertEqual(second.session.session_key, original_key)
-        self.assertEqual(second.session.started_at, original_started_at)
-        self.assertGreaterEqual(second.session.last_seen_at, first.session.last_seen_at)
+        self.assertNotEqual(second.session.session_key, first.session.session_key)
+        self.assertNotEqual(second.session.id, first.session.id)
+        self.assertEqual(PersistentAgentWebSession.objects.filter(agent=self.agent, user=self.user).count(), 2)
 
     @tag("batch_agent_chat")
-    def test_heartbeat_recovers_when_session_key_rotates(self):
+    def test_hidden_tab_does_not_mask_visible_tab_for_delivery(self):
+        first = start_web_session(self.agent, self.user)
+        second = start_web_session(self.agent, self.user)
+
+        heartbeat_web_session(second.session.session_key, self.agent, self.user, is_visible=True)
+        heartbeat_web_session(first.session.session_key, self.agent, self.user, is_visible=False)
+
+        deliverable = get_deliverable_web_session(self.agent, self.user)
+        self.assertIsNotNone(deliverable)
+        self.assertEqual(deliverable.session_key, second.session.session_key)
+        self.assertTrue(has_deliverable_web_session(self.agent))
+
+    @tag("batch_agent_chat")
+    def test_heartbeat_rejects_unknown_session_key(self):
         first = start_web_session(self.agent, self.user)
         original_key = first.session.session_key
 
-        refreshed_key = uuid.uuid4()
-        PersistentAgentWebSession.objects.filter(agent=self.agent, user=self.user).update(
-            session_key=refreshed_key
+        PersistentAgentWebSession.objects.filter(pk=first.session.pk).update(
+            session_key=uuid.uuid4()
         )
 
-        recovered = heartbeat_web_session(original_key, self.agent, self.user)
-        self.assertEqual(recovered.session.session_key, refreshed_key)
+        with self.assertRaises(ValueError):
+            heartbeat_web_session(original_key, self.agent, self.user)

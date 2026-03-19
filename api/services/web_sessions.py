@@ -71,7 +71,7 @@ def _deliverable_session_queryset(
     ttl_seconds: int,
     grace_seconds: int,
     now: timezone.datetime,
-):
+) -> models.QuerySet[PersistentAgentWebSession]:
     live_threshold = now - timedelta(seconds=ttl_seconds)
     visible_threshold = now - timedelta(seconds=grace_seconds)
     return PersistentAgentWebSession.objects.filter(
@@ -97,6 +97,68 @@ def _mark_session_ended(
     return session
 
 
+def _create_session(
+    agent: PersistentAgent,
+    user,
+    *,
+    stamp: timezone.datetime,
+    source: str,
+    is_visible: bool,
+) -> PersistentAgentWebSession:
+    return PersistentAgentWebSession.objects.create(
+        agent=agent,
+        user=user,
+        session_key=uuid.uuid4(),
+        started_at=stamp,
+        last_seen_at=stamp,
+        last_seen_source=source[:32],
+        is_visible=bool(is_visible),
+        last_visible_at=stamp if is_visible else None,
+    )
+
+
+def _live_user_session_queryset(
+    agent: PersistentAgent,
+    user,
+    *,
+    ttl_seconds: int,
+    now: timezone.datetime,
+) -> models.QuerySet[PersistentAgentWebSession]:
+    live_threshold = now - timedelta(seconds=ttl_seconds)
+    return (
+        PersistentAgentWebSession.objects.filter(
+            agent=agent,
+            user=user,
+            ended_at__isnull=True,
+            last_seen_at__gte=live_threshold,
+        )
+        .order_by("-last_seen_at", "-started_at")
+    )
+
+
+def _mark_stale_user_sessions_ended(
+    agent: PersistentAgent,
+    user,
+    *,
+    ttl_seconds: int,
+    now: timezone.datetime,
+    source: Optional[str] = None,
+) -> None:
+    live_threshold = now - timedelta(seconds=ttl_seconds)
+    update_fields: dict[str, timezone.datetime | str] = {"ended_at": now}
+    if source:
+        update_fields["last_seen_source"] = source[:32]
+    (
+        PersistentAgentWebSession.objects.filter(
+            agent=agent,
+            user=user,
+            ended_at__isnull=True,
+            last_seen_at__lt=live_threshold,
+        )
+        .update(**update_fields)
+    )
+
+
 def _touch_session(
     session: PersistentAgentWebSession,
     *,
@@ -113,37 +175,6 @@ def _touch_session(
     session.ended_at = None
     session.save(
         update_fields=[
-            "last_seen_at",
-            "last_seen_source",
-            "is_visible",
-            "last_visible_at",
-            "ended_at",
-        ]
-    )
-    return session
-
-
-def _restart_session(
-    session: PersistentAgentWebSession,
-    *,
-    now: Optional[timezone.datetime] = None,
-    source: Optional[str] = None,
-    is_visible: bool = True,
-) -> PersistentAgentWebSession:
-    stamp = now or _now()
-    session.session_key = uuid.uuid4()
-    session.started_at = stamp
-    session.last_seen_at = stamp
-    if source:
-        session.last_seen_source = source[:32]
-    _set_visibility(session, is_visible=is_visible, stamp=stamp)
-    if not is_visible:
-        session.last_visible_at = None
-    session.ended_at = None
-    session.save(
-        update_fields=[
-            "session_key",
-            "started_at",
             "last_seen_at",
             "last_seen_source",
             "is_visible",
@@ -174,36 +205,13 @@ def start_web_session(
 ) -> SessionResult:
     stamp = _now()
     with transaction.atomic():
-        session, created = (
-            PersistentAgentWebSession.objects.select_for_update()
-            .get_or_create(
-                agent=agent,
-                user=user,
-                defaults={
-                    "session_key": uuid.uuid4(),
-                    "started_at": stamp,
-                    "last_seen_at": stamp,
-                    "last_seen_source": (source or _START_SOURCE)[:32],
-                    "is_visible": bool(is_visible),
-                    "last_visible_at": stamp if is_visible else None,
-                },
-            )
+        session = _create_session(
+            agent,
+            user,
+            stamp=stamp,
+            source=(source or _START_SOURCE),
+            is_visible=is_visible,
         )
-        if not created:
-            if _is_session_live(session, ttl_seconds=ttl_seconds, now=stamp):
-                session = _touch_session(
-                    session,
-                    now=stamp,
-                    source=(source or _START_SOURCE),
-                    is_visible=is_visible,
-                )
-            else:
-                session = _restart_session(
-                    session,
-                    now=stamp,
-                    source=(source or _START_SOURCE),
-                    is_visible=is_visible,
-                )
     return SessionResult(session=session, ttl_seconds=ttl_seconds)
 
 
@@ -225,13 +233,7 @@ def heartbeat_web_session(
                 .get(session_key=key)
             )
         except PersistentAgentWebSession.DoesNotExist as exc:
-            session = (
-                PersistentAgentWebSession.objects.select_for_update()
-                .filter(agent=agent, user=user)
-                .first()
-            )
-            if session is None:
-                raise ValueError("Unknown web session.") from exc
+            raise ValueError("Unknown web session.") from exc
 
         if session.agent_id != agent.id or session.user_id != getattr(user, "id", None):
             raise ValueError("Session does not belong to this agent or user.")
@@ -289,28 +291,18 @@ def touch_web_session(
     is_visible: Optional[bool] = None,
 ) -> Optional[SessionResult]:
     stamp = _now()
-    try:
-        with transaction.atomic():
-            session = (
-                PersistentAgentWebSession.objects.select_for_update()
-                .get(agent=agent, user=user)
+    with transaction.atomic():
+        session = (
+            _live_user_session_queryset(
+                agent,
+                user,
+                ttl_seconds=ttl_seconds,
+                now=stamp,
             )
-            if not _is_session_live(session, ttl_seconds=ttl_seconds, now=stamp):
-                if not create:
-                    _mark_session_ended(
-                        session,
-                        ended_at=stamp,
-                        source=(source or _MESSAGE_SOURCE),
-                    )
-                    return None
-
-                session = _restart_session(
-                    session,
-                    now=stamp,
-                    source=(source or _MESSAGE_SOURCE),
-                    is_visible=bool(True if is_visible is None else is_visible),
-                )
-                return SessionResult(session=session, ttl_seconds=ttl_seconds)
+            .select_for_update()
+            .first()
+        )
+        if session is not None:
             session = _touch_session(
                 session,
                 now=stamp,
@@ -318,16 +310,25 @@ def touch_web_session(
                 is_visible=is_visible,
             )
             return SessionResult(session=session, ttl_seconds=ttl_seconds)
-    except PersistentAgentWebSession.DoesNotExist:
-        if not create:
-            return None
-        return start_web_session(
+
+        _mark_stale_user_sessions_ended(
             agent,
             user,
-            source=(source or _MESSAGE_SOURCE),
             ttl_seconds=ttl_seconds,
-            is_visible=bool(True if is_visible is None else is_visible),
+            now=stamp,
+            source=(source or _MESSAGE_SOURCE),
         )
+        if not create:
+            return None
+
+        session = _create_session(
+            agent,
+            user,
+            stamp=stamp,
+            source=(source or _MESSAGE_SOURCE),
+            is_visible=is_visible is not False,
+        )
+        return SessionResult(session=session, ttl_seconds=ttl_seconds)
 
 
 def get_active_web_session(
@@ -337,15 +338,17 @@ def get_active_web_session(
     ttl_seconds: int = WEB_SESSION_TTL_SECONDS,
 ) -> Optional[PersistentAgentWebSession]:
     stamp = _now()
-    try:
-        session = PersistentAgentWebSession.objects.get(agent=agent, user=user)
-    except PersistentAgentWebSession.DoesNotExist:
-        return None
+    session = _live_user_session_queryset(
+        agent,
+        user,
+        ttl_seconds=ttl_seconds,
+        now=stamp,
+    ).first()
+    if session is not None:
+        return session
 
-    if not _is_session_live(session, ttl_seconds=ttl_seconds, now=stamp):
-        _mark_session_ended(session, ended_at=stamp)
-        return None
-    return session
+    _mark_stale_user_sessions_ended(agent, user, ttl_seconds=ttl_seconds, now=stamp)
+    return None
 
 
 def get_active_web_sessions(
@@ -397,16 +400,16 @@ def get_deliverable_web_session(
     grace_seconds: int = WEB_SESSION_VISIBILITY_GRACE_SECONDS,
 ) -> Optional[PersistentAgentWebSession]:
     stamp = _now()
-    try:
-        session = _deliverable_session_queryset(
+    return (
+        _deliverable_session_queryset(
             ttl_seconds=ttl_seconds,
             grace_seconds=grace_seconds,
             now=stamp,
-        ).get(agent=agent, user=user)
-    except PersistentAgentWebSession.DoesNotExist:
-        return None
-
-    return session
+        )
+        .filter(agent=agent, user=user)
+        .order_by("-last_visible_at", "-last_seen_at", "-started_at")
+        .first()
+    )
 
 
 def get_deliverable_web_sessions(
@@ -424,7 +427,7 @@ def get_deliverable_web_sessions(
         )
         .filter(agent=agent)
         .select_related("user")
-        .order_by("-last_visible_at", "-last_seen_at")
+        .order_by("-last_visible_at", "-last_seen_at", "-started_at")
     )
 
     yield from sessions

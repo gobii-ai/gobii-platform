@@ -33,4 +33,15 @@ class Migration(migrations.Migration):
                 name="pa_web_session_visibility_idx",
             ),
         ),
+        migrations.AlterUniqueTogether(
+            name="persistentagentwebsession",
+            unique_together=set(),
+        ),
+        migrations.AddIndex(
+            model_name="persistentagentwebsession",
+            index=models.Index(
+                fields=["agent", "user", "last_seen_at"],
+                name="pa_web_session_user_seen_idx",
+            ),
+        ),
     ]
