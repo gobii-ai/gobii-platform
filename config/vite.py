@@ -45,17 +45,24 @@ def _release_asset_url(relative_path: str) -> str:
     return f"{base_url}/{release_id}/{relative_path.lstrip('/')}"
 
 
-@lru_cache(maxsize=1)
-def _get_release_id() -> str:
+def _read_release_id() -> str:
     explicit_release_id = settings.VITE_ASSET_RELEASE_ID.strip()
     if explicit_release_id:
         return explicit_release_id
 
     release_file: Path = settings.VITE_ASSET_RELEASE_ID_FILE
     if release_file.exists():
-        release_id = release_file.read_text(encoding='utf-8').strip()
-        if release_id:
-            return release_id
+        return release_file.read_text(encoding='utf-8').strip()
+
+    return ""
+
+
+@lru_cache(maxsize=1)
+def _get_release_id() -> str:
+    release_file: Path = settings.VITE_ASSET_RELEASE_ID_FILE
+    release_id = _read_release_id()
+    if release_id and release_id.lower() != "unknown":
+        return release_id
 
     message = (
         "Vite asset release ID is required when VITE_ASSET_BASE_URL is configured. "
@@ -116,16 +123,13 @@ def get_vite_asset(entry: str | None = None) -> ViteAsset:
     file_path = chunk['file']
     css_paths = tuple(chunk.get('css', []))
 
+    url_builder = _static_url
     if settings.VITE_ASSET_BASE_URL.strip():
         release_id = _get_release_id()
         if release_id:
-            file_url = _release_asset_url(file_path)
-            css_urls = tuple(_release_asset_url(path) for path in css_paths)
-        else:
-            file_url = _static_url(file_path)
-            css_urls = tuple(_static_url(path) for path in css_paths)
-    else:
-        file_url = _static_url(file_path)
-        css_urls = tuple(_static_url(path) for path in css_paths)
+            url_builder = _release_asset_url
+
+    file_url = url_builder(file_path)
+    css_urls = tuple(url_builder(path) for path in css_paths)
 
     return ViteAsset(scripts=(file_url,), styles=css_urls)

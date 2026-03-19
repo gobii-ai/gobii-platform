@@ -400,6 +400,7 @@ jobs:
     env:
       STATIC_BUCKET: gobii-platform-static
       STATIC_ASSET_BASE_URL: https://static.gobii.ai/frontend/releases
+      VITE_BUILD_BASE_URL: https://static.gobii.ai/frontend/releases/${{ github.sha }}/
       AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto

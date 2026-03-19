@@ -86,6 +86,24 @@ class ViteAssetResolutionTests(SimpleTestCase):
                 with self.assertRaisesMessage(ViteAssetReleaseNotFound, "Vite asset release ID is required"):
                     get_vite_asset("src/main.tsx")
 
+    def test_raises_when_release_id_uses_unknown_placeholder(self):
+        with TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = self._write_manifest(temp_root)
+            release_path = temp_root / ".git-commit"
+            release_path.write_text("unknown\n", encoding="utf-8")
+            with override_settings(
+                DEBUG=False,
+                VITE_USE_DEV_SERVER=False,
+                VITE_MANIFEST_PATH=manifest_path,
+                VITE_ASSET_BASE_URL="https://static.gobii.ai/frontend/releases",
+                VITE_ASSET_RELEASE_ID="",
+                VITE_ASSET_RELEASE_ID_FILE=release_path,
+            ):
+                clear_manifest_cache()
+                with self.assertRaisesMessage(ViteAssetReleaseNotFound, "Vite asset release ID is required"):
+                    get_vite_asset("src/main.tsx")
+
 
 @tag("batch_pages")
 class AppShellCacheHeaderTests(TestCase):

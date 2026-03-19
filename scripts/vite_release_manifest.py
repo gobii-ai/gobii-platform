@@ -4,9 +4,10 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 
-def _collect_paths(node, collected):
+def _collect_paths(node: Any, collected: set[str]) -> None:
     if isinstance(node, dict):
         file_path = node.get("file")
         if isinstance(file_path, str) and file_path:
