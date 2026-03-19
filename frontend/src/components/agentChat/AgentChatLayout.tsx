@@ -1,7 +1,6 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
-import type { Virtualizer } from '@tanstack/react-virtual'
 import '../../styles/agentChatLegacy.css'
 import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
@@ -51,6 +50,16 @@ type TaskQuotaInfo = {
 }
 
 const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
+
+function timelineEventKey(event: SimplifiedTimelineItem): string {
+  if (event.kind === 'collapsed-group') {
+    return `collapsed:${event.cursor}`
+  }
+  if (event.kind === 'steps' && event.entries.length > 0) {
+    return `cluster:${event.entries[0].id}`
+  }
+  return event.cursor
+}
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
@@ -117,7 +126,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskCreditsWarningVariant?: 'low' | 'out' | null
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
-  virtualizer?: Virtualizer<HTMLElement, Element> | null
   highPriorityBanner?: HighPriorityBannerConfig | null
   onLoadOlder?: () => void
   onLoadNewer?: () => void
@@ -238,7 +246,6 @@ export function AgentChatLayout({
   taskCreditsWarningVariant = null,
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
-  virtualizer = null,
   highPriorityBanner = null,
   hasMoreNewer,
   processingActive,
@@ -873,44 +880,20 @@ export function AgentChatLayout({
                       </div>
                     </div>
                   </div>
-                ) : virtualizer ? (
-                  <div
-                    id="timeline-event-list"
-                    style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}
-                  >
-                    {virtualizer.getVirtualItems().map((virtualItem) => {
-                      const event = timelineRenderEvents[virtualItem.index]
-                      if (!event) return null
-                      const isLatestEvent = virtualItem.index === timelineRenderEvents.length - 1
-                      return (
-                        <div
-                          key={virtualItem.key}
-                          data-index={virtualItem.index}
-                          ref={virtualizer.measureElement}
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            transform: `translateY(${virtualItem.start}px)`,
-                          }}
-                        >
-                          <TimelineVirtualItem
-                            event={event}
-                            isLatestEvent={isLatestEvent}
-                            agentFirstName={agentFirstName}
-                            agentColorHex={agentColorHex || undefined}
-                            agentAvatarUrl={agentAvatarUrl}
-                            viewerUserId={viewerUserId ?? null}
-                            viewerEmail={viewerEmail ?? null}
-                            suppressedThinkingCursor={suppressedThinkingCursor}
-                            statusExpansionTargets={statusExpansionTargets}
-                          />
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : null}
+                ) : timelineRenderEvents.map((event, index) => (
+                  <TimelineVirtualItem
+                    key={timelineEventKey(event)}
+                    event={event}
+                    isLatestEvent={index === timelineRenderEvents.length - 1}
+                    agentFirstName={agentFirstName}
+                    agentColorHex={agentColorHex || undefined}
+                    agentAvatarUrl={agentAvatarUrl}
+                    viewerUserId={viewerUserId ?? null}
+                    viewerEmail={viewerEmail ?? null}
+                    suppressedThinkingCursor={suppressedThinkingCursor}
+                    statusExpansionTargets={statusExpansionTargets}
+                  />
+                ))}
                 {showScheduledResumeEvent ? (
                   <ScheduledResumeCard
                     nextScheduledAt={nextScheduledAt}

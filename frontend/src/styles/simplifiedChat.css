@@ -332,7 +332,7 @@
 
 /* ---- Smooth Position Transitions ---- */
 
-/* Existing virtualizer items glide up when new content arrives */
+/* Existing items glide up when new content arrives */
 .simplified-chat-vitem {
   max-width: 100%;
   overflow-x: clip;
