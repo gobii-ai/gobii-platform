@@ -6,6 +6,8 @@ import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
+import type { ToolClusterEvent } from '../../types/agentChat'
+import type { StatusExpansionTargets } from './statusExpansion'
 
 type TimelineVirtualItemProps = {
   event: SimplifiedTimelineItem
@@ -16,6 +18,7 @@ type TimelineVirtualItemProps = {
   viewerUserId?: number | null
   viewerEmail?: string | null
   suppressedThinkingCursor?: string | null
+  statusExpansionTargets?: StatusExpansionTargets
 }
 
 export const TimelineVirtualItem = memo(function TimelineVirtualItem({
@@ -27,6 +30,7 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   viewerUserId,
   viewerEmail,
   suppressedThinkingCursor,
+  statusExpansionTargets,
 }: TimelineVirtualItemProps) {
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
@@ -60,17 +64,40 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
         cluster={buildThinkingCluster(event)}
         isLatestEvent={isLatestEvent}
         suppressedThinkingCursor={suppressedThinkingCursor}
+        statusExpansionTargets={statusExpansionTargets}
       />
     )
   }
-  if (event.kind === 'kanban') {
+  if (event.kind === 'kanban' && event.cursor === statusExpansionTargets?.latestKanbanCursor) {
     return <KanbanEventCard event={event} />
+  }
+  if (event.kind === 'kanban') {
+    const cluster: ToolClusterEvent = {
+      kind: 'steps',
+      cursor: event.cursor,
+      entries: [],
+      entryCount: 1,
+      collapsible: false,
+      collapseThreshold: Infinity,
+      earliestTimestamp: event.timestamp ?? null,
+      latestTimestamp: event.timestamp ?? null,
+      kanbanEntries: [event],
+    }
+    return (
+      <ToolClusterCard
+        cluster={cluster}
+        isLatestEvent={isLatestEvent}
+        suppressedThinkingCursor={suppressedThinkingCursor}
+        statusExpansionTargets={statusExpansionTargets}
+      />
+    )
   }
   return (
     <ToolClusterCard
       cluster={event}
       isLatestEvent={isLatestEvent}
       suppressedThinkingCursor={suppressedThinkingCursor}
+      statusExpansionTargets={statusExpansionTargets}
     />
   )
 })

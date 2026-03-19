@@ -25,7 +25,7 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
-from api.models import MCPServerConfig, PipedreamAppSelection, UserPreference
+from api.models import MCPServerConfig, PipedreamAppSelection
 from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
 from api.services.pipedream_apps import get_owner_apps_state
 
@@ -634,67 +634,6 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-cta-pricing-cancel-text-under-btn="true"')
         mock_customer_has_any_individual_subscription.assert_not_called()
-
-    @tag("batch_console_agents")
-    def test_agent_chat_shell_exposes_simplified_chat_toggle_state(self):
-        from api.models import BrowserUseAgent, PersistentAgent
-        from waffle.testutils import override_flag
-
-        browser_agent = BrowserUseAgent.objects.create(
-            user=self.user,
-            name="Simplified Chat Browser Agent",
-        )
-        persistent_agent = PersistentAgent.objects.create(
-            user=self.user,
-            name="Simplified Chat Agent",
-            charter="Simplified chat toggle charter",
-            browser_use_agent=browser_agent,
-        )
-
-        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=False):
-            response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-simplified-chat-ui="true"')
-        self.assertContains(response, 'data-simplified-chat-toggle-available="false"')
-
-        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=True):
-            default_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
-
-        self.assertEqual(default_response.status_code, 200)
-        self.assertContains(default_response, 'data-simplified-chat-ui="true"')
-        self.assertContains(default_response, 'data-simplified-chat-toggle-available="false"')
-
-        UserPreference.update_known_preferences(
-            self.user,
-            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: True},
-        )
-
-        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=False):
-            enabled_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
-
-        self.assertEqual(enabled_response.status_code, 200)
-        self.assertContains(enabled_response, 'data-simplified-chat-ui="true"')
-        self.assertContains(enabled_response, 'data-simplified-chat-toggle-available="false"')
-
-        UserPreference.update_known_preferences(
-            self.user,
-            {UserPreference.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: False},
-        )
-
-        with override_flag("simplified_chat_ui", active=True), override_flag("simplified_chat_default_conversational", active=True):
-            saved_false_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
-
-        self.assertEqual(saved_false_response.status_code, 200)
-        self.assertContains(saved_false_response, 'data-simplified-chat-ui="true"')
-        self.assertContains(saved_false_response, 'data-simplified-chat-toggle-available="false"')
-
-        with override_flag("simplified_chat_ui", active=False), override_flag("simplified_chat_default_conversational", active=True):
-            disabled_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
-
-        self.assertEqual(disabled_response.status_code, 200)
-        self.assertContains(disabled_response, 'data-simplified-chat-ui="false"')
-        self.assertContains(disabled_response, 'data-simplified-chat-toggle-available="false"')
 
     @tag("batch_console_agents")
     @patch("console.views.customer_has_any_individual_subscription", return_value=True)

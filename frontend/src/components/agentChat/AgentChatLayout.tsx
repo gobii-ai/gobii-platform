@@ -1,10 +1,7 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
-import type { Virtualizer } from '@tanstack/react-virtual'
 import '../../styles/agentChatLegacy.css'
-import '../../styles/simplifiedChat.css'
-import { useSimplifiedChat } from '../../contexts/SimplifiedChatContext'
 import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -26,7 +23,6 @@ import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
-import { shouldShowStreamingThinking } from './simplifiedChatPresentation'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
@@ -44,6 +40,7 @@ import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } 
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
+import type { StatusExpansionTargets } from './statusExpansion'
 
 type TaskQuotaInfo = {
   available: number
@@ -54,8 +51,19 @@ type TaskQuotaInfo = {
 
 const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 
+function timelineEventKey(event: SimplifiedTimelineItem): string {
+  if (event.kind === 'collapsed-group') {
+    return `collapsed:${event.cursor}`
+  }
+  if (event.kind === 'steps' && event.entries.length > 0) {
+    return `cluster:${event.entries[0].id}`
+  }
+  return event.cursor
+}
+
 type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
+  statusExpansionTargets?: StatusExpansionTargets
   agentId?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
@@ -118,7 +126,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskCreditsWarningVariant?: 'low' | 'out' | null
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
-  virtualizer?: Virtualizer<HTMLElement, Element> | null
   highPriorityBanner?: HighPriorityBannerConfig | null
   onLoadOlder?: () => void
   onLoadNewer?: () => void
@@ -176,6 +183,7 @@ export function AgentChatLayout({
   agentFirstName,
   events,
   displayEvents,
+  statusExpansionTargets,
   agentId,
   agentColorHex,
   agentAvatarUrl,
@@ -238,7 +246,6 @@ export function AgentChatLayout({
   taskCreditsWarningVariant = null,
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
-  virtualizer = null,
   highPriorityBanner = null,
   hasMoreNewer,
   processingActive,
@@ -283,7 +290,6 @@ export function AgentChatLayout({
   pendingHumanInputRequests = [],
   onRespondHumanInputRequest,
 }: AgentChatLayoutProps) {
-  const { enabled: simplifiedChat } = useSimplifiedChat()
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -533,15 +539,9 @@ export function AgentChatLayout({
   // Un-suppress the static thinking entry once streaming completes so it appears in its chronological position
   const suppressedThinkingCursor = streaming && !streaming.done ? streaming.cursor ?? null : null
   const showStreamingSlot = hasStreamingContent && isStreaming
-  // Show streaming thinking card at the bottom while actively streaming reasoning (before content arrives)
-  // In simplified mode, the typing indicator covers this state instead
-  const showStreamingThinking = shouldShowStreamingThinking({
-    enabled: simplifiedChat,
-    isStreaming,
-    hasReasoning: Boolean(streaming?.reasoning?.trim()),
-    hasStreamingContent,
-    hasMoreNewer: Boolean(hasMoreNewer),
-  })
+  const showStreamingThinking = Boolean(
+    isStreaming && streaming?.reasoning?.trim() && !hasStreamingContent && !hasMoreNewer,
+  )
 
   // Show progress bar whenever processing is active (agent is working)
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
@@ -857,7 +857,7 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" className={simplifiedChat ? 'simplified-chat' : undefined} data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">
@@ -880,45 +880,20 @@ export function AgentChatLayout({
                       </div>
                     </div>
                   </div>
-                ) : virtualizer ? (
-                  <div
-                    id="timeline-event-list"
-                    style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}
-                  >
-                    {virtualizer.getVirtualItems().map((virtualItem) => {
-                      const event = timelineRenderEvents[virtualItem.index]
-                      if (!event) return null
-                      const isLatestEvent = virtualItem.index === timelineRenderEvents.length - 1
-                      return (
-                        <div
-                          key={virtualItem.key}
-                          data-index={virtualItem.index}
-                          data-animate-entry={simplifiedChat && isLatestEvent ? 'true' : undefined}
-                          className={simplifiedChat ? 'simplified-chat-vitem' : undefined}
-                          ref={virtualizer.measureElement}
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            width: '100%',
-                            transform: `translateY(${virtualItem.start}px)`,
-                          }}
-                        >
-                          <TimelineVirtualItem
-                            event={event}
-                            isLatestEvent={isLatestEvent}
-                            agentFirstName={agentFirstName}
-                            agentColorHex={agentColorHex || undefined}
-                            agentAvatarUrl={agentAvatarUrl}
-                            viewerUserId={viewerUserId ?? null}
-                            viewerEmail={viewerEmail ?? null}
-                            suppressedThinkingCursor={suppressedThinkingCursor}
-                          />
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : null}
+                ) : timelineRenderEvents.map((event, index) => (
+                  <TimelineVirtualItem
+                    key={timelineEventKey(event)}
+                    event={event}
+                    isLatestEvent={index === timelineRenderEvents.length - 1}
+                    agentFirstName={agentFirstName}
+                    agentColorHex={agentColorHex || undefined}
+                    agentAvatarUrl={agentAvatarUrl}
+                    viewerUserId={viewerUserId ?? null}
+                    viewerEmail={viewerEmail ?? null}
+                    suppressedThinkingCursor={suppressedThinkingCursor}
+                    statusExpansionTargets={statusExpansionTargets}
+                  />
+                ))}
                 {showScheduledResumeEvent ? (
                   <ScheduledResumeCard
                     nextScheduledAt={nextScheduledAt}

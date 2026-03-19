@@ -93,8 +93,6 @@ from console.daily_credit import (
 )
 from console.home_metrics import get_console_home_metrics
 from console.role_constants import BILLING_MANAGE_ROLES
-from console.simplified_chat import resolve_simplified_chat_state
-
 from api.models import (
     ApiKey,
     UserBilling,
@@ -456,7 +454,6 @@ from constants.feature_flags import (
     CTA_START_FREE_TRIAL,
     ORGANIZATIONS,
     PRICING_MODAL_ALMOST_FULL_SCREEN,
-    SIMPLIFIED_CHAT_UI,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesChoices
@@ -5795,10 +5792,6 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         agent_sms_ep = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
         context["agent_email"] = agent_email_ep.address if agent_email_ep else ""
         context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
-        simplified_chat_state = resolve_simplified_chat_state(self.request)
-        context["simplified_chat_ui"] = simplified_chat_state.enabled
-        context["simplified_chat_toggle_available"] = simplified_chat_state.toggle_available
-
         return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only

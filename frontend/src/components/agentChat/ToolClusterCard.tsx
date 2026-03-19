@@ -10,25 +10,60 @@ import { formatRelativeTimestamp } from '../../util/time'
 import { compareTimelineCursors } from '../../util/timelineCursor'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { buildActionCountLabel } from './activityEntryUtils'
+import type { StatusExpansionTargets } from './statusExpansion'
+import { isStatusDisplayEntry, resolveEntrySeparation } from './statusExpansion'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
   isLatestEvent?: boolean
   suppressedThinkingCursor?: string | null
+  statusExpansionTargets?: StatusExpansionTargets
 }
 
-export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatestEvent = false, suppressedThinkingCursor }: ToolClusterCardProps) {
+export const ToolClusterCard = memo(function ToolClusterCard({
+  cluster,
+  isLatestEvent = false,
+  suppressedThinkingCursor,
+  statusExpansionTargets,
+}: ToolClusterCardProps) {
   const transformed = useMemo(
     () => transformToolCluster(cluster, { suppressedThinkingCursor }),
     [cluster, suppressedThinkingCursor],
   )
+  const resolvedTransformed = useMemo(() => {
+    if (!statusExpansionTargets) {
+      return transformed
+    }
+
+    let changed = false
+    const entries = transformed.entries.map((entry) => {
+      const separateFromPreview = resolveEntrySeparation(entry, statusExpansionTargets)
+      if (separateFromPreview === entry.separateFromPreview) {
+        return entry
+      }
+      changed = true
+      return {
+        ...entry,
+        separateFromPreview,
+      }
+    })
+
+    if (!changed) {
+      return transformed
+    }
+
+    return {
+      ...transformed,
+      entries,
+    }
+  }, [statusExpansionTargets, transformed])
   const separatedEntries = useMemo(
-    () => transformed.entries.filter((entry) => entry.separateFromPreview),
-    [transformed.entries],
+    () => resolvedTransformed.entries.filter((entry) => entry.separateFromPreview),
+    [resolvedTransformed.entries],
   )
   const previewEntries = useMemo(
-    () => transformed.entries.filter((entry) => !entry.separateFromPreview),
-    [transformed.entries],
+    () => resolvedTransformed.entries.filter((entry) => !entry.separateFromPreview),
+    [resolvedTransformed.entries],
   )
   const visiblePreviewEntries = previewEntries
   const separatedEntryPlacement = useMemo(() => {
@@ -75,22 +110,38 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
 
   const articleClasses = useMemo(() => {
     const classes = ['timeline-event', 'tool-cluster']
-    if (transformed.collapsible) {
+    if (resolvedTransformed.collapsible) {
       classes.push('tool-cluster--collapsible')
     }
     return classes.join(' ')
-  }, [transformed.collapsible])
+  }, [resolvedTransformed.collapsible])
+  const hasExpandedStatusEntry = useMemo(
+    () => resolvedTransformed.entries.some((entry) => isStatusDisplayEntry(entry) && entry.separateFromPreview),
+    [resolvedTransformed.entries],
+  )
+  const shouldCollapse = useMemo(() => {
+    if (hasExpandedStatusEntry) {
+      return false
+    }
+    if (resolvedTransformed.collapsible) {
+      return true
+    }
+    if (!statusExpansionTargets) {
+      return false
+    }
+    return resolvedTransformed.entries.some((entry) => isStatusDisplayEntry(entry) && !entry.separateFromPreview)
+  }, [hasExpandedStatusEntry, resolvedTransformed.collapsible, resolvedTransformed.entries, statusExpansionTargets])
 
-  if (!isClusterRenderable(transformed)) {
+  if (!isClusterRenderable(resolvedTransformed)) {
     return null
   }
 
-  if (transformed.collapsible) {
+  if (shouldCollapse) {
     return (
       <CollapsedActivityCard
-        overlayId={transformed.cursor}
-        entries={transformed.entries}
-        label={buildActionCountLabel(transformed.entryCount)}
+        overlayId={resolvedTransformed.cursor}
+        entries={resolvedTransformed.entries}
+        label={buildActionCountLabel(resolvedTransformed.entryCount)}
       />
     )
   }
@@ -132,11 +183,11 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
     <article
       className={articleClasses}
       data-cursor={cluster.cursor}
-      data-entry-count={transformed.entryCount}
-      data-collapsible={transformed.collapsible ? 'true' : 'false'}
+      data-entry-count={resolvedTransformed.entryCount}
+      data-collapsible={resolvedTransformed.collapsible ? 'true' : 'false'}
       data-collapse-threshold={cluster.collapseThreshold}
       data-cluster-kind="tool"
-      data-earliest={transformed.earliestTimestamp}
+      data-earliest={resolvedTransformed.earliestTimestamp}
     >
       <div className="tool-cluster-shell">
         {separatedEntryPlacement.beforePreview.length ? (
@@ -145,7 +196,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
         {hasPreviewEntries ? (
           <div className="tool-cluster-summary">
             <ToolClusterLivePreview
-              cluster={transformed}
+              cluster={resolvedTransformed}
               isLatestEvent={isLatestEvent}
               previewEntryLimit={previewEntries.length}
               onOpenTimeline={handleToggleCluster}
@@ -159,9 +210,9 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, isLatest
       </div>
       <ToolClusterTimelineOverlay
         open={timelineOpen}
-        overlayId={transformed.cursor}
-        title={buildActionCountLabel(transformed.entryCount)}
-        entries={transformed.entries}
+        overlayId={resolvedTransformed.cursor}
+        title={buildActionCountLabel(resolvedTransformed.entryCount)}
+        entries={resolvedTransformed.entries}
         initialOpenEntryId={timelineInitialEntryId}
         onClose={() => {
           setTimelineOpen(false)

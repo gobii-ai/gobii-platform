@@ -583,7 +583,6 @@ class UserPreference(models.Model):
 
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
-    KEY_AGENT_CHAT_SIMPLIFIED_ENABLED = "agent.chat.simplified.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -594,10 +593,6 @@ class UserPreference(models.Model):
         KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: {
             "default": [],
             "type": "uuid_list",
-        },
-        KEY_AGENT_CHAT_SIMPLIFIED_ENABLED: {
-            "default": False,
-            "type": "boolean",
         },
         KEY_USER_TIMEZONE: {
             "default": "",
@@ -747,27 +742,6 @@ class UserPreference(models.Model):
         resolved = cls.resolve_known_preferences(user)
         favorite_ids = resolved[cls.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS]
         return list(favorite_ids) if isinstance(favorite_ids, list) else []
-
-    @classmethod
-    def resolve_simplified_chat_enabled(cls, user) -> bool:
-        resolved = cls.resolve_known_preferences(user)
-        return bool(resolved[cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED])
-
-    @classmethod
-    def resolve_optional_simplified_chat_enabled(cls, user) -> bool | None:
-        preference = cls.get_for_user(user)
-        stored = preference.preferences if preference and isinstance(preference.preferences, dict) else {}
-        if cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED not in stored:
-            return None
-        try:
-            normalized = cls._normalize_preference_value(
-                cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED,
-                stored.get(cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED),
-                cls.PREFERENCE_DEFINITIONS[cls.KEY_AGENT_CHAT_SIMPLIFIED_ENABLED],
-            )
-        except ValueError:
-            return None
-        return bool(normalized)
 
     @classmethod
     def update_known_preferences(cls, user, updates: dict[str, object]) -> dict[str, object]:

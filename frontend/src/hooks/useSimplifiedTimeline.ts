@@ -2,6 +2,11 @@ import { useMemo } from 'react'
 import type { TimelineEvent, ToolCallEntry } from '../types/agentChat'
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
 import { buildActionCountLabel } from '../components/agentChat/activityEntryUtils'
+import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
+import {
+  eventHasHistoricalStatus,
+  eventHasLatestStatus,
+} from '../components/agentChat/statusExpansion'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,6 +205,46 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
     }
 
     // Everything else → buffer for collapsing
+    buffer.push(event)
+  }
+
+  flush()
+  return result
+}
+
+export function collapseDetailedStatusRuns(
+  events: TimelineEvent[],
+  targets: StatusExpansionTargets,
+): SimplifiedTimelineItem[] {
+  const result: SimplifiedTimelineItem[] = []
+  let buffer: TimelineEvent[] = []
+
+  const flush = () => {
+    if (buffer.length === 0) return
+    if (buffer.some((event) => eventHasHistoricalStatus(event, targets))) {
+      const meaningful = buffer.filter(isRenderableCollapsedEvent)
+      if (meaningful.length > 0) {
+        result.push(makeCollapsedGroup(meaningful))
+      }
+    } else {
+      result.push(...buffer)
+    }
+    buffer = []
+  }
+
+  for (const event of events) {
+    if (event.kind === 'message') {
+      flush()
+      result.push(event)
+      continue
+    }
+
+    if (eventHasLatestStatus(event, targets)) {
+      flush()
+      result.push(event)
+      continue
+    }
+
     buffer.push(event)
   }
 

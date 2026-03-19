@@ -18,6 +18,7 @@ import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelli
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
+import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
@@ -34,9 +35,7 @@ import {
   replacePendingHumanInputRequestsInCache,
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
 } from '../hooks/useTimelineCacheInjector'
-import { useTimelineVirtualizer } from '../hooks/useTimelineVirtualizer'
-import { useSimplifiedTimeline } from '../hooks/useSimplifiedTimeline'
-import { useSimplifiedChat } from '../contexts/SimplifiedChatContext'
+import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
@@ -597,7 +596,7 @@ const STREAMING_REFRESH_INTERVAL_MS = 6000
 const AUTO_SCROLL_REPIN_SUPPRESSION_MS = 1500
 const BOTTOM_REPIN_THRESHOLD_PX = 50
 const NEAR_BOTTOM_THRESHOLD_PX = 100
-const TOP_LOAD_THRESHOLD_PX = 96
+const TOP_LOAD_THRESHOLD_PX = 200
 const UNPIN_DISTANCE_FROM_BOTTOM_PX = 12
 const PROGRAMMATIC_SCROLL_GUARD_MS = 150
 const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES
@@ -791,18 +790,19 @@ export function AgentChatPage({
   const timelineLoadingNewer = !isNewAgent ? timelineQuery.isFetchingNextPage : false
   const initialLoading = !isNewAgent && timelineQuery.isLoading
 
-  // Simplified-chat mode collapses non-message events for the virtualizer
-  const {
-    enabled: simplifiedChat,
-  } = useSimplifiedChat()
-  const displayEvents = useSimplifiedTimeline(timelineEvents, simplifiedChat)
+  const statusExpansionTargets = useMemo(
+    () => findLatestStatusExpansionTargets(timelineEvents),
+    [timelineEvents],
+  )
+  const displayEvents = useMemo(
+    () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets),
+    [timelineEvents, statusExpansionTargets],
+  )
 
-  // Set up virtualizer
-  const scrollContainerRef = useRef<HTMLElement | null>(null)
-  const virtualizer = useTimelineVirtualizer({
-    events: displayEvents,
-    scrollContainerRef,
-  })
+  const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
+  const prevScrollHeightRef = useRef(0)
+  const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
+  const preservePrependViewportRef = useRef(false)
   const olderPageRequestInFlightRef = useRef(false)
 
   const requestPreviousPage = useCallback(() => {
@@ -815,11 +815,15 @@ export function AgentChatPage({
       return
     }
 
+    prevPageCountRef.current = timelineQuery.data?.pages?.length ?? 0
+    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
+    preservePrependViewportRef.current = true
     olderPageRequestInFlightRef.current = true
     void timelineQuery.fetchPreviousPage().finally(() => {
       olderPageRequestInFlightRef.current = false
     })
   }, [
+    timelineQuery.data?.pages?.length,
     timelineQuery.fetchPreviousPage,
     timelineQuery.hasPreviousPage,
     timelineQuery.isFetchingPreviousPage,
@@ -831,10 +835,8 @@ export function AgentChatPage({
   }, [activeAgentId])
 
   // Auto-trigger older loading when scrolled near top
-  const virtualItems = virtualizer.getVirtualItems()
-  const firstVisibleIndex = virtualItems.length > 0 ? virtualItems[0].index : null
   useEffect(() => {
-    const container = scrollContainerRef.current
+    const container = timelineRef.current
     const nearTopByScroll = container ? container.scrollTop <= TOP_LOAD_THRESHOLD_PX : false
     if (
       !didInitialScrollRef.current
@@ -845,13 +847,10 @@ export function AgentChatPage({
     ) {
       return
     }
-    if (
-      (nearTopByScroll || (firstVisibleIndex !== null && firstVisibleIndex <= 2))
-    ) {
+    if (nearTopByScroll) {
       requestPreviousPage()
     }
   }, [
-    firstVisibleIndex,
     initialLoading,
     isNewAgent,
     requestPreviousPage,
@@ -859,34 +858,36 @@ export function AgentChatPage({
     timelineEvents.length,
   ])
 
-  // Scroll position preservation when loading older pages
-  const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
-  const prevTotalSizeRef = useRef(0)
-  const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
-  // Capture total size before older page arrives
-  useEffect(() => {
-    prevTotalSizeRef.current = virtualizer.getTotalSize()
-    prevPageCountRef.current = timelineQuery.data?.pages?.length ?? 0
-  })
+  // Preserve the viewport when older pages prepend above the current scroll position.
   useLayoutEffect(() => {
     const pageCount = timelineQuery.data?.pages?.length ?? 0
     if (prependTrackingAgentIdRef.current !== activeAgentId) {
       prependTrackingAgentIdRef.current = activeAgentId
+      preservePrependViewportRef.current = false
       prevPageCountRef.current = pageCount
-      prevTotalSizeRef.current = virtualizer.getTotalSize()
+      prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
       return
     }
-    if (pageCount > prevPageCountRef.current && prevPageCountRef.current > 0) {
-      const container = scrollContainerRef.current
+
+    if (preservePrependViewportRef.current && pageCount > prevPageCountRef.current && prevPageCountRef.current > 0) {
+      const container = timelineRef.current
       if (container) {
-        const newTotalSize = virtualizer.getTotalSize()
-        const delta = newTotalSize - prevTotalSizeRef.current
+        const newScrollHeight = container.scrollHeight
+        const delta = newScrollHeight - prevScrollHeightRef.current
         if (delta > 0) {
           container.scrollTop += delta
         }
       }
     }
-  }, [activeAgentId, timelineQuery.data?.pages?.length, virtualizer])
+
+    if (preservePrependViewportRef.current && timelineQuery.isFetchingPreviousPage) {
+      return
+    }
+
+    preservePrependViewportRef.current = false
+    prevPageCountRef.current = pageCount
+    prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
+  }, [activeAgentId, timelineQuery.data?.pages?.length, timelineQuery.isFetchingPreviousPage])
 
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
@@ -1473,7 +1474,7 @@ export function AgentChatPage({
   const pendingScrollFrameRef = useRef<number | null>(null)
 
   // Lightweight auto-follow: just set scrollTop, no overflow toggle.
-  // Used by ResizeObserver callbacks to avoid layout thrashing with the virtualizer.
+  // Used by ResizeObserver callbacks to avoid layout thrashing during rapid layout updates.
   // Does NOT update lastProgrammaticScrollAtRef — that guard is for user-initiated
   // programmatic scrolls (jump-to-latest, send). Auto-follow must not block detection
   // of user scroll-up gestures (especially momentum scrolling after touch end on mobile).
@@ -1636,7 +1637,6 @@ export function AgentChatPage({
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
-    scrollContainerRef.current = node
     setTimelineNode(node)
   }, [])
 
@@ -1649,7 +1649,7 @@ export function AgentChatPage({
       const shouldFollow = shouldAutoFollowTimeline()
       // If pinned, ensure we stay at the bottom when content changes
       // Skip while user is actively touching to prevent scroll fighting on mobile
-      // Uses rAF-coalesced scrollToBottom to avoid feedback loop with virtualizer measurements
+      // Uses rAF-coalesced scrollToBottom to avoid ResizeObserver feedback loops
       if (shouldFollow) {
         executeAutoFollow()
         return
@@ -3143,6 +3143,7 @@ export function AgentChatPage({
         pendingHumanInputRequests={pendingHumanInputRequests}
         events={timelineEvents}
         displayEvents={displayEvents}
+        statusExpansionTargets={statusExpansionTargets}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
@@ -3153,7 +3154,6 @@ export function AgentChatPage({
         processingWebTasks={timelineProcessingWebTasks}
         nextScheduledAt={timelineNextScheduledAt}
         streaming={timelineStreaming}
-        virtualizer={virtualizer}
         onSendMessage={handleSend}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
         onJumpToLatest={handleJumpToLatest}
