@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from allauth.account.models import EmailAddress
 from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
@@ -245,6 +243,25 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             "to_address": self.user.email,
             "subject": "Quick update",
             "mobile_first_html": "<p>The report is ready for review.</p>",
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertTrue(result.get("message_id"))
+
+    def test_execute_send_email_ignores_attachment_claim_in_quoted_thread(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Following up",
+            "mobile_first_html": (
+                "<p>Thanks for the follow-up.</p>"
+                "<blockquote><p>Please find attached the updated report.</p></blockquote>"
+            ),
         }
 
         with patch(

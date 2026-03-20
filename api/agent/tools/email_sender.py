@@ -36,12 +36,17 @@ logger = logging.getLogger(__name__)
 
 
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+_QUOTED_THREAD_PATTERN = re.compile(r"<blockquote\b[^>]*>.*?</blockquote>", re.IGNORECASE | re.DOTALL)
 _ATTACHMENT_CLAIM_PATTERNS = (
     re.compile(r"\bplease\s+find\s+attached\b", re.IGNORECASE),
     re.compile(r"\bsee\s+attached\b", re.IGNORECASE),
     re.compile(r"\b(?:i(?:'|’)ve|i\s+have)\s+attached\b", re.IGNORECASE),
     re.compile(r"\battached\s+(?:you(?:'|’)ll|you\s+will)\s+find\b", re.IGNORECASE),
     re.compile(r"\battached\s+(?:is|are)\b", re.IGNORECASE),
+)
+_MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE = (
+    "Email body claims attachments are included, but send_email.attachments is empty. "
+    "Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
 )
 
 
@@ -94,21 +99,20 @@ def _strip_html_to_text(html: str) -> str:
     return re.sub(r"\s+", " ", _HTML_TAG_PATTERN.sub(" ", html)).strip()
 
 
+def _strip_quoted_thread_html(html: str) -> str:
+    """Ignore quoted thread content so only newly authored attachment claims are enforced."""
+    if not html:
+        return ""
+    return _QUOTED_THREAD_PATTERN.sub(" ", html)
+
+
 def _email_claims_attachments(html: str) -> bool:
     """Return True when the email body explicitly claims attachments are included."""
-    plain_text = _strip_html_to_text(html)
+    plain_text = _strip_html_to_text(_strip_quoted_thread_html(html))
     if not plain_text:
         return False
     return any(pattern.search(plain_text) for pattern in _ATTACHMENT_CLAIM_PATTERNS)
 
-
-def _build_missing_attachment_claim_error() -> str:
-    """Return an actionable error when an email claims attachments without providing them."""
-    message = (
-        "Email body claims attachments are included, but send_email.attachments is empty. "
-        "Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
-    )
-    return message
 
 def get_send_email_tool() -> Dict[str, Any]:
     """Return the send_email tool definition for the LLM."""
@@ -172,7 +176,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
 
     if _email_claims_attachments(mobile_first_html) and not attachment_paths:
-        return {"status": "error", "message": _build_missing_attachment_claim_error()}
+        return {"status": "error", "message": _MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE}
 
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
