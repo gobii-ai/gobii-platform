@@ -22,7 +22,7 @@ from ...services.sandbox_compute import (
 )
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
-from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
+from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
 from .read_file import get_read_file_tool, execute_read_file
@@ -145,10 +145,12 @@ BUILTIN_TOOL_REGISTRY = {
     HTTP_REQUEST_TOOL_NAME: {
         "definition": get_http_request_tool,
         "executor": execute_http_request,
+        "parallel_safe": True,
     },
     READ_FILE_TOOL_NAME: {
         "definition": get_read_file_tool,
         "executor": execute_read_file,
+        "parallel_safe": True,
     },
     CREATE_FILE_TOOL_NAME: {
         "definition": get_create_file_tool,
@@ -158,17 +160,20 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_CSV_TOOL_NAME: {
         "definition": get_create_csv_tool,
         "executor": execute_create_csv,
+        "parallel_safe": True,
     },
     CREATE_PDF_TOOL_NAME: {
         "definition": get_create_pdf_tool,
         "executor": execute_create_pdf,
         "skip_auto_substitution": True,  # PDF does its own substitution (data URIs for embedded assets)
         "sandboxed": False,
+        "parallel_safe": True,
     },
     CREATE_CHART_TOOL_NAME: {
         "definition": get_create_chart_tool,
         "executor": execute_create_chart,
         "sandboxed": False,
+        "parallel_safe": True,
     },
     CREATE_IMAGE_TOOL_NAME: {
         "definition": get_create_image_tool,
@@ -1004,7 +1009,13 @@ def auto_enable_heuristic_tools(
     return enabled
 
 
-def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def execute_enabled_tool(
+    agent: PersistentAgent,
+    tool_name: str,
+    params: Dict[str, Any],
+    *,
+    isolated_mcp: bool = False,
+) -> Dict[str, Any]:
     """Execute an enabled tool, routing to the appropriate provider."""
     entry = resolve_tool_entry(agent, tool_name)
     if not entry:
@@ -1038,6 +1049,8 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
             }
 
     if entry.provider == "mcp":
+        if isolated_mcp and resolved_name.startswith("mcp_brightdata_"):
+            return execute_mcp_tool_isolated(agent, resolved_name, params)
         return execute_mcp_tool(agent, resolved_name, params)
 
     if entry.provider == "builtin":
@@ -1090,3 +1103,26 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
             return executor(agent, params)
 
     return {"status": "error", "message": f"Tool '{resolved_name}' has no execution handler"}
+
+
+def is_parallel_safe_tool_name(tool_name: str) -> bool:
+    """Return whether the tool name is on the explicit parallel-safe allowlist."""
+    if isinstance(tool_name, str) and tool_name.startswith("mcp_brightdata_"):
+        return True
+    entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+    return bool(entry and entry.get("parallel_safe"))
+
+
+def get_parallel_safe_tool_rejection_reason(tool_name: str, params: Dict[str, Any]) -> Optional[str]:
+    """Return the rejection reason when a tool call is not parallel-safe."""
+    if not is_parallel_safe_tool_name(tool_name):
+        return f"unsafe_tool:{tool_name}"
+    if tool_name == HTTP_REQUEST_TOOL_NAME:
+        method = str((params or {}).get("method") or "GET").strip().upper()
+        if method != "GET":
+            return "http_request_requires_get"
+        download = (params or {}).get("download")
+        if download in (True, "true", "True", 1):
+            return "http_request_download_not_supported"
+    return None
+

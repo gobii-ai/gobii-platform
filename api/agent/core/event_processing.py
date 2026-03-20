@@ -10,7 +10,10 @@ from __future__ import annotations
 import json
 import os
 import logging
+import re
 import time
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
@@ -122,11 +125,23 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
-from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, should_skip_auto_substitution
+from ..tools.tool_manager import (
+    execute_enabled_tool,
+    auto_enable_heuristic_tools,
+    get_parallel_safe_tool_rejection_reason,
+    should_skip_auto_substitution,
+)
 from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact_channel
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
-from ..tools.agent_variables import clear_variables, substitute_variables
+from ..tools.agent_variables import (
+    clear_variables,
+    get_all_variables,
+    replace_all_variables,
+    substitute_variables,
+)
+from ..tools.file_export_helpers import resolve_export_target
+from ..files.filespace_service import _normalize_write_path
 from ..comms.human_input_requests import attach_originating_step_from_result
 from ...models import (
     PersistentAgent,
@@ -172,6 +187,7 @@ MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation sig
 MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS = 60
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
+MAX_PARALLEL_SAFE_TOOL_WORKERS = 4
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
@@ -494,6 +510,11 @@ STOP_HINT_PHRASES = (
     "standing by",
     "whenever you're ready",
 )
+PARALLEL_SAFE_PLACEHOLDER_RE = re.compile(r"\$\[([^\]]+)\]")
+PARALLEL_SAFE_OUTPUT_EXTENSIONS = {
+    "create_csv": ".csv",
+    "create_pdf": ".pdf",
+}
 
 
 def _has_completion_signal(text: str) -> bool:
@@ -1179,6 +1200,663 @@ def _substitute_variables_in_params(params: Any) -> Any:
     if isinstance(params, list):
         return [_substitute_variables_in_params(item) for item in params]
     return params
+
+
+@dataclass
+class _PreparedToolExecution:
+    idx: int
+    tool_name: str
+    tool_params: Dict[str, Any]
+    exec_params: Dict[str, Any]
+    pending_step: Optional["PersistentAgentStep"]
+    credits_consumed: Any
+    consumed_credit: Any
+    call_id: Optional[str]
+    explicit_continue: Optional[bool]
+    inferred_continue: bool
+    parallel_safe: bool
+    parallel_ineligible_reason: Optional[str]
+
+
+@dataclass
+class _ToolExecutionOutcome:
+    prepared: _PreparedToolExecution
+    result: Any
+    duration_ms: int
+    updated_tools: Optional[List[dict]]
+    variable_map: Dict[str, str]
+
+
+@dataclass
+class _PreparedToolBatch:
+    prepared_calls: list[_PreparedToolExecution]
+    followup_required: bool
+    all_calls_sleep: bool
+    abort_after_execution: bool
+    parallel_ineligible_reason: Optional[str]
+
+
+@dataclass
+class _ExecutedToolBatch:
+    execution_outcomes: list[_ToolExecutionOutcome]
+    tools: List[dict]
+
+
+@dataclass
+class _FinalizedToolBatch:
+    executed_calls: int
+    followup_required: bool
+    message_delivery_ok: bool
+    last_explicit_continue: Optional[bool]
+    inferred_message_continue_this_iteration: bool
+    executed_non_message_action: bool
+
+
+def _normalize_parallel_placeholder_path(raw: str) -> Optional[str]:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if value.startswith("$[") and value.endswith("]"):
+        value = value[2:-1].strip()
+    if not value:
+        return None
+    if value.startswith("/"):
+        return value
+    if "/" in value:
+        return f"/{value}"
+    return None
+
+
+def _collect_parallel_placeholder_paths(value: Any) -> set[str]:
+    paths: set[str] = set()
+    if isinstance(value, str):
+        for match in PARALLEL_SAFE_PLACEHOLDER_RE.findall(value):
+            normalized = _normalize_parallel_placeholder_path(match)
+            if normalized:
+                paths.add(normalized)
+        return paths
+    if isinstance(value, dict):
+        for item in value.values():
+            paths.update(_collect_parallel_placeholder_paths(item))
+        return paths
+    if isinstance(value, list):
+        for item in value:
+            paths.update(_collect_parallel_placeholder_paths(item))
+    return paths
+
+
+def _normalized_parallel_output_path(tool_name: str, tool_params: Dict[str, Any]) -> Optional[str]:
+    extension = PARALLEL_SAFE_OUTPUT_EXTENSIONS.get(tool_name)
+    if not extension:
+        return None
+    file_path, _overwrite, error = resolve_export_target(tool_params)
+    if error or not file_path:
+        return None
+    normalized = _normalize_write_path(file_path, extension)
+    if not normalized:
+        return None
+    return normalized[3]
+
+
+def _parallel_batch_ineligible_reason(
+    prepared_calls: list[_PreparedToolExecution],
+) -> Optional[str]:
+    if len(prepared_calls) <= 1:
+        return "batch_too_small"
+
+    produced_paths: set[str] = set()
+    for prepared in prepared_calls:
+        if not prepared.parallel_safe:
+            return prepared.parallel_ineligible_reason or f"unsafe_tool:{prepared.tool_name}"
+        referenced_paths = _collect_parallel_placeholder_paths(prepared.tool_params)
+        if produced_paths.intersection(referenced_paths):
+            return f"same_batch_dependency:{prepared.tool_name}"
+        output_path = _normalized_parallel_output_path(prepared.tool_name, prepared.tool_params)
+        if output_path:
+            if output_path in produced_paths:
+                return f"duplicate_output:{output_path}"
+            produced_paths.add(output_path)
+
+    return None
+
+
+def _execute_tool_call_runtime(
+    agent: PersistentAgent,
+    *,
+    tool_name: str,
+    exec_params: Dict[str, Any],
+    budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
+    parallel_safe: bool = False,
+) -> tuple[Any, Optional[List[dict]]]:
+    updated_tools: Optional[List[dict]] = None
+    mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
+    mock_result = mock_config.get(tool_name) if mock_config else None
+    if mock_result is not None:
+        logger.info(
+            "Agent %s: using mock for %s (eval_run_id=%s)",
+            agent.id,
+            tool_name,
+            eval_run_id,
+        )
+        return mock_result, updated_tools
+    if parallel_safe:
+        return execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True), updated_tools
+    if tool_name == "spawn_web_task":
+        return execute_spawn_web_task(agent, exec_params), updated_tools
+    if tool_name == "send_email":
+        return execute_send_email(agent, exec_params), updated_tools
+    if tool_name == "send_sms":
+        return execute_send_sms(agent, exec_params), updated_tools
+    if tool_name == "send_chat_message":
+        return execute_send_chat_message(agent, exec_params), updated_tools
+    if tool_name == "send_agent_message":
+        return execute_send_agent_message(agent, exec_params), updated_tools
+    if tool_name == "send_webhook_event":
+        return execute_send_webhook_event(agent, exec_params), updated_tools
+    if tool_name == "update_schedule":
+        return execute_update_schedule(agent, exec_params), updated_tools
+    if tool_name == "update_charter":
+        return execute_update_charter(agent, exec_params), updated_tools
+    if tool_name == "secure_credentials_request":
+        return execute_secure_credentials_request(agent, exec_params), updated_tools
+    if tool_name == "enable_database":
+        result = execute_enable_database(agent, exec_params)
+        updated_tools = get_agent_tools(agent)
+        return result, updated_tools
+    if tool_name == "request_contact_permission":
+        return execute_request_contact_permission(agent, exec_params), updated_tools
+    if tool_name == "request_human_input":
+        return execute_request_human_input(agent, exec_params), updated_tools
+    if tool_name == "spawn_agent":
+        return execute_spawn_agent(agent, exec_params), updated_tools
+    if tool_name == "search_tools":
+        result = execute_search_tools(agent, exec_params)
+        updated_tools = get_agent_tools(agent)
+        return result, updated_tools
+    return execute_enabled_tool(agent, tool_name, exec_params), updated_tools
+
+
+def _execute_prepared_tool_call(
+    agent: PersistentAgent,
+    prepared: _PreparedToolExecution,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
+    parallel_safe: bool = False,
+) -> _ToolExecutionOutcome:
+    close_old_connections()
+    tool_started_at = time.monotonic()
+    try:
+        result, updated_tools = _execute_tool_call_runtime(
+            agent,
+            tool_name=prepared.tool_name,
+            exec_params=prepared.exec_params,
+            budget_ctx=budget_ctx,
+            eval_run_id=eval_run_id,
+            parallel_safe=parallel_safe,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Agent %s: tool %s failed (call_id=%s)",
+            agent.id,
+            prepared.tool_name,
+            prepared.call_id or "<none>",
+        )
+        result = _build_safe_error_payload(
+            f"Tool execution failed: {exc}",
+            error_type=type(exc).__name__,
+            retryable=_infer_retryable_from_text(str(exc)),
+        )
+        updated_tools = None
+    duration_ms = int(round((time.monotonic() - tool_started_at) * 1000))
+    return _ToolExecutionOutcome(
+        prepared=prepared,
+        result=result,
+        duration_ms=duration_ms,
+        updated_tools=updated_tools,
+        variable_map=get_all_variables(),
+    )
+
+
+def _prepare_tool_batch(
+    agent: PersistentAgent,
+    *,
+    tool_calls: list[Any],
+    budget_ctx: Optional[BudgetContext],
+    heartbeat: Any,
+    lock_extender: Any,
+    credit_snapshot: Any,
+    allow_inferred_message_continue: bool,
+    has_non_sleep_calls: bool,
+    has_user_facing_message: bool,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> _PreparedToolBatch:
+    prepared_calls: list[_PreparedToolExecution] = []
+    followup_required = False
+    all_calls_sleep = not has_non_sleep_calls
+    abort_after_execution = False
+
+    for idx, call in enumerate(tool_calls, start=1):
+        with tracer.start_as_current_span("Prepare Tool") as tool_span:
+            if _should_abort_for_inactive_or_deleted_agent(
+                agent,
+                budget_ctx=budget_ctx,
+                heartbeat=heartbeat,
+                span=tool_span,
+                check_context="tool_batch",
+            ):
+                abort_after_execution = True
+                break
+            if lock_extender:
+                lock_extender.maybe_extend()
+            tool_span.set_attribute("persistent_agent.id", str(agent.id))
+            tool_name = _get_tool_call_name(call)
+            if not tool_name:
+                logger.warning(
+                    "Agent %s: received tool call without a function name; skipping and requesting resend.",
+                    agent.id,
+                )
+                try:
+                    step_kwargs = {
+                        "agent": agent,
+                        "description": (
+                            "Tool call error: missing function name. "
+                            "Re-send the SAME tool call with a valid 'name' and JSON arguments."
+                        ),
+                    }
+                    attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    attach_prompt_archive(step)
+                    logger.info(
+                        "Agent %s: added correction step_id=%s for missing tool name",
+                        agent.id,
+                        getattr(step, "id", None),
+                    )
+                except Exception:
+                    logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
+                followup_required = True
+                break
+            if heartbeat:
+                heartbeat.touch("tool_call")
+            tool_span.set_attribute("tool.name", tool_name)
+            logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
+
+            if tool_name == "sleep_until_next_trigger":
+                if has_non_sleep_calls:
+                    logger.info(
+                        "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
+                        agent.id,
+                    )
+                    continue
+                credit_info = _ensure_credit_for_tool(
+                    agent,
+                    tool_name,
+                    span=tool_span,
+                    credit_snapshot=credit_snapshot,
+                )
+                if not credit_info:
+                    abort_after_execution = True
+                    break
+                credits_consumed = credit_info.get("cost")
+                consumed_credit = credit_info.get("credit")
+                step_kwargs = {
+                    "agent": agent,
+                    "description": "Decided to sleep until next trigger.",
+                    "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                    "task_credit": consumed_credit,
+                }
+                attach_completion(step_kwargs)
+                step = PersistentAgentStep.objects.create(**step_kwargs)
+                attach_prompt_archive(step)
+                logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
+                continue
+
+            all_calls_sleep = False
+            try:
+                raw_args = _get_tool_call_arguments(call)
+                if isinstance(raw_args, dict):
+                    tool_params = raw_args
+                    raw_args = json.dumps(raw_args)
+                else:
+                    raw_args = raw_args or ""
+                    tool_params = json.loads(raw_args)
+                tool_params = _normalize_tool_params_unicode_escapes(tool_params)
+            except Exception:
+                preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
+                logger.warning(
+                    "Agent %s: invalid JSON for tool %s; prompting model to resend valid arguments (preview=%s%s)",
+                    agent.id,
+                    tool_name,
+                    preview,
+                    "…" if raw_args and len(raw_args) > len(preview) else "",
+                )
+                try:
+                    step_text = (
+                        f"Tool call error: arguments for {tool_name} were not valid JSON. "
+                        "Re-send the SAME tool call immediately with valid JSON only. "
+                        "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
+                    )
+                    step_kwargs = {"agent": agent, "description": step_text}
+                    attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    attach_prompt_archive(step)
+                    logger.info(
+                        "Agent %s: added correction step_id=%s to request a retried tool call",
+                        agent.id,
+                        getattr(step, "id", None),
+                    )
+                except Exception:
+                    logger.debug("Failed to persist correction step", exc_info=True)
+                followup_required = True
+                break
+
+            parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
+
+            if not _enforce_tool_rate_limit(
+                agent,
+                tool_name,
+                span=tool_span,
+                attach_completion=attach_completion,
+                attach_prompt_archive=attach_prompt_archive,
+            ):
+                followup_required = True
+                continue
+
+            credit_info = _ensure_credit_for_tool(
+                agent,
+                tool_name,
+                span=tool_span,
+                credit_snapshot=credit_snapshot,
+            )
+            if not credit_info:
+                abort_after_execution = True
+                break
+            credits_consumed = credit_info.get("cost")
+            consumed_credit = credit_info.get("credit")
+
+            call_id = getattr(call, "id", None)
+            if not call_id and isinstance(call, dict):
+                call_id = call.get("id")
+            explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+            inferred_continue = False
+            if tool_name in MESSAGE_TOOL_NAMES:
+                body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+                if body_key and isinstance(tool_params.get(body_key), str):
+                    cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
+                        tool_params[body_key]
+                    )
+                    if found_phrase:
+                        tool_params[body_key] = cleaned_body
+                        tool_params["will_continue_work"] = True
+                    elif (
+                        explicit_continue is None
+                        and allow_inferred_message_continue
+                        and _should_infer_message_tool_continuation(cleaned_body)
+                    ):
+                        tool_params["will_continue_work"] = True
+                        inferred_continue = True
+                        logger.info(
+                            "Agent %s: inferred will_continue_work=true for %s based on progress-update language.",
+                            agent.id,
+                            tool_name,
+                        )
+                    elif (
+                        explicit_continue is None
+                        and not allow_inferred_message_continue
+                        and _should_infer_message_tool_continuation(cleaned_body)
+                    ):
+                        logger.info(
+                            "Agent %s: suppressing inferred continuation for %s to avoid progress-message loops without work tools.",
+                            agent.id,
+                            tool_name,
+                        )
+                explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+
+            tool_span.set_attribute("tool.params", json.dumps(tool_params))
+            logger.info(
+                "Agent %s: %s params=%s",
+                agent.id,
+                tool_name,
+                json.dumps(tool_params)[:ARG_LOG_MAX_CHARS],
+            )
+
+            if should_skip_auto_substitution(tool_name):
+                exec_params = tool_params
+            else:
+                exec_params = _substitute_variables_in_params(tool_params)
+            if tool_name == "sqlite_batch":
+                exec_params = dict(exec_params)
+                exec_params["_has_user_facing_message"] = has_user_facing_message
+
+            close_old_connections()
+            pending_step = _create_pending_tool_call_step(
+                agent=agent,
+                tool_name=tool_name,
+                tool_params=tool_params,
+                credits_consumed=credits_consumed,
+                consumed_credit=consumed_credit,
+                attach_completion=attach_completion,
+                attach_prompt_archive=attach_prompt_archive,
+            )
+
+            prepared_calls.append(
+                _PreparedToolExecution(
+                    idx=idx,
+                    tool_name=tool_name,
+                    tool_params=tool_params,
+                    exec_params=exec_params,
+                    pending_step=pending_step,
+                    credits_consumed=credits_consumed,
+                    consumed_credit=consumed_credit,
+                    call_id=call_id,
+                    explicit_continue=explicit_continue,
+                    inferred_continue=inferred_continue,
+                    parallel_safe=parallel_ineligible_reason is None,
+                    parallel_ineligible_reason=parallel_ineligible_reason,
+                )
+            )
+
+    return _PreparedToolBatch(
+        prepared_calls=prepared_calls,
+        followup_required=followup_required,
+        all_calls_sleep=all_calls_sleep,
+        abort_after_execution=abort_after_execution,
+        parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
+    )
+
+
+def _execute_prepared_tool_batch(
+    agent: PersistentAgent,
+    prepared_batch: _PreparedToolBatch,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
+    tools: List[dict],
+    lock_extender: Any,
+) -> _ExecutedToolBatch:
+    execution_outcomes: list[_ToolExecutionOutcome] = []
+    run_parallel_batch = prepared_batch.parallel_ineligible_reason is None
+    available_tools = tools
+
+    if run_parallel_batch:
+        logger.info(
+            "Agent %s: executing %d safe tool calls in parallel.",
+            agent.id,
+            len(prepared_batch.prepared_calls),
+        )
+        base_variables = get_all_variables()
+        max_workers = min(len(prepared_batch.prepared_calls), MAX_PARALLEL_SAFE_TOOL_WORKERS)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for prepared in prepared_batch.prepared_calls:
+                context = copy_context()
+                futures.append(
+                    executor.submit(
+                        context.run,
+                        _execute_prepared_tool_call,
+                        agent,
+                        prepared,
+                        budget_ctx=budget_ctx,
+                        eval_run_id=eval_run_id,
+                        parallel_safe=True,
+                    )
+                )
+            execution_outcomes = [future.result() for future in futures]
+
+        merged_variables = dict(base_variables)
+        for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
+            merged_variables.update(outcome.variable_map)
+        replace_all_variables(merged_variables)
+    else:
+        if prepared_batch.prepared_calls and prepared_batch.parallel_ineligible_reason:
+            logger.info(
+                "Agent %s: falling back to serial tool execution (%s).",
+                agent.id,
+                prepared_batch.parallel_ineligible_reason,
+            )
+        for prepared in prepared_batch.prepared_calls:
+            with tracer.start_as_current_span("Execute Tool") as tool_span:
+                if lock_extender:
+                    lock_extender.maybe_extend()
+                tool_span.set_attribute("persistent_agent.id", str(agent.id))
+                tool_span.set_attribute("tool.name", prepared.tool_name)
+                outcome = _execute_prepared_tool_call(
+                    agent,
+                    prepared,
+                    budget_ctx=budget_ctx,
+                    eval_run_id=eval_run_id,
+                    parallel_safe=False,
+                )
+                execution_outcomes.append(outcome)
+                if outcome.updated_tools is not None:
+                    before_count = len(available_tools)
+                    available_tools = outcome.updated_tools
+                    after_count = len(available_tools)
+                    logger.info(
+                        "Agent %s: refreshed tools after %s (before=%d after=%d)",
+                        agent.id,
+                        prepared.tool_name,
+                        before_count,
+                        after_count,
+                    )
+
+    return _ExecutedToolBatch(execution_outcomes=execution_outcomes, tools=available_tools)
+
+
+def _finalize_tool_batch(
+    agent: PersistentAgent,
+    execution_outcomes: list[_ToolExecutionOutcome],
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> _FinalizedToolBatch:
+    executed_calls = 0
+    followup_required = False
+    message_delivery_ok = False
+    last_explicit_continue: Optional[bool] = None
+    inferred_message_continue_this_iteration = False
+    executed_non_message_action = False
+
+    for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
+        prepared = outcome.prepared
+        result = outcome.result
+        tool_name = prepared.tool_name
+        if _is_error_status(result):
+            result = _normalize_error_result(result)
+
+        try:
+            result_content = json.dumps(result)
+        except (TypeError, ValueError):
+            try:
+                result_content = json.dumps(result, default=str)
+            except Exception as exc:
+                logger.exception(
+                    "Agent %s: failed to serialize tool result for %s (call_id=%s)",
+                    agent.id,
+                    tool_name,
+                    prepared.call_id or "<none>",
+                )
+                result = _build_safe_error_payload(
+                    "Tool result serialization failed.",
+                    error_type=type(exc).__name__,
+                    retryable=False,
+                )
+                result_content = json.dumps(result)
+
+        try:
+            status = result.get("status") if isinstance(result, dict) else None
+        except Exception:
+            status = None
+        result_preview = result_content[:RESULT_LOG_MAX_CHARS]
+        logger.info(
+            "Agent %s: %s completed status=%s result=%s%s",
+            agent.id,
+            tool_name,
+            status or "",
+            result_preview,
+            "…" if len(result_content) > len(result_preview) else "",
+        )
+        if tool_name in MESSAGE_TOOL_NAMES:
+            status_label = str(status or "").lower()
+            if status_label in MESSAGE_SUCCESS_STATUSES:
+                message_delivery_ok = True
+
+        is_error_status = _is_error_status(result)
+        tool_status = "error" if is_error_status else "complete"
+
+        close_old_connections()
+        if prepared.pending_step is not None:
+            _finalize_pending_tool_call_step(
+                step=prepared.pending_step,
+                tool_name=tool_name,
+                tool_params=prepared.tool_params,
+                result_content=result_content,
+                execution_duration_ms=outcome.duration_ms,
+                status=tool_status,
+            )
+            step = prepared.pending_step
+        else:
+            step = _persist_tool_call_step(
+                agent=agent,
+                tool_name=tool_name,
+                tool_params=prepared.tool_params,
+                result_content=result_content,
+                execution_duration_ms=outcome.duration_ms,
+                status=tool_status,
+                credits_consumed=prepared.credits_consumed,
+                consumed_credit=prepared.consumed_credit,
+                attach_completion=attach_completion,
+                attach_prompt_archive=attach_prompt_archive,
+            )
+        if tool_name == "request_human_input" and isinstance(result, dict):
+            attach_originating_step_from_result(step, result)
+
+        allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
+        tool_had_warning = _is_warning_status(result)
+        if prepared.explicit_continue is not None:
+            last_explicit_continue = prepared.explicit_continue
+        if prepared.explicit_continue is True and prepared.inferred_continue:
+            inferred_message_continue_this_iteration = True
+
+        if is_error_status or tool_had_warning:
+            followup_required = True
+        elif prepared.explicit_continue is None and not allow_auto_sleep:
+            followup_required = True
+
+        executed_calls += 1
+        if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
+            executed_non_message_action = True
+
+    return _FinalizedToolBatch(
+        executed_calls=executed_calls,
+        followup_required=followup_required,
+        message_delivery_ok=message_delivery_ok,
+        last_explicit_continue=last_explicit_continue,
+        inferred_message_continue_this_iteration=inferred_message_continue_this_iteration,
+        executed_non_message_action=executed_non_message_action,
+    )
 
 
 def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
@@ -3863,7 +4541,6 @@ def _run_agent_loop(
                 followup_required = False
                 last_explicit_continue: Optional[bool] = None  # Final explicit will_continue_work in batch
                 allow_inferred_message_continue = inferred_message_continue_streak == 0
-                inferred_continue_call_tokens: set[str] = set()
                 inferred_message_continue_this_iteration = False
                 executed_non_message_action = False
                 try:
@@ -3880,392 +4557,49 @@ def _run_agent_loop(
                     has_non_sleep_calls = True
                     actionable_calls_total = len(tool_calls or []) if tool_calls else 0
                     has_user_facing_message = False
-                message_delivery_ok = False
-                all_calls_sleep = not has_non_sleep_calls
+                prepared_batch = _prepare_tool_batch(
+                    agent,
+                    tool_calls=list(tool_calls or []),
+                    budget_ctx=budget_ctx,
+                    heartbeat=heartbeat,
+                    lock_extender=lock_extender,
+                    credit_snapshot=credit_snapshot,
+                    allow_inferred_message_continue=allow_inferred_message_continue,
+                    has_non_sleep_calls=has_non_sleep_calls,
+                    has_user_facing_message=has_user_facing_message,
+                    attach_completion=_attach_completion,
+                    attach_prompt_archive=_attach_prompt_archive,
+                )
+                followup_required = prepared_batch.followup_required
+                all_calls_sleep = prepared_batch.all_calls_sleep
 
-                for idx, call in enumerate(tool_calls, start=1):
-                    with tracer.start_as_current_span("Execute Tool") as tool_span:
-                        if _should_abort_for_inactive_or_deleted_agent(
-                            agent,
-                            budget_ctx=budget_ctx,
-                            heartbeat=heartbeat,
-                            span=tool_span,
-                            check_context="tool_batch",
-                        ):
-                            return cumulative_token_usage
-                        if lock_extender:
-                            lock_extender.maybe_extend()
-                        tool_span.set_attribute("persistent_agent.id", str(agent.id))
-                        tool_name = _get_tool_call_name(call)
-                        if not tool_name:
-                            logger.warning(
-                                "Agent %s: received tool call without a function name; skipping and requesting resend.",
-                                agent.id,
-                            )
-                            try:
-                                step_kwargs = {
-                                    "agent": agent,
-                                    "description": (
-                                        "Tool call error: missing function name. "
-                                        "Re-send the SAME tool call with a valid 'name' and JSON arguments."
-                                    ),
-                                }
-                                _attach_completion(step_kwargs)
-                                step = PersistentAgentStep.objects.create(**step_kwargs)
-                                _attach_prompt_archive(step)
-                                logger.info(
-                                    "Agent %s: added correction step_id=%s for missing tool name",
-                                    agent.id,
-                                    getattr(step, "id", None),
-                                )
-                            except Exception:
-                                logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
-                            followup_required = True
-                            break
-                        if heartbeat:
-                            heartbeat.touch("tool_call")
-                        tool_span.set_attribute("tool.name", tool_name)
-                        logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
+                executed_batch = _execute_prepared_tool_batch(
+                    agent,
+                    prepared_batch,
+                    budget_ctx=budget_ctx,
+                    eval_run_id=eval_run_id,
+                    tools=tools,
+                    lock_extender=lock_extender,
+                )
+                tools = executed_batch.tools
 
-                        if tool_name == "sleep_until_next_trigger":
-                            # Ignore sleep tool if there are other actionable tools in this batch
-                            if has_non_sleep_calls:
-                                logger.info(
-                                    "Agent %s: ignoring sleep_until_next_trigger because other tools are present in this batch.",
-                                    agent.id,
-                                )
-                                # Do not consume credits or record a step for ignored sleep
-                                continue
-                            # All tool calls are sleep; consume credits once per call and record step
-                            credit_info = _ensure_credit_for_tool(
-                                agent,
-                                tool_name,
-                                span=tool_span,
-                                credit_snapshot=credit_snapshot,
-                            )
-                            if not credit_info:
-                                return cumulative_token_usage
-                            credits_consumed = credit_info.get("cost")
-                            consumed_credit = credit_info.get("credit")
-                            # Create sleep step with token usage if available
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": "Decided to sleep until next trigger.",
-                                "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                                "task_credit": consumed_credit,
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                            logger.info("Agent %s: sleep_until_next_trigger recorded (will sleep after batch)", agent.id)
-                            continue
+                finalized_batch = _finalize_tool_batch(
+                    agent,
+                    executed_batch.execution_outcomes,
+                    attach_completion=_attach_completion,
+                    attach_prompt_archive=_attach_prompt_archive,
+                )
+                executed_calls = finalized_batch.executed_calls
+                followup_required = followup_required or finalized_batch.followup_required
+                message_delivery_ok = finalized_batch.message_delivery_ok
+                last_explicit_continue = finalized_batch.last_explicit_continue
+                inferred_message_continue_this_iteration = (
+                    finalized_batch.inferred_message_continue_this_iteration
+                )
+                executed_non_message_action = finalized_batch.executed_non_message_action
 
-                        all_calls_sleep = False
-                        if not _enforce_tool_rate_limit(
-                            agent,
-                            tool_name,
-                            span=tool_span,
-                            attach_completion=_attach_completion,
-                            attach_prompt_archive=_attach_prompt_archive,
-                        ):
-                            followup_required = True
-                            continue
-
-                        # Ensure credit is available and consume just-in-time for actionable tools
-                        credit_info = _ensure_credit_for_tool(
-                            agent,
-                            tool_name,
-                            span=tool_span,
-                            credit_snapshot=credit_snapshot,
-                        )
-                        if not credit_info:
-                            # Credit insufficient or consumption failed; halt processing
-                            return cumulative_token_usage
-                        credits_consumed = credit_info.get("cost")
-                        consumed_credit = credit_info.get("credit")
-                        try:
-                            raw_args = _get_tool_call_arguments(call)
-                            if isinstance(raw_args, dict):
-                                tool_params = raw_args
-                                raw_args = json.dumps(raw_args)
-                            else:
-                                raw_args = raw_args or ""
-                                tool_params = json.loads(raw_args)
-                            tool_params = _normalize_tool_params_unicode_escapes(tool_params)
-                        except Exception:
-                            # Simple recovery: record a correction instruction and retry next iteration.
-                            preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
-                            logger.warning(
-                                "Agent %s: invalid JSON for tool %s; prompting model to resend valid arguments (preview=%s%s)",
-                                agent.id,
-                                tool_name,
-                                preview,
-                                "…" if raw_args and len(raw_args) > len(preview) else "",
-                            )
-                            try:
-                                step_text = (
-                                    f"Tool call error: arguments for {tool_name} were not valid JSON. "
-                                    "Re-send the SAME tool call immediately with valid JSON only. "
-                                    "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
-                                )
-                                step_kwargs = {
-                                    "agent": agent,
-                                    "description": step_text,
-                                    "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                                    "task_credit": consumed_credit,
-                                }
-                                _attach_completion(step_kwargs)
-                                step = PersistentAgentStep.objects.create(**step_kwargs)
-                                _attach_prompt_archive(step)
-                                logger.info(
-                                    "Agent %s: added correction step_id=%s to request a retried tool call",
-                                    agent.id,
-                                    getattr(step, 'id', None),
-                                )
-                            except Exception:
-                                logger.debug("Failed to persist correction step", exc_info=True)
-                            # Abort remaining tool calls this iteration; retry next loop
-                            followup_required = True
-                            break
-                        call_id = getattr(call, "id", None)
-                        if not call_id and isinstance(call, dict):
-                            call_id = call.get("id")
-                        call_token = str(call_id or f"idx-{idx}")
-                        if tool_name in MESSAGE_TOOL_NAMES:
-                            body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
-                            explicit_continue_hint = _coerce_optional_bool(tool_params.get("will_continue_work"))
-                            if body_key and isinstance(tool_params.get(body_key), str):
-                                cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
-                                    tool_params[body_key]
-                                )
-                                if found_phrase:
-                                    tool_params[body_key] = cleaned_body
-                                    tool_params["will_continue_work"] = True
-                                elif (
-                                    explicit_continue_hint is None
-                                    and allow_inferred_message_continue
-                                    and _should_infer_message_tool_continuation(cleaned_body)
-                                ):
-                                    tool_params["will_continue_work"] = True
-                                    inferred_continue_call_tokens.add(call_token)
-                                    logger.info(
-                                        "Agent %s: inferred will_continue_work=true for %s based on progress-update language.",
-                                        agent.id,
-                                        tool_name,
-                                    )
-                                elif (
-                                    explicit_continue_hint is None
-                                    and not allow_inferred_message_continue
-                                    and _should_infer_message_tool_continuation(cleaned_body)
-                                ):
-                                    logger.info(
-                                        "Agent %s: suppressing inferred continuation for %s to avoid progress-message loops without work tools.",
-                                        agent.id,
-                                        tool_name,
-                                    )
-                            # Explicit message tools still default to STOP when the flag is omitted.
-                            # We only auto-continue on strong progress-update language.
-                        tool_span.set_attribute("tool.params", json.dumps(tool_params))
-                        logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
-
-                        # Substitute $[var] placeholders in tool parameters (unless tool opts out)
-                        if should_skip_auto_substitution(tool_name):
-                            exec_params = tool_params  # Tool handles substitution itself
-                        else:
-                            exec_params = _substitute_variables_in_params(tool_params)
-                        if tool_name == "sqlite_batch":
-                            exec_params = dict(exec_params)  # copy already-substituted params
-                            exec_params["_has_user_facing_message"] = has_user_facing_message
-
-                        # Ensure a fresh DB connection before tool execution and subsequent ORM writes
-                        close_old_connections()
-
-                        pending_step = _create_pending_tool_call_step(
-                            agent=agent,
-                            tool_name=tool_name,
-                            tool_params=tool_params,
-                            credits_consumed=credits_consumed,
-                            consumed_credit=consumed_credit,
-                            attach_completion=_attach_completion,
-                            attach_prompt_archive=_attach_prompt_archive,
-                        )
-
-                        logger.info("Agent %s: executing %s now", agent.id, tool_name)
-
-                        tool_started_at = time.monotonic()
-                        tool_duration_ms: Optional[int] = None
-                        try:
-                            # Check for eval mock before real execution (mock_config passed via BudgetContext)
-                            mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
-                            mock_result = mock_config.get(tool_name) if mock_config else None
-                            if mock_result is not None:
-                                logger.info(
-                                    "Agent %s: using mock for %s (eval_run_id=%s)",
-                                    agent.id,
-                                    tool_name,
-                                    eval_run_id,
-                                )
-                                result = mock_result
-                            elif tool_name == "spawn_web_task":
-                                # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
-                                result = execute_spawn_web_task(agent, exec_params)
-                            elif tool_name == "send_email":
-                                result = execute_send_email(agent, exec_params)
-                            elif tool_name == "send_sms":
-                                result = execute_send_sms(agent, exec_params)
-                            elif tool_name == "send_chat_message":
-                                result = execute_send_chat_message(agent, exec_params)
-                            elif tool_name == "send_agent_message":
-                                result = execute_send_agent_message(agent, exec_params)
-                            elif tool_name == "send_webhook_event":
-                                result = execute_send_webhook_event(agent, exec_params)
-                            elif tool_name == "update_schedule":
-                                result = execute_update_schedule(agent, exec_params)
-                            elif tool_name == "update_charter":
-                                result = execute_update_charter(agent, exec_params)
-                            elif tool_name == "secure_credentials_request":
-                                result = execute_secure_credentials_request(agent, exec_params)
-                            elif tool_name == "enable_database":
-                                result = execute_enable_database(agent, exec_params)
-                                before_count = len(tools)
-                                tools = get_agent_tools(agent)
-                                after_count = len(tools)
-                                logger.info(
-                                    "Agent %s: refreshed tools after enable_database (before=%d after=%d)",
-                                    agent.id,
-                                    before_count,
-                                    after_count,
-                                )
-                            elif tool_name == "request_contact_permission":
-                                result = execute_request_contact_permission(agent, exec_params)
-                            elif tool_name == "request_human_input":
-                                result = execute_request_human_input(agent, exec_params)
-                            elif tool_name == "spawn_agent":
-                                result = execute_spawn_agent(agent, exec_params)
-                            elif tool_name == "search_tools":
-                                result = execute_search_tools(agent, exec_params)
-                                # After search_tools auto-enables relevant tools, refresh tool definitions
-                                before_count = len(tools)
-                                tools = get_agent_tools(agent)
-                                after_count = len(tools)
-                                logger.info(
-                                    "Agent %s: refreshed tools after search_tools (before=%d after=%d)",
-                                    agent.id,
-                                    before_count,
-                                    after_count,
-                                )
-                            else:
-                                # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
-                                result = execute_enabled_tool(agent, tool_name, exec_params)
-                        except Exception as exc:
-                            mark_span_failed_with_exception(tool_span, exc, f"Tool {tool_name} failed")
-                            logger.exception(
-                                "Agent %s: tool %s failed (call_id=%s)",
-                                agent.id,
-                                tool_name,
-                                call_id or "<none>",
-                            )
-                            result = _build_safe_error_payload(
-                                f"Tool execution failed: {exc}",
-                                error_type=type(exc).__name__,
-                                retryable=_infer_retryable_from_text(str(exc)),
-                            )
-                        finally:
-                            tool_duration_ms = int(round((time.monotonic() - tool_started_at) * 1000))
-
-                        if _is_error_status(result):
-                            result = _normalize_error_result(result)
-
-                        try:
-                            result_content = json.dumps(result)
-                        except (TypeError, ValueError):
-                            try:
-                                result_content = json.dumps(result, default=str)
-                            except Exception as exc:
-                                logger.exception(
-                                    "Agent %s: failed to serialize tool result for %s (call_id=%s)",
-                                    agent.id,
-                                    tool_name,
-                                    call_id or "<none>",
-                                )
-                                result = _build_safe_error_payload(
-                                    "Tool result serialization failed.",
-                                    error_type=type(exc).__name__,
-                                    retryable=False,
-                                )
-                                result_content = json.dumps(result)
-                        # Log result summary
-                        try:
-                            status = result.get("status") if isinstance(result, dict) else None
-                        except Exception:
-                            status = None
-                        try:
-                            tool_span.set_attribute("tool.status", str(status or ""))
-                        except Exception:
-                            pass
-                        result_preview = result_content[:RESULT_LOG_MAX_CHARS]
-                        logger.info(
-                            "Agent %s: %s completed status=%s result=%s%s",
-                            agent.id,
-                            tool_name,
-                            status or "",
-                            result_preview,
-                            "…" if len(result_content) > len(result_preview) else "",
-                        )
-                        if tool_name in MESSAGE_TOOL_NAMES:
-                            status_label = str(status or "").lower()
-                            if status_label in MESSAGE_SUCCESS_STATUSES:
-                                message_delivery_ok = True
-
-                        is_error_status = _is_error_status(result)
-                        tool_status = "error" if is_error_status else "complete"
-
-                        # Guard ORM writes against stale connections; retry once on OperationalError
-                        close_old_connections()
-                        if pending_step is not None:
-                            _finalize_pending_tool_call_step(
-                                step=pending_step,
-                                tool_name=tool_name,
-                                tool_params=tool_params,
-                                result_content=result_content,
-                                execution_duration_ms=tool_duration_ms,
-                                status=tool_status,
-                            )
-                            step = pending_step
-                        else:
-                            step = _persist_tool_call_step(
-                                agent=agent,
-                                tool_name=tool_name,
-                                tool_params=tool_params,
-                                result_content=result_content,
-                                execution_duration_ms=tool_duration_ms,
-                                status=tool_status,
-                                credits_consumed=credits_consumed,
-                                consumed_credit=consumed_credit,
-                                attach_completion=_attach_completion,
-                                attach_prompt_archive=_attach_prompt_archive,
-                            )
-                        if tool_name == "request_human_input" and isinstance(result, dict):
-                            attach_originating_step_from_result(step, result)
-                        allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
-                        tool_had_error = is_error_status
-                        tool_had_warning = _is_warning_status(result)
-                        explicit_continue = None
-                        if isinstance(tool_params, dict):
-                            explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
-                            if explicit_continue is not None:
-                                last_explicit_continue = explicit_continue
-                            if explicit_continue is True and call_token in inferred_continue_call_tokens:
-                                inferred_message_continue_this_iteration = True
-
-                        if tool_had_error or tool_had_warning:
-                            followup_required = True
-                        elif explicit_continue is None and not allow_auto_sleep:
-                            followup_required = True
-
-                        executed_calls += 1
-                        if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
-                            executed_non_message_action = True
+                if prepared_batch.abort_after_execution:
+                    return cumulative_token_usage
 
                 if _apply_runtime_updates():
                     followup_required = True

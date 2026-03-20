@@ -99,6 +99,11 @@ def get_all_variables() -> Dict[str, str]:
     return _agent_variables.get({}).copy()
 
 
+def replace_all_variables(variables: Dict[str, str]) -> None:
+    """Replace the current variable map with a provided snapshot."""
+    _agent_variables.set(dict(variables or {}))
+
+
 def clear_variables() -> None:
     """Clear all variables (typically at session start)."""
     _agent_variables.set({})
