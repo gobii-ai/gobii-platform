@@ -2525,3 +2525,144 @@ class ToolNameNormalizationTests(TestCase):
             call_args = mock_execute.call_args
             self.assertEqual(call_args[0][1], "mcp_brightdata_scrape_as_markdown")
             self.assertEqual(result["status"], "success")
+
+
+@tag("batch_mcp_tools")
+class MCPIsolatedExecutionTests(TestCase):
+    def setUp(self):
+        self.manager = MCPToolManager()
+        self.manager._initialized = True
+        User = get_user_model()
+        self.user = User.objects.create_user(username=f"isolated-{uuid.uuid4().hex[:8]}@example.com")
+        browser_agent = create_test_browser_agent(self.user)
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="isolated-agent",
+            charter="test isolated mcp execution",
+            browser_use_agent=browser_agent,
+        )
+        self.server_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name=f"brightdata-{uuid.uuid4().hex[:8]}",
+            display_name="BrightData",
+            description="",
+            url="https://example.com/mcp",
+        )
+        self.config_id = str(self.server_config.id)
+        self.runtime = MCPServerRuntime(
+            config_id=self.config_id,
+            name=self.server_config.name,
+            display_name=self.server_config.display_name,
+            description=self.server_config.description,
+            command=None,
+            args=[],
+            url=self.server_config.url,
+            auth_method=self.server_config.auth_method,
+            env=self.server_config.environment or {},
+            headers=self.server_config.headers or {},
+            prefetch_apps=[],
+            scope=self.server_config.scope,
+            organization_id=None,
+            user_id=None,
+            updated_at=self.server_config.updated_at,
+        )
+        self.tool_info = MCPToolInfo(
+            self.config_id,
+            "mcp_brightdata_search_engine",
+            self.server_config.name,
+            "search_engine",
+            "Search the web",
+            {"type": "object", "properties": {"query": {"type": "string"}}},
+        )
+        self.manager._server_cache[self.config_id] = self.runtime
+        self.manager._tools_cache["test-slot"] = [self.tool_info]
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=self.tool_info.full_name,
+            tool_server=self.tool_info.server_name,
+            tool_name=self.tool_info.tool_name,
+            server_config=self.server_config,
+        )
+
+    def test_execute_mcp_tool_isolated_does_not_reuse_shared_loop_or_client_cache(self):
+        shared_client = MagicMock(name="shared-client")
+        shared_loop = object()
+        self.manager._clients[self.config_id] = shared_client
+        self.manager._loop = shared_loop
+        isolated_client = MagicMock(name="isolated-client")
+        fake_result = SimpleNamespace(is_error=False, data={"ok": True}, content=None)
+
+        def run_coroutine_isolated(coroutine):
+            try:
+                return fake_result
+            finally:
+                coroutine.close()
+
+        with patch.object(self.manager, "_select_agent_proxy_url", return_value=(None, None)), patch.object(
+            self.manager,
+            "_build_client_for_runtime",
+            return_value=isolated_client,
+        ) as mock_build, patch.object(
+            self.manager,
+            "_run_coroutine_isolated",
+            side_effect=run_coroutine_isolated,
+        ) as mock_run, patch.object(self.manager, "_adapt_tool_result", side_effect=lambda _server, _tool, result: result):
+            result = self.manager.execute_mcp_tool_isolated(
+                self.agent,
+                self.tool_info.full_name,
+                {"query": "openai"},
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["result"], {"ok": True})
+        self.assertIs(self.manager._clients[self.config_id], shared_client)
+        self.assertIs(self.manager._loop, shared_loop)
+        mock_build.assert_called_once_with(self.runtime)
+        mock_run.assert_called_once()
+        isolated_client.close.assert_not_called()
+
+    def test_execute_mcp_tool_isolated_strips_will_continue_work_before_validation_and_execution(self):
+        fake_result = SimpleNamespace(is_error=False, data={"ok": True}, content=None)
+
+        async def fake_execute_async(_client, _tool_name, params, timeout_seconds):
+            self.assertEqual(params, {"query": "openai"})
+            self.assertEqual(timeout_seconds, self.manager._get_timeout_for_runtime(self.runtime))
+            return fake_result
+
+        with patch.object(self.manager, "_select_agent_proxy_url", return_value=(None, None)), patch.object(
+            self.manager,
+            "_build_client_for_runtime",
+            return_value=MagicMock(name="isolated-client"),
+        ), patch.object(
+            self.manager._param_guards,
+            "validate",
+            return_value=None,
+        ) as mock_validate, patch.object(
+            self.manager,
+            "_execute_async",
+            side_effect=fake_execute_async,
+        ) as mock_execute_async, patch.object(
+            self.manager,
+            "_run_coroutine_isolated",
+            side_effect=asyncio.run,
+        ), patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            side_effect=lambda _server, _tool, result: result,
+        ):
+            result = self.manager.execute_mcp_tool_isolated(
+                self.agent,
+                self.tool_info.full_name,
+                {"query": "openai", "will_continue_work": False},
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["result"], {"ok": True})
+        self.assertTrue(result["auto_sleep_ok"])
+        mock_validate.assert_called_once_with(
+            self.server_config.name,
+            self.tool_info.tool_name,
+            {"query": "openai"},
+            self.agent.user,
+        )
+        self.assertEqual(mock_execute_async.call_count, 1)

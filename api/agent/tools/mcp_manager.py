@@ -134,6 +134,27 @@ def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, An
     return updated_parameters
 
 
+def _extract_will_continue_work(
+    params: Dict[str, Any],
+) -> tuple[Dict[str, Any], Optional[bool]]:
+    will_continue_work_raw = params.get("will_continue_work", None)
+    if will_continue_work_raw is None:
+        will_continue_work = None
+    elif isinstance(will_continue_work_raw, bool):
+        will_continue_work = will_continue_work_raw
+    elif isinstance(will_continue_work_raw, str):
+        will_continue_work = will_continue_work_raw.lower() == "true"
+    else:
+        will_continue_work = None
+
+    if "will_continue_work" not in params:
+        return params, will_continue_work
+
+    sanitized_params = dict(params)
+    sanitized_params.pop("will_continue_work", None)
+    return sanitized_params, will_continue_work
+
+
 def _build_jit_connect_url(agent_id: str, app_slug: str) -> str:
     """
     Build the just-in-time Pipedream connect URL that generates fresh auth links on demand.
@@ -341,6 +362,28 @@ class MCPToolManager:
                 self._loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(self._loop)
         return self._loop
+
+    def _run_coroutine_isolated(self, coroutine):
+        """Run a coroutine on a dedicated event loop for thread-safe execution."""
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coroutine)
+        finally:
+            # AnyIO's stdio transport owns task-group scoped async generators.
+            # Forcing shutdown_asyncgens() here can close them from a different
+            # task than they were entered in, which raises during parallel MCP teardown.
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    def _close_client_sync(self, client: Optional[Client], *, context: str) -> None:
+        """Close a FastMCP client from sync code."""
+        if client is None:
+            return
+        try:
+            self._run_coroutine_isolated(client.close())
+        except Exception:
+            logger.debug("Failed to close MCP client for %s", context, exc_info=True)
     
     def _is_tool_blacklisted(self, tool_name: str) -> bool:
         """Check if a tool name matches any blacklist pattern."""
@@ -486,10 +529,7 @@ class MCPToolManager:
     def _discard_client(self, config_id: str) -> None:
         client = self._clients.pop(config_id, None)
         if client:
-            try:
-                client.close()
-            except Exception:
-                logger.debug("Error closing MCP client for %s", config_id, exc_info=True)
+            self._close_client_sync(client, context=config_id)
         self._tools_cache.pop(config_id, None)
         self._tool_cache_fingerprints.pop(config_id, None)
         prefix = f"{config_id}:"
@@ -948,6 +988,38 @@ class MCPToolManager:
             token_type = "Bearer" if token_type_raw.lower() == "bearer" else token_type_raw
             headers["Authorization"] = f"{token_type} {token_value}"
         return headers
+
+    def _build_client_for_runtime(
+        self,
+        server: MCPServerRuntime,
+        *,
+        pipedream_context: Optional[PipedreamToolCacheContext] = None,
+    ) -> Client:
+        if server.name == self.PIPEDREAM_RUNTIME_NAME:
+            raise ValueError("Pipedream clients require agent-scoped initialization")
+
+        if server.url:
+            from fastmcp.client.transports import StreamableHttpTransport
+
+            headers: Dict[str, str] = dict(server.headers or {})
+            auth_headers = self._build_auth_headers(server)
+            if auth_headers:
+                headers.update(auth_headers)
+            transport = StreamableHttpTransport(
+                url=server.url,
+                headers=headers,
+                httpx_client_factory=self._httpx_client_factory,
+            )
+        elif server.command:
+            transport = GobiiStdioTransport(
+                command=server.command,
+                args=server.args or [],
+                env=server.env or {},
+            )
+        else:
+            raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
+
+        return Client(transport)
 
     def _select_discovery_proxy_url(self, server: MCPServerRuntime) -> Optional[str]:
         if not server.url:
@@ -1761,18 +1833,7 @@ class MCPToolManager:
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
 
-        will_continue_work_raw = params.get("will_continue_work", None)
-        if will_continue_work_raw is None:
-            will_continue_work = None
-        elif isinstance(will_continue_work_raw, bool):
-            will_continue_work = will_continue_work_raw
-        elif isinstance(will_continue_work_raw, str):
-            will_continue_work = will_continue_work_raw.lower() == "true"
-        else:
-            will_continue_work = None
-        if "will_continue_work" in params:
-            params = dict(params)
-            params.pop("will_continue_work", None)
+        params, will_continue_work = _extract_will_continue_work(params)
 
         param_error = self._param_guards.validate(server_name, actual_tool_name, params, owner)
         if param_error:
@@ -2006,6 +2067,97 @@ class MCPToolManager:
                 "status": "error",
                 "message": str(e)
             }
+
+    def execute_mcp_tool_isolated(
+        self,
+        agent: PersistentAgent,
+        tool_name: str,
+        params: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Execute an MCP tool without shared loop/client state."""
+        if self._is_tool_blacklisted(tool_name):
+            return {
+                "status": "error",
+                "message": f"Tool '{tool_name}' is blacklisted and cannot be executed",
+            }
+
+        if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
+            return {
+                "status": "error",
+                "message": f"Tool '{tool_name}' is not enabled for this agent",
+            }
+
+        try:
+            row, _ = PersistentAgentEnabledTool.objects.get_or_create(
+                agent=agent,
+                tool_full_name=tool_name,
+            )
+            row.last_used_at = datetime.now(UTC)
+            row.usage_count = (row.usage_count or 0) + 1
+            row.save(update_fields=["last_used_at", "usage_count"])
+        except Exception:
+            logger.exception("Failed to update isolated usage for tool %s", tool_name)
+
+        info = self._resolve_tool_info(tool_name)
+        if not info:
+            return {"status": "error", "message": f"Unknown MCP tool: {tool_name}"}
+
+        runtime = self._server_cache.get(info.config_id)
+        if not runtime:
+            return {"status": "error", "message": f"MCP server '{info.server_name}' is not available"}
+
+        owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+        actual_tool_name = info.tool_name
+        server_name = info.server_name
+        params, will_continue_work = _extract_will_continue_work(params)
+
+        param_error = self._param_guards.validate(server_name, actual_tool_name, params, owner)
+        if param_error:
+            return param_error
+
+        proxy_url = None
+        if runtime.url:
+            proxy_url, proxy_error = self._select_agent_proxy_url(agent)
+            if proxy_error:
+                return {"status": "error", "message": proxy_error}
+
+        try:
+            client = self._build_client_for_runtime(runtime)
+            timeout_seconds = self._get_timeout_for_runtime(runtime)
+            with _use_mcp_proxy(proxy_url):
+                result = self._run_coroutine_isolated(
+                    self._execute_async(
+                        client,
+                        actual_tool_name,
+                        params,
+                        timeout_seconds=timeout_seconds,
+                    )
+                )
+            with mcp_result_owner_context(owner):
+                result = self._adapt_tool_result(server_name, actual_tool_name, result)
+
+            if hasattr(result, "is_error") and result.is_error:
+                return {
+                    "status": "error",
+                    "message": str(result.content[0].text if result.content else "Unknown error"),
+                }
+
+            content = None
+            if result.data is not None:
+                content = result.data
+            elif result.content:
+                for block in result.content:
+                    if hasattr(block, "text"):
+                        content = block.text
+                        break
+
+            response = {"status": "success", "result": content or "Tool executed successfully"}
+            if will_continue_work is False:
+                response["auto_sleep_ok"] = True
+            return response
+        except Exception as exc:
+            logger.error("Failed to execute isolated MCP tool %s: %s", tool_name, exc)
+            return {"status": "error", "message": str(exc)}
     
     def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):
         """Run the tool response through any registered adapters."""
@@ -2242,6 +2394,17 @@ def execute_mcp_tool(
     if not _mcp_manager._initialized:
         _mcp_manager.initialize()
     return _mcp_manager.execute_mcp_tool(agent, tool_name, params, force_local=force_local)
+
+
+def execute_mcp_tool_isolated(
+    agent: PersistentAgent,
+    tool_name: str,
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Execute any enabled MCP tool without shared runtime state."""
+    if not _mcp_manager._initialized:
+        _mcp_manager.initialize()
+    return _mcp_manager.execute_mcp_tool_isolated(agent, tool_name, params)
 
 
 def execute_platform_mcp_tool(server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
