@@ -18,11 +18,13 @@ import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core import signing
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http.multipartparser import MultiPartParserError
 from django.shortcuts import get_object_or_404
+from django.template.defaultfilters import filesizeformat
 from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -97,6 +99,7 @@ from console.agent_audit.serializers import serialize_system_message
 from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
 from api.agent.tasks import process_agent_events_task
+from api.services.system_settings import get_max_file_size
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
@@ -2516,8 +2519,18 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         attachments: list[Any] = []
         message_text = ""
         if request.content_type and request.content_type.startswith("multipart/form-data"):
-            message_text = (request.POST.get("body") or "").strip()
-            attachments = list(request.FILES.getlist("attachments") or request.FILES.values())
+            try:
+                message_text = (request.POST.get("body") or "").strip()
+                attachments = list(request.FILES.getlist("attachments") or request.FILES.values())
+            except (MultiPartParserError, RequestDataTooBig):
+                max_size_label = filesizeformat(get_max_file_size() or 0).replace("\xa0", " ")
+                return JsonResponse(
+                    {"error": f"Upload is too large. Max file size is {max_size_label}."},
+                    status=400,
+                )
+            oversize_error = _validate_console_chat_attachments(attachments)
+            if oversize_error is not None:
+                return JsonResponse({"error": oversize_error}, status=400)
         else:
             try:
                 body = json.loads(request.body or "{}")
@@ -2572,6 +2585,26 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
 
         return JsonResponse({"event": event}, status=201)
+
+
+def _validate_console_chat_attachments(attachments: list[Any]) -> str | None:
+    max_bytes = get_max_file_size()
+    if not max_bytes:
+        return None
+
+    for attachment in attachments:
+        size = getattr(attachment, "size", None)
+        try:
+            size_bytes = int(size)
+        except (TypeError, ValueError):
+            continue
+
+        if size_bytes > int(max_bytes):
+            filename = getattr(attachment, "name", None) or "attachment"
+            max_size_label = filesizeformat(int(max_bytes)).replace("\xa0", " ")
+            return f'"{filename}" is too large. Max file size is {max_size_label}.'
+
+    return None
 
 
 def _build_filespace_download_response(node: AgentFsNode) -> FileResponse:

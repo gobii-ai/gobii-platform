@@ -1,8 +1,10 @@
+from types import SimpleNamespace
+
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
-from api.agent.comms.message_service import _save_attachments
+from api.agent.comms.message_service import _get_rejected_attachment_channel, _save_attachments
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
@@ -60,3 +62,35 @@ class SignatureAttachmentFilterTests(TestCase):
         _save_attachments(message, [attachment])
 
         self.assertEqual(message.attachments.count(), 1)
+
+    @override_settings(MAX_FILE_SIZE=5)
+    def test_records_rejected_attachment_metadata_for_oversize_inbound_file(self):
+        message = self._make_message()
+        attachment = ContentFile(b"hello-bytes", name="report.pdf")
+        attachment.content_type = "application/pdf"
+
+        _save_attachments(message, [attachment])
+        message.refresh_from_db()
+
+        self.assertEqual(message.attachments.count(), 0)
+        self.assertEqual(
+            message.raw_payload.get("rejected_attachments"),
+            [
+                {
+                    "filename": "report.pdf",
+                    "limit_bytes": 5,
+                    "reason_code": "too_large",
+                    "channel": "email",
+                    "size_bytes": len(b"hello-bytes"),
+                }
+            ],
+        )
+
+    def test_rejected_attachment_channel_falls_back_when_from_endpoint_missing(self):
+        message = SimpleNamespace(
+            from_endpoint=None,
+            to_endpoint=SimpleNamespace(channel="email"),
+            conversation=SimpleNamespace(channel="web"),
+        )
+
+        self.assertEqual(_get_rejected_attachment_channel(message), "email")

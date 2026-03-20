@@ -169,6 +169,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
+  maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
   pendingHumanInputRequests?: PendingHumanInputRequest[]
@@ -285,6 +286,7 @@ export function AgentChatLayout({
   composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
+  maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
   pendingHumanInputRequests = [],
@@ -1052,6 +1054,7 @@ export function AgentChatLayout({
               disabledReason={composerDisabledReason}
               submitError={composerError}
               showSubmitErrorUpgrade={composerErrorShowUpgrade}
+              maxAttachmentBytes={maxAttachmentBytes}
               pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
             />

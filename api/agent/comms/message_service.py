@@ -52,6 +52,7 @@ from api.services.owner_execution_pause import (
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
 from .outbound_delivery import deliver_agent_email, deliver_agent_sms
+from .rejected_attachments import build_rejected_attachment_metadata
 from .email_endpoint_routing import (
     get_agent_primary_endpoint,
     resolve_agent_email_sender_endpoint_for_message,
@@ -190,9 +191,43 @@ def _should_skip_signature_attachment(filename: str, content_type: str) -> bool:
         return True
     return False
 
+
+def _append_rejected_attachments_to_message(
+    message: PersistentAgentMessage,
+    rejected_attachments: Iterable[dict[str, Any]],
+) -> None:
+    if message.is_outbound:
+        return
+
+    rejected_list = [item for item in rejected_attachments if isinstance(item, dict)]
+    if not rejected_list:
+        return
+
+    payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    existing_raw = payload.get("rejected_attachments")
+    existing = [item for item in existing_raw if isinstance(item, dict)] if isinstance(existing_raw, list) else []
+
+    next_payload = dict(payload)
+    next_payload["rejected_attachments"] = existing + rejected_list
+    message.raw_payload = next_payload
+    message.save(update_fields=["raw_payload"])
+
+
+def _get_rejected_attachment_channel(message: PersistentAgentMessage) -> str:
+    if message.from_endpoint and message.from_endpoint.channel:
+        return message.from_endpoint.channel
+    if message.to_endpoint and message.to_endpoint.channel:
+        return message.to_endpoint.channel
+    if message.conversation and message.conversation.channel:
+        return message.conversation.channel
+    return "unknown"
+
+
 @tracer.start_as_current_span("_save_attachments")
 def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any]) -> None:
     max_bytes = get_max_file_size()
+    channel = _get_rejected_attachment_channel(message)
+    rejected_attachments: list[dict[str, Any]] = []
     for att in attachments:
         file_obj: File | None = None
         content_type = ""
@@ -208,7 +243,16 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
             # Reject oversize file-like attachments
             try:
                 if max_bytes and size and int(size) > int(max_bytes):
-                    logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
+                    logging.warning(f"File '{filename}' exceeds max size of {max_bytes} bytes, skipping.")
+                    rejected_attachments.append(
+                        build_rejected_attachment_metadata(
+                            filename=filename,
+                            channel=channel,
+                            limit_bytes=max_bytes,
+                            reason_code="too_large",
+                            size_bytes=int(size),
+                        )
+                    )
                     continue
             except Exception:
                 logging.warning(f"Could not process '{filename}' file size.")
@@ -252,7 +296,16 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                         h = requests.head(url, allow_redirects=True, timeout=15, auth=auth)
                         clen = int(h.headers.get("Content-Length", "0")) if h is not None else 0
                         if clen and clen > int(max_bytes):
-                            logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
+                            logging.warning(f"File '{filename}' exceeds max size of {max_bytes} bytes, skipping.")
+                            rejected_attachments.append(
+                                build_rejected_attachment_metadata(
+                                    filename=filename,
+                                    channel=channel,
+                                    limit_bytes=max_bytes,
+                                    reason_code="too_large",
+                                    size_bytes=clen,
+                                )
+                            )
                             continue
                     except Exception:
                         logging.warning(f"Could not process '{filename}' file size.")
@@ -266,7 +319,16 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                 filename = _append_extension(filename, content_type_hint or content_type)
                 size = len(content)
                 if max_bytes and size > int(max_bytes):
-                    logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
+                    logging.warning(f"File '{filename}' exceeds max size of {max_bytes} bytes, skipping.")
+                    rejected_attachments.append(
+                        build_rejected_attachment_metadata(
+                            filename=filename,
+                            channel=channel,
+                            limit_bytes=max_bytes,
+                            reason_code="too_large",
+                            size_bytes=size,
+                        )
+                    )
                     continue
                 if _should_skip_signature_attachment(filename, content_type):
                     continue
@@ -288,6 +350,7 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                 file_size=size,
                 filename=filename,
             )
+    _append_rejected_attachments_to_message(message, rejected_attachments)
 
 def _build_site_url(path: str) -> str:
     """Return an absolute URL for a site-relative path."""

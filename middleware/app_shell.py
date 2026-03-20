@@ -5,6 +5,7 @@ from django.conf import settings
 from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified
 from django.templatetags.static import static
 
+from api.services.system_settings import get_max_file_size
 from config.vite import ViteManifestError, get_vite_asset
 from util.fish_collateral import is_fish_collateral_enabled
 
@@ -171,6 +172,12 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
     pygments_css = static("css/pygments.css")
     globals_css = static("css/globals.css")
     csrf_cookie_name = getattr(settings, "CSRF_COOKIE_NAME", "csrftoken") or "csrftoken"
+    max_chat_upload_size_bytes = get_max_file_size()
+    max_chat_upload_size_attr = (
+        f' data-max-chat-upload-size-bytes="{max_chat_upload_size_bytes}"'
+        if max_chat_upload_size_bytes
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -193,7 +200,7 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
   {vite_tags}
 </head>
 <body class="min-h-screen bg-white">
-  <div id="gobii-frontend-root" data-app="immersive-app" data-fish-collateral-enabled="{fish_collateral_data_attr}"></div>
+  <div id="gobii-frontend-root" data-app="immersive-app" data-fish-collateral-enabled="{fish_collateral_data_attr}"{max_chat_upload_size_attr}></div>
 </body>
 </html>"""
 

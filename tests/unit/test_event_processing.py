@@ -440,7 +440,7 @@ class PromptContextBuilderTests(TestCase):
                 cur = conn.cursor()
                 cur.execute(
                     """
-                    SELECT channel, is_outbound, subject, body, is_hidden_in_chat, attachment_paths_json
+                    SELECT channel, is_outbound, subject, body, is_hidden_in_chat, attachment_paths_json, rejected_attachments_json
                     FROM "__messages"
                     ORDER BY timestamp DESC
                     LIMIT 1;
@@ -455,6 +455,69 @@ class PromptContextBuilderTests(TestCase):
                 self.assertIn("Hello from sqlite snapshot", row[3])
                 self.assertEqual(row[4], 1)
                 self.assertEqual(json.loads(row[5]), [])
+                self.assertEqual(json.loads(row[6]), [])
+            finally:
+                conn.close()
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
+    def test_sqlite_messages_snapshot_includes_rejected_attachment_metadata(self):
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Please review the email body.",
+            raw_payload={
+                "subject": "Oversize file attempt",
+                "rejected_attachments": [
+                    {
+                        "filename": "deck.pdf",
+                        "size_bytes": 71303168,
+                        "limit_bytes": 10485760,
+                        "reason_code": "too_large",
+                        "channel": "email",
+                    }
+                ],
+            },
+            seq=f"SQLRJ{int(timezone.now().timestamp() * 1_000_000):021d}"[:26],
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+        try:
+            with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+                 patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                build_prompt_context(self.agent)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT rejected_attachments_json
+                    FROM "__messages"
+                    ORDER BY timestamp DESC
+                    LIMIT 1;
+                    """
+                )
+                row = cur.fetchone()
+                self.assertIsNotNone(row)
+                assert row is not None
+                self.assertEqual(
+                    json.loads(row[0]),
+                    [
+                        {
+                            "filename": "deck.pdf",
+                            "size_bytes": 71303168,
+                            "limit_bytes": 10485760,
+                            "reason_code": "too_large",
+                            "channel": "email",
+                        }
+                    ],
+                )
             finally:
                 conn.close()
         finally:
@@ -529,6 +592,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("# Attachment pre-flight", content)
         self.assertIn("RIGHT: send_email(..., attachments=[result.attach])", content)
         self.assertIn("Prior sends: verify via __messages.attachment_count", content)
+        self.assertIn("__messages.rejected_attachments_json", content)
 
     def test_prompt_does_not_add_attachment_suffix_to_inbound_messages(self):
         PersistentAgentMessage.objects.create(

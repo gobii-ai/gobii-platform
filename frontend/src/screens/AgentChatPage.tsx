@@ -39,6 +39,7 @@ import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
 import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
+import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
@@ -579,6 +580,7 @@ export type AgentChatPageProps = {
   isStaff?: boolean
   auditUrl?: string | null
   auditUrlTemplate?: string | null
+  maxChatUploadSizeBytes?: number | null
   viewerUserId?: number | null
   viewerEmail?: string | null
   canManageCollaborators?: boolean | null
@@ -618,6 +620,7 @@ export function AgentChatPage({
   collaboratorInviteUrl,
   auditUrl,
   auditUrlTemplate,
+  maxChatUploadSizeBytes = null,
   viewerUserId,
   viewerEmail,
   canManageCollaborators,
@@ -1812,6 +1815,7 @@ export function AgentChatPage({
   const [intelligenceBusy, setIntelligenceBusy] = useState(false)
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const [createAgentError, setCreateAgentError] = useState<CreateAgentErrorState | null>(null)
+  const [sendMessageError, setSendMessageError] = useState<string | null>(null)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
   const spawnIntentAutoSubmittedRef = useRef(false)
@@ -1883,6 +1887,7 @@ export function AgentChatPage({
     }
     setIntelligenceError(null)
     setCreateAgentError(null)
+    setSendMessageError(null)
   }, [isNewAgent, activeAgentId])
 
   useEffect(() => {
@@ -2744,6 +2749,7 @@ export function AgentChatPage({
     if (!activeAgentId && !isNewAgent) {
       return
     }
+    setSendMessageError(null)
     if (sendMessageDisabledReason) {
       return
     }
@@ -2823,7 +2829,12 @@ export function AgentChatPage({
         (current) => touchRosterEntryLastInteraction(current, activeAgentId, sentAt),
       )
     }
-    await sendMessage(body, attachments)
+    try {
+      await sendMessage(body, attachments)
+    } catch (error) {
+      setSendMessageError(safeErrorMessage(error))
+      throw error
+    }
     if (!autoScrollPinnedRef.current) return
     scrollToBottom()
   }, [
@@ -3134,10 +3145,11 @@ export function AgentChatPage({
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
-        composerError={createAgentError?.message ?? null}
-        composerErrorShowUpgrade={Boolean(createAgentError?.showUpgradeCta)}
+        composerError={sendMessageError ?? createAgentError?.message ?? null}
+        composerErrorShowUpgrade={sendMessageError ? false : Boolean(createAgentError?.showUpgradeCta)}
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
+        maxAttachmentBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={PIPEDREAM_APPS_SETTINGS_URL}
         pipedreamAppSearchUrl={PIPEDREAM_APP_SEARCH_URL}
         pendingHumanInputRequests={pendingHumanInputRequests}

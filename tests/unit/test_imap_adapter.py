@@ -3,7 +3,7 @@ from __future__ import annotations
 import email
 from email.message import EmailMessage
 
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from api.agent.comms.imap_adapter import ImapEmailAdapter, ImapParsedContext
 
@@ -60,3 +60,23 @@ class ImapAdapterTests(TestCase):
         self.assertTrue(hasattr(att, "name"))
         self.assertTrue(hasattr(att, "size"))
         self.assertTrue(hasattr(att, "content_type"))
+
+    @override_settings(MAX_FILE_SIZE=5)
+    def test_oversize_attachment_is_reported_in_raw_payload(self):
+        raw = self._build_with_attachment()
+
+        parsed = ImapEmailAdapter.parse_bytes(raw, recipient_address="agent@example.org")
+
+        self.assertEqual(parsed.attachments, [])
+        self.assertEqual(
+            parsed.raw_payload.get("rejected_attachments"),
+            [
+                {
+                    "filename": "hello.bin",
+                    "limit_bytes": 5,
+                    "reason_code": "too_large",
+                    "channel": "email",
+                    "size_bytes": len(b"hello-bytes"),
+                }
+            ],
+        )

@@ -35,9 +35,18 @@ function ProgressRing({
   const offset = circumference - (percentage / 100) * circumference
 
   const isComplete = done === total && total > 0
+  const progressLabel = `${done}/${total}`
+  const isCompact = progressLabel.length >= 7
 
   return (
-    <div className={`kanban-progress-ring ${isComplete ? 'kanban-progress-complete' : ''}`}>
+    <div
+      className={[
+        'kanban-progress-ring',
+        isComplete && 'kanban-progress-complete',
+        isCompact && 'kanban-progress-ring--compact',
+      ].filter(Boolean).join(' ')}
+      aria-label={`${done} of ${total} tasks complete`}
+    >
       <svg viewBox="0 0 70 70" className="kanban-ring-svg">
         {/* Background track */}
         <circle

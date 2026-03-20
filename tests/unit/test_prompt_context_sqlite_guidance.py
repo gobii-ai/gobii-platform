@@ -27,6 +27,7 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         examples = prompt_context._get_sqlite_examples()
         self.assertIn("# __messages (special table)", examples)
         self.assertIn("attachment_paths_json", examples)
+        self.assertIn("rejected_attachments_json", examples)
         self.assertIn("latest_status", examples)
 
     def test_examples_include_files_table_schema(self):

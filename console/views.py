@@ -53,6 +53,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyUnavailableError,
     is_multi_assign_enabled,
 )
+from api.services.system_settings import get_max_file_size
 from api.services.persistent_agents import maybe_sync_agent_email_display_name
 from api.agent.core.llm_config import (
     AgentLLMTier,
@@ -5792,6 +5793,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         agent_sms_ep = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
         context["agent_email"] = agent_email_ep.address if agent_email_ep else ""
         context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
+        context["max_chat_upload_size_bytes"] = get_max_file_size()
         return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only

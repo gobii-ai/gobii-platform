@@ -57,6 +57,12 @@ const agentSms = mountNode.dataset.agentSms || null
 const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
 const auditUrl = mountNode.dataset.auditUrl || null
 const auditUrlTemplate = mountNode.dataset.auditUrlTemplate || null
+const maxChatUploadSizeBytesRaw = mountNode.dataset.maxChatUploadSizeBytes
+const maxChatUploadSizeBytesValue = maxChatUploadSizeBytesRaw ? Number.parseInt(maxChatUploadSizeBytesRaw, 10) : null
+const maxChatUploadSizeBytes =
+  typeof maxChatUploadSizeBytesValue === 'number' && Number.isFinite(maxChatUploadSizeBytesValue) && maxChatUploadSizeBytesValue > 0
+    ? maxChatUploadSizeBytesValue
+    : null
 const viewerUserIdRaw = mountNode.dataset.viewerUserId
 const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
 const viewerUserId = Number.isFinite(viewerUserIdValue) ? viewerUserIdValue : null
@@ -118,6 +124,7 @@ switch (appName) {
         isStaff={isStaff}
         auditUrl={auditUrl}
         auditUrlTemplate={auditUrlTemplate}
+        maxChatUploadSizeBytes={maxChatUploadSizeBytes}
         canManageCollaborators={canManageCollaborators}
         isCollaborator={isCollaborator}
         viewerUserId={viewerUserId}
@@ -262,7 +269,7 @@ switch (appName) {
     )
     break
   case 'immersive-app':
-    screen = <ImmersiveApp />
+    screen = <ImmersiveApp maxChatUploadSizeBytes={maxChatUploadSizeBytes} />
     break
   default:
     throw new Error(`Unsupported console React app: ${appName}`)

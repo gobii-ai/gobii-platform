@@ -46,9 +46,13 @@
 
 .kanban-progress-ring {
   position: relative;
-  width: 56px;
-  height: 56px;
+  width: var(--kanban-ring-size, 56px);
+  height: var(--kanban-ring-size, 56px);
   flex-shrink: 0;
+}
+
+.kanban-progress-ring--compact {
+  --kanban-ring-size: 68px;
 }
 
 .kanban-ring-svg {
@@ -72,6 +76,7 @@
   align-items: center;
   justify-content: center;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .kanban-ring-done {
@@ -90,6 +95,24 @@
   font-size: 0.75rem;
   font-weight: 500;
   color: #64748b;
+}
+
+.kanban-progress-ring--compact .kanban-ring-content {
+  gap: 0;
+  letter-spacing: -0.02em;
+}
+
+.kanban-progress-ring--compact .kanban-ring-done {
+  font-size: 0.8125rem;
+}
+
+.kanban-progress-ring--compact .kanban-ring-divider,
+.kanban-progress-ring--compact .kanban-ring-total {
+  font-size: 0.625rem;
+}
+
+.kanban-progress-ring--compact .kanban-ring-divider {
+  margin: 0;
 }
 
 .kanban-ring-glow {

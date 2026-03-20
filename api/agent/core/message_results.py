@@ -2,7 +2,7 @@ import json
 import logging
 import sqlite3
 from dataclasses import dataclass
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import MESSAGES_TABLE, get_sqlite_db_path
@@ -26,6 +26,7 @@ class MessageSQLiteRecord:
     subject: str
     body: str
     attachment_paths: Sequence[str]
+    rejected_attachments: Sequence[dict[str, Any]]
     latest_status: str
     latest_sent_at: Optional[str]
     latest_delivered_at: Optional[str]
@@ -71,6 +72,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     0,
                     json.dumps(list(record.attachment_paths), ensure_ascii=False),
                     len(record.attachment_paths),
+                    json.dumps(list(record.rejected_attachments), ensure_ascii=False),
                     record.latest_status or "",
                     record.latest_sent_at,
                     record.latest_delivered_at,
@@ -102,6 +104,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     body_truncated_bytes,
                     attachment_paths_json,
                     attachment_count,
+                    rejected_attachments_json,
                     latest_status,
                     latest_sent_at,
                     latest_delivered_at,
@@ -109,7 +112,7 @@ def store_messages_for_prompt(records: Sequence[MessageSQLiteRecord]) -> None:
                     latest_error_message,
                     is_hidden_in_chat
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -150,6 +153,7 @@ def _recreate_messages_table(conn) -> None:
             body_truncated_bytes INTEGER,
             attachment_paths_json TEXT,
             attachment_count INTEGER,
+            rejected_attachments_json TEXT,
             latest_status TEXT,
             latest_sent_at TEXT,
             latest_delivered_at TEXT,
