@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from email.message import EmailMessage
 import json
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,8 @@ from django.utils import timezone
 
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.comms.imap_adapter import ImapEmailAdapter
+from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
@@ -560,6 +563,44 @@ class AgentChatAPITests(TestCase):
         self.assertIn("<table>", rendered_html)
         self.assertIn("<strong>Ready</strong>", rendered_html)
         self.assertNotIn("<p>Status: Ready</p>", rendered_html)
+
+    @tag("batch_agent_chat")
+    def test_timeline_uses_preserved_html_for_ingested_imap_email(self):
+        recipient_address = f"agent-{self.agent.id}@example.com"
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=recipient_address,
+            is_primary=True,
+        )
+
+        message = EmailMessage()
+        message["From"] = "sender@example.com"
+        message["To"] = recipient_address
+        message["Subject"] = "Status update"
+        message.set_content("Plain status update")
+        message.add_alternative(
+            "<table><tr><th>Status</th></tr><tr><td><strong>Ready</strong></td></tr></table>",
+            subtype="html",
+        )
+
+        parsed = ImapEmailAdapter.parse_bytes(message.as_bytes(), recipient_address=recipient_address)
+        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        html_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == "Plain status update\n"
+        )
+
+        rendered_html = html_event["message"]["bodyHtml"]
+        self.assertIn("<table>", rendered_html)
+        self.assertIn("<strong>Ready</strong>", rendered_html)
+        self.assertNotIn("<p>Plain status update</p>", rendered_html)
 
     @tag("batch_agent_chat")
     def test_timeline_rewrites_cid_image_src_from_preserved_email_html(self):

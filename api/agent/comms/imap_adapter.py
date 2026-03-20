@@ -17,6 +17,7 @@ from django.core.files.base import ContentFile
 
 from api.models import CommsChannel
 from .adapters import (
+    EMAIL_BODY_HTML_PAYLOAD_KEY,
     ParsedMessage,
     _html_to_text,
     _is_forward_like,
@@ -29,6 +30,13 @@ from api.services.system_settings import get_max_file_size
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExtractedEmailBody:
+    body_text: str
+    body_used: str
+    body_html: str | None = None
 
 
 def _decode_header_value(value: Optional[str]) -> str:
@@ -49,7 +57,7 @@ def _decode_part_payload(part: email.message.EmailMessage) -> str | None:
         return None
 
 
-def _extract_text_parts(msg: email.message.EmailMessage) -> Tuple[str, str, str | None]:
+def _extract_text_parts(msg: email.message.EmailMessage) -> ExtractedEmailBody:
     """Return best-effort plain text body, source note, and preserved HTML when safe.
 
     Preference order:
@@ -72,28 +80,42 @@ def _extract_text_parts(msg: email.message.EmailMessage) -> Tuple[str, str, str 
                 if text is not None:
                     plain_body = text
         if plain_body is not None:
-            return plain_body, "text/plain", html_body
+            return ExtractedEmailBody(
+                body_text=plain_body,
+                body_used="text/plain",
+                body_html=html_body,
+            )
     else:
         content_type = (msg.get_content_type() or "").lower()
         if content_type == "text/plain":
             text = _decode_part_payload(msg)
             if text is not None:
-                return text, "text/plain", None
+                return ExtractedEmailBody(body_text=text, body_used="text/plain")
         elif content_type == "text/html":
             html_body = _decode_part_payload(msg)
 
     # 2) text/html → text
     if html_body:
-        return _html_to_text(html_body), "text/html→text", html_body
+        return ExtractedEmailBody(
+            body_text=_html_to_text(html_body),
+            body_used="text/html→text",
+            body_html=html_body,
+        )
 
     # 3) fallback: raw
     try:
-        return msg.get_body(preferencelist=('plain', 'html')).get_content(), "fallback/body", None
+        return ExtractedEmailBody(
+            body_text=msg.get_body(preferencelist=('plain', 'html')).get_content(),
+            body_used="fallback/body",
+        )
     except Exception:
         try:
-            return msg.as_string(), "fallback/as_string", None
+            return ExtractedEmailBody(
+                body_text=msg.as_string(),
+                body_used="fallback/as_string",
+            )
         except Exception:
-            return "", "fallback/empty", None
+            return ExtractedEmailBody(body_text="", body_used="fallback/empty")
 
 
 def _collect_attachments(msg: email.message.EmailMessage) -> Tuple[List[Any], List[dict[str, Any]]]:
@@ -181,10 +203,12 @@ class ImapEmailAdapter:
         references = _decode_header_value(msg.get("References"))
 
         # Body text selection
-        body_text, body_used, body_html = _extract_text_parts(msg)
+        extracted_body = _extract_text_parts(msg)
+        body_text = extracted_body.body_text
+        body_used = extracted_body.body_used
 
         # Strip forwards/replies if configured
-        body_html_preserved = body_html
+        body_html_preserved = extracted_body.body_html
         if EMAIL_STRIP_REPLIES:
             is_forward = _is_forward_like(subject or "", body_text or "", [])
             if is_forward:
@@ -214,7 +238,7 @@ class ImapEmailAdapter:
             "body_used": body_used,
         }
         if body_html_preserved:
-            raw_payload["body_html"] = body_html_preserved
+            raw_payload[EMAIL_BODY_HTML_PAYLOAD_KEY] = body_html_preserved
         if ctx is not None:
             if ctx.uid:
                 raw_payload["imap_uid"] = str(ctx.uid)

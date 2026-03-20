@@ -24,6 +24,7 @@ from bleach.sanitizer import Cleaner
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.agent.core.schedule_parser import ScheduleParser
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
+from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.models import (
@@ -202,7 +203,7 @@ def _message_body_html(message: PersistentAgentMessage, channel: str | None, att
     if not channel or channel.lower() != "email":
         return ""
     payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
-    explicit_html = payload.get("body_html")
+    explicit_html = payload.get(EMAIL_BODY_HTML_PAYLOAD_KEY)
     return _render_email_body_html(
         message.body or "",
         attachments,

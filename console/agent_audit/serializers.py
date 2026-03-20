@@ -5,6 +5,7 @@ from urllib.parse import urlencode
 from django.utils import timezone
 from django.urls import reverse
 
+from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.human_input_requests import serialize_human_input_tool_result
 from api.models import (
     PersistentAgentMessage,
@@ -74,7 +75,7 @@ def serialize_message(message: PersistentAgentMessage) -> dict:
     self_agent_name = getattr(self_agent, "name", None)
     peer_link_id = getattr(conversation, "peer_link_id", None) if conversation else None
     payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
-    body_html = payload.get("body_html") if channel.lower() == "email" else None
+    body_html = payload.get(EMAIL_BODY_HTML_PAYLOAD_KEY) if channel.lower() == "email" else None
     return {
         "kind": "message",
         "id": str(message.id),

@@ -23,6 +23,8 @@ from api.services.system_settings import get_max_file_size
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
+EMAIL_BODY_HTML_PAYLOAD_KEY = "body_html"
+
 
 # Optional quote prefix pattern - matches "> " or "> > " etc. at start of line
 # This handles forwarded content that's been quoted (e.g., when replying to a forward)
