@@ -6,6 +6,7 @@ including tool definition and execution logic.
 """
 
 import logging
+import re
 from typing import Dict, Any
 
 from ...models import (
@@ -32,6 +33,21 @@ from api.services.email_verification import require_verified_email, EmailVerific
 from .attachment_guidance import SEND_EMAIL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)
+
+
+_HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+_QUOTED_THREAD_PATTERN = re.compile(r"<blockquote\b[^>]*>.*?</blockquote>", re.IGNORECASE | re.DOTALL)
+_ATTACHMENT_CLAIM_PATTERNS = (
+    re.compile(r"\bplease\s+find\s+attached\b", re.IGNORECASE),
+    re.compile(r"\bsee\s+attached\b", re.IGNORECASE),
+    re.compile(r"\b(?:i(?:'|’)ve|i\s+have)\s+attached\b", re.IGNORECASE),
+    re.compile(r"\battached\s+(?:you(?:'|’)ll|you\s+will)\s+find\b", re.IGNORECASE),
+    re.compile(r"\battached\s+(?:is|are)\b", re.IGNORECASE),
+)
+_MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE = (
+    "Email body claims attachments are included, but send_email.attachments is empty. "
+    "Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
+)
 
 
 def _maybe_provision_simulated_from_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint | None:
@@ -74,6 +90,29 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
         normalized = raw.strip().lower()
         return normalized in {"1", "true", "yes"}
     return bool(raw)
+
+
+def _strip_html_to_text(html: str) -> str:
+    """Convert lightweight HTML email content to plain text for semantic checks."""
+    if not html:
+        return ""
+    return re.sub(r"\s+", " ", _HTML_TAG_PATTERN.sub(" ", html)).strip()
+
+
+def _strip_quoted_thread_html(html: str) -> str:
+    """Ignore quoted thread content so only newly authored attachment claims are enforced."""
+    if not html:
+        return ""
+    return _QUOTED_THREAD_PATTERN.sub(" ", html)
+
+
+def _email_claims_attachments(html: str) -> bool:
+    """Return True when the email body explicitly claims attachments are included."""
+    plain_text = _strip_html_to_text(_strip_quoted_thread_html(html))
+    if not plain_text:
+        return False
+    return any(pattern.search(plain_text) for pattern in _ATTACHMENT_CLAIM_PATTERNS)
+
 
 def get_send_email_tool() -> Dict[str, Any]:
     """Return the send_email tool definition for the LLM."""
@@ -135,6 +174,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
+
+    if _email_claims_attachments(mobile_first_html) and not attachment_paths:
+        return {"status": "error", "message": _MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE}
 
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)

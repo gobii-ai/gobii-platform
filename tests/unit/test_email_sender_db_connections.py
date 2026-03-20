@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from allauth.account.models import EmailAddress
 from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
@@ -224,3 +222,78 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertEqual(result.get("status"), "ok")
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertEqual(message.from_endpoint_id, custom_primary.id)
+
+    def test_execute_send_email_rejects_attachment_claim_without_attachments(self):
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": self.user.email,
+                "subject": "Files enclosed",
+                "mobile_first_html": "<p>Please find attached the updated report.</p>",
+            },
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("claims attachments are included", result.get("message", ""))
+        self.assertIn("send_email.attachments", result.get("message", ""))
+
+    def test_execute_send_email_allows_normal_email_without_attachments(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Quick update",
+            "mobile_first_html": "<p>The report is ready for review.</p>",
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertTrue(result.get("message_id"))
+
+    def test_execute_send_email_ignores_attachment_claim_in_quoted_thread(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Following up",
+            "mobile_first_html": (
+                "<p>Thanks for the follow-up.</p>"
+                "<blockquote><p>Please find attached the updated report.</p></blockquote>"
+            ),
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertTrue(result.get("message_id"))
+
+    def test_execute_send_email_allows_attachment_claim_with_attachments(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Attached report",
+            "mobile_first_html": "<p>See attached the updated report.</p>",
+            "attachments": ["$[/exports/report.csv]"],
+        }
+        resolved_attachment = MagicMock()
+
+        with patch(
+            "api.agent.tools.email_sender.resolve_filespace_attachments",
+            return_value=[resolved_attachment],
+        ), patch(
+            "api.agent.tools.email_sender.create_message_attachments",
+        ) as create_message_attachments_mock, patch(
+            "api.agent.tools.email_sender.broadcast_message_attachment_update",
+        ), patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        create_message_attachments_mock.assert_called_once()
