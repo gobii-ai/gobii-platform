@@ -26,6 +26,15 @@ class ImapAdapterTests(TestCase):
         m.add_alternative("<p><b>Hi</b> there</p>", subtype="html")
         return m.as_bytes()
 
+    def _build_multipart(self) -> bytes:
+        m = EmailMessage()
+        m["From"] = "Dana <dana@example.com>"
+        m["To"] = "agent@example.org"
+        m["Subject"] = "Multipart"
+        m.set_content("Plain fallback line")
+        m.add_alternative("<table><tr><td><strong>Rich</strong></td></tr></table>", subtype="html")
+        return m.as_bytes()
+
     def _build_with_attachment(self) -> bytes:
         m = EmailMessage()
         m["From"] = "Carol <carol@example.com>"
@@ -50,6 +59,19 @@ class ImapAdapterTests(TestCase):
         self.assertEqual(parsed.sender, "bob@example.com")
         self.assertIn("Hi", parsed.body)
         self.assertGreater(len(parsed.body.strip()), 0)
+        self.assertEqual(parsed.raw_payload.get("body_html"), "<p><b>Hi</b> there</p>\n")
+
+    def test_multipart_parse_preserves_html_in_raw_payload(self):
+        raw = self._build_multipart()
+
+        parsed = ImapEmailAdapter.parse_bytes(raw, recipient_address="agent@example.org")
+
+        self.assertEqual(parsed.sender, "dana@example.com")
+        self.assertEqual(parsed.body, "Plain fallback line\n")
+        self.assertEqual(
+            parsed.raw_payload.get("body_html"),
+            "<table><tr><td><strong>Rich</strong></td></tr></table>\n",
+        )
 
     def test_attachment_collected(self):
         raw = self._build_with_attachment()

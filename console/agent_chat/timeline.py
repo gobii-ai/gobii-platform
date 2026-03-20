@@ -182,24 +182,32 @@ class TimelineWindow:
         return self.processing_snapshot.active
 
 
-def _humanize_body(body: str, channel: str | None = None, attachments: Sequence[dict] | None = None) -> str:
-    """Convert message body to sanitized HTML for display.
-
-    For email channel: Converts markdown to HTML for email client rendering.
-    For all other channels: Returns empty string - the frontend's markdown
-    renderer handles the content, including inline HTML like <br> tags.
-    """
-    body = body or ""
-    if channel and channel.lower() == "email":
+def _render_email_body_html(
+    body: str,
+    attachments: Sequence[dict],
+    explicit_html: str | None = None,
+) -> str:
+    html_snippet = explicit_html or ""
+    if not html_snippet:
         try:
-            html_snippet, _ = convert_body_to_html_and_plaintext(body, emit_logs=False)
+            html_snippet, _ = convert_body_to_html_and_plaintext(body or "", emit_logs=False)
         except Exception:
-            html_snippet = body
-        if html_snippet:
-            html_snippet = _rewrite_email_cid_image_src(html_snippet, attachments or ())
-        return HTML_CLEANER.clean(html_snippet) if html_snippet else ""
-    # Non-email channels: Let frontend render markdown (handles <br> naturally)
-    return ""
+            html_snippet = body or ""
+    if html_snippet:
+        html_snippet = _rewrite_email_cid_image_src(html_snippet, attachments)
+    return HTML_CLEANER.clean(html_snippet) if html_snippet else ""
+
+
+def _message_body_html(message: PersistentAgentMessage, channel: str | None, attachments: Sequence[dict]) -> str:
+    if not channel or channel.lower() != "email":
+        return ""
+    payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    explicit_html = payload.get("body_html")
+    return _render_email_body_html(
+        message.body or "",
+        attachments,
+        explicit_html=explicit_html.strip() if isinstance(explicit_html, str) else None,
+    )
 
 
 def _rewrite_email_cid_image_src(html_body: str, attachments: Sequence[dict]) -> str:
@@ -537,7 +545,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         if not sender_name:
             sender_name = sender_address
 
-    body_html = _humanize_body(message.body or "", channel, attachments)
+    body_html = _message_body_html(message, channel, attachments)
 
     return {
         "kind": "message",

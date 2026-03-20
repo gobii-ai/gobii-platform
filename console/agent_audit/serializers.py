@@ -73,13 +73,15 @@ def serialize_message(message: PersistentAgentMessage) -> dict:
     self_agent = getattr(message, "owner_agent", None)
     self_agent_name = getattr(self_agent, "name", None)
     peer_link_id = getattr(conversation, "peer_link_id", None) if conversation else None
+    payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    body_html = payload.get("body_html") if channel.lower() == "email" else None
     return {
         "kind": "message",
         "id": str(message.id),
         "timestamp": timestamp,
         "is_outbound": bool(message.is_outbound),
         "channel": channel,
-        "body_html": None,
+        "body_html": body_html if isinstance(body_html, str) else None,
         "body_text": message.body or "",
         "attachments": attachments,
         "peer_agent": peer_payload,

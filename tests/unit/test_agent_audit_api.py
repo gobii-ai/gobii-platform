@@ -135,12 +135,12 @@ class StaffAgentAuditAPITests(TestCase):
         )
         from_ep = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
-            channel=CommsChannel.WEB,
+            channel=CommsChannel.EMAIL,
             address=f"agent-{uuid4().hex}@example.com",
             is_primary=True,
         )
         to_ep = PersistentAgentCommsEndpoint.objects.create(
-            channel=CommsChannel.WEB,
+            channel=CommsChannel.EMAIL,
             address=f"user-{uuid4().hex}@example.com",
         )
         PersistentAgentMessage.objects.create(
@@ -149,6 +149,7 @@ class StaffAgentAuditAPITests(TestCase):
             to_endpoint=to_ep,
             owner_agent=self.agent,
             body="Hello from the agent.",
+            raw_payload={"body_html": "<p><strong>Hello</strong> from the agent.</p>"},
         )
 
         response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/")
@@ -187,6 +188,7 @@ class StaffAgentAuditAPITests(TestCase):
         exported_message = export_payload["messages"][0]
         self.assertIsNotNone(exported_message.get("timestamp"))
         self.assertEqual(exported_message.get("body_text"), "Hello from the agent.")
+        self.assertEqual(exported_message.get("body_html"), "<p><strong>Hello</strong> from the agent.</p>")
 
     def test_audit_export_requires_staff(self):
         self.client.force_login(self.nonstaff)
