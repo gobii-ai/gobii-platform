@@ -1943,7 +1943,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         self,
         key,
         value,
-        domain="*",
+        domain="https://api.example.com",
         name=None,
         secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
     ):

@@ -5479,6 +5479,14 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
 
 def _format_credential_secrets(secrets_qs, is_pending: bool) -> list[str]:
     """Format domain-scoped credential secrets for prompt context."""
+    def _display_domain_pattern(domain_pattern: str) -> str:
+        # Wildcard host patterns are stored with an implicit https:// prefix for
+        # validation consistency, but the agent-facing prompt is easier to scan
+        # when it shows the original host wildcard form.
+        if domain_pattern.startswith("https://*."):
+            return domain_pattern.removeprefix("https://")
+        return domain_pattern
+
     secret_lines: list[str] = []
     current_domain: str | None = None
     for secret in secrets_qs:
@@ -5486,7 +5494,7 @@ def _format_credential_secrets(secrets_qs, is_pending: bool) -> list[str]:
         if secret.domain_pattern != current_domain:
             if current_domain is not None:
                 secret_lines.append("")  # blank line between domains
-            secret_lines.append(f"Domain: {secret.domain_pattern}")
+            secret_lines.append(f"Domain: {_display_domain_pattern(secret.domain_pattern)}")
             current_domain = secret.domain_pattern
 
         # Format secret info
