@@ -17,6 +17,7 @@ from django.core.files.base import ContentFile
 
 from api.models import CommsChannel
 from .adapters import (
+    EMAIL_BODY_HTML_PAYLOAD_KEY,
     ParsedMessage,
     _html_to_text,
     _is_forward_like,
@@ -31,6 +32,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ExtractedEmailBody:
+    """Decoded body parts for the primary message body.
+
+    ``body_html`` is only populated when a non-attachment ``text/html`` body part
+    is found on the primary message. It remains ``None`` when no preservable HTML
+    body exists or later parsing steps intentionally suppress preservation.
+    """
+
+    body_text: str
+    body_used: str
+    body_html: str | None = None
+
+
 def _decode_header_value(value: Optional[str]) -> str:
     if not value:
         return ""
@@ -40,67 +55,102 @@ def _decode_header_value(value: Optional[str]) -> str:
         return value or ""
 
 
-def _choose_body(msg: email.message.EmailMessage) -> Tuple[str, str]:
-    """Return best-effort plain text body and a note of which source was used.
+def _decode_part_payload(part: email.message.EmailMessage) -> str | None:
+    payload = part.get_payload(decode=True) or b""
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset, errors="replace")
+    except LookupError:
+        logger.debug("Unknown email charset %r; falling back to utf-8", charset)
+        return payload.decode("utf-8", errors="replace")
+
+
+def _iter_primary_body_parts(msg: email.message.EmailMessage):
+    """Yield leaf parts that belong to the primary message body.
+
+    This traverses multipart containers used for the visible body, but skips
+    attached messages so we never preserve HTML from a nested ``message/rfc822``
+    attachment as if it were the top-level email body.
+    """
+    if not msg.is_multipart():
+        yield msg
+        return
+
+    for part in msg.iter_parts():
+        ctype = (part.get_content_type() or "").lower()
+        dispo = (part.get_content_disposition() or "").lower()
+
+        if ctype == "message/rfc822" or dispo == "attachment":
+            continue
+
+        if part.is_multipart():
+            yield from _iter_primary_body_parts(part)
+            continue
+
+        yield part
+
+
+def _extract_text_parts(msg: email.message.EmailMessage) -> ExtractedEmailBody:
+    """Return best-effort plain text body, source note, and preserved HTML when safe.
 
     Preference order:
     1) text/plain (non-attachment)
     2) text/html → text via _html_to_text
     3) entire message string as last resort
+
+    "Safe" means the HTML came from a non-attachment body part on the primary
+    message, not from a nested attached email or fallback raw-message rendering.
     """
+    plain_body: str | None = None
+    html_body: str | None = None
+
     # 1) text/plain
     if msg.is_multipart():
-        for part in msg.walk():
+        for part in _iter_primary_body_parts(msg):
             ctype = (part.get_content_type() or "").lower()
-            dispo = (part.get_content_disposition() or "").lower()
-            if ctype == "text/plain" and dispo != "attachment":
-                try:
-                    payload = part.get_payload(decode=True) or b""
-                    charset = part.get_content_charset() or "utf-8"
-                    text = payload.decode(charset, errors="replace")
-                    return text, "text/plain"
-                except Exception:
-                    continue
+            if ctype == "text/html" and not html_body:
+                html_body = _decode_part_payload(part)
+            if ctype == "text/plain" and plain_body is None:
+                text = _decode_part_payload(part)
+                if text is not None:
+                    plain_body = text
+        if plain_body is not None:
+            return ExtractedEmailBody(
+                body_text=plain_body,
+                body_used="text/plain",
+                body_html=html_body,
+            )
     else:
-        if (msg.get_content_type() or "").lower() == "text/plain":
-            try:
-                payload = msg.get_payload(decode=True) or b""
-                charset = msg.get_content_charset() or "utf-8"
-                return payload.decode(charset, errors="replace"), "text/plain"
-            except Exception:
-                pass
+        content_type = (msg.get_content_type() or "").lower()
+        if content_type == "text/plain":
+            text = _decode_part_payload(msg)
+            if text is not None:
+                return ExtractedEmailBody(body_text=text, body_used="text/plain")
+        elif content_type == "text/html":
+            html_body = _decode_part_payload(msg)
 
     # 2) text/html → text
-    if msg.is_multipart():
-        for part in msg.walk():
-            ctype = (part.get_content_type() or "").lower()
-            dispo = (part.get_content_disposition() or "").lower()
-            if ctype == "text/html" and dispo != "attachment":
-                try:
-                    payload = part.get_payload(decode=True) or b""
-                    charset = part.get_content_charset() or "utf-8"
-                    html = payload.decode(charset, errors="replace")
-                    return _html_to_text(html), "text/html→text"
-                except Exception:
-                    continue
-    else:
-        if (msg.get_content_type() or "").lower() == "text/html":
-            try:
-                payload = msg.get_payload(decode=True) or b""
-                charset = msg.get_content_charset() or "utf-8"
-                html = payload.decode(charset, errors="replace")
-                return _html_to_text(html), "text/html→text"
-            except Exception:
-                pass
+    if html_body:
+        return ExtractedEmailBody(
+            body_text=_html_to_text(html_body),
+            body_used="text/html→text",
+            body_html=html_body,
+        )
 
     # 3) fallback: raw
     try:
-        return msg.get_body(preferencelist=('plain', 'html')).get_content(), "fallback/body"
+        return ExtractedEmailBody(
+            body_text=msg.get_body(preferencelist=('plain', 'html')).get_content(),
+            body_used="fallback/body",
+        )
     except Exception:
         try:
-            return msg.as_string(), "fallback/as_string"
+            return ExtractedEmailBody(
+                body_text=msg.as_string(),
+                body_used="fallback/as_string",
+            )
         except Exception:
-            return "", "fallback/empty"
+            return ExtractedEmailBody(body_text="", body_used="fallback/empty")
 
 
 def _collect_attachments(msg: email.message.EmailMessage) -> Tuple[List[Any], List[dict[str, Any]]]:
@@ -188,12 +238,16 @@ class ImapEmailAdapter:
         references = _decode_header_value(msg.get("References"))
 
         # Body text selection
-        body_text, body_used = _choose_body(msg)
+        extracted_body = _extract_text_parts(msg)
+        body_text = extracted_body.body_text
+        body_used = extracted_body.body_used
 
         # Strip forwards/replies if configured
+        body_html_preserved = extracted_body.body_html
         if EMAIL_STRIP_REPLIES:
             is_forward = _is_forward_like(subject or "", body_text or "", [])
             if is_forward:
+                body_html_preserved = None
                 pre, fwd = _extract_forward_sections(body_text)
                 if fwd and pre:
                     body_text = f"{pre}\n\n{fwd}"
@@ -218,6 +272,8 @@ class ImapEmailAdapter:
             "headers": hdr_map,
             "body_used": body_used,
         }
+        if body_html_preserved:
+            raw_payload[EMAIL_BODY_HTML_PAYLOAD_KEY] = body_html_preserved
         if ctx is not None:
             if ctx.uid:
                 raw_payload["imap_uid"] = str(ctx.uid)

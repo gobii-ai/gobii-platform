@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from email.message import EmailMessage
 import json
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,8 @@ from django.utils import timezone
 
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.comms.imap_adapter import ImapEmailAdapter
+from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
@@ -517,6 +520,190 @@ class AgentChatAPITests(TestCase):
         self.assertIn("https://example.com/generated.png", rendered_html)
         self.assertIn("<img", rendered_html)
         self.assertNotIn("&lt;", rendered_html)
+
+    @tag("batch_agent_chat")
+    def test_timeline_prefers_preserved_email_html_from_raw_payload(self):
+        html_body = (
+            "<table><tr><th>Status</th></tr><tr><td><strong>Ready</strong></td></tr></table>"
+        )
+        plain_body = "Status: Ready"
+        email_address = "raw-html@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=plain_body,
+            owner_agent=self.agent,
+            raw_payload={"body_html": html_body},
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        html_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
+        )
+
+        rendered_html = html_event["message"]["bodyHtml"]
+        self.assertIn("<table>", rendered_html)
+        self.assertIn("<strong>Ready</strong>", rendered_html)
+        self.assertNotIn("<p>Status: Ready</p>", rendered_html)
+
+    @tag("batch_agent_chat")
+    def test_timeline_uses_preserved_html_for_ingested_imap_email(self):
+        recipient_address = f"agent-{self.agent.id}@example.com"
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=recipient_address,
+            is_primary=True,
+        )
+
+        message = EmailMessage()
+        message["From"] = "sender@example.com"
+        message["To"] = recipient_address
+        message["Subject"] = "Status update"
+        message.set_content("Plain status update")
+        message.add_alternative(
+            "<table><tr><th>Status</th></tr><tr><td><strong>Ready</strong></td></tr></table>",
+            subtype="html",
+        )
+
+        parsed = ImapEmailAdapter.parse_bytes(message.as_bytes(), recipient_address=recipient_address)
+        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        html_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == "Plain status update\n"
+        )
+
+        rendered_html = html_event["message"]["bodyHtml"]
+        self.assertIn("<table>", rendered_html)
+        self.assertIn("<strong>Ready</strong>", rendered_html)
+        self.assertNotIn("<p>Plain status update</p>", rendered_html)
+
+    @tag("batch_agent_chat")
+    def test_timeline_preserves_safe_inline_email_styles(self):
+        html_body = (
+            "<div style='background: #f8f9fa; padding: 14px; border-radius: 8px; border-left: 4px solid #1976d2;'>"
+            "<strong style='color: #1976d2;'>Consultant Note</strong>"
+            "<span style='font-size: 14px; color: #333; line-height: 1.5;'>Styled body</span>"
+            "</div>"
+            "<h2 style='margin-top: 28px; border-bottom: 2px solid #1976d2; padding-bottom: 6px;'>Bigger Picture</h2>"
+            "<p><em>Supporting detail</em></p>"
+        )
+        plain_body = "Consultant Note\nStyled body\nBigger Picture"
+        email_address = "styled-html@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=plain_body,
+            owner_agent=self.agent,
+            raw_payload={"body_html": html_body},
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        html_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
+        )
+
+        rendered_html = html_event["message"]["bodyHtml"]
+        self.assertIn("<div style=", rendered_html)
+        self.assertIn("background: #f8f9fa", rendered_html)
+        self.assertIn("border-left: 4px solid #1976d2", rendered_html)
+        self.assertIn("<strong style=", rendered_html)
+        self.assertIn("color: #1976d2", rendered_html)
+        self.assertIn("<span style=", rendered_html)
+        self.assertIn("font-size: 14px", rendered_html)
+        self.assertIn("<h2 style=", rendered_html)
+        self.assertIn("margin-top: 28px", rendered_html)
+        self.assertIn("<em>Supporting detail</em>", rendered_html)
+
+    @tag("batch_agent_chat")
+    def test_timeline_rewrites_cid_image_src_from_preserved_email_html(self):
+        html_body = "<p><img src='cid:roadmap-card.png' alt='Roadmap card' /></p>"
+        plain_body = "See roadmap card"
+        email_address = "raw-html-cid@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=plain_body,
+            owner_agent=self.agent,
+            raw_payload={"body_html": html_body},
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"image-bytes", name="roadmap-card.png"),
+            content_type="image/png",
+            file_size=11,
+            filename="roadmap-card.png",
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        cid_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
+        )
+
+        rendered_html = cid_event["message"]["bodyHtml"]
+        attachment_url = cid_event["message"]["attachments"][0]["url"]
+        self.assertIn(attachment_url, rendered_html)
+        self.assertNotIn("cid:roadmap-card.png", rendered_html)
 
     @tag("batch_agent_chat")
     def test_timeline_rewrites_cid_image_src_to_attachment_url(self):
