@@ -7326,6 +7326,10 @@ class PersistentAgentSecret(models.Model):
                 except ValueError as e:
                     raise ValidationError({'key': str(e)})
 
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
     def set_value(self, value: str):
         """
         Encrypt and set the secret value.
