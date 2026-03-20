@@ -63,6 +63,7 @@ const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const PIPEDREAM_APPS_SETTINGS_URL = '/console/api/mcp/pipedream/apps/'
 const PIPEDREAM_APP_SEARCH_URL = '/console/api/mcp/pipedream/apps/search/'
+const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -801,6 +802,30 @@ export function AgentChatPage({
     () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets),
     [timelineEvents, statusExpansionTargets],
   )
+  const [timelineCanScrollForOlder, setTimelineCanScrollForOlder] = useState(false)
+
+  const canLoadOlderViaScroll = useCallback((container: HTMLElement | null) => {
+    if (!container) {
+      return false
+    }
+    return container.scrollHeight > container.clientHeight + TIMELINE_SCROLLABILITY_EPSILON_PX
+  }, [])
+
+  const syncTimelineScrollability = useCallback((container: HTMLElement | null) => {
+    const next = canLoadOlderViaScroll(container)
+    setTimelineCanScrollForOlder((current) => (current === next ? current : next))
+    return next
+  }, [canLoadOlderViaScroll])
+
+  const showOlderLoadButton = (
+    !initialLoading
+    && !isNewAgent
+    && !switchingAgentId
+    && timelineEvents.length > 0
+    && timelineHasMoreOlder
+    && !timelineLoadingOlder
+    && !timelineCanScrollForOlder
+  )
 
   const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
   const prevScrollHeightRef = useRef(0)
@@ -840,6 +865,7 @@ export function AgentChatPage({
   // Auto-trigger older loading when scrolled near top
   useEffect(() => {
     const container = timelineRef.current
+    const canReachOlderViaScroll = canLoadOlderViaScroll(container)
     const nearTopByScroll = container ? container.scrollTop <= TOP_LOAD_THRESHOLD_PX : false
     if (
       !didInitialScrollRef.current
@@ -847,6 +873,7 @@ export function AgentChatPage({
       || isNewAgent
       || switchingAgentId
       || !timelineEvents.length
+      || !canReachOlderViaScroll
     ) {
       return
     }
@@ -856,6 +883,7 @@ export function AgentChatPage({
   }, [
     initialLoading,
     isNewAgent,
+    canLoadOlderViaScroll,
     requestPreviousPage,
     switchingAgentId,
     timelineEvents.length,
@@ -1342,12 +1370,14 @@ export function AgentChatPage({
     const handleScroll = () => {
       const nextScrollTop = container.scrollTop
       const distanceFromBottom = syncNearBottomState(container)
+      const canReachOlderViaScroll = syncTimelineScrollability(container)
       if (
         didInitialScrollRef.current
         && !initialLoading
         && !isNewAgent
         && !switchingAgentId
         && timelineEvents.length
+        && canReachOlderViaScroll
         && nextScrollTop <= TOP_LOAD_THRESHOLD_PX
       ) {
         requestPreviousPage()
@@ -1426,6 +1456,7 @@ export function AgentChatPage({
 
     // Listen on the container, not window
     syncNearBottomState(container)
+    syncTimelineScrollability(container)
     container.addEventListener('scroll', handleScroll, { passive: true })
     container.addEventListener('wheel', handleWheel, { passive: true })
     container.addEventListener('touchstart', handleTouchStart, { passive: true })
@@ -1448,6 +1479,7 @@ export function AgentChatPage({
     isNewAgent,
     repinAutoScrollIfAtBottom,
     requestPreviousPage,
+    syncTimelineScrollability,
     switchingAgentId,
     syncNearBottomState,
     timelineEvents.length,
@@ -1640,15 +1672,20 @@ export function AgentChatPage({
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
+    syncTimelineScrollability(node)
     setTimelineNode(node)
-  }, [])
+  }, [syncTimelineScrollability])
 
   // Observe timeline changes (e.g. images loading, new DOM elements) to keep pinned to bottom
   useEffect(() => {
-    if (!timelineNode) return
+    if (!timelineNode) {
+      setTimelineCanScrollForOlder(false)
+      return
+    }
     const inner = document.getElementById('timeline-events')
 
     const observer = new ResizeObserver(() => {
+      syncTimelineScrollability(timelineNode)
       const shouldFollow = shouldAutoFollowTimeline()
       // If pinned, ensure we stay at the bottom when content changes
       // Skip while user is actively touching to prevent scroll fighting on mobile
@@ -1665,7 +1702,7 @@ export function AgentChatPage({
       observer.observe(inner)
     }
     return () => observer.disconnect()
-  }, [executeAutoFollow, timelineNode, shouldAutoFollowTimeline, syncNearBottomState])
+  }, [executeAutoFollow, syncTimelineScrollability, timelineNode, shouldAutoFollowTimeline, syncNearBottomState])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -3158,6 +3195,7 @@ export function AgentChatPage({
         statusExpansionTargets={statusExpansionTargets}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
+        showOlderLoadButton={showOlderLoadButton}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
         newestCursor={timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : null}
         processingActive={timelineProcessingActive}
@@ -3166,6 +3204,7 @@ export function AgentChatPage({
         processingWebTasks={timelineProcessingWebTasks}
         nextScheduledAt={timelineNextScheduledAt}
         streaming={timelineStreaming}
+        onLoadOlder={requestPreviousPage}
         onSendMessage={handleSend}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
         onJumpToLatest={handleJumpToLatest}
