@@ -59,6 +59,20 @@ def _within_downgrade_grace(agent) -> bool:
         return timezone.now() < (downgraded_at + timedelta(hours=48))
 
 
+def _is_exempt_from_soft_expiration(agent) -> bool:
+    """Return True if the agent should be skipped by the soft-expiration sweep.
+
+    An agent is exempt when it is on a paid plan (so only free accounts expire)
+    or still within the post-downgrade grace window (so recently-downgraded users
+    get a chance to upgrade back before their agents are affected).
+    """
+    if not _is_free_plan_for_agent(agent):
+        return True
+    if _within_downgrade_grace(agent):
+        return True
+    return False
+
+
 def _get_agent_sending_endpoint(
     agent,
     channel: CommsChannel,
@@ -192,9 +206,7 @@ def soft_expire_inactive_agents_task() -> int:
             last_ts = agent.last_interaction_at or agent.created_at
             if last_ts > cutoff:
                 continue
-            if not _is_free_plan_for_agent(agent):
-                continue
-            if _within_downgrade_grace(agent):
+            if _is_exempt_from_soft_expiration(agent):
                 continue
             # Expire within a transaction/lock
             with transaction.atomic():
@@ -206,19 +218,19 @@ def soft_expire_inactive_agents_task() -> int:
                         or not locked_agent.is_active
                         or not locked_agent.schedule
                         or last_ts_locked > cutoff
-                        or not _is_free_plan_for_agent(locked_agent)
-                        or _within_downgrade_grace(locked_agent)
+                        or _is_exempt_from_soft_expiration(locked_agent)
                 ):
                     continue
 
                 # Snapshot schedule for restoration (best-effort) and clear active schedule
                 locked_agent.schedule_snapshot = locked_agent.schedule
 
-                # Clear schedule; model.save will sync RedBeat (removal) after commit
+                # Clear schedule and deactivate; model.save will sync RedBeat (removal) after commit
                 locked_agent.schedule = ""
+                locked_agent.is_active = False
                 locked_agent.life_state = locked_agent.LifeState.EXPIRED
                 locked_agent.last_expired_at = now
-                locked_agent.save(update_fields=["schedule_snapshot", "schedule", "life_state", "last_expired_at"])
+                locked_agent.save(update_fields=["schedule_snapshot", "schedule", "is_active", "life_state", "last_expired_at"])
 
                 # Enqueue centralized cleanup for soft-expire (idempotent)
                 try:
