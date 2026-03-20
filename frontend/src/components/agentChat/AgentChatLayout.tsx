@@ -127,7 +127,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
   highPriorityBanner?: HighPriorityBannerConfig | null
-  showOlderLoadButton?: boolean
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -248,8 +247,6 @@ export function AgentChatLayout({
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
   highPriorityBanner = null,
-  showOlderLoadButton = false,
-  onLoadOlder,
   hasMoreNewer,
   processingActive,
   awaitingResponse = false,
@@ -871,13 +868,6 @@ export function AgentChatLayout({
                       <span className="timeline-load-indicator" data-loading="true" aria-hidden="true" />
                       <span className="timeline-load-label">Loading…</span>
                     </div>
-                  </div>
-                ) : showOlderLoadButton && onLoadOlder ? (
-                  <div className="timeline-load-control" data-side="older" data-state="ready">
-                    <button type="button" className="timeline-load-button" onClick={onLoadOlder}>
-                      <span className="timeline-load-indicator" aria-hidden="true" />
-                      <span className="timeline-load-label">Load older activity</span>
-                    </button>
                   </div>
                 ) : null}
 
