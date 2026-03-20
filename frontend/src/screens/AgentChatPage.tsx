@@ -814,6 +814,16 @@ export function AgentChatPage({
     return next
   }, [canLoadOlderViaScroll])
 
+  const showOlderLoadButton = (
+    !initialLoading
+    && !isNewAgent
+    && !switchingAgentId
+    && timelineEvents.length > 0
+    && timelineHasMoreOlder
+    && !timelineLoadingOlder
+    && !timelineCanScrollForOlder
+  )
+
   const prevPageCountRef = useRef(timelineQuery.data?.pages?.length ?? 0)
   const prevScrollHeightRef = useRef(0)
   const prependTrackingAgentIdRef = useRef<string | null>(activeAgentId)
@@ -848,32 +858,6 @@ export function AgentChatPage({
   useEffect(() => {
     olderPageRequestInFlightRef.current = false
   }, [activeAgentId])
-
-  // Auto-backfill older history until the timeline becomes scrollable or history is exhausted.
-  useEffect(() => {
-    if (
-      !didInitialScrollRef.current
-      || initialLoading
-      || isNewAgent
-      || switchingAgentId
-      || !timelineEvents.length
-      || !timelineHasMoreOlder
-      || timelineLoadingOlder
-      || timelineCanScrollForOlder
-    ) {
-      return
-    }
-    requestPreviousPage()
-  }, [
-    initialLoading,
-    isNewAgent,
-    requestPreviousPage,
-    switchingAgentId,
-    timelineCanScrollForOlder,
-    timelineEvents.length,
-    timelineHasMoreOlder,
-    timelineLoadingOlder,
-  ])
 
   // Auto-trigger older loading when scrolled near top
   useEffect(() => {
@@ -3199,6 +3183,7 @@ export function AgentChatPage({
         statusExpansionTargets={statusExpansionTargets}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
+        showOlderLoadButton={showOlderLoadButton}
         oldestCursor={timelineEvents.length ? timelineEvents[0].cursor : null}
         newestCursor={timelineEvents.length ? timelineEvents[timelineEvents.length - 1].cursor : null}
         processingActive={timelineProcessingActive}
@@ -3207,6 +3192,7 @@ export function AgentChatPage({
         processingWebTasks={timelineProcessingWebTasks}
         nextScheduledAt={timelineNextScheduledAt}
         streaming={timelineStreaming}
+        onLoadOlder={requestPreviousPage}
         onSendMessage={handleSend}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
         onJumpToLatest={handleJumpToLatest}
