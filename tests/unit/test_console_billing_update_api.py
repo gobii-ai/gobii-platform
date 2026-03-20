@@ -16,6 +16,7 @@ from api.models import (
     ProxyServer,
     UserBilling,
 )
+from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES
 
 
 def create_persistent_agent(user, name: str, *, organization: Organization | None = None) -> PersistentAgent:
@@ -294,6 +295,50 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertIn("return_to=%2Fconsole%2Fbilling%2F", payload.get("redirectUrl", ""))
         ensure_kwargs = mock_ensure_single_subscription.call_args.kwargs
         self.assertNotIn("metered_price_id", ensure_kwargs)
+
+    @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
+    @patch("console.billing_update_service.stripe.checkout.Session.create")
+    @patch(
+        "console.billing_update_service.get_or_create_stripe_customer",
+        return_value=SimpleNamespace(id="cus_org_checkout"),
+    )
+    @patch("console.billing_update_service.get_stripe_settings")
+    @patch("console.billing_update_service.stripe_status")
+    def test_org_seat_checkout_redirect_excludes_disabled_payment_methods(
+        self,
+        mock_stripe_status,
+        mock_get_stripe_settings,
+        _mock_get_customer,
+        mock_session_create,
+        _mock_assign_key,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_get_stripe_settings.return_value = SimpleNamespace(org_team_price_id="price_org_team")
+        mock_session_create.return_value = SimpleNamespace(url="https://stripe.test/org-seat-checkout")
+
+        resp = self.client.post(
+            self.url,
+            data=json.dumps(
+                {
+                    "ownerType": "organization",
+                    "organizationId": str(self.org.id),
+                    "seatsTarget": 2,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertTrue(payload.get("ok"))
+        self.assertEqual(payload.get("redirectUrl"), "https://stripe.test/org-seat-checkout")
+        _, kwargs = mock_session_create.call_args
+        self.assertEqual(
+            kwargs["excluded_payment_method_types"],
+            EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertNotIn("payment_method_types", kwargs)
+        self.assertEqual(kwargs["line_items"], [{"price": "price_org_team", "quantity": 2}])
 
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
     @patch("console.billing_update_service.stripe.Subscription.retrieve")

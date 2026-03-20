@@ -461,6 +461,7 @@ from constants.plans import EXTRA_TASKS_DEFAULT_MAX_TASKS, PlanNames, PlanNamesC
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
+    EXCLUDED_PAYMENT_METHOD_TYPES,
 )
 from util.waffle_flags import is_waffle_flag_active
 from opentelemetry import trace, baggage, context
@@ -8659,6 +8660,7 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 mode="subscription",
                 success_url=success_url,
                 cancel_url=cancel_url,
+                excluded_payment_method_types=EXCLUDED_PAYMENT_METHOD_TYPES,
                 allow_promotion_codes=True,
                 line_items=line_items,
                 metadata={
@@ -9933,6 +9935,7 @@ def _start_addon_checkout_session(customer_id: str, price_id: str, quantity: int
         success_url=success_url,
         cancel_url=cancel_url,
         mode="subscription",
+        excluded_payment_method_types=EXCLUDED_PAYMENT_METHOD_TYPES,
         allow_promotion_codes=True,
         line_items=[
             {

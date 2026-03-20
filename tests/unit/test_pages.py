@@ -18,6 +18,7 @@ from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from constants.plans import PlanNames
+from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES
 from api.services.pipedream_apps import PipedreamCatalogError
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
@@ -1413,6 +1414,11 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
 
         kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(
+            kwargs["excluded_payment_method_types"],
+            EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         self.assertEqual(
             kwargs["line_items"],
@@ -1521,6 +1527,11 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
 
         kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(
+            kwargs["excluded_payment_method_types"],
+            EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertNotIn("payment_method_types", kwargs)
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
         self.assertEqual(
             kwargs["line_items"],
