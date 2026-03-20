@@ -298,6 +298,23 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertEqual(mock_execute_enabled.call_count, 2)
         self.assertTrue(all(not call.kwargs.get("isolated_mcp", False) for call in mock_execute_enabled.call_args_list))
 
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok", "auto_sleep_ok": True})
+    def test_same_batch_literal_file_dependency_falls_back_to_serial(
+        self,
+        mock_execute_enabled,
+        _mock_credit,
+    ):
+        self._run_single_iteration(
+            [
+                _tool_call("create_csv", '{"csv_text": "a\\n1\\n", "file_path": "/exports/report.csv"}'),
+                _tool_call("read_file", '{"path": "/exports/report.csv"}'),
+            ]
+        )
+
+        self.assertEqual(mock_execute_enabled.call_count, 2)
+        self.assertTrue(all(not call.kwargs.get("isolated_mcp", False) for call in mock_execute_enabled.call_args_list))
+
     @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=SimpleNamespace(errors=[]))
     @patch(
         "api.agent.core.event_processing.apply_sqlite_kanban_updates",

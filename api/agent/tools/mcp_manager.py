@@ -134,6 +134,27 @@ def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, An
     return updated_parameters
 
 
+def _extract_will_continue_work(
+    params: Dict[str, Any],
+) -> tuple[Dict[str, Any], Optional[bool]]:
+    will_continue_work_raw = params.get("will_continue_work", None)
+    if will_continue_work_raw is None:
+        will_continue_work = None
+    elif isinstance(will_continue_work_raw, bool):
+        will_continue_work = will_continue_work_raw
+    elif isinstance(will_continue_work_raw, str):
+        will_continue_work = will_continue_work_raw.lower() == "true"
+    else:
+        will_continue_work = None
+
+    if "will_continue_work" not in params:
+        return params, will_continue_work
+
+    sanitized_params = dict(params)
+    sanitized_params.pop("will_continue_work", None)
+    return sanitized_params, will_continue_work
+
+
 def _build_jit_connect_url(agent_id: str, app_slug: str) -> str:
     """
     Build the just-in-time Pipedream connect URL that generates fresh auth links on demand.
@@ -1812,18 +1833,7 @@ class MCPToolManager:
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
 
-        will_continue_work_raw = params.get("will_continue_work", None)
-        if will_continue_work_raw is None:
-            will_continue_work = None
-        elif isinstance(will_continue_work_raw, bool):
-            will_continue_work = will_continue_work_raw
-        elif isinstance(will_continue_work_raw, str):
-            will_continue_work = will_continue_work_raw.lower() == "true"
-        else:
-            will_continue_work = None
-        if "will_continue_work" in params:
-            params = dict(params)
-            params.pop("will_continue_work", None)
+        params, will_continue_work = _extract_will_continue_work(params)
 
         param_error = self._param_guards.validate(server_name, actual_tool_name, params, owner)
         if param_error:
@@ -2099,6 +2109,7 @@ class MCPToolManager:
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
         actual_tool_name = info.tool_name
         server_name = info.server_name
+        params, will_continue_work = _extract_will_continue_work(params)
 
         param_error = self._param_guards.validate(server_name, actual_tool_name, params, owner)
         if param_error:
@@ -2140,7 +2151,10 @@ class MCPToolManager:
                         content = block.text
                         break
 
-            return {"status": "success", "result": content or "Tool executed successfully"}
+            response = {"status": "success", "result": content or "Tool executed successfully"}
+            if will_continue_work is False:
+                response["auto_sleep_ok"] = True
+            return response
         except Exception as exc:
             logger.error("Failed to execute isolated MCP tool %s: %s", tool_name, exc)
             return {"status": "error", "message": str(exc)}

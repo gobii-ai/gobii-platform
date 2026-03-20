@@ -2620,3 +2620,49 @@ class MCPIsolatedExecutionTests(TestCase):
         mock_build.assert_called_once_with(self.runtime)
         mock_run.assert_called_once()
         isolated_client.close.assert_not_called()
+
+    def test_execute_mcp_tool_isolated_strips_will_continue_work_before_validation_and_execution(self):
+        fake_result = SimpleNamespace(is_error=False, data={"ok": True}, content=None)
+
+        async def fake_execute_async(_client, _tool_name, params, timeout_seconds):
+            self.assertEqual(params, {"query": "openai"})
+            self.assertEqual(timeout_seconds, self.manager._get_timeout_for_runtime(self.runtime))
+            return fake_result
+
+        with patch.object(self.manager, "_select_agent_proxy_url", return_value=(None, None)), patch.object(
+            self.manager,
+            "_build_client_for_runtime",
+            return_value=MagicMock(name="isolated-client"),
+        ), patch.object(
+            self.manager._param_guards,
+            "validate",
+            return_value=None,
+        ) as mock_validate, patch.object(
+            self.manager,
+            "_execute_async",
+            side_effect=fake_execute_async,
+        ) as mock_execute_async, patch.object(
+            self.manager,
+            "_run_coroutine_isolated",
+            side_effect=asyncio.run,
+        ), patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            side_effect=lambda _server, _tool, result: result,
+        ):
+            result = self.manager.execute_mcp_tool_isolated(
+                self.agent,
+                self.tool_info.full_name,
+                {"query": "openai", "will_continue_work": False},
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["result"], {"ok": True})
+        self.assertTrue(result["auto_sleep_ok"])
+        mock_validate.assert_called_once_with(
+            self.server_config.name,
+            self.tool_info.tool_name,
+            {"query": "openai"},
+            self.agent.user,
+        )
+        self.assertEqual(mock_execute_async.call_count, 1)

@@ -1118,6 +1118,8 @@ def get_parallel_safe_tool_rejection_reason(tool_name: str, params: Dict[str, An
     if not is_parallel_safe_tool_name(tool_name):
         return f"unsafe_tool:{tool_name}"
     if tool_name == HTTP_REQUEST_TOOL_NAME:
+        # Parallel-safe HTTP is intentionally read-only in v1. Non-GET methods can
+        # have side effects, and downloads write files into filespace.
         method = str((params or {}).get("method") or "GET").strip().upper()
         if method != "GET":
             return "http_request_requires_get"
@@ -1125,4 +1127,3 @@ def get_parallel_safe_tool_rejection_reason(tool_name: str, params: Dict[str, An
         if download in (True, "true", "True", 1):
             return "http_request_download_not_supported"
     return None
-

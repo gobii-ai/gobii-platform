@@ -187,7 +187,9 @@ MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation sig
 MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS = 60
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
-MAX_PARALLEL_SAFE_TOOL_WORKERS = 4
+# Keep v1 fan-out modest: safe batches are usually network-bound and short, and
+# a cap of 6 improves overlap without spiking MCP startup churn and DB connection pressure too aggressively.
+MAX_PARALLEL_SAFE_TOOL_WORKERS = 6
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
@@ -1286,6 +1288,27 @@ def _collect_parallel_placeholder_paths(value: Any) -> set[str]:
     return paths
 
 
+def _normalized_parallel_read_dependency_path(tool_name: str, tool_params: Dict[str, Any]) -> Optional[str]:
+    if tool_name != "read_file":
+        return None
+    for key in ("path", "file_path", "filename"):
+        value = tool_params.get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = _normalize_parallel_placeholder_path(value)
+        if normalized:
+            return normalized
+    return None
+
+
+def _collect_parallel_dependency_paths(tool_name: str, tool_params: Dict[str, Any]) -> set[str]:
+    paths = _collect_parallel_placeholder_paths(tool_params)
+    direct_path = _normalized_parallel_read_dependency_path(tool_name, tool_params)
+    if direct_path:
+        paths.add(direct_path)
+    return paths
+
+
 def _normalized_parallel_output_path(tool_name: str, tool_params: Dict[str, Any]) -> Optional[str]:
     extension = PARALLEL_SAFE_OUTPUT_EXTENSIONS.get(tool_name)
     if not extension:
@@ -1309,7 +1332,10 @@ def _parallel_batch_ineligible_reason(
     for prepared in prepared_calls:
         if not prepared.parallel_safe:
             return prepared.parallel_ineligible_reason or f"unsafe_tool:{prepared.tool_name}"
-        referenced_paths = _collect_parallel_placeholder_paths(prepared.tool_params)
+        referenced_paths = _collect_parallel_dependency_paths(
+            prepared.tool_name,
+            prepared.tool_params,
+        )
         if produced_paths.intersection(referenced_paths):
             return f"same_batch_dependency:{prepared.tool_name}"
         output_path = _normalized_parallel_output_path(prepared.tool_name, prepared.tool_params)
