@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ExtractedEmailBody:
+    """Decoded body parts for the primary message body.
+
+    ``body_html`` is only populated when a non-attachment ``text/html`` body part
+    is found on the primary message. It remains ``None`` when no preservable HTML
+    body exists or later parsing steps intentionally suppress preservation.
+    """
+
     body_text: str
     body_used: str
     body_html: str | None = None
@@ -49,12 +56,38 @@ def _decode_header_value(value: Optional[str]) -> str:
 
 
 def _decode_part_payload(part: email.message.EmailMessage) -> str | None:
+    payload = part.get_payload(decode=True) or b""
+    charset = part.get_content_charset() or "utf-8"
     try:
-        payload = part.get_payload(decode=True) or b""
-        charset = part.get_content_charset() or "utf-8"
         return payload.decode(charset, errors="replace")
-    except Exception:
-        return None
+    except LookupError:
+        logger.debug("Unknown email charset %r; falling back to utf-8", charset)
+        return payload.decode("utf-8", errors="replace")
+
+
+def _iter_primary_body_parts(msg: email.message.EmailMessage):
+    """Yield leaf parts that belong to the primary message body.
+
+    This traverses multipart containers used for the visible body, but skips
+    attached messages so we never preserve HTML from a nested ``message/rfc822``
+    attachment as if it were the top-level email body.
+    """
+    if not msg.is_multipart():
+        yield msg
+        return
+
+    for part in msg.iter_parts():
+        ctype = (part.get_content_type() or "").lower()
+        dispo = (part.get_content_disposition() or "").lower()
+
+        if ctype == "message/rfc822" or dispo == "attachment":
+            continue
+
+        if part.is_multipart():
+            yield from _iter_primary_body_parts(part)
+            continue
+
+        yield part
 
 
 def _extract_text_parts(msg: email.message.EmailMessage) -> ExtractedEmailBody:
@@ -64,18 +97,20 @@ def _extract_text_parts(msg: email.message.EmailMessage) -> ExtractedEmailBody:
     1) text/plain (non-attachment)
     2) text/html → text via _html_to_text
     3) entire message string as last resort
+
+    "Safe" means the HTML came from a non-attachment body part on the primary
+    message, not from a nested attached email or fallback raw-message rendering.
     """
     plain_body: str | None = None
     html_body: str | None = None
 
     # 1) text/plain
     if msg.is_multipart():
-        for part in msg.walk():
+        for part in _iter_primary_body_parts(msg):
             ctype = (part.get_content_type() or "").lower()
-            dispo = (part.get_content_disposition() or "").lower()
-            if ctype == "text/html" and dispo != "attachment" and not html_body:
+            if ctype == "text/html" and not html_body:
                 html_body = _decode_part_payload(part)
-            if ctype == "text/plain" and dispo != "attachment" and plain_body is None:
+            if ctype == "text/plain" and plain_body is None:
                 text = _decode_part_payload(part)
                 if text is not None:
                     plain_body = text
