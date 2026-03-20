@@ -5,8 +5,10 @@ This module provides email sending functionality for persistent agents,
 including tool definition and execution logic.
 """
 
+import html as _html_lib
 import logging
-from typing import Dict, Any
+import re
+from typing import Dict, Any, List
 
 from ...models import (
     PersistentAgent,
@@ -32,6 +34,93 @@ from api.services.email_verification import require_verified_email, EmailVerific
 from .attachment_guidance import SEND_EMAIL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)
+
+# Regex patterns for detecting markdown pipe-table rows and separator lines.
+_PIPE_TABLE_ROW_RE = re.compile(r"^\s*\|(.+)\|\s*$")
+# Matches separator rows like | --- | --- | or | :---: | ---: | (including single-column).
+_PIPE_TABLE_SEP_RE = re.compile(
+    r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$"
+)
+
+# Inline styles keep tables readable across email clients that strip external CSS.
+_EMAIL_TABLE_STYLE = (
+    "border-collapse:collapse;width:100%;margin:16px 0;font-size:14px;"
+)
+_EMAIL_TH_STYLE = (
+    "padding:10px 12px;text-align:left;background:#f8fafc;"
+    "border-bottom:2px solid #e2e8f0;font-weight:600;color:#1e293b;"
+)
+_EMAIL_TD_STYLE = (
+    "padding:10px 12px;text-align:left;"
+    "border-bottom:1px solid #e2e8f0;color:#334155;"
+)
+
+
+def _parse_pipe_table_cells(line: str) -> List[str]:
+    """Split a markdown table row into individual cell strings."""
+    stripped = line.strip()
+    if stripped.startswith("|"):
+        stripped = stripped[1:]
+    if stripped.endswith("|"):
+        stripped = stripped[:-1]
+    return [cell.strip() for cell in stripped.split("|")]
+
+
+def convert_markdown_pipe_tables_to_html(body: str) -> str:
+    """Convert any markdown pipe tables in *body* to native HTML ``<table>`` elements.
+
+    Agents occasionally emit markdown pipe-table syntax (``| Col | Col |``) despite
+    instructions to use HTML. This function detects those patterns and replaces
+    them with proper ``<table>/<tr>/<th>/<td>`` markup so the stored message body
+    is always clean, renderable HTML rather than raw markdown.
+    """
+    if not body or "|" not in body:
+        return body
+
+    lines = body.split("\n")
+    result: List[str] = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        # A markdown table starts with a pipe-delimited row followed immediately
+        # by a separator row (e.g. | --- | --- |).
+        if (
+            _PIPE_TABLE_ROW_RE.match(line)
+            and i + 1 < len(lines)
+            and _PIPE_TABLE_SEP_RE.match(lines[i + 1])
+        ):
+            headers = _parse_pipe_table_cells(line)
+            i += 2  # skip header row and separator line
+
+            th_cells = "".join(
+                f'<th style="{_EMAIL_TH_STYLE}">{_html_lib.escape(h)}</th>'
+                for h in headers
+            )
+            table_parts: List[str] = [
+                f'<table style="{_EMAIL_TABLE_STYLE}">',
+                f"<thead><tr>{th_cells}</tr></thead>",
+                "<tbody>",
+            ]
+
+            while i < len(lines) and _PIPE_TABLE_ROW_RE.match(lines[i]):
+                cells = _parse_pipe_table_cells(lines[i])
+                td_cells = "".join(
+                    f'<td style="{_EMAIL_TD_STYLE}">{_html_lib.escape(c)}</td>'
+                    for c in cells
+                )
+                table_parts.append(f"<tr>{td_cells}</tr>")
+                i += 1
+
+            table_parts.extend(["</tbody>", "</table>"])
+            result.append("\n".join(table_parts))
+            continue
+
+        result.append(line)
+        i += 1
+
+    return "\n".join(result)
 
 
 def _maybe_provision_simulated_from_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint | None:
@@ -82,8 +171,19 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Sends an email to a recipient. Write the body as lightweight, mobile-first HTML (using simple <p>, <br>, <ul>, <ol>, <li>, etc.) that feels like it was typed in a normal email client, not a marketing blast. DO NOT include <html>, <head>, or <body> tags—the system will wrap your content. Avoid markdown formatting and heavy styling. If you need tabular data, use real HTML table tags like <table>, <tr>, <th>, and <td>; do NOT use Markdown pipe tables like | Col | Col |. Quote recent parts of the conversation when relevant. "
-                "IMPORTANT: Use single quotes for ALL HTML attributes (e.g., <a href='https://example.com'>link</a>) to keep the JSON arguments valid. Do NOT use double quotes in HTML attributes."
+                "Sends an email to a recipient. Write the body as lightweight, mobile-first HTML "
+                "(using simple <p>, <br>, <ul>, <ol>, <li>, etc.) that feels like it was typed in "
+                "a normal email client, not a marketing blast. DO NOT include <html>, <head>, or "
+                "<body> tags—the system will wrap your content. "
+                "STRICTLY FORBIDDEN: Markdown formatting of any kind, including Markdown pipe "
+                "tables (| Col | Col |). The email body MUST be pure HTML. "
+                "REQUIRED for tabular data: use native HTML table elements ONLY—<table>, <thead>, "
+                "<tbody>, <tr>, <th>, and <td>. Do NOT use Markdown pipe tables like | Col | Col |; "
+                "they will not render correctly in email clients. "
+                "Quote recent parts of the conversation when relevant. "
+                "IMPORTANT: Use single quotes for ALL HTML attributes "
+                "(e.g., <a href='https://example.com'>link</a>) to keep the JSON arguments valid. "
+                "Do NOT use double quotes in HTML attributes."
             ),
             "parameters": {
                 "type": "object",
@@ -98,7 +198,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "description": "List of CC email addresses (optional)"
                     },
                     "subject": {"type": "string", "description": "Email subject."},
-                    "mobile_first_html": {"type": "string", "description": "Email content as lightweight HTML, excluding <html>, <head>, and <body> tags. Use single quotes for attributes, e.g. <a href='https://news.ycombinator.com'>News</a>. Must be actual email content, NOT tool call syntax. XML like <function_calls> or <invoke> does NOT execute tools—it will be sent as literal text."},
+                    "mobile_first_html": {"type": "string", "description": "Email body as pure HTML (no <html>/<head>/<body> wrappers). Use single quotes for attributes. NEVER use Markdown—especially no pipe tables (| Col | Col |); always use <table>/<tr>/<th>/<td> for tabular data. Must be actual email content, NOT tool call syntax. XML like <function_calls> or <invoke> does NOT execute tools—it will be sent as literal text."},
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -129,6 +229,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     mobile_first_html = strip_control_chars(mobile_first_html)
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
+    # Ensure any markdown pipe tables are converted to native HTML table elements
+    # before the body is stored, so the message always contains clean HTML.
+    mobile_first_html = convert_markdown_pipe_tables_to_html(mobile_first_html)
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
