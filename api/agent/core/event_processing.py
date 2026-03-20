@@ -1240,6 +1240,7 @@ class _PreparedToolBatch:
 class _ExecutedToolBatch:
     execution_outcomes: list[_ToolExecutionOutcome]
     tools: List[dict]
+    abort_after_execution: bool = False
 
 
 @dataclass
@@ -1674,11 +1675,13 @@ def _execute_prepared_tool_batch(
     budget_ctx: Optional[BudgetContext],
     eval_run_id: Optional[str],
     tools: List[dict],
+    heartbeat: Any,
     lock_extender: Any,
 ) -> _ExecutedToolBatch:
     execution_outcomes: list[_ToolExecutionOutcome] = []
     run_parallel_batch = prepared_batch.parallel_ineligible_reason is None
     available_tools = tools
+    abort_after_execution = False
 
     if run_parallel_batch:
         logger.info(
@@ -1718,6 +1721,15 @@ def _execute_prepared_tool_batch(
             )
         for prepared in prepared_batch.prepared_calls:
             with tracer.start_as_current_span("Execute Tool") as tool_span:
+                if _should_abort_for_inactive_or_deleted_agent(
+                    agent,
+                    budget_ctx=budget_ctx,
+                    heartbeat=heartbeat,
+                    span=tool_span,
+                    check_context="tool_batch_execute",
+                ):
+                    abort_after_execution = True
+                    break
                 if lock_extender:
                     lock_extender.maybe_extend()
                 tool_span.set_attribute("persistent_agent.id", str(agent.id))
@@ -1742,7 +1754,11 @@ def _execute_prepared_tool_batch(
                         after_count,
                     )
 
-    return _ExecutedToolBatch(execution_outcomes=execution_outcomes, tools=available_tools)
+    return _ExecutedToolBatch(
+        execution_outcomes=execution_outcomes,
+        tools=available_tools,
+        abort_after_execution=abort_after_execution,
+    )
 
 
 def _finalize_tool_batch(
@@ -4579,6 +4595,7 @@ def _run_agent_loop(
                     budget_ctx=budget_ctx,
                     eval_run_id=eval_run_id,
                     tools=tools,
+                    heartbeat=heartbeat,
                     lock_extender=lock_extender,
                 )
                 tools = executed_batch.tools
@@ -4598,7 +4615,7 @@ def _run_agent_loop(
                 )
                 executed_non_message_action = finalized_batch.executed_non_message_action
 
-                if prepared_batch.abort_after_execution:
+                if prepared_batch.abort_after_execution or executed_batch.abort_after_execution:
                     return cumulative_token_usage
 
                 if _apply_runtime_updates():
