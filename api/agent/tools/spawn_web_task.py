@@ -17,6 +17,7 @@ from ...models import (
     PersistentAgentSecret,
 )
 from ..core.budget import get_current_context as get_budget_context, AgentBudgetManager
+from ...services.persistent_agent_secrets import build_browser_task_secret_payload
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ...services.browser_settings import get_browser_settings_for_owner
 
@@ -96,7 +97,6 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
 def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the spawn_web_task tool for a persistent agent."""
     from ...tasks.browser_agent_tasks import process_browser_use_task
-    from ...encryption import SecretsEncryption
 
     prompt = params.get("prompt")
     if not prompt:
@@ -191,14 +191,6 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             # Simply calculate the next depth without mutating shared state
             next_depth = current_depth + 1
 
-        task = BrowserUseAgentTask.objects.create(
-            agent=browser_use_agent,
-            user=agent.user,
-            prompt=prompt,
-            requires_vision=requires_vision,
-            eval_run_id=getattr(budget_ctx, "eval_run_id", None),
-        )
-
         # Copy credential secrets from persistent agent to browser task (exclude requested secrets)
         agent_secrets = agent.secrets.filter(
             requested=False,
@@ -219,26 +211,46 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             
             # Filter to only requested secrets
             agent_secrets = agent_secrets.filter(key__in=requested_secrets)
-        
-        if agent_secrets.exists():
-            # Convert table-based secrets to JSON format for the task
-            secrets_by_domain = {}
-            secret_keys_by_domain = {}
-            
-            for secret in agent_secrets:
-                domain = secret.domain_pattern
-                if domain not in secrets_by_domain:
-                    secrets_by_domain[domain] = {}
-                    secret_keys_by_domain[domain] = []
-                
-                # Decrypt the secret value for the task
-                secrets_by_domain[domain][secret.key] = secret.get_value()
-                secret_keys_by_domain[domain].append(secret.key)
-            
-            # Encrypt the consolidated secrets for the task
-            task.encrypted_secrets = SecretsEncryption.encrypt_secrets(secrets_by_domain, allow_legacy=False)
-            task.secret_keys = secret_keys_by_domain
-            task.save(update_fields=['encrypted_secrets', 'secret_keys'])
+
+        encrypted_secrets, secret_keys_by_domain, invalid_secrets = build_browser_task_secret_payload(
+            agent,
+            list(agent_secrets),
+        )
+
+        if invalid_secrets:
+            logger.warning(
+                "Persistent agent secrets are invalid for browser task injection",
+                extra={
+                    "agent_id": str(agent.id),
+                    "invalid_secret_count": len(invalid_secrets),
+                    "invalid_secret_ids": [entry["id"] for entry in invalid_secrets],
+                    "invalid_secret_keys": [entry["key"] for entry in invalid_secrets],
+                    "invalid_secret_domains": [entry["domain_pattern"] for entry in invalid_secrets],
+                },
+            )
+
+        if invalid_secrets and requested_secrets:
+            invalid_details = ", ".join(
+                f"{entry['key']} ({entry['domain_pattern']}): {entry['error']}"
+                for entry in invalid_secrets
+            )
+            return {
+                "status": "error",
+                "message": (
+                    "Requested secret keys are stored with invalid configuration and cannot be used: "
+                    f"{invalid_details}"
+                ),
+            }
+
+        task = BrowserUseAgentTask.objects.create(
+            agent=browser_use_agent,
+            user=agent.user,
+            prompt=prompt,
+            requires_vision=requires_vision,
+            eval_run_id=getattr(budget_ctx, "eval_run_id", None),
+            encrypted_secrets=encrypted_secrets,
+            secret_keys=secret_keys_by_domain,
+        )
 
         # If we have a parent branch, increment its outstanding-children counter
         try:

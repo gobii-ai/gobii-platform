@@ -5,17 +5,21 @@ argument but correctly increment the outstanding-children counter in
 Redis so the agent loop keeps the cycle open while children run.
 """
 
+from datetime import timedelta
 import threading
 import time
 from itertools import count
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
-from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask, BrowserConfig
+from api.encryption import SecretsEncryption
+from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask, BrowserConfig, PersistentAgentSecret, TaskCredit
 from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current_context as set_budget_context
 from api.agent.tools.spawn_web_task import execute_spawn_web_task
-from constants.plans import PlanNames
+from constants.grant_types import GrantTypeChoices
+from constants.plans import PlanNames, PlanNamesChoices
 from util.analytics import AnalyticsEvent
 
 
@@ -45,6 +49,14 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             charter="Test",
             browser_use_agent=self.browser_agent
         )
+        TaskCredit.objects.create(
+            user=self.user,
+            credits=50,
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=30),
+            plan=PlanNamesChoices.FREE,
+            grant_type=GrantTypeChoices.PROMO,
+        )
         
         # Initialize a budget cycle
         self.budget_id, _, _ = AgentBudgetManager.find_or_start_cycle(
@@ -69,6 +81,19 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             max_steps=100,
             max_depth=3,
         )
+
+    def _create_credential_secret(self, *, key: str, domain: str, value: str, name: str | None = None) -> PersistentAgentSecret:
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern=domain,
+            name=name or key,
+            key=key,
+            requested=False,
+        )
+        secret.set_value(value)
+        secret.save()
+        return secret
 
     def _set_browser_config(self, *, active: int | None = None, daily: int | None = None) -> None:
         config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.FREE)
@@ -296,3 +321,77 @@ class SpawnDepthTrackingTests(TransactionTestCase):
         mock_track_event.assert_called_once()
         event_args, event_kwargs = mock_track_event.call_args
         self.assertEqual(event_args[1], AnalyticsEvent.PERSISTENT_AGENT_BROWSER_DAILY_LIMIT_REACHED)
+
+    @patch("api.agent.tools.spawn_web_task.logger.warning")
+    @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
+    @patch("api.tasks.browser_agent_tasks.process_browser_use_task")
+    def test_spawn_skips_invalid_stored_secret_when_not_explicitly_requested(
+        self,
+        mock_process_task,
+        _mock_consume_credit,
+        mock_logger_warning,
+    ):
+        mock_process_task.delay = MagicMock()
+        set_budget_context(self.budget_ctx)
+
+        self._create_credential_secret(
+            key="portal_password",
+            domain="https://portal.example.com",
+            value="portal-secret",
+        )
+        invalid_secret = self._create_credential_secret(
+            key="legacy_password",
+            domain="https://legacy.example.com",
+            value="legacy-secret",
+        )
+        PersistentAgentSecret.objects.filter(pk=invalid_secret.pk).update(domain_pattern="*.gov")
+
+        result = execute_spawn_web_task(self.agent, {"prompt": "Open portal.example.com"})
+
+        self.assertEqual(result.get("status"), "pending", result)
+        mock_process_task.delay.assert_called_once()
+        task = BrowserUseAgentTask.objects.get(id=result["task_id"])
+        decrypted = SecretsEncryption.decrypt_secrets(task.encrypted_secrets)
+
+        self.assertEqual(
+            decrypted,
+            {
+                "https://portal.example.com": {
+                    "portal_password": "portal-secret",
+                }
+            },
+        )
+        self.assertEqual(
+            task.secret_keys,
+            {"https://portal.example.com": ["portal_password"]},
+        )
+        self.assertNotIn("legacy_password", str(task.secret_keys))
+        self.assertTrue(mock_logger_warning.called)
+
+    @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
+    @patch("api.tasks.browser_agent_tasks.process_browser_use_task")
+    def test_spawn_errors_for_explicit_invalid_secret(
+        self,
+        mock_process_task,
+        _mock_consume_credit,
+    ):
+        mock_process_task.delay = MagicMock()
+        set_budget_context(self.budget_ctx)
+
+        secret = self._create_credential_secret(
+            key="legacy_password",
+            domain="https://legacy.example.com",
+            value="legacy-secret",
+        )
+        PersistentAgentSecret.objects.filter(pk=secret.pk).update(domain_pattern="*.gov")
+
+        result = execute_spawn_web_task(
+            self.agent,
+            {"prompt": "Open portal.example.com", "secrets": ["legacy_password"]},
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("legacy_password", result.get("message", ""))
+        self.assertIn("*.gov", result.get("message", ""))
+        self.assertEqual(BrowserUseAgentTask.objects.count(), 0)
+        mock_process_task.delay.assert_not_called()
