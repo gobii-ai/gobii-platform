@@ -603,6 +603,61 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("<p>Plain status update</p>", rendered_html)
 
     @tag("batch_agent_chat")
+    def test_timeline_preserves_safe_inline_email_styles(self):
+        html_body = (
+            "<div style='background: #f8f9fa; padding: 14px; border-radius: 8px; border-left: 4px solid #1976d2;'>"
+            "<strong style='color: #1976d2;'>Consultant Note</strong>"
+            "<span style='font-size: 14px; color: #333; line-height: 1.5;'>Styled body</span>"
+            "</div>"
+            "<h2 style='margin-top: 28px; border-bottom: 2px solid #1976d2; padding-bottom: 6px;'>Bigger Picture</h2>"
+            "<p><em>Supporting detail</em></p>"
+        )
+        plain_body = "Consultant Note\nStyled body\nBigger Picture"
+        email_address = "styled-html@example.com"
+
+        email_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+            is_primary=False,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=email_address,
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=email_sender,
+            conversation=email_conversation,
+            body=plain_body,
+            owner_agent=self.agent,
+            raw_payload={"body_html": html_body},
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        html_event = next(
+            event
+            for event in payload.get("events", [])
+            if event.get("kind") == "message" and event["message"].get("bodyText") == plain_body
+        )
+
+        rendered_html = html_event["message"]["bodyHtml"]
+        self.assertIn("<div style=", rendered_html)
+        self.assertIn("background: #f8f9fa", rendered_html)
+        self.assertIn("border-left: 4px solid #1976d2", rendered_html)
+        self.assertIn("<strong style=", rendered_html)
+        self.assertIn("color: #1976d2", rendered_html)
+        self.assertIn("<span style=", rendered_html)
+        self.assertIn("font-size: 14px", rendered_html)
+        self.assertIn("<h2 style=", rendered_html)
+        self.assertIn("margin-top: 28px", rendered_html)
+        self.assertIn("<em>Supporting detail</em>", rendered_html)
+
+    @tag("batch_agent_chat")
     def test_timeline_rewrites_cid_image_src_from_preserved_email_html(self):
         html_body = "<p><img src='cid:roadmap-card.png' alt='Roadmap card' /></p>"
         plain_body = "See roadmap card"

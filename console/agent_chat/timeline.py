@@ -20,6 +20,7 @@ from bleach.sanitizer import ALLOWED_ATTRIBUTES as BLEACH_ALLOWED_ATTRIBUTES_BAS
 from bleach.sanitizer import ALLOWED_PROTOCOLS as BLEACH_ALLOWED_PROTOCOLS_BASE
 from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
 from bleach.sanitizer import Cleaner
+from bleach.css_sanitizer import CSSSanitizer
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.agent.core.schedule_parser import ScheduleParser
@@ -48,6 +49,43 @@ MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
 THINKING_COMPLETION_TYPES = (PersistentAgentCompletion.CompletionType.ORCHESTRATOR,)
 HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
+EMAIL_STYLE_TAGS = {
+    "caption",
+    "div",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "li",
+    "ol",
+    "p",
+    "span",
+    "strong",
+    "table",
+    "td",
+    "th",
+    "tr",
+    "ul",
+}
+EMAIL_ALLOWED_CSS_PROPERTIES = [
+    "background",
+    "border-bottom",
+    "border-left",
+    "border-radius",
+    "color",
+    "display",
+    "flex-direction",
+    "font-size",
+    "gap",
+    "line-height",
+    "margin",
+    "margin-top",
+    "padding",
+    "padding-bottom",
+]
 
 
 def is_chat_hidden_message(message: PersistentAgentMessage) -> bool:
@@ -71,6 +109,12 @@ def _build_html_cleaner() -> Cleaner:
             "div",
             "span",
             "img",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
             "ul",
             "ol",
             "li",
@@ -95,7 +139,8 @@ def _build_html_cleaner() -> Cleaner:
     # Table cell attributes
     allowed_attributes["th"] = ["colspan", "rowspan", "scope", "headers"]
     allowed_attributes["td"] = ["colspan", "rowspan", "headers"]
-    allowed_attributes["table"] = ["style"]
+    for tag in EMAIL_STYLE_TAGS:
+        allowed_attributes[tag] = sorted(set(allowed_attributes.get(tag, ())).union({"style"}))
 
     allowed_protocols = set(BLEACH_ALLOWED_PROTOCOLS_BASE).union({"mailto", "tel"})
 
@@ -103,6 +148,7 @@ def _build_html_cleaner() -> Cleaner:
         tags=sorted(allowed_tags),
         attributes=allowed_attributes,
         protocols=allowed_protocols,
+        css_sanitizer=CSSSanitizer(allowed_css_properties=EMAIL_ALLOWED_CSS_PROPERTIES),
         strip=True,
     )
 

@@ -1,16 +1,74 @@
 import DOMPurify from 'dompurify'
 
+const ALLOWED_INLINE_STYLE_PROPERTIES = new Set([
+  'background',
+  'border-bottom',
+  'border-left',
+  'border-radius',
+  'color',
+  'display',
+  'flex-direction',
+  'font-size',
+  'gap',
+  'line-height',
+  'margin',
+  'margin-top',
+  'padding',
+  'padding-bottom',
+])
+const DISALLOWED_STYLE_VALUE_PATTERN = /(?:url\s*\(|expression\s*\(|@import|javascript:)/i
+
+function sanitizeStyleAttribute(styleValue: string): string {
+  const declarations: string[] = []
+
+  for (const declaration of styleValue.split(';')) {
+    const trimmed = declaration.trim()
+    if (!trimmed) continue
+
+    const separatorIndex = trimmed.indexOf(':')
+    if (separatorIndex <= 0) continue
+
+    const property = trimmed.slice(0, separatorIndex).trim().toLowerCase()
+    const value = trimmed.slice(separatorIndex + 1).trim()
+
+    if (!ALLOWED_INLINE_STYLE_PROPERTIES.has(property) || !value || DISALLOWED_STYLE_VALUE_PATTERN.test(value)) {
+      continue
+    }
+
+    declarations.push(`${property}: ${value}`)
+  }
+
+  return declarations.join('; ')
+}
+
+function preserveSafeInlineStyles(value: string): string {
+  const parser = new DOMParser()
+  const document = parser.parseFromString(value, 'text/html')
+
+  document.body.querySelectorAll<HTMLElement>('[style]').forEach((node) => {
+    const sanitizedStyle = sanitizeStyleAttribute(node.getAttribute('style') || '')
+    if (sanitizedStyle) {
+      node.setAttribute('style', sanitizedStyle)
+      return
+    }
+    node.removeAttribute('style')
+  })
+
+  return document.body.innerHTML
+}
+
 export function sanitizeHtml(value: string): string {
   if (!value) return ''
   if (typeof window === 'undefined') {
     return value
   }
   // Explicitly add table and img tags to the allowed list alongside html profile
-  return DOMPurify.sanitize(value, {
+  const sanitized = DOMPurify.sanitize(value, {
     USE_PROFILES: { html: true },
     ADD_TAGS: ['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col', 'img'],
-    ADD_ATTR: ['colspan', 'rowspan', 'scope', 'headers', 'src', 'alt', 'width', 'height'],
+    ADD_ATTR: ['colspan', 'rowspan', 'scope', 'headers', 'src', 'alt', 'width', 'height', 'style'],
   })
+  return preserveSafeInlineStyles(sanitized)
 }
 
 const HTML_DOCUMENT_PREFIX_PATTERN = /^<(?:!doctype\s+html|html|body)\b/i
