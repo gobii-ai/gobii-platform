@@ -1,8 +1,10 @@
+from types import SimpleNamespace
+
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 
-from api.agent.comms.message_service import _save_attachments
+from api.agent.comms.message_service import _get_rejected_attachment_channel, _save_attachments
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
@@ -83,3 +85,12 @@ class SignatureAttachmentFilterTests(TestCase):
                 }
             ],
         )
+
+    def test_rejected_attachment_channel_falls_back_when_from_endpoint_missing(self):
+        message = SimpleNamespace(
+            from_endpoint=None,
+            to_endpoint=SimpleNamespace(channel="email"),
+            conversation=SimpleNamespace(channel="web"),
+        )
+
+        self.assertEqual(_get_rejected_attachment_channel(message), "email")

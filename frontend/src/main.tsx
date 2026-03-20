@@ -269,7 +269,7 @@ switch (appName) {
     )
     break
   case 'immersive-app':
-    screen = <ImmersiveApp />
+    screen = <ImmersiveApp maxChatUploadSizeBytes={maxChatUploadSizeBytes} />
     break
   default:
     throw new Error(`Unsupported console React app: ${appName}`)

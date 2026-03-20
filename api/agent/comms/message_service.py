@@ -212,10 +212,21 @@ def _append_rejected_attachments_to_message(
     message.raw_payload = next_payload
     message.save(update_fields=["raw_payload"])
 
+
+def _get_rejected_attachment_channel(message: PersistentAgentMessage) -> str:
+    if message.from_endpoint and message.from_endpoint.channel:
+        return message.from_endpoint.channel
+    if message.to_endpoint and message.to_endpoint.channel:
+        return message.to_endpoint.channel
+    if message.conversation and message.conversation.channel:
+        return message.conversation.channel
+    return "unknown"
+
+
 @tracer.start_as_current_span("_save_attachments")
 def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any]) -> None:
     max_bytes = get_max_file_size()
-    channel = message.from_endpoint.channel if message.from_endpoint and message.from_endpoint.channel else ""
+    channel = _get_rejected_attachment_channel(message)
     rejected_attachments: list[dict[str, Any]] = []
     for att in attachments:
         file_obj: File | None = None

@@ -29,6 +29,10 @@ type ConsoleSessionPayload = {
   email?: string
 }
 
+type ImmersiveAppProps = {
+  maxChatUploadSizeBytes?: number | null
+}
+
 function readLocation(): LocationSnapshot {
   return {
     pathname: window.location.pathname,
@@ -283,7 +287,7 @@ function navigateTo(path: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-export function ImmersiveApp() {
+export function ImmersiveApp({ maxChatUploadSizeBytes = null }: ImmersiveAppProps) {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
   const embed = useMemo(() => {
@@ -408,6 +412,7 @@ export function ImmersiveApp() {
         {route.kind === 'agent-chat' ? (
           <AgentChatPage
             agentId={route.agentId}
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
             viewerUserId={viewerUserId}
             viewerEmail={viewerEmail}
             onClose={embed ? handleEmbeddedClose : handleClose}
@@ -420,6 +425,7 @@ export function ImmersiveApp() {
         ) : null}
         {route.kind === 'agent-select' ? (
           <AgentChatPage
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
             viewerUserId={viewerUserId}
             viewerEmail={viewerEmail}
             onClose={embed ? handleEmbeddedClose : handleClose}
