@@ -39,6 +39,10 @@ CHART_TYPES = {
     "scatter",
 }
 
+# Labels longer than this on a bar chart trigger an automatic swap to horizontal_bar,
+# where labels sit on the y-axis and have ample room to display in full.
+_LONG_LABEL_THRESHOLD = 12
+
 
 def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[List[str]], Optional[str]]:
     """Execute a SQL query and return results as a list of dicts."""
@@ -50,6 +54,31 @@ def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[List[str]]
 def _extract_values(data: List[Dict], key: str) -> List[Any]:
     """Extract values for a given key from list of dicts."""
     return [row.get(key) for row in data]
+
+
+def _max_label_len(labels: list) -> int:
+    """Return the maximum string length among label values."""
+    return max((len(str(v)) for v in labels if v is not None), default=0)
+
+
+def _should_swap_to_horizontal(chart_type: str, x_vals: list) -> bool:
+    """Return True when a bar chart should automatically swap to horizontal_bar.
+
+    Horizontal bars handle long category labels better—labels appear on the y-axis
+    where there is ample horizontal room, instead of crowding or rotating on the x-axis.
+    """
+    return chart_type == "bar" and _max_label_len(x_vals) > _LONG_LABEL_THRESHOLD
+
+
+def _compute_horizontal_bar_left_margin(labels: list) -> float:
+    """Return a left subplot margin (0–1 fraction of figure width) sized for the y-axis labels.
+
+    tight_layout alone can still clip long category labels in some rendering paths;
+    an explicit left-margin based on the longest label prevents that.
+    """
+    max_len = _max_label_len(labels)
+    # Empirically ~0.01 figure-fraction per character, clamped to a safe range.
+    return max(0.15, min(0.45, max_len * 0.01))
 
 
 def _setup_style():
@@ -240,6 +269,11 @@ def _generate_chart(
     else:
         x_vals = _extract_values(data, x) if x else list(range(len(data)))
 
+        # Auto-swap bar → horizontal_bar when category labels are too long.
+        # Horizontal bars give labels space on the y-axis and avoid crowded x-axis tick labels.
+        if _should_swap_to_horizontal(chart_type, x_vals):
+            chart_type = "horizontal_bar"
+
         # Handle single or multiple y series
         if isinstance(y, list):
             # Multiple series
@@ -270,6 +304,12 @@ def _generate_chart(
                 _create_area_chart(ax, x_vals, y_vals, chart_colors)
             elif chart_type == "scatter":
                 _create_scatter_chart(ax, x_vals, y_vals, chart_colors)
+
+        # Explicitly set left margin for horizontal bars so long y-axis category labels
+        # aren't clipped. tight_layout alone can leave labels partially outside the
+        # saved bounds in some rendering paths.
+        if chart_type == "horizontal_bar":
+            fig.subplots_adjust(left=_compute_horizontal_bar_left_margin(x_vals))
 
     # Set labels and title
     if title:
