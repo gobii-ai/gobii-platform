@@ -55,6 +55,36 @@ class PricingPageCtaCopyTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
+    def test_unauthenticated_pricing_renders_no_charge_trial_text_when_flag_enabled(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag("cta_no_charge_during_trial", active=True):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(
+            plans[PlanNames.STARTUP]["trial_cancel_text"],
+            "No charge if you cancel during the 7-day trial. Takes 30 seconds.",
+        )
+        self.assertEqual(
+            plans[PlanNames.SCALE]["trial_cancel_text"],
+            "No charge if you cancel during the 14-day trial. Takes 30 seconds.",
+        )
+        self.assertContains(response, "No charge if you cancel during the 7-day trial. Takes 30 seconds.")
+        self.assertContains(response, "No charge if you cancel during the 14-day trial. Takes 30 seconds.")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
     def test_unauthenticated_pricing_renders_trial_cancel_text_when_flag_enabled(
         self,
         mock_get_stripe_settings,

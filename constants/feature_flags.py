@@ -25,6 +25,15 @@ CTA_PRICING_CANCEL_TEXT_UNDER_BTN = "cta_pricing_cancel_text_under_btn"
 # Controls whether pricing trial CTA buttons omit the explicit day count.
 CTA_START_FREE_TRIAL = "cta_start_free_trial"
 
+# Controls whether pricing trial modals use a softer completion-style title.
+CTA_PICK_A_PLAN = "cta_pick_a_plan"
+
+# Controls whether pricing modal trial CTA buttons say "Continue Your Agent".
+CTA_CONTINUE_AGENT_BTN = "cta_continue_agent_btn"
+
+# Controls whether pricing trial CTA helper text emphasizes no charge during the trial.
+CTA_NO_CHARGE_DURING_TRIAL = "cta_no_charge_during_trial"
+
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
 # switch not flag
