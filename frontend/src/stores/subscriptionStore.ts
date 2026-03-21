@@ -13,6 +13,18 @@ export type UpgradeModalSource =
   | 'agent_limit_error'
   | 'unknown'
 
+const CONTINUATION_UPGRADE_MODAL_SOURCES: readonly UpgradeModalSource[] = [
+  'trial_onboarding',
+  'agent_limit_error',
+]
+
+export function isContinuationUpgradeModalSource(
+  source: UpgradeModalSource | string | null | undefined,
+): boolean {
+  // This copy should only appear when the modal interrupted an in-progress action.
+  return Boolean(source && CONTINUATION_UPGRADE_MODAL_SOURCES.includes(source as UpgradeModalSource))
+}
+
 type UpgradeModalOptions = {
   dismissible?: boolean
 }
