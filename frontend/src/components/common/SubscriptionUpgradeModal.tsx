@@ -22,7 +22,12 @@ export function SubscriptionUpgradeModal({
   dismissible = true,
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
-  const { trialDaysByPlan, trialEligible, pricingModalAlmostFullScreen } = useSubscriptionStore()
+  const {
+    trialDaysByPlan,
+    trialEligible,
+    pricingModalAlmostFullScreen,
+    ctaPickAPlan,
+  } = useSubscriptionStore()
   const handleClose = useCallback(() => {
     if (dismissible) {
       onClose()
@@ -37,7 +42,7 @@ export function SubscriptionUpgradeModal({
     && (source === 'trial_onboarding' || currentPlan === 'free')
   )
   const title = useTrialCopy
-    ? `Start ${maxTrialDays}-day Free Trial`
+    ? (ctaPickAPlan ? 'Finish what you just started' : `Start ${maxTrialDays}-day Free Trial`)
     : (allowDowngrade ? 'Change your plan' : 'Upgrade your plan')
   const subtitle = useTrialCopy
     ? 'Choose your plan to continue'

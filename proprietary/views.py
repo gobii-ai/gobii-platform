@@ -22,6 +22,12 @@ from util.subscription_helper import (
 )
 from api.services.trial_abuse import evaluate_user_trial_eligibility
 from util.fish_collateral import is_fish_collateral_enabled
+from constants.feature_flags import (
+    CTA_NO_CHARGE_DURING_TRIAL,
+    CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
+    CTA_START_FREE_TRIAL,
+    SUPPORT_INTERCOM,
+)
 from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
 from constants.feature_flags import CTA_PRICING_CANCEL_TEXT_UNDER_BTN, CTA_START_FREE_TRIAL, SUPPORT_INTERCOM
 from constants.plans import PlanNames
@@ -78,6 +84,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             self.request,
             default=False,
         )
+        cta_no_charge_during_trial = is_waffle_flag_active(
+            CTA_NO_CHARGE_DURING_TRIAL,
+            self.request,
+            default=False,
+        )
 
         def _trial_cta(days: int, label: str) -> str:
             if days > 0 and trial_eligible:
@@ -87,10 +98,12 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             return f"Subscribe to {label}"
 
         def _trial_cancel_text(days: int) -> str | None:
-            if not cta_pricing_cancel_text_under_btn:
+            if not (cta_pricing_cancel_text_under_btn or cta_no_charge_during_trial):
                 return None
             if not trial_eligible or days <= 0:
                 return None
+            if cta_no_charge_during_trial:
+                return f"No charge if you cancel during the {days}-day trial. Takes 30 seconds."
             return f"Cancel anytime during the {days}-day trial"
 
         def _trial_pricing_model(days: int) -> str:

@@ -76,6 +76,8 @@ export function SubscriptionUpgradePlans({
     pricingModalAlmostFullScreen,
     ctaPricingCancelTextUnderBtn,
     ctaStartFreeTrial,
+    ctaContinueAgentBtn,
+    ctaNoChargeDuringTrial,
   } = useSubscriptionStore()
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const canSelectPlan = useCallback(
@@ -145,17 +147,26 @@ export function SubscriptionUpgradePlans({
             const ctaLabel = useTrialCopy
               ? (
                   trialDays > 0
-                    ? (ctaStartFreeTrial ? 'Start Free Trial' : `Start ${trialDays}-day Free Trial`)
+                    ? (
+                        ctaContinueAgentBtn
+                          ? 'Continue Your Agent'
+                          : (ctaStartFreeTrial ? 'Start Free Trial' : `Start ${trialDays}-day Free Trial`)
+                      )
                     : subscribeLabel
                 )
               : (allowDowngrade ? `Select ${plan.name}` : subscribeLabel)
-            const trialCancelText = (
-              ctaPricingCancelTextUnderBtn
+            const shouldShowTrialCancelText = (
+              (ctaNoChargeDuringTrial || ctaPricingCancelTextUnderBtn)
               && canUpgrade
               && useTrialCopy
               && trialDays > 0
             )
-              ? `Cancel anytime during the ${trialDays}-day trial`
+            const trialCancelText = shouldShowTrialCancelText
+              ? (
+                  ctaNoChargeDuringTrial
+                    ? `No charge if you cancel during the ${trialDays}-day trial. Takes 30 seconds.`
+                    : `Cancel anytime during the ${trialDays}-day trial`
+                )
               : null
 
             return (
