@@ -1,7 +1,11 @@
 import { useCallback } from 'react'
 import { Check, Sparkles, Rocket } from 'lucide-react'
 
-import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
+import {
+  isContinuationUpgradeModalSource,
+  useSubscriptionStore,
+  type PlanTier,
+} from '../../stores/subscriptionStore'
 import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -134,6 +138,7 @@ export function SubscriptionUpgradePlans({
     && hasAnyTrialDays
     && (source === 'trial_onboarding' || currentPlan === 'free')
   )
+  const useContinuationButtonCopy = ctaContinueAgentBtn && isContinuationUpgradeModalSource(source)
 
   return (
     <div className={rootClass}>
@@ -148,7 +153,7 @@ export function SubscriptionUpgradePlans({
               ? (
                   trialDays > 0
                     ? (
-                        ctaContinueAgentBtn
+                        useContinuationButtonCopy
                           ? 'Continue Your Agent'
                           : (ctaStartFreeTrial ? 'Start Free Trial' : `Start ${trialDays}-day Free Trial`)
                       )

@@ -34,7 +34,11 @@ import type {
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
-import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
+import {
+  isContinuationUpgradeModalSource,
+  useSubscriptionStore,
+  type PlanTier,
+} from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } from '../../types/agentAddons'
@@ -322,8 +326,14 @@ export function AgentChatLayout({
     && maxTrialDays > 0
     && (upgradeModalSource === 'trial_onboarding' || subscriptionPlan === 'free')
   )
-  const upgradeTitle = useTrialUpgradeCopy
-    ? (ctaPickAPlan ? 'Finish what you just started' : `Start ${maxTrialDays}-day Free Trial`)
+  const useContinuationUpgradeTitle = (
+    ctaPickAPlan
+    && isContinuationUpgradeModalSource(upgradeModalSource)
+  )
+  const upgradeTitle = useContinuationUpgradeTitle
+    ? 'Finish what you just started'
+    : useTrialUpgradeCopy
+      ? `Start ${maxTrialDays}-day Free Trial`
     : 'Upgrade your plan'
   const upgradeSubtitle = useTrialUpgradeCopy ? 'Choose your plan to continue' : 'Choose the plan that fits your needs'
   const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {
