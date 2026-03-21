@@ -3,24 +3,7 @@
 {% block title %}{% trans "Create your account" %}{% endblock %}
 
 {% block head_extras %}
-  {% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
-    <script>
-      const fp = import('{{ settings.FINGERPRINT_JS_URL }}')
-        .then(({ load, defaultEndpoint }) => load({
-            apiKey: '{{ settings.FINGERPRINT_JS_API_KEY }}',
-            scriptUrlPattern: [
-              '{{ settings.FINGERPRINT_JS_URL }}?apiKey=<apiKey>&version=<version>&loaderVersion=<loaderVersion>',
-            ],
-            endpoint: [
-              '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL }}?region=us',
-              defaultEndpoint
-            ]
-          })
-        );
 
-      fp.then(fp => fp.get()).then(result => console.log(result.visitorId, result.requestId));
-    </script>
-  {% endif %}
 {% endblock %}
 
 {% block body_inner %}
@@ -68,6 +51,7 @@
     {% if account_allow_password_signup %}
     <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
       {% csrf_token %}
+      <input type="hidden" name="ufp" value="" id="ufp" />
       {% if redirect_field_value %}
         <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
       {% endif %}
@@ -117,4 +101,21 @@
     {% endif %}
   </div>
 </div>
+
+{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
+<script>
+  const fp = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
+    .then(({ load, defaultEndpoint }) => load({
+        endpoint: ['{{ settings.FINGERPRINT_JS_BEHAVIOR_URL }}?region=us', defaultEndpoint]
+      })
+    ).then(ufp => ufp.get()).then((r) => {
+      let v = document.getElementById('ufp');
+      if (v) {
+        v.value= r.visitorId;
+      }
+    })
+
+  fp.then(fp => fp.get()).then(result => console.log(result.visitorId, result.requestId));
+</script>
+{% endif %}
 {% endblock %} 
