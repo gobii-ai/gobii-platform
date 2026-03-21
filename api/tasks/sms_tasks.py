@@ -42,6 +42,8 @@ def sync_twilio_numbers():
 
     # ─────────── Upsert or update ───────────
     for sid, pn in remote.items():
+        existing = SmsNumber.objects.filter(sid=sid).only("released_at").first()
+        should_remain_retired = bool(existing and existing.released_at is not None)
         SmsNumber.objects.update_or_create(
             sid=sid,
             defaults={
@@ -51,7 +53,7 @@ def sync_twilio_numbers():
                 "region": getattr(pn, "region", ""),
                 "is_sms_enabled": "SMS" in pn.capabilities,
                 "is_mms_enabled": "MMS" in pn.capabilities,
-                "is_active": True,
+                "is_active": not should_remain_retired,
                 "extra": {},        # TODO: Store the full Twilio phone number object
                 "last_synced_at": timezone.now(),
                 "messaging_service_sid": service_sid,
