@@ -82,15 +82,20 @@ def find_unused_number() -> SmsNumber:
     Find an unused SMS number for the user.
     Returns a SmsNumber instance or raises an exception if none available.
     """
-    # Look up Persistent Agent SMS Comm Endpoints, owned by a Persistent Agent owned by the user. Then find a number
-    # that is not in use, and return that. If no such number exists, raise an exception.
+    # Only allocate numbers that are still active in local inventory and were never retired.
     sms_in_use = PersistentAgentCommsEndpoint.objects.filter(
         channel=CommsChannel.SMS,
     ).values_list('address', flat=True)
 
-    unused_pks = list(SmsNumber.objects.exclude(
-        phone_number__in=sms_in_use,
-    ).values_list('id', flat=True))
+    unused_pks = list(
+        SmsNumber.objects.filter(
+            is_active=True,
+            released_at__isnull=True,
+            is_sms_enabled=True,
+        ).exclude(
+            phone_number__in=sms_in_use,
+        ).values_list('id', flat=True)
+    )
 
     if not unused_pks:
         logger.warning("No unused SMS numbers available.")

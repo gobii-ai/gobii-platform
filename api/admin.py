@@ -74,6 +74,7 @@ from django.db.models import Sum
 from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
 from .tasks.sms_tasks import sync_twilio_numbers, send_test_sms
+from .services.sms_number_inventory import retire_sms_number
 from config import settings
 from constants.plans import PlanNamesChoices
 
@@ -4208,15 +4209,60 @@ def sync_from_twilio(modeladmin, request, queryset):
     sync_twilio_numbers.delay()
     messages.success(request, "Background sync started – this may take a minute. Refresh the page to see updates.")
 
+
+@admin.action(description="Retire selected numbers locally")
+def retire_selected_sms_numbers(modeladmin, request, queryset):
+    retired_count = 0
+    already_retired_count = 0
+    blocked_numbers = []
+
+    for sms_number in queryset:
+        try:
+            changed = retire_sms_number(sms_number)
+        except ValidationError:
+            blocked_numbers.append(sms_number.phone_number)
+            continue
+
+        if changed:
+            retired_count += 1
+        else:
+            already_retired_count += 1
+
+    if retired_count:
+        messages.success(
+            request,
+            f"Retired {retired_count} SMS number(s) locally. They will remain in history and will not be allocated again.",
+        )
+    if already_retired_count:
+        messages.info(request, f"{already_retired_count} SMS number(s) were already retired.")
+    if blocked_numbers:
+        blocked_preview = ", ".join(blocked_numbers[:5])
+        suffix = "..." if len(blocked_numbers) > 5 else ""
+        messages.error(
+            request,
+            f"Could not retire {len(blocked_numbers)} SMS number(s) still assigned to SMS endpoints: {blocked_preview}{suffix}",
+        )
+
+
 @admin.register(SmsNumber)
 class SmsNumberAdmin(admin.ModelAdmin):
     change_form_template = "admin/smsnumber_change_form.html"
     change_list_template = "admin/smsnumber_change_list.html"
-    actions = [sync_from_twilio]
-    list_display = ('friendly_number', 'provider', 'is_active', 'in_use', 'country', 'created_at')
-    list_filter = ('provider', 'is_active', 'created_at')
+    actions = [sync_from_twilio, retire_selected_sms_numbers]
+    list_display = ('friendly_number', 'provider', 'is_active', 'released_at', 'in_use', 'country', 'created_at')
+    list_filter = ('provider', 'is_active', 'created_at', 'released_at')
     search_fields = ('phone_number', 'provider__name')
-    readonly_fields = ('id', 'created_at', 'updated_at', 'provider', 'is_sms_enabled', 'is_mms_enabled', 'messaging_service_sid', 'extra')
+    readonly_fields = (
+        'id',
+        'created_at',
+        'updated_at',
+        'provider',
+        'is_sms_enabled',
+        'is_mms_enabled',
+        'messaging_service_sid',
+        'extra',
+        'released_at',
+    )
 
     @admin.display(description="Phone", ordering="text")
     def friendly_number(self, obj):
@@ -4249,7 +4295,7 @@ class SmsNumberAdmin(admin.ModelAdmin):
 
     fieldsets = (
         ('Basic Information', {
-            'fields': ('id', 'phone_number', 'is_active')
+            'fields': ('id', 'phone_number', 'is_active', 'released_at')
         }),
         ('SMS/MMS Configuration', {
             'fields': ('is_sms_enabled', 'is_mms_enabled', 'messaging_service_sid', 'provider', 'extra')
