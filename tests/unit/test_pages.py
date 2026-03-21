@@ -1743,6 +1743,8 @@ class MarketingMetaTests(TestCase):
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",
             scale_additional_task_price_id="price_scale_meter",
+            scale_product_id="prod_scale",
+            startup_product_id="prod_startup",
         )
         mock_customer.return_value = SimpleNamespace(id="cus_scale")
         mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
@@ -1752,7 +1754,7 @@ class MarketingMetaTests(TestCase):
         mock_existing_subs.return_value = [
             {
                 "id": "sub_startup",
-                "items": {"data": [{"price": {"id": "price_startup", "usage_type": "licensed"}}]},
+                "items": {"data": [{"price": {"id": "price_startup", "product": "prod_startup", "usage_type": "licensed"}}]},
             }
         ]
 
@@ -1769,6 +1771,7 @@ class MarketingMetaTests(TestCase):
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
         ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertTrue(ensure_kwargs.get("end_trial_now"))
         self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()
 
@@ -1835,6 +1838,8 @@ class SubscriptionPriceParsingTests(TestCase):
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",
             scale_additional_task_price_id=None,
+            scale_product_id="prod_scale",
+            startup_product_id="prod_startup",
         )
         mock_customer.return_value = SimpleNamespace(id="cus_scale")
         mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
@@ -1844,7 +1849,7 @@ class SubscriptionPriceParsingTests(TestCase):
         mock_existing_subs.return_value = [
             {
                 "id": "sub_scale",
-                "items": {"data": [{"price": {"id": "price_scale", "usage_type": "licensed"}}]},
+                "items": {"data": [{"price": {"id": "price_scale_legacy", "product": "prod_scale", "usage_type": "licensed"}}]},
             }
         ]
 
@@ -1861,5 +1866,6 @@ class SubscriptionPriceParsingTests(TestCase):
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
         ensure_kwargs = mock_ensure.call_args.kwargs
+        self.assertNotIn("end_trial_now", ensure_kwargs)
         self.assertNotIn("metered_price_id", ensure_kwargs)
         mock_session_create.assert_not_called()
