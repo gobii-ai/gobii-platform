@@ -4251,7 +4251,7 @@ class SmsNumberAdmin(admin.ModelAdmin):
     actions = [sync_from_twilio, retire_selected_sms_numbers]
     list_display = ('friendly_number', 'provider', 'is_active', 'released_at', 'in_use', 'country', 'created_at')
     list_filter = ('provider', 'is_active', 'created_at', 'released_at')
-    search_fields = ('phone_number', 'provider__name')
+    search_fields = ('phone_number', 'provider')
     readonly_fields = (
         'id',
         'created_at',

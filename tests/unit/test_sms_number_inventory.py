@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
+from django.urls import reverse
 from django.utils import timezone
 
 from django.contrib.auth import get_user_model
@@ -158,3 +159,24 @@ class SmsNumberInventoryTests(TestCase):
         self.assertFalse(sms_number.is_active)
         self.assertEqual(sms_number.released_at, released_at)
         self.assertEqual(sms_number.friendly_name, "Twilio Name")
+
+    def test_sms_number_admin_search_does_not_crash(self):
+        admin_user = get_user_model().objects.create_superuser(
+            email="sms-admin@example.com",
+            username="sms-admin",
+            password="password123",
+        )
+        self.client.force_login(admin_user)
+        SmsNumber.objects.create(
+            sid="PN000000000000000000000000000010",
+            phone_number="+12075550123",
+            country="US",
+        )
+
+        response = self.client.get(
+            reverse("admin:api_smsnumber_changelist"),
+            {"q": "207"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "207")
