@@ -1,7 +1,11 @@
 import { useCallback } from 'react'
 import { Check, Sparkles, Rocket } from 'lucide-react'
 
-import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
+import {
+  isContinuationUpgradeModalSource,
+  useSubscriptionStore,
+  type PlanTier,
+} from '../../stores/subscriptionStore'
 import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -76,6 +80,8 @@ export function SubscriptionUpgradePlans({
     pricingModalAlmostFullScreen,
     ctaPricingCancelTextUnderBtn,
     ctaStartFreeTrial,
+    ctaContinueAgentBtn,
+    ctaNoChargeDuringTrial,
   } = useSubscriptionStore()
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const canSelectPlan = useCallback(
@@ -132,6 +138,7 @@ export function SubscriptionUpgradePlans({
     && hasAnyTrialDays
     && (source === 'trial_onboarding' || currentPlan === 'free')
   )
+  const useContinuationButtonCopy = ctaContinueAgentBtn && isContinuationUpgradeModalSource(source)
 
   return (
     <div className={rootClass}>
@@ -145,17 +152,26 @@ export function SubscriptionUpgradePlans({
             const ctaLabel = useTrialCopy
               ? (
                   trialDays > 0
-                    ? (ctaStartFreeTrial ? 'Start Free Trial' : `Start ${trialDays}-day Free Trial`)
+                    ? (
+                        useContinuationButtonCopy
+                          ? 'Continue Your Agent'
+                          : (ctaStartFreeTrial ? 'Start Free Trial' : `Start ${trialDays}-day Free Trial`)
+                      )
                     : subscribeLabel
                 )
               : (allowDowngrade ? `Select ${plan.name}` : subscribeLabel)
-            const trialCancelText = (
-              ctaPricingCancelTextUnderBtn
+            const shouldShowTrialCancelText = (
+              (ctaNoChargeDuringTrial || ctaPricingCancelTextUnderBtn)
               && canUpgrade
               && useTrialCopy
               && trialDays > 0
             )
-              ? `Cancel anytime during the ${trialDays}-day trial`
+            const trialCancelText = shouldShowTrialCancelText
+              ? (
+                  ctaNoChargeDuringTrial
+                    ? `No charge if you cancel during the ${trialDays}-day trial. Takes 30 seconds.`
+                    : `Cancel anytime during the ${trialDays}-day trial`
+                )
               : null
 
             return (

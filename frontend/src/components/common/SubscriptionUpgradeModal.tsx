@@ -2,7 +2,11 @@ import { useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
-import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
+import {
+  isContinuationUpgradeModalSource,
+  useSubscriptionStore,
+  type PlanTier,
+} from '../../stores/subscriptionStore'
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
 
 type SubscriptionUpgradeModalProps = {
@@ -22,7 +26,12 @@ export function SubscriptionUpgradeModal({
   dismissible = true,
   allowDowngrade = false,
 }: SubscriptionUpgradeModalProps) {
-  const { trialDaysByPlan, trialEligible, pricingModalAlmostFullScreen } = useSubscriptionStore()
+  const {
+    trialDaysByPlan,
+    trialEligible,
+    pricingModalAlmostFullScreen,
+    ctaPickAPlan,
+  } = useSubscriptionStore()
   const handleClose = useCallback(() => {
     if (dismissible) {
       onClose()
@@ -36,8 +45,11 @@ export function SubscriptionUpgradeModal({
     && maxTrialDays > 0
     && (source === 'trial_onboarding' || currentPlan === 'free')
   )
-  const title = useTrialCopy
-    ? `Start ${maxTrialDays}-day Free Trial`
+  const useContinuationTitle = ctaPickAPlan && isContinuationUpgradeModalSource(source)
+  const title = useContinuationTitle
+    ? 'Finish what you just started'
+    : useTrialCopy
+      ? `Start ${maxTrialDays}-day Free Trial`
     : (allowDowngrade ? 'Change your plan' : 'Upgrade your plan')
   const subtitle = useTrialCopy
     ? 'Choose your plan to continue'
