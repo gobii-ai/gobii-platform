@@ -186,3 +186,43 @@ class TrialAbuseServiceTests(TestCase):
         self.assertTrue(result.eligible)
         self.assertEqual(result.decision, UserTrialEligibilityAutoStatusChoices.ELIGIBLE)
         self.assertEqual(result.manual_action, UserTrialEligibilityManualActionChoices.ALLOW_TRIAL)
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse.customer_has_any_individual_subscription", return_value=False)
+    @patch("api.services.trial_abuse.get_stripe_customer")
+    def test_signal_matching_does_not_fan_out_to_candidate_stripe_lookups(
+        self,
+        mock_get_stripe_customer,
+        mock_customer_has_any_individual_subscription,
+    ):
+        current_user = self._create_user("current-fanout@example.com")
+        matching_users = [
+            self._create_user(f"candidate-{index}@example.com")
+            for index in range(5)
+        ]
+
+        UserIdentitySignal.objects.create(
+            user=current_user,
+            signal_type=UserIdentitySignalTypeChoices.IP_PREFIX,
+            signal_value="198.51.100.0/24",
+        )
+        for user in matching_users:
+            UserIdentitySignal.objects.create(
+                user=user,
+                signal_type=UserIdentitySignalTypeChoices.IP_PREFIX,
+                signal_value="198.51.100.0/24",
+            )
+
+        def _customer_for_user(user):
+            return SimpleNamespace(id=f"cus_{user.id}")
+
+        mock_get_stripe_customer.side_effect = _customer_for_user
+
+        result = evaluate_user_trial_eligibility(current_user)
+
+        self.assertTrue(result.eligible)
+        self.assertEqual(mock_get_stripe_customer.call_count, 1)
+        self.assertEqual(mock_get_stripe_customer.call_args.args[0], current_user)
+        mock_customer_has_any_individual_subscription.assert_called_once_with(
+            f"cus_{current_user.id}"
+        )
