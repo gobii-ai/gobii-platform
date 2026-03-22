@@ -5,7 +5,6 @@ from typing import Any
 from urllib.parse import unquote
 
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.db.models import F
 from django.utils import timezone
 
@@ -254,15 +253,19 @@ def _filter_users_with_trial_or_subscription_history(user_ids: set[int]) -> set[
     if not user_ids:
         return set()
 
-    UserModel = get_user_model()
-    users = UserModel.objects.filter(id__in=user_ids).select_related("billing")
-    matched: set[int] = set()
-
-    for candidate in users:
-        has_history, _ = _user_has_prior_individual_history(candidate)
-        if has_history:
-            matched.add(candidate.id)
-
+    # Signal fanout can be large on shared networks, so candidate history checks
+    # stay local to our DB. Only the evaluated user's own history falls back to Stripe.
+    matched = set(
+        TaskCredit.objects.filter(
+            user_id__in=user_ids,
+            free_trial_start=True,
+        ).values_list("user_id", flat=True)
+    )
+    matched.update(
+        UserBilling.objects.filter(user_id__in=user_ids)
+        .exclude(subscription=PlanNames.FREE)
+        .values_list("user_id", flat=True)
+    )
     return matched
 
 
