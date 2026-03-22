@@ -2,6 +2,10 @@
 {% load i18n form_extras socialaccount social_extras %}
 {% block title %}{% trans "Create your account" %}{% endblock %}
 
+{% block head_extras %}
+
+{% endblock %}
+
 {% block body_inner %}
 <div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs mb-20">
   <div class="p-8">
@@ -23,6 +27,7 @@
     {% if has_google_provider and account_allow_social_signup %}
       <div class="flex justify-center mt-6">
         <a href="{% provider_login_url 'google' %}"
+           data-social-signup-link
            class="w-full inline-flex justify-center items-center gap-x-2 rounded-lg
                   border border-gray-200 bg-white text-gray-800 text-sm font-medium py-3
                   shadow-2xs hover:bg-gray-50">
@@ -45,8 +50,11 @@
     {% endif %}
 
     {% if account_allow_password_signup %}
-    <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
+    <form method="post" action="{% url 'account_signup' %}" class="space-y-4" data-password-signup-form>
       {% csrf_token %}
+      <input type="hidden" name="ufp" value="" id="ufp" />
+      <input type="hidden" name="ufpr" value="" id="ufpr" />
+      <input type="hidden" name="uga" value="" id="uga" />
       {% if redirect_field_value %}
         <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
       {% endif %}
@@ -96,4 +104,154 @@
     {% endif %}
   </div>
 </div>
+
+{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
+<script>
+  (() => {
+    const cookieMaxAge = 60 * 60 * 2;
+    const measurementId = '{{ settings.GA_MEASUREMENT_ID|escapejs }}';
+    const socialLinks = Array.from(document.querySelectorAll('[data-social-signup-link]'));
+    const signupForm = document.querySelector('[data-password-signup-form]');
+    const signupSubmitButtons = signupForm
+      ? Array.from(signupForm.querySelectorAll('button[type="submit"], input[type="submit"]'))
+      : [];
+
+    const setFieldValue = (fieldId, value) => {
+      const field = document.getElementById(fieldId);
+      if (field) {
+        field.value = value || '';
+      }
+    };
+
+    const normalizeGaClientId = (value) => {
+      const normalized = (value || '').trim().replace(/^"+|"+$/g, '');
+      const match = normalized.match(/^GA\d+\.\d+\.(\d+\.\d+)$/i);
+      if (match) {
+        return match[1];
+      }
+      return normalized;
+    };
+
+    const readCookie = (name) => {
+      const prefix = `${name}=`;
+      const cookie = document.cookie
+        .split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(prefix));
+      if (!cookie) {
+        return '';
+      }
+      return decodeURIComponent(cookie.slice(prefix.length));
+    };
+
+    const writeCookie = (name, value) => {
+      if (!value) {
+        return;
+      }
+      let cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${cookieMaxAge}; Path=/; SameSite=Lax`;
+      if (window.location.protocol === 'https:') {
+        cookie += '; Secure';
+      }
+      document.cookie = cookie;
+    };
+
+    const setSignupSubmitDisabled = (disabled) => {
+      signupSubmitButtons.forEach((button) => {
+        button.disabled = disabled;
+      });
+    };
+
+    const gaClientIdPromise = new Promise((resolve) => {
+      const fallback = normalizeGaClientId(readCookie('_ga'));
+      if (!measurementId || typeof window.gtag !== 'function') {
+        resolve(fallback);
+        return;
+      }
+
+      let settled = false;
+      const finish = (value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(normalizeGaClientId(value) || fallback || '');
+      };
+
+      const timerId = window.setTimeout(() => finish(fallback), 1000);
+      try {
+        window.gtag('get', measurementId, 'client_id', (value) => {
+          window.clearTimeout(timerId);
+          finish(value);
+        });
+      } catch (_error) {
+        window.clearTimeout(timerId);
+        finish(fallback);
+      }
+    }).then((gaClientId) => {
+      const normalizedGaClientId = normalizeGaClientId(gaClientId);
+      setFieldValue('uga', normalizedGaClientId);
+      writeCookie('gobii_signup_ga_client_id', normalizedGaClientId);
+      return normalizedGaClientId;
+    });
+
+    const fpjsPromise = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
+      .then(({ load, defaultEndpoint }) => {
+        const loadOptions = {};
+        const behaviorUrl = '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|escapejs }}';
+        if (behaviorUrl) {
+          loadOptions.endpoint = [`${behaviorUrl}?region=us`, defaultEndpoint];
+        }
+        return load(loadOptions);
+      })
+      .then((fpAgent) => fpAgent.get())
+      .then((result) => {
+        setFieldValue('ufp', result.visitorId);
+        setFieldValue('ufpr', result.requestId);
+        writeCookie('gobii_signup_fpjs_visitor_id', result.visitorId);
+        writeCookie('gobii_signup_fpjs_request_id', result.requestId);
+        return result;
+      })
+      .catch(() => null);
+
+    const clientSignalsReady = Promise.allSettled([fpjsPromise, gaClientIdPromise]);
+    let clientSignalsSettled = false;
+    let replayingSignupSubmit = false;
+    clientSignalsReady.finally(() => {
+      clientSignalsSettled = true;
+    });
+
+    if (signupForm) {
+      signupForm.addEventListener('submit', (event) => {
+        if (replayingSignupSubmit || clientSignalsSettled) {
+          return;
+        }
+        event.preventDefault();
+        if (signupForm.dataset.clientSignalsPending === 'true') {
+          return;
+        }
+        signupForm.dataset.clientSignalsPending = 'true';
+        setSignupSubmitDisabled(true);
+        clientSignalsReady.finally(() => {
+          signupForm.dataset.clientSignalsReady = 'true';
+          replayingSignupSubmit = true;
+          signupForm.submit();
+        });
+      });
+    }
+
+    socialLinks.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        if (link.dataset.clientSignalsReady === 'true') {
+          return;
+        }
+        event.preventDefault();
+        clientSignalsReady.finally(() => {
+          link.dataset.clientSignalsReady = 'true';
+          window.location.href = link.href;
+        });
+      }, { once: true });
+    });
+  })();
+</script>
+{% endif %}
 {% endblock %} 

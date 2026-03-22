@@ -28,6 +28,7 @@
       {% if account_allow_social_login or account_allow_social_signup %}
       {% providers_media_js %}
       <a href="{% provider_login_url 'google' %}"
+         data-social-auth-link
          class="mt-6 w-full inline-flex justify-center items-center gap-x-2 rounded-lg
                 border border-gray-200 bg-white text-gray-800 text-sm font-medium py-3
                 shadow-2xs hover:bg-gray-50">
@@ -137,4 +138,119 @@
 
   </div>
 </div>
+
+{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
+<script>
+  (() => {
+    const socialLinks = Array.from(document.querySelectorAll('[data-social-auth-link]'));
+    if (!socialLinks.length) {
+      return;
+    }
+
+    const cookieMaxAge = 60 * 60 * 2;
+    const measurementId = '{{ settings.GA_MEASUREMENT_ID|escapejs }}';
+
+    const normalizeGaClientId = (value) => {
+      const normalized = (value || '').trim().replace(/^"+|"+$/g, '');
+      const match = normalized.match(/^GA\d+\.\d+\.(\d+\.\d+)$/i);
+      if (match) {
+        return match[1];
+      }
+      return normalized;
+    };
+
+    const readCookie = (name) => {
+      const prefix = `${name}=`;
+      const cookie = document.cookie
+        .split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(prefix));
+      if (!cookie) {
+        return '';
+      }
+      return decodeURIComponent(cookie.slice(prefix.length));
+    };
+
+    const writeCookie = (name, value) => {
+      if (!value) {
+        return;
+      }
+      let cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${cookieMaxAge}; Path=/; SameSite=Lax`;
+      if (window.location.protocol === 'https:') {
+        cookie += '; Secure';
+      }
+      document.cookie = cookie;
+    };
+
+    const gaClientIdPromise = new Promise((resolve) => {
+      const fallback = normalizeGaClientId(readCookie('_ga'));
+      if (!measurementId || typeof window.gtag !== 'function') {
+        resolve(fallback);
+        return;
+      }
+
+      let settled = false;
+      const finish = (value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(normalizeGaClientId(value) || fallback || '');
+      };
+
+      const timerId = window.setTimeout(() => finish(fallback), 1000);
+      try {
+        window.gtag('get', measurementId, 'client_id', (value) => {
+          window.clearTimeout(timerId);
+          finish(value);
+        });
+      } catch (_error) {
+        window.clearTimeout(timerId);
+        finish(fallback);
+      }
+    }).then((gaClientId) => {
+      const normalizedGaClientId = normalizeGaClientId(gaClientId);
+      writeCookie('gobii_signup_ga_client_id', normalizedGaClientId);
+      return normalizedGaClientId;
+    });
+
+    let fpjsPromise = null;
+    const getFpjsPromise = () => {
+      if (fpjsPromise) {
+        return fpjsPromise;
+      }
+      fpjsPromise = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
+        .then(({ load, defaultEndpoint }) => {
+          const loadOptions = {};
+          const behaviorUrl = '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|escapejs }}';
+          if (behaviorUrl) {
+            loadOptions.endpoint = [`${behaviorUrl}?region=us`, defaultEndpoint];
+          }
+          return load(loadOptions);
+        })
+        .then((fpAgent) => fpAgent.get())
+        .then((result) => {
+          writeCookie('gobii_signup_fpjs_visitor_id', result.visitorId);
+          writeCookie('gobii_signup_fpjs_request_id', result.requestId);
+          return result;
+        })
+        .catch(() => null);
+      return fpjsPromise;
+    };
+
+    socialLinks.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        if (link.dataset.clientSignalsReady === 'true') {
+          return;
+        }
+        event.preventDefault();
+        Promise.allSettled([gaClientIdPromise, getFpjsPromise()]).finally(() => {
+          link.dataset.clientSignalsReady = 'true';
+          window.location.href = link.href;
+        });
+      }, { once: true });
+    });
+  })();
+</script>
+{% endif %}
 {% endblock %}

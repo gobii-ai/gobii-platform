@@ -18,7 +18,7 @@ from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from constants.plans import PlanNames
-from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES
+from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES, PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from api.services.pipedream_apps import PipedreamCatalogError
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
@@ -1321,7 +1321,7 @@ class CheckoutRedirectTests(TestCase):
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
-    @patch("pages.views.customer_has_any_individual_subscription")
+    @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.stripe.checkout.Session.create")
@@ -1336,7 +1336,7 @@ class CheckoutRedirectTests(TestCase):
         mock_session_create,
         mock_existing_subs,
         mock_ensure,
-        mock_has_history,
+        _mock_trial_eligible,
         _,
     ):
         user = get_user_model().objects.create_user(
@@ -1359,8 +1359,6 @@ class CheckoutRedirectTests(TestCase):
         mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
         mock_ensure.return_value = ({"id": "sub_updated"}, "updated")
         mock_existing_subs.return_value = []
-        mock_has_history.return_value = False
-
         resp = self.client.get(reverse("proprietary:pro_checkout"))
 
         self.assertEqual(resp.status_code, 302)
@@ -1374,7 +1372,7 @@ class CheckoutRedirectTests(TestCase):
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
-    @patch("pages.views.customer_has_any_individual_subscription")
+    @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
@@ -1387,7 +1385,7 @@ class CheckoutRedirectTests(TestCase):
         mock_price_get,
         mock_session_create,
         mock_ensure,
-        mock_has_history,
+        _mock_trial_eligible,
         _,
     ):
         user = get_user_model().objects.create_user(
@@ -1406,8 +1404,6 @@ class CheckoutRedirectTests(TestCase):
         mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
         mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
         mock_ensure.return_value = (None, "absent")
-        mock_has_history.return_value = False
-
         resp = self.client.get(reverse("proprietary:pro_checkout"))
 
         self.assertEqual(resp.status_code, 302)
@@ -1418,7 +1414,10 @@ class CheckoutRedirectTests(TestCase):
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
         )
-        self.assertNotIn("payment_method_types", kwargs)
+        self.assertEqual(
+            kwargs["payment_method_types"],
+            PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
+        )
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         self.assertEqual(
             kwargs["line_items"],
@@ -1427,7 +1426,7 @@ class CheckoutRedirectTests(TestCase):
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
-    @patch("pages.views.customer_has_any_individual_subscription")
+    @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
@@ -1440,7 +1439,7 @@ class CheckoutRedirectTests(TestCase):
         mock_price_get,
         mock_session_create,
         mock_ensure,
-        mock_has_history,
+        _mock_trial_eligible,
         _,
     ):
         user = get_user_model().objects.create_user(
@@ -1463,8 +1462,6 @@ class CheckoutRedirectTests(TestCase):
         mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
         mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
         mock_ensure.return_value = (None, "absent")
-        mock_has_history.return_value = False
-
         resp = self.client.get(reverse("proprietary:pro_checkout"))
 
         self.assertEqual(resp.status_code, 302)
@@ -1484,7 +1481,7 @@ class CheckoutRedirectTests(TestCase):
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
-    @patch("pages.views.customer_has_any_individual_subscription")
+    @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.stripe.checkout.Session.create")
@@ -1499,7 +1496,7 @@ class CheckoutRedirectTests(TestCase):
         mock_session_create,
         mock_existing_subs,
         mock_ensure,
-        mock_has_history,
+        _mock_trial_eligible,
         _,
     ):
         user = get_user_model().objects.create_user(
@@ -1519,8 +1516,6 @@ class CheckoutRedirectTests(TestCase):
         mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
         mock_existing_subs.return_value = []
         mock_ensure.return_value = (None, "absent")
-        mock_has_history.return_value = True
-
         resp = self.client.get("/subscribe/scale/")
 
         self.assertEqual(resp.status_code, 302)
@@ -1531,7 +1526,10 @@ class CheckoutRedirectTests(TestCase):
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
         )
-        self.assertNotIn("payment_method_types", kwargs)
+        self.assertEqual(
+            kwargs["payment_method_types"],
+            PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
+        )
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
         self.assertEqual(
             kwargs["line_items"],
@@ -1555,14 +1553,12 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
     @tag("batch_pages")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
-    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=True)
-    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_prior_trial"))
+    @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
     @patch("proprietary.views.get_stripe_settings")
     def test_pricing_cta_uses_subscribe_copy_when_trial_ineligible(
         self,
         mock_get_stripe_settings,
-        _mock_get_stripe_customer,
-        _mock_has_any_subscription,
+        _mock_trial_eligibility,
         _mock_get_user_plan,
     ):
         user = get_user_model().objects.create_user(
@@ -1583,14 +1579,12 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
     @tag("batch_pages")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
-    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=False)
-    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_new_trial"))
+    @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=True))
     @patch("proprietary.views.get_stripe_settings")
     def test_pricing_cta_shows_trial_copy_when_trial_eligible(
         self,
         mock_get_stripe_settings,
-        _mock_get_stripe_customer,
-        _mock_has_any_subscription,
+        _mock_trial_eligibility,
         _mock_get_user_plan,
     ):
         user = get_user_model().objects.create_user(
@@ -1611,14 +1605,12 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
     @tag("batch_pages")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
-    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=False)
-    @patch("proprietary.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_new_trial"))
+    @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=True))
     @patch("proprietary.views.get_stripe_settings")
     def test_pricing_cta_omits_trial_days_when_flag_enabled(
         self,
         mock_get_stripe_settings,
-        _mock_get_stripe_customer,
-        _mock_has_any_subscription,
+        _mock_trial_eligibility,
         _mock_get_user_plan,
     ):
         user = get_user_model().objects.create_user(
@@ -1689,6 +1681,38 @@ class AuthLinkTests(TestCase):
         self.assertEqual(parsed.path, reverse("account_signup"))
         self.assertEqual(params.get("utm_campaign"), ["fall"])
         self.assertEqual(params.get("next"), [next_url])
+
+    @tag("batch_pages")
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        FINGERPRINT_JS_ENABLED=True,
+        FINGERPRINT_JS_URL="https://fp.example/v3/loader.js",
+        FINGERPRINT_JS_API_KEY="fp_test_key",
+        GA_MEASUREMENT_ID="G-TEST1234",
+    )
+    def test_signup_page_waits_for_client_signals_before_password_submit(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-password-signup-form")
+        self.assertContains(response, "signupForm.addEventListener('submit'")
+        self.assertContains(response, "signupForm.submit()")
+
+    @tag("batch_pages")
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        FINGERPRINT_JS_ENABLED=True,
+        FINGERPRINT_JS_URL="https://fp.example/v3/loader.js",
+        FINGERPRINT_JS_API_KEY="fp_test_key",
+        GA_MEASUREMENT_ID="G-TEST1234",
+    )
+    def test_login_page_renders_social_auth_signal_staging_script(self):
+        response = self.client.get(reverse("account_login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "gobii_signup_fpjs_visitor_id")
+        self.assertContains(response, "gobii_signup_fpjs_request_id")
+        self.assertContains(response, "gobii_signup_ga_client_id")
 
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):

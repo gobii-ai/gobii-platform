@@ -21,6 +21,7 @@ from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, Persist
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
+from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial_eligibility
 from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
     OAUTH_ATTRIBUTION_SESSION_KEYS,
@@ -34,7 +35,6 @@ from djstripe.models import Customer, Subscription, Price
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import (
-    customer_has_any_individual_subscription,
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_or_create_stripe_customer,
@@ -50,7 +50,7 @@ from util.onboarding import (
 )
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
-from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES
+from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES, PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
@@ -299,6 +299,16 @@ def _set_oauth_stash_cookies(response, request, *, charter_data: dict, attributi
 
 
 POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
+
+
+def _is_individual_trial_eligible(user, *, request=None, capture_source: str | None = None) -> bool:
+    if not user or not getattr(user, "pk", None):
+        return True
+    return evaluate_user_trial_eligibility(
+        user,
+        request=request,
+        capture_source=capture_source,
+    ).eligible
 
 
 def _pop_post_checkout_redirect(request) -> str | None:
@@ -1538,7 +1548,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
         # 2️⃣  Kick off Checkout with the *existing* customer
         trial_days = _normalize_trial_days(getattr(stripe_settings, "startup_trial_days", 0))
-        include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
+        include_trial = trial_days > 0 and _is_individual_trial_eligible(
+            user,
+            request=request,
+            capture_source=SIGNAL_SOURCE_CHECKOUT,
+        )
 
         subscription_data = {"metadata": metadata}
         if include_trial:
@@ -1550,6 +1564,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "success_url": success_url,
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
+            "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
             "excluded_payment_method_types": EXCLUDED_PAYMENT_METHOD_TYPES,
             "allow_promotion_codes": True,
             "subscription_data": subscription_data,
@@ -1693,7 +1708,11 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                 )
 
         trial_days = _normalize_trial_days(getattr(stripe_settings, "scale_trial_days", 0))
-        include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
+        include_trial = trial_days > 0 and _is_individual_trial_eligible(
+            user,
+            request=request,
+            capture_source=SIGNAL_SOURCE_CHECKOUT,
+        )
 
         subscription_data = {"metadata": metadata}
         if include_trial:
@@ -1705,6 +1724,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "success_url": success_url,
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
+            "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
             "excluded_payment_method_types": EXCLUDED_PAYMENT_METHOD_TYPES,
             "allow_promotion_codes": True,
             "subscription_data": subscription_data,

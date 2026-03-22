@@ -1,10 +1,13 @@
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.test import RequestFactory, TestCase, tag
+from django.template import engines
+from django.test import RequestFactory, TestCase, override_settings, tag
 from django.utils import timezone
 
+from config.context_processors import global_settings_context
 from pages.context_processors import (
     ACCOUNT_INFO_CACHE_FRESH_SECONDS,
     ACCOUNT_INFO_CACHE_STALE_SECONDS,
@@ -15,6 +18,29 @@ from pages.context_processors import (
 from pages.account_info_cache import account_info_cache_key
 
 User = get_user_model()
+
+
+@tag("batch_pages")
+class GlobalSettingsContextProcessorTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    @override_settings(
+        FINGERPRINT_JS_ENABLED=True,
+        FINGERPRINT_JS_URL="https://cdn.example.com/fingerprint.js",
+    )
+    def test_templates_can_access_fingerprint_js_settings(self):
+        self.assertIn(
+            "config.context_processors.global_settings_context",
+            settings.TEMPLATES[0]["OPTIONS"]["context_processors"],
+        )
+
+        context = global_settings_context(self.factory.get("/"))
+        rendered = engines["django"].from_string(
+            "{{ settings.FINGERPRINT_JS_ENABLED|yesno:'true,false' }}|{{ settings.FINGERPRINT_JS_URL }}"
+        ).render(context)
+
+        self.assertEqual(rendered, "true|https://cdn.example.com/fingerprint.js")
 
 
 @tag("batch_pages")

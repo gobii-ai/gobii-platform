@@ -84,16 +84,14 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertContains(response, "Cancel anytime during the 14-day trial")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @patch("proprietary.views.customer_has_any_individual_subscription", return_value=True)
-    @patch("proprietary.views.get_stripe_customer")
+    @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.get_stripe_settings")
     def test_free_user_pricing_cta_uses_subscribe_copy_with_prior_subscription_history(
         self,
         mock_get_stripe_settings,
         _mock_get_user_plan,
-        mock_get_stripe_customer,
-        _mock_customer_has_history,
+        _mock_trial_eligibility,
     ):
         user = get_user_model().objects.create_user(
             username="pricingfree@example.com",
@@ -106,7 +104,6 @@ class PricingPageCtaCopyTests(TestCase):
             startup_trial_days=7,
             scale_trial_days=14,
         )
-        mock_get_stripe_customer.return_value = SimpleNamespace(id="cus_123")
 
         response = self.client.get(reverse("proprietary:pricing"))
 

@@ -4097,6 +4097,120 @@ class UserAttribution(models.Model):
         return f"Attribution for user {self.user_id}"
 
 
+class UserIdentitySignalTypeChoices(models.TextChoices):
+    FPJS_VISITOR_ID = "fpjs_visitor_id", "FPJS Visitor ID"
+    FPJS_REQUEST_ID = "fpjs_request_id", "FPJS Request ID"
+    FBP = "fbp", "Meta Browser ID"
+    GA_CLIENT_ID = "ga_client_id", "GA Client ID"
+    IP_EXACT = "ip_exact", "Exact IP"
+    IP_PREFIX = "ip_prefix", "IP Prefix"
+
+
+class UserIdentitySignal(models.Model):
+    """Normalized identity signals used for trial-abuse matching."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="identity_signals",
+    )
+    signal_type = models.CharField(
+        max_length=32,
+        choices=UserIdentitySignalTypeChoices.choices,
+    )
+    signal_value = models.CharField(max_length=512)
+    first_seen_at = models.DateTimeField(default=timezone.now)
+    last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+    first_seen_source = models.CharField(max_length=32, blank=True, default="")
+    last_seen_source = models.CharField(max_length=32, blank=True, default="")
+    observation_count = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-last_seen_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=("user", "signal_type", "signal_value"),
+                name="uniq_user_identity_signal",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=("signal_type", "signal_value"), name="identity_signal_lookup_idx"),
+            models.Index(fields=("user", "signal_type"), name="identity_signal_user_type_idx"),
+        ]
+        verbose_name = "User identity signal"
+        verbose_name_plural = "User identity signals"
+
+    def __str__(self):
+        return f"{self.user_id}:{self.signal_type}={self.signal_value}"
+
+
+class UserTrialEligibilityAutoStatusChoices(models.TextChoices):
+    ELIGIBLE = "eligible", "Eligible"
+    NO_TRIAL = "no_trial", "No Trial"
+    REVIEW = "review", "Review"
+
+
+class UserTrialEligibilityManualActionChoices(models.TextChoices):
+    INHERIT = "inherit", "Automatic"
+    ALLOW_TRIAL = "allow_trial", "Allow Trial"
+    DENY_TRIAL = "deny_trial", "Deny Trial"
+
+
+class UserTrialEligibility(models.Model):
+    """Persist the current trial decision and any manual support override."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="trial_eligibility",
+    )
+    auto_status = models.CharField(
+        max_length=16,
+        choices=UserTrialEligibilityAutoStatusChoices.choices,
+        default=UserTrialEligibilityAutoStatusChoices.ELIGIBLE,
+    )
+    manual_action = models.CharField(
+        max_length=16,
+        choices=UserTrialEligibilityManualActionChoices.choices,
+        default=UserTrialEligibilityManualActionChoices.INHERIT,
+    )
+    reason_codes = models.JSONField(default=list, blank=True)
+    evidence_summary = models.JSONField(default=dict, blank=True)
+    evaluated_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="trial_eligibility_reviews",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User trial eligibility"
+        verbose_name_plural = "User trial eligibility"
+
+    @property
+    def effective_status(self) -> str:
+        if self.manual_action == UserTrialEligibilityManualActionChoices.ALLOW_TRIAL:
+            return UserTrialEligibilityAutoStatusChoices.ELIGIBLE
+        if self.manual_action == UserTrialEligibilityManualActionChoices.DENY_TRIAL:
+            return UserTrialEligibilityAutoStatusChoices.NO_TRIAL
+        return self.auto_status
+
+    @property
+    def is_trial_allowed(self) -> bool:
+        return self.effective_status == UserTrialEligibilityAutoStatusChoices.ELIGIBLE
+
+    def __str__(self):
+        return f"Trial eligibility for user {self.user_id}: {self.effective_status}"
+
+
 class ReferralGrant(models.Model):
     """Audit record for referral credit grants."""
 
