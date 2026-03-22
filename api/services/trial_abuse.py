@@ -315,7 +315,7 @@ def evaluate_user_trial_eligibility(user, *, request=None, capture_source: str |
         signal_matches: dict[str, set[int]] = {}
         per_user_signal_types: dict[int, set[str]] = defaultdict(set)
 
-        signal_types = [
+        signal_types_to_check = [
             UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
             UserIdentitySignalTypeChoices.FPJS_REQUEST_ID,
             UserIdentitySignalTypeChoices.FBP,
@@ -324,7 +324,7 @@ def evaluate_user_trial_eligibility(user, *, request=None, capture_source: str |
             UserIdentitySignalTypeChoices.IP_PREFIX,
         ]
 
-        for signal_type in signal_types:
+        for signal_type in signal_types_to_check:
             user_ids = _user_ids_with_matching_signal_values(user, signal_type)
             historical_user_ids = _filter_users_with_trial_or_subscription_history(user_ids)
             if not historical_user_ids:
@@ -336,8 +336,8 @@ def evaluate_user_trial_eligibility(user, *, request=None, capture_source: str |
         if signal_matches:
             evidence_summary["matched_signal_types"] = sorted(signal_matches)
             evidence_summary["matched_signal_users"] = {
-                str(user_id): sorted(signal_types)
-                for user_id, signal_types in per_user_signal_types.items()
+                str(user_id): sorted(matched_signal_types)
+                for user_id, matched_signal_types in per_user_signal_types.items()
             }
 
         strong_match = bool(

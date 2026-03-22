@@ -18,7 +18,7 @@ from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from constants.plans import PlanNames
-from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES, PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
+from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from api.services.pipedream_apps import PipedreamCatalogError
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
@@ -1410,10 +1410,7 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
 
         kwargs = mock_session_create.call_args.kwargs
-        self.assertEqual(
-            kwargs["excluded_payment_method_types"],
-            EXCLUDED_PAYMENT_METHOD_TYPES,
-        )
+        self.assertNotIn("excluded_payment_method_types", kwargs)
         self.assertEqual(
             kwargs["payment_method_types"],
             PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
@@ -1522,10 +1519,7 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
 
         kwargs = mock_session_create.call_args.kwargs
-        self.assertEqual(
-            kwargs["excluded_payment_method_types"],
-            EXCLUDED_PAYMENT_METHOD_TYPES,
-        )
+        self.assertNotIn("excluded_payment_method_types", kwargs)
         self.assertEqual(
             kwargs["payment_method_types"],
             PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,

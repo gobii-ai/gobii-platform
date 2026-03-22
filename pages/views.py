@@ -50,7 +50,7 @@ from util.onboarding import (
 )
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
-from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES, PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
+from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
@@ -1565,7 +1565,6 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
             "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
-            "excluded_payment_method_types": EXCLUDED_PAYMENT_METHOD_TYPES,
             "allow_promotion_codes": True,
             "subscription_data": subscription_data,
             "line_items": line_items,
@@ -1725,7 +1724,6 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
             "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
-            "excluded_payment_method_types": EXCLUDED_PAYMENT_METHOD_TYPES,
             "allow_promotion_codes": True,
             "subscription_data": subscription_data,
             "line_items": line_items,
