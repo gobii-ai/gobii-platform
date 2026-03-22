@@ -86,6 +86,7 @@ from api.services.agent_settings_resume import (
     queue_settings_change_resume,
 )
 from api.services.referral_service import ReferralService
+from api.services.trial_abuse import evaluate_user_trial_eligibility
 from console.daily_credit import (
     build_agent_daily_credit_context,
     get_daily_credit_slider_bounds,
@@ -148,7 +149,6 @@ from util.subscription_helper import (
     allow_user_extra_tasks,
     calculate_extra_tasks_used_during_subscription_period,
     get_user_extra_task_limit,
-    customer_has_any_individual_subscription,
     get_stripe_customer,
     get_or_create_stripe_customer,
     get_organization_plan,
@@ -596,12 +596,8 @@ def _get_checkout_trial_days() -> tuple[int, int]:
 
 def _is_checkout_trial_eligible(user) -> bool:
     """Return whether a user can start an individual-plan free trial."""
-    customer = get_stripe_customer(user)
-    if not customer or not getattr(customer, "id", None):
-        return True
-
     try:
-        return not customer_has_any_individual_subscription(str(customer.id))
+        return evaluate_user_trial_eligibility(user).eligible
     except (IntegrationDisabledError, stripe.error.StripeError, TypeError, ValueError):
         logger.warning(
             "Failed to resolve trial eligibility for user %s; defaulting to ineligible.",

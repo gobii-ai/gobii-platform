@@ -27,6 +27,7 @@
     {% if has_google_provider and account_allow_social_signup %}
       <div class="flex justify-center mt-6">
         <a href="{% provider_login_url 'google' %}"
+           data-social-signup-link
            class="w-full inline-flex justify-center items-center gap-x-2 rounded-lg
                   border border-gray-200 bg-white text-gray-800 text-sm font-medium py-3
                   shadow-2xs hover:bg-gray-50">
@@ -52,6 +53,8 @@
     <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
       {% csrf_token %}
       <input type="hidden" name="ufp" value="" id="ufp" />
+      <input type="hidden" name="ufpr" value="" id="ufpr" />
+      <input type="hidden" name="uga" value="" id="uga" />
       {% if redirect_field_value %}
         <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
       {% endif %}
@@ -104,18 +107,107 @@
 
 {% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
 <script>
-  const fp = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
-    .then(({ load, defaultEndpoint }) => load({
-        endpoint: ['{{ settings.FINGERPRINT_JS_BEHAVIOR_URL }}?region=us', defaultEndpoint]
-      })
-    ).then(ufp => ufp.get()).then((r) => {
-      let v = document.getElementById('ufp');
-      if (v) {
-        v.value= r.visitorId;
-      }
-    })
+  (() => {
+    const cookieMaxAge = 60 * 60 * 2;
+    const measurementId = '{{ settings.GA_MEASUREMENT_ID|escapejs }}';
+    const socialLinks = Array.from(document.querySelectorAll('[data-social-signup-link]'));
 
-  fp.then(fp => fp.get()).then(result => console.log(result.visitorId, result.requestId));
+    const setFieldValue = (fieldId, value) => {
+      const field = document.getElementById(fieldId);
+      if (field) {
+        field.value = value || '';
+      }
+    };
+
+    const readCookie = (name) => {
+      const prefix = `${name}=`;
+      const cookie = document.cookie
+        .split(';')
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(prefix));
+      if (!cookie) {
+        return '';
+      }
+      return decodeURIComponent(cookie.slice(prefix.length));
+    };
+
+    const writeCookie = (name, value) => {
+      if (!value) {
+        return;
+      }
+      let cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${cookieMaxAge}; Path=/; SameSite=Lax`;
+      if (window.location.protocol === 'https:') {
+        cookie += '; Secure';
+      }
+      document.cookie = cookie;
+    };
+
+    const gaClientIdPromise = new Promise((resolve) => {
+      const fallback = readCookie('_ga');
+      if (!measurementId || typeof window.gtag !== 'function') {
+        resolve(fallback);
+        return;
+      }
+
+      let settled = false;
+      const finish = (value) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        resolve(value || fallback || '');
+      };
+
+      const timerId = window.setTimeout(() => finish(fallback), 1000);
+      try {
+        window.gtag('get', measurementId, 'client_id', (value) => {
+          window.clearTimeout(timerId);
+          finish(value);
+        });
+      } catch (_error) {
+        window.clearTimeout(timerId);
+        finish(fallback);
+      }
+    }).then((gaClientId) => {
+      setFieldValue('uga', gaClientId);
+      writeCookie('gobii_signup_ga_client_id', gaClientId);
+      return gaClientId;
+    });
+
+    const fpjsPromise = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
+      .then(({ load, defaultEndpoint }) => {
+        const loadOptions = {};
+        const behaviorUrl = '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|escapejs }}';
+        if (behaviorUrl) {
+          loadOptions.endpoint = [`${behaviorUrl}?region=us`, defaultEndpoint];
+        }
+        return load(loadOptions);
+      })
+      .then((fpAgent) => fpAgent.get())
+      .then((result) => {
+        setFieldValue('ufp', result.visitorId);
+        setFieldValue('ufpr', result.requestId);
+        writeCookie('gobii_signup_fpjs_visitor_id', result.visitorId);
+        writeCookie('gobii_signup_fpjs_request_id', result.requestId);
+        return result;
+      })
+      .catch(() => null);
+
+    const clientSignalsReady = Promise.allSettled([fpjsPromise, gaClientIdPromise]);
+
+    socialLinks.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        if (link.dataset.clientSignalsReady === 'true') {
+          return;
+        }
+        event.preventDefault();
+        clientSignalsReady.finally(() => {
+          link.dataset.clientSignalsReady = 'true';
+          window.location.href = link.href;
+        });
+      }, { once: true });
+    });
+  })();
 </script>
 {% endif %}
 {% endblock %} 

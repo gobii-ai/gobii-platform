@@ -299,20 +299,17 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(PersistentAgent.objects.filter(id=replacement_agent.id).exists())
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_user_plan_api_includes_trial_days(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=14,
             scale_trial_days=30,
         )
-        mock_get_stripe_customer.return_value = None
 
         response = self.client.get(reverse("get_user_plan"))
 
@@ -324,17 +321,14 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(payload.get("pricing_modal_almost_full_screen"))
         self.assertFalse(payload.get("cta_pricing_cancel_text_under_btn"))
         self.assertFalse(payload.get("cta_start_free_trial"))
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_user_plan_api_includes_pricing_modal_flag_state(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from waffle.models import Flag
 
@@ -352,24 +346,20 @@ class ConsoleViewsTest(TestCase):
             startup_trial_days=14,
             scale_trial_days=30,
         )
-        mock_get_stripe_customer.return_value = None
 
         response = self.client.get(reverse("get_user_plan"))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("pricing_modal_almost_full_screen"))
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_user_plan_api_includes_cta_start_free_trial_flag_state(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from waffle.models import Flag
 
@@ -387,24 +377,20 @@ class ConsoleViewsTest(TestCase):
             startup_trial_days=14,
             scale_trial_days=30,
         )
-        mock_get_stripe_customer.return_value = None
 
         response = self.client.get(reverse("get_user_plan"))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload.get("cta_start_free_trial"))
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_user_plan_api_includes_cta_pricing_cancel_text_under_btn_flag_state(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from waffle.models import Flag
 
@@ -422,24 +408,20 @@ class ConsoleViewsTest(TestCase):
             startup_trial_days=14,
             scale_trial_days=30,
         )
-        mock_get_stripe_customer.return_value = None
 
         response = self.client.get(reverse("get_user_plan"))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload.get("cta_pricing_cancel_text_under_btn"))
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription", return_value=True)
-    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_trial_history"))
+    @patch("console.views._is_checkout_trial_eligible", return_value=False)
     @patch("console.views.get_stripe_settings")
     def test_user_plan_api_marks_trial_ineligible_for_prior_subscription(
         self,
         mock_get_stripe_settings,
-        _mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=14,
@@ -451,17 +433,14 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("trial_eligible"))
-        mock_customer_has_any_individual_subscription.assert_called_once_with("cus_trial_history")
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_agent_chat_shell_exposes_trial_days_in_data_attributes(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from api.models import BrowserUseAgent, PersistentAgent
 
@@ -469,7 +448,6 @@ class ConsoleViewsTest(TestCase):
             startup_trial_days=9,
             scale_trial_days=18,
         )
-        mock_get_stripe_customer.return_value = None
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -492,17 +470,14 @@ class ConsoleViewsTest(TestCase):
         self.assertContains(response, 'data-cta-start-free-trial="false"')
         self.assertContains(response, 'data-cta-pricing-cancel-text-under-btn="false"')
         self.assertContains(response, 'data-is-staff="false"')
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_agent_chat_shell_exposes_pricing_modal_flag_data_attribute_state(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from api.models import BrowserUseAgent, PersistentAgent
         from waffle.models import Flag
@@ -522,7 +497,6 @@ class ConsoleViewsTest(TestCase):
             startup_trial_days=9,
             scale_trial_days=18,
         )
-        mock_get_stripe_customer.return_value = None
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -539,17 +513,14 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-pricing-modal-almost-full-screen="false"')
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_agent_chat_shell_exposes_cta_start_free_trial_data_attribute_state(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from api.models import BrowserUseAgent, PersistentAgent
         from waffle.models import Flag
@@ -569,7 +540,6 @@ class ConsoleViewsTest(TestCase):
             startup_trial_days=9,
             scale_trial_days=18,
         )
-        mock_get_stripe_customer.return_value = None
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -586,17 +556,14 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-cta-start-free-trial="true"')
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription")
-    @patch("console.views.get_stripe_customer")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_agent_chat_shell_exposes_cta_pricing_cancel_text_under_btn_data_attribute_state(
         self,
         mock_get_stripe_settings,
-        mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from api.models import BrowserUseAgent, PersistentAgent
         from waffle.models import Flag
@@ -616,7 +583,6 @@ class ConsoleViewsTest(TestCase):
             startup_trial_days=9,
             scale_trial_days=18,
         )
-        mock_get_stripe_customer.return_value = None
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -633,17 +599,14 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-cta-pricing-cancel-text-under-btn="true"')
-        mock_customer_has_any_individual_subscription.assert_not_called()
 
     @tag("batch_console_agents")
-    @patch("console.views.customer_has_any_individual_subscription", return_value=True)
-    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_trial_history"))
+    @patch("console.views._is_checkout_trial_eligible", return_value=False)
     @patch("console.views.get_stripe_settings")
     def test_agent_chat_shell_exposes_trial_ineligible_data_attribute(
         self,
         mock_get_stripe_settings,
-        _mock_get_stripe_customer,
-        mock_customer_has_any_individual_subscription,
+        _mock_trial_eligible,
     ):
         from api.models import BrowserUseAgent, PersistentAgent
 
@@ -667,7 +630,6 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-trial-eligible="false"')
-        mock_customer_has_any_individual_subscription.assert_called_once_with("cus_trial_history")
 
     @tag("batch_console_agents")
     def test_agent_chat_shell_exposes_audit_url_for_staff(self):
