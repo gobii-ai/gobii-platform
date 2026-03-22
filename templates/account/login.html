@@ -140,6 +140,7 @@
 </div>
 
 {% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
+{% include "account/_identity_signal_helpers.html" %}
 <script>
   (() => {
     const socialLinks = Array.from(document.querySelectorAll('[data-social-auth-link]'));
@@ -149,69 +150,16 @@
 
     const cookieMaxAge = 60 * 60 * 2;
     const measurementId = '{{ settings.GA_MEASUREMENT_ID|escapejs }}';
+    const identitySignals = window.GobiiIdentitySignals;
+    const fpjsLoaderUrl = '{{ settings.FINGERPRINT_JS_URL|escapejs }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY|escapejs }}';
+    const behaviorUrl = '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|escapejs }}';
+    const fpjsTimeoutMs = 3000;
 
-    const normalizeGaClientId = (value) => {
-      const normalized = (value || '').trim().replace(/^"+|"+$/g, '');
-      const match = normalized.match(/^GA\d+\.\d+\.(\d+\.\d+)$/i);
-      if (match) {
-        return match[1];
-      }
-      return normalized;
-    };
-
-    const readCookie = (name) => {
-      const prefix = `${name}=`;
-      const cookie = document.cookie
-        .split(';')
-        .map((part) => part.trim())
-        .find((part) => part.startsWith(prefix));
-      if (!cookie) {
-        return '';
-      }
-      return decodeURIComponent(cookie.slice(prefix.length));
-    };
-
-    const writeCookie = (name, value) => {
-      if (!value) {
-        return;
-      }
-      let cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${cookieMaxAge}; Path=/; SameSite=Lax`;
-      if (window.location.protocol === 'https:') {
-        cookie += '; Secure';
-      }
-      document.cookie = cookie;
-    };
-
-    const gaClientIdPromise = new Promise((resolve) => {
-      const fallback = normalizeGaClientId(readCookie('_ga'));
-      if (!measurementId || typeof window.gtag !== 'function') {
-        resolve(fallback);
-        return;
-      }
-
-      let settled = false;
-      const finish = (value) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        resolve(normalizeGaClientId(value) || fallback || '');
-      };
-
-      const timerId = window.setTimeout(() => finish(fallback), 1000);
-      try {
-        window.gtag('get', measurementId, 'client_id', (value) => {
-          window.clearTimeout(timerId);
-          finish(value);
-        });
-      } catch (_error) {
-        window.clearTimeout(timerId);
-        finish(fallback);
-      }
-    }).then((gaClientId) => {
-      const normalizedGaClientId = normalizeGaClientId(gaClientId);
-      writeCookie('gobii_signup_ga_client_id', normalizedGaClientId);
-      return normalizedGaClientId;
+    const gaClientIdPromise = identitySignals.createGaClientIdPromise({
+      measurementId,
+      onResolved: (normalizedGaClientId) => {
+        identitySignals.writeCookie('gobii_signup_ga_client_id', normalizedGaClientId, cookieMaxAge);
+      },
     });
 
     let fpjsPromise = null;
@@ -219,22 +167,15 @@
       if (fpjsPromise) {
         return fpjsPromise;
       }
-      fpjsPromise = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
-        .then(({ load, defaultEndpoint }) => {
-          const loadOptions = {};
-          const behaviorUrl = '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|escapejs }}';
-          if (behaviorUrl) {
-            loadOptions.endpoint = [`${behaviorUrl}?region=us`, defaultEndpoint];
-          }
-          return load(loadOptions);
-        })
-        .then((fpAgent) => fpAgent.get())
-        .then((result) => {
-          writeCookie('gobii_signup_fpjs_visitor_id', result.visitorId);
-          writeCookie('gobii_signup_fpjs_request_id', result.requestId);
-          return result;
-        })
-        .catch(() => null);
+      fpjsPromise = identitySignals.createFpjsPromise({
+        loaderUrl: fpjsLoaderUrl,
+        behaviorUrl,
+        timeoutMs: fpjsTimeoutMs,
+        onResolved: (result) => {
+          identitySignals.writeCookie('gobii_signup_fpjs_visitor_id', result.visitorId, cookieMaxAge);
+          identitySignals.writeCookie('gobii_signup_fpjs_request_id', result.requestId, cookieMaxAge);
+        },
+      });
       return fpjsPromise;
     };
 

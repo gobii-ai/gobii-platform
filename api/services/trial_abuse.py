@@ -163,7 +163,13 @@ def extract_request_identity_signal_values(request, *, include_fpjs: bool) -> di
     return values
 
 
-def capture_request_identity_signals(user, request, *, source: str, include_fpjs: bool) -> dict[str, str]:
+def capture_request_identity_signals_and_attribution(
+    user,
+    request,
+    *,
+    source: str,
+    include_fpjs: bool,
+) -> dict[str, str]:
     if not user or not getattr(user, "pk", None):
         return {}
 
@@ -293,7 +299,7 @@ def evaluate_user_trial_eligibility(user, *, request=None, capture_source: str |
         )
 
     if request is not None and capture_source:
-        capture_request_identity_signals(
+        capture_request_identity_signals_and_attribution(
             user,
             request,
             source=capture_source,

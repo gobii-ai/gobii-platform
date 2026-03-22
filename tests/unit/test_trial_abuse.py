@@ -17,7 +17,7 @@ from api.models import (
 )
 from api.services.trial_abuse import (
     SIGNAL_SOURCE_SIGNUP,
-    capture_request_identity_signals,
+    capture_request_identity_signals_and_attribution,
     evaluate_user_trial_eligibility,
 )
 from constants.grant_types import GrantTypeChoices
@@ -54,7 +54,7 @@ class TrialAbuseServiceTests(TestCase):
         )
 
     @tag("batch_pages")
-    def test_capture_request_identity_signals_stores_raw_values(self):
+    def test_capture_request_identity_signals_and_attribution_stores_raw_values(self):
         user = self._create_user("capture-signals@example.com")
         request = self.factory.post(
             "/signup",
@@ -69,7 +69,7 @@ class TrialAbuseServiceTests(TestCase):
             "_fbp": "fb.1.123.abcdef",
         }
 
-        captured = capture_request_identity_signals(
+        captured = capture_request_identity_signals_and_attribution(
             user,
             request,
             source=SIGNAL_SOURCE_SIGNUP,
@@ -100,7 +100,7 @@ class TrialAbuseServiceTests(TestCase):
         )
 
     @tag("batch_pages")
-    def test_capture_request_identity_signals_normalizes_ga_cookie_value(self):
+    def test_capture_request_identity_signals_and_attribution_normalizes_ga_cookie_value(self):
         user = self._create_user("capture-ga-cookie@example.com")
         request = self.factory.post("/signup")
         request.META["REMOTE_ADDR"] = "198.51.100.24"
@@ -108,7 +108,7 @@ class TrialAbuseServiceTests(TestCase):
             "_ga": "GA1.2.333.444",
         }
 
-        captured = capture_request_identity_signals(
+        captured = capture_request_identity_signals_and_attribution(
             user,
             request,
             source=SIGNAL_SOURCE_SIGNUP,

@@ -71,7 +71,7 @@ from api.services.trial_abuse import (
     SIGNUP_GA_CLIENT_COOKIE_NAME,
     SIGNAL_SOURCE_LOGIN,
     SIGNAL_SOURCE_SIGNUP,
-    capture_request_identity_signals,
+    capture_request_identity_signals_and_attribution,
     evaluate_user_trial_eligibility,
 )
 from util.payments_helper import PaymentsHelper
@@ -1403,7 +1403,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         except Exception:
             logger.exception("Failed to persist user attribution for user %s", user.id)
 
-        capture_request_identity_signals(
+        capture_request_identity_signals_and_attribution(
             user,
             request,
             source=SIGNAL_SOURCE_SIGNUP,
@@ -1610,7 +1610,7 @@ def handle_user_logged_in(sender, request, user, **kwargs):
     logger.info(f"User logged in: {user.id} ({user.email})")
 
     try:
-        capture_request_identity_signals(
+        capture_request_identity_signals_and_attribution(
             user,
             request,
             source=SIGNAL_SOURCE_LOGIN,

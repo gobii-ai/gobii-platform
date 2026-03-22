@@ -1689,6 +1689,8 @@ class AuthLinkTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "data-password-signup-form")
+        self.assertContains(response, "const fpjsTimeoutMs = 3000;")
+        self.assertContains(response, "Promise.race([")
         self.assertContains(response, "signupForm.addEventListener('submit'")
         self.assertContains(response, "signupForm.submit()")
 
@@ -1704,6 +1706,8 @@ class AuthLinkTests(TestCase):
         response = self.client.get(reverse("account_login"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "const fpjsTimeoutMs = 3000;")
+        self.assertContains(response, "Promise.race([")
         self.assertContains(response, "gobii_signup_fpjs_visitor_id")
         self.assertContains(response, "gobii_signup_fpjs_request_id")
         self.assertContains(response, "gobii_signup_ga_client_id")
