@@ -110,6 +110,19 @@ def _normalize_ip_prefix(ip: str) -> str:
     return str(network)
 
 
+def _normalize_ga_client_id(raw: str | None) -> str:
+    value = _decode_value(raw)
+    if not value:
+        return ""
+
+    parts = value.split(".")
+    if len(parts) >= 4 and parts[0].upper().startswith("GA"):
+        trailing_parts = parts[-2:]
+        if all(part.isdigit() for part in trailing_parts):
+            return ".".join(trailing_parts)
+    return value
+
+
 def extract_request_identity_signal_values(request, *, include_fpjs: bool) -> dict[str, str]:
     if request is None:
         return {}
@@ -117,9 +130,9 @@ def extract_request_identity_signal_values(request, *, include_fpjs: bool) -> di
     values: dict[str, str] = {}
 
     ga_client_id = (
-        _decode_value(request.POST.get("uga"))
-        or _decode_value(request.COOKIES.get(SIGNUP_GA_CLIENT_COOKIE_NAME))
-        or _decode_value(request.COOKIES.get("_ga"))
+        _normalize_ga_client_id(request.POST.get("uga"))
+        or _normalize_ga_client_id(request.COOKIES.get(SIGNUP_GA_CLIENT_COOKIE_NAME))
+        or _normalize_ga_client_id(request.COOKIES.get("_ga"))
     )
     fbp = _decode_value(request.COOKIES.get(settings.FBP_COOKIE_NAME)) or _decode_value(getattr(request, "fbp", ""))
 

@@ -165,14 +165,14 @@ class UserSignedUpSignalTests(TestCase):
                 (UserIdentitySignalTypeChoices.FPJS_VISITOR_ID, "visitor-123"),
                 (UserIdentitySignalTypeChoices.FPJS_REQUEST_ID, "request-456"),
                 (UserIdentitySignalTypeChoices.FBP, "fb.1.111.abcdef"),
-                (UserIdentitySignalTypeChoices.GA_CLIENT_ID, "GA1.2.333.444"),
+                (UserIdentitySignalTypeChoices.GA_CLIENT_ID, "333.444"),
                 (UserIdentitySignalTypeChoices.IP_EXACT, "198.51.100.24"),
                 (UserIdentitySignalTypeChoices.IP_PREFIX, "198.51.100.0/24"),
             },
         )
 
         attribution = UserAttribution.objects.get(user=self.user)
-        self.assertEqual(attribution.ga_client_id, "GA1.2.333.444")
+        self.assertEqual(attribution.ga_client_id, "333.444")
         self.assertEqual(attribution.fbp, "fb.1.111.abcdef")
         self.assertEqual(attribution.last_client_ip, "198.51.100.24")
 

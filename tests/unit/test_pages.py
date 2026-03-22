@@ -1690,6 +1690,22 @@ class AuthLinkTests(TestCase):
         FINGERPRINT_JS_API_KEY="fp_test_key",
         GA_MEASUREMENT_ID="G-TEST1234",
     )
+    def test_signup_page_waits_for_client_signals_before_password_submit(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-password-signup-form")
+        self.assertContains(response, "signupForm.addEventListener('submit'")
+        self.assertContains(response, "signupForm.submit()")
+
+    @tag("batch_pages")
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        FINGERPRINT_JS_ENABLED=True,
+        FINGERPRINT_JS_URL="https://fp.example/v3/loader.js",
+        FINGERPRINT_JS_API_KEY="fp_test_key",
+        GA_MEASUREMENT_ID="G-TEST1234",
+    )
     def test_login_page_renders_social_auth_signal_staging_script(self):
         response = self.client.get(reverse("account_login"))
 

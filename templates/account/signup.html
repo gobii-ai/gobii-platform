@@ -50,7 +50,7 @@
     {% endif %}
 
     {% if account_allow_password_signup %}
-    <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
+    <form method="post" action="{% url 'account_signup' %}" class="space-y-4" data-password-signup-form>
       {% csrf_token %}
       <input type="hidden" name="ufp" value="" id="ufp" />
       <input type="hidden" name="ufpr" value="" id="ufpr" />
@@ -111,12 +111,25 @@
     const cookieMaxAge = 60 * 60 * 2;
     const measurementId = '{{ settings.GA_MEASUREMENT_ID|escapejs }}';
     const socialLinks = Array.from(document.querySelectorAll('[data-social-signup-link]'));
+    const signupForm = document.querySelector('[data-password-signup-form]');
+    const signupSubmitButtons = signupForm
+      ? Array.from(signupForm.querySelectorAll('button[type="submit"], input[type="submit"]'))
+      : [];
 
     const setFieldValue = (fieldId, value) => {
       const field = document.getElementById(fieldId);
       if (field) {
         field.value = value || '';
       }
+    };
+
+    const normalizeGaClientId = (value) => {
+      const normalized = (value || '').trim().replace(/^"+|"+$/g, '');
+      const match = normalized.match(/^GA\d+\.\d+\.(\d+\.\d+)$/i);
+      if (match) {
+        return match[1];
+      }
+      return normalized;
     };
 
     const readCookie = (name) => {
@@ -142,8 +155,14 @@
       document.cookie = cookie;
     };
 
+    const setSignupSubmitDisabled = (disabled) => {
+      signupSubmitButtons.forEach((button) => {
+        button.disabled = disabled;
+      });
+    };
+
     const gaClientIdPromise = new Promise((resolve) => {
-      const fallback = readCookie('_ga');
+      const fallback = normalizeGaClientId(readCookie('_ga'));
       if (!measurementId || typeof window.gtag !== 'function') {
         resolve(fallback);
         return;
@@ -155,7 +174,7 @@
           return;
         }
         settled = true;
-        resolve(value || fallback || '');
+        resolve(normalizeGaClientId(value) || fallback || '');
       };
 
       const timerId = window.setTimeout(() => finish(fallback), 1000);
@@ -169,9 +188,10 @@
         finish(fallback);
       }
     }).then((gaClientId) => {
-      setFieldValue('uga', gaClientId);
-      writeCookie('gobii_signup_ga_client_id', gaClientId);
-      return gaClientId;
+      const normalizedGaClientId = normalizeGaClientId(gaClientId);
+      setFieldValue('uga', normalizedGaClientId);
+      writeCookie('gobii_signup_ga_client_id', normalizedGaClientId);
+      return normalizedGaClientId;
     });
 
     const fpjsPromise = import('{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}')
@@ -194,6 +214,30 @@
       .catch(() => null);
 
     const clientSignalsReady = Promise.allSettled([fpjsPromise, gaClientIdPromise]);
+    let clientSignalsSettled = false;
+    let replayingSignupSubmit = false;
+    clientSignalsReady.finally(() => {
+      clientSignalsSettled = true;
+    });
+
+    if (signupForm) {
+      signupForm.addEventListener('submit', (event) => {
+        if (replayingSignupSubmit || clientSignalsSettled) {
+          return;
+        }
+        event.preventDefault();
+        if (signupForm.dataset.clientSignalsPending === 'true') {
+          return;
+        }
+        signupForm.dataset.clientSignalsPending = 'true';
+        setSignupSubmitDisabled(true);
+        clientSignalsReady.finally(() => {
+          signupForm.dataset.clientSignalsReady = 'true';
+          replayingSignupSubmit = true;
+          signupForm.submit();
+        });
+      });
+    }
 
     socialLinks.forEach((link) => {
       link.addEventListener('click', (event) => {

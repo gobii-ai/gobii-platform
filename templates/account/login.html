@@ -150,6 +150,15 @@
     const cookieMaxAge = 60 * 60 * 2;
     const measurementId = '{{ settings.GA_MEASUREMENT_ID|escapejs }}';
 
+    const normalizeGaClientId = (value) => {
+      const normalized = (value || '').trim().replace(/^"+|"+$/g, '');
+      const match = normalized.match(/^GA\d+\.\d+\.(\d+\.\d+)$/i);
+      if (match) {
+        return match[1];
+      }
+      return normalized;
+    };
+
     const readCookie = (name) => {
       const prefix = `${name}=`;
       const cookie = document.cookie
@@ -174,7 +183,7 @@
     };
 
     const gaClientIdPromise = new Promise((resolve) => {
-      const fallback = readCookie('_ga');
+      const fallback = normalizeGaClientId(readCookie('_ga'));
       if (!measurementId || typeof window.gtag !== 'function') {
         resolve(fallback);
         return;
@@ -186,7 +195,7 @@
           return;
         }
         settled = true;
-        resolve(value || fallback || '');
+        resolve(normalizeGaClientId(value) || fallback || '');
       };
 
       const timerId = window.setTimeout(() => finish(fallback), 1000);
@@ -200,8 +209,9 @@
         finish(fallback);
       }
     }).then((gaClientId) => {
-      writeCookie('gobii_signup_ga_client_id', gaClientId);
-      return gaClientId;
+      const normalizedGaClientId = normalizeGaClientId(gaClientId);
+      writeCookie('gobii_signup_ga_client_id', normalizedGaClientId);
+      return normalizedGaClientId;
     });
 
     let fpjsPromise = null;

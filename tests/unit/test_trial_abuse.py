@@ -79,7 +79,7 @@ class TrialAbuseServiceTests(TestCase):
         self.assertEqual(
             captured,
             {
-                UserIdentitySignalTypeChoices.GA_CLIENT_ID: "GA1.2.111.222",
+                UserIdentitySignalTypeChoices.GA_CLIENT_ID: "111.222",
                 UserIdentitySignalTypeChoices.FBP: "fb.1.123.abcdef",
                 UserIdentitySignalTypeChoices.IP_EXACT: "198.51.100.24",
                 UserIdentitySignalTypeChoices.IP_PREFIX: "198.51.100.0/24",
@@ -90,13 +90,34 @@ class TrialAbuseServiceTests(TestCase):
         self.assertSetEqual(
             set(UserIdentitySignal.objects.filter(user=user).values_list("signal_type", "signal_value")),
             {
-                (UserIdentitySignalTypeChoices.GA_CLIENT_ID, "GA1.2.111.222"),
+                (UserIdentitySignalTypeChoices.GA_CLIENT_ID, "111.222"),
                 (UserIdentitySignalTypeChoices.FBP, "fb.1.123.abcdef"),
                 (UserIdentitySignalTypeChoices.IP_EXACT, "198.51.100.24"),
                 (UserIdentitySignalTypeChoices.IP_PREFIX, "198.51.100.0/24"),
                 (UserIdentitySignalTypeChoices.FPJS_VISITOR_ID, "visitor-123"),
                 (UserIdentitySignalTypeChoices.FPJS_REQUEST_ID, "request-456"),
             },
+        )
+
+    @tag("batch_pages")
+    def test_capture_request_identity_signals_normalizes_ga_cookie_value(self):
+        user = self._create_user("capture-ga-cookie@example.com")
+        request = self.factory.post("/signup")
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        request.COOKIES = {
+            "_ga": "GA1.2.333.444",
+        }
+
+        captured = capture_request_identity_signals(
+            user,
+            request,
+            source=SIGNAL_SOURCE_SIGNUP,
+            include_fpjs=False,
+        )
+
+        self.assertEqual(
+            captured[UserIdentitySignalTypeChoices.GA_CLIENT_ID],
+            "333.444",
         )
 
     @tag("batch_pages")
