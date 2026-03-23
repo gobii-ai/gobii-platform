@@ -1798,6 +1798,7 @@ class MarketingMetaTests(TestCase):
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
     @patch("pages.views.get_stripe_settings")
+    @override_settings(CAPI_LTV_MULTIPLE=5.0, CAPI_START_TRIAL_CONV_RATE=0.3)
     def test_switching_from_startup_redirects_to_billing(
         self,
         mock_stripe_settings,
@@ -1835,7 +1836,7 @@ class MarketingMetaTests(TestCase):
 
         self.assertEqual(parsed.path, "/console/billing/")
         self.assertEqual(params.get("subscribe_success"), ["1"])
-        self.assertEqual(params.get("p"), ["1250.00"])
+        self.assertEqual(params.get("p"), ["375.00"])
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
@@ -1890,6 +1891,7 @@ class SubscriptionPriceParsingTests(TestCase):
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
     @patch("pages.views.get_stripe_settings")
+    @override_settings(CAPI_LTV_MULTIPLE=5.0, CAPI_START_TRIAL_CONV_RATE=0.3)
     def test_existing_scale_subscription_short_circuits_checkout(
         self,
         mock_stripe_settings,
@@ -1927,7 +1929,7 @@ class SubscriptionPriceParsingTests(TestCase):
 
         self.assertEqual(parsed.path, "/console/billing/")
         self.assertEqual(params.get("subscribe_success"), ["1"])
-        self.assertEqual(params.get("p"), ["1250.00"])
+        self.assertEqual(params.get("p"), ["375.00"])
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()

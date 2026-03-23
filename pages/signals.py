@@ -36,6 +36,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from marketing_events.api import capi
 from marketing_events.context import extract_click_context
 from marketing_events.telemetry import record_fbc_synthesized
+from marketing_events.value_utils import calculate_start_trial_values
 import logging
 import stripe
 
@@ -2822,10 +2823,15 @@ def handle_subscription_event(event, **kwargs):
 
                     if sub.status == "trialing":
                         value, currency = _calculate_subscription_value(licensed_item)
-                        ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
-                        if value is not None:
-                            marketing_properties["predicted_ltv"] = value * ltv_multiple
-                        marketing_properties["value"] = 0
+                        predicted_ltv, conversion_value = calculate_start_trial_values(
+                            value,
+                            ltv_multiple=settings.CAPI_LTV_MULTIPLE,
+                            conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+                        )
+                        if predicted_ltv is not None:
+                            marketing_properties["predicted_ltv"] = predicted_ltv
+                        if conversion_value is not None:
+                            marketing_properties["value"] = conversion_value
                         marketing_properties["currency"] = "USD"
 
                     marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}

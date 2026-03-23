@@ -654,7 +654,7 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
-    @override_settings(CAPI_LTV_MULTIPLE=2.0)
+    @override_settings(CAPI_LTV_MULTIPLE=2.0, CAPI_START_TRIAL_CONV_RATE=0.5)
     def test_subscription_capi_value_applies_ltv_multiple(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
@@ -682,7 +682,7 @@ class SubscriptionSignalTests(TestCase):
         props = self.mock_capi.call_args.kwargs["properties"]
         # Base value from payload is 29.99; with 2x multiplier expect ~59.98
         self.assertAlmostEqual(props["predicted_ltv"], 59.98, places=2)
-        self.assertEqual(props["value"], 0)
+        self.assertAlmostEqual(props["value"], 29.99, places=2)
         self.assertEqual(props["currency"], "USD")
 
     @tag("batch_pages")
@@ -1017,6 +1017,7 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
+    @override_settings(CAPI_START_TRIAL_CONV_RATE=0.3)
     def test_trialing_subscription_grants_full_credits(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
@@ -1058,7 +1059,7 @@ class SubscriptionSignalTests(TestCase):
         capi_kwargs = self.mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "StartTrial")
         props = capi_kwargs["properties"]
-        self.assertEqual(props["value"], 0)
+        self.assertAlmostEqual(props["value"], props["predicted_ltv"] * 0.3, places=6)
         self.assertEqual(props["currency"], "USD")
 
         events = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
