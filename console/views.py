@@ -5286,6 +5286,29 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if normalized_action not in {"create", "update", "delete", "rotate_secret"}:
             return _error_response("Unsupported inbound webhook action.")
 
+        def _track_inbound_webhook_event(
+            event_type: AnalyticsEvent,
+            webhook_obj: PersistentAgentInboundWebhook,
+        ) -> None:
+            props = Analytics.with_org_properties(
+                {
+                    'agent_id': str(agent.pk),
+                    'agent_name': agent.name,
+                    'webhook_id': str(webhook_obj.id),
+                    'webhook_name': webhook_obj.name,
+                    'is_active': webhook_obj.is_active,
+                },
+                organization=agent.organization,
+            )
+            transaction.on_commit(
+                lambda evt=event_type, properties=props: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=evt,
+                    source=AnalyticsSource.WEB,
+                    properties=properties.copy(),
+                )
+            )
+
         if normalized_action in {"delete", "rotate_secret", "update"}:
             webhook_id = request.POST.get("inbound_webhook_id")
             if not webhook_id:
@@ -5298,11 +5321,13 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             webhook = None
 
         if normalized_action == "delete":
+            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_DELETED, webhook)
             webhook.delete()
             return _success_response("Inbound webhook removed.")
 
         if normalized_action == "rotate_secret":
             webhook.rotate_secret()
+            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_SECRET_ROTATED, webhook)
             return _success_response("Inbound webhook secret rotated.")
 
         name = (request.POST.get("inbound_webhook_name") or "").strip()
@@ -5334,6 +5359,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         except IntegrityError:
             return _error_response("An inbound webhook with that name already exists for this agent.")
 
+        if normalized_action == "create":
+            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_ADDED, webhook)
+        else:
+            _track_inbound_webhook_event(AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_UPDATED, webhook)
         return _success_response("Inbound webhook saved.")
 
     def _handle_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):

@@ -175,7 +175,7 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
               collapsed={1}
               displayDataTypes={false}
               displayObjectSize={false}
-              enableClipboard
+              enableClipboard={false}
               iconStyle="triangle"
               sortKeys
               style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}

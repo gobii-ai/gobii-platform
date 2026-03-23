@@ -383,6 +383,26 @@ def inbound_agent_webhook(request, webhook_id):
         logger.exception("Error ingesting inbound webhook %s", webhook_id)
         return JsonResponse({"accepted": False, "error": "Failed to ingest webhook payload."}, status=500)
 
+    inbound_props = Analytics.with_org_properties(
+        {
+            'agent_id': str(webhook.agent_id),
+            'agent_name': webhook.agent.name,
+            'webhook_id': str(webhook.id),
+            'webhook_name': webhook.name,
+            'message_id': str(info.message.id),
+            'payload_kind': str(raw_payload.get("payload_kind") or ""),
+            'content_type': str(raw_payload.get("content_type") or ""),
+            'attachment_count': len(attachments),
+        },
+        organization=getattr(webhook.agent, "organization", None),
+    )
+    Analytics.track_event(
+        user_id=webhook.agent.user.id,
+        event=AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_TRIGGERED,
+        source=AnalyticsSource.API,
+        properties=inbound_props.copy(),
+    )
+
     return JsonResponse(
         {
             "accepted": True,

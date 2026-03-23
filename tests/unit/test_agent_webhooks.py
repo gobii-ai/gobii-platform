@@ -5,6 +5,7 @@ from allauth.account.models import EmailAddress
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.http import QueryDict
+from django.test import RequestFactory
 from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -21,6 +22,8 @@ from api.models import (
     ProxyServer,
 )
 from api.webhooks import _parse_inbound_agent_webhook_request
+from console.views import AgentDetailView
+from util.analytics import AnalyticsEvent
 
 
 class AgentWebhookToolTests(TestCase):
@@ -219,6 +222,7 @@ class AgentWebhookConsoleViewTests(TestCase):
         self.user = type(self).user
         self.client.force_login(self.user)
         self.agent = PersistentAgent.objects.get(pk=self.agent_id)
+        self.factory = RequestFactory()
 
     @tag("batch_agent_webhooks")
     def test_console_creates_webhook(self):
@@ -347,6 +351,99 @@ class AgentWebhookConsoleViewTests(TestCase):
             PersistentAgentInboundWebhook.objects.filter(pk=webhook.pk).exists()
         )
 
+    @tag("batch_agent_webhooks")
+    @patch("console.views.Analytics.track_event")
+    def test_inbound_webhook_actions_emit_analytics(self, mock_track_event):
+        view = AgentDetailView()
+
+        create_request = self.factory.post(
+            "/console/agents/test/",
+            {
+                "inbound_webhook_name": "Build Trigger",
+                "inbound_webhook_is_active": "true",
+            },
+        )
+        create_request.user = self.user
+        with self.captureOnCommitCallbacks(execute=True):
+            create_response = view._handle_inbound_webhook_action(
+                create_request,
+                self.agent,
+                "create",
+                ajax=True,
+            )
+
+        self.assertEqual(create_response.status_code, 200)
+        webhook = PersistentAgentInboundWebhook.objects.get(agent=self.agent, name="Build Trigger")
+
+        update_request = self.factory.post(
+            "/console/agents/test/",
+            {
+                "inbound_webhook_id": str(webhook.id),
+                "inbound_webhook_name": "Build Trigger Updated",
+                "inbound_webhook_is_active": "false",
+            },
+        )
+        update_request.user = self.user
+        with self.captureOnCommitCallbacks(execute=True):
+            update_response = view._handle_inbound_webhook_action(
+                update_request,
+                self.agent,
+                "update",
+                ajax=True,
+            )
+
+        self.assertEqual(update_response.status_code, 200)
+        webhook.refresh_from_db()
+
+        rotate_request = self.factory.post(
+            "/console/agents/test/",
+            {"inbound_webhook_id": str(webhook.id)},
+        )
+        rotate_request.user = self.user
+        with self.captureOnCommitCallbacks(execute=True):
+            rotate_response = view._handle_inbound_webhook_action(
+                rotate_request,
+                self.agent,
+                "rotate_secret",
+                ajax=True,
+            )
+
+        self.assertEqual(rotate_response.status_code, 200)
+
+        delete_request = self.factory.post(
+            "/console/agents/test/",
+            {"inbound_webhook_id": str(webhook.id)},
+        )
+        delete_request.user = self.user
+        with self.captureOnCommitCallbacks(execute=True):
+            delete_response = view._handle_inbound_webhook_action(
+                delete_request,
+                self.agent,
+                "delete",
+                ajax=True,
+            )
+
+        self.assertEqual(delete_response.status_code, 200)
+
+        self.assertEqual(
+            [call.kwargs["event"] for call in mock_track_event.call_args_list],
+            [
+                AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_ADDED,
+                AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_UPDATED,
+                AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_SECRET_ROTATED,
+                AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_DELETED,
+            ],
+        )
+        create_props = mock_track_event.call_args_list[0].kwargs["properties"]
+        self.assertEqual(create_props["agent_id"], str(self.agent.id))
+        self.assertEqual(create_props["webhook_id"], str(webhook.id))
+        self.assertEqual(create_props["webhook_name"], "Build Trigger")
+        self.assertTrue(create_props["is_active"])
+
+        update_props = mock_track_event.call_args_list[1].kwargs["properties"]
+        self.assertEqual(update_props["webhook_name"], "Build Trigger Updated")
+        self.assertFalse(update_props["is_active"])
+
 
 class InboundAgentWebhookEndpointTests(TestCase):
     @classmethod
@@ -374,6 +471,32 @@ class InboundAgentWebhookEndpointTests(TestCase):
             agent=cls.agent,
             name="Deploy Hook",
         )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.webhooks.Analytics.track_event")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_emits_analytics(self, mock_delay, mock_track_event):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+                data='{"status":"ok","build_id":42}',
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        mock_delay.assert_called_once_with(str(self.agent.id))
+        mock_track_event.assert_called_once()
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["event"],
+            AnalyticsEvent.PERSISTENT_AGENT_INBOUND_WEBHOOK_TRIGGERED,
+        )
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["agent_id"], str(self.agent.id))
+        self.assertEqual(props["webhook_id"], str(self.webhook.id))
+        self.assertEqual(props["webhook_name"], self.webhook.name)
+        self.assertEqual(props["payload_kind"], "json")
+        self.assertEqual(props["attachment_count"], 0)
+        self.assertTrue(props["message_id"])
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.tasks.process_agent_events_task.delay")
