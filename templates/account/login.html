@@ -155,6 +155,8 @@
     const behaviorUrl = '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|escapejs }}';
     const fpjsTimeoutMs = 3000;
 
+    identitySignals.clearStagedFpjsCookies();
+
     const gaClientIdPromise = identitySignals.createGaClientIdPromise({
       measurementId,
       onResolved: (normalizedGaClientId) => {

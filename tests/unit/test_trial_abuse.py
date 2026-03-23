@@ -19,6 +19,7 @@ from api.services.trial_abuse import (
     SIGNAL_SOURCE_SIGNUP,
     capture_request_identity_signals_and_attribution,
     evaluate_user_trial_eligibility,
+    extract_request_identity_signal_values,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
@@ -179,6 +180,106 @@ class TrialAbuseServiceTests(TestCase):
                 UserIdentitySignalTypeChoices.FBP,
                 UserIdentitySignalTypeChoices.GA_CLIENT_ID,
             ],
+        )
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
+    def test_ip_only_match_does_not_send_user_to_review(self, _mock_get_stripe_customer):
+        historical_user = self._create_user("historical-ip@example.com")
+        current_user = self._create_user("current-ip@example.com")
+        self._grant_trial_history(historical_user)
+
+        for user in (historical_user, current_user):
+            UserIdentitySignal.objects.create(
+                user=user,
+                signal_type=UserIdentitySignalTypeChoices.IP_EXACT,
+                signal_value="198.51.100.24",
+            )
+            UserIdentitySignal.objects.create(
+                user=user,
+                signal_type=UserIdentitySignalTypeChoices.IP_PREFIX,
+                signal_value="198.51.100.0/24",
+            )
+
+        result = evaluate_user_trial_eligibility(current_user)
+
+        self.assertTrue(result.eligible)
+        self.assertEqual(result.decision, UserTrialEligibilityAutoStatusChoices.ELIGIBLE)
+        self.assertEqual(result.reason_codes, [])
+        self.assertEqual(
+            result.evidence_summary["matched_signal_types"],
+            [
+                UserIdentitySignalTypeChoices.IP_EXACT,
+                UserIdentitySignalTypeChoices.IP_PREFIX,
+            ],
+        )
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
+    def test_fbp_and_ip_match_sends_user_to_review(self, _mock_get_stripe_customer):
+        historical_user = self._create_user("historical-fbp-ip@example.com")
+        current_user = self._create_user("current-fbp-ip@example.com")
+        self._grant_trial_history(historical_user)
+
+        for user in (historical_user, current_user):
+            UserIdentitySignal.objects.create(
+                user=user,
+                signal_type=UserIdentitySignalTypeChoices.FBP,
+                signal_value="fb.1.123.shared",
+            )
+            UserIdentitySignal.objects.create(
+                user=user,
+                signal_type=UserIdentitySignalTypeChoices.IP_EXACT,
+                signal_value="198.51.100.24",
+            )
+            UserIdentitySignal.objects.create(
+                user=user,
+                signal_type=UserIdentitySignalTypeChoices.IP_PREFIX,
+                signal_value="198.51.100.0/24",
+            )
+
+        result = evaluate_user_trial_eligibility(current_user)
+
+        self.assertFalse(result.eligible)
+        self.assertEqual(result.decision, UserTrialEligibilityAutoStatusChoices.REVIEW)
+        self.assertIn("multi_signal_history_match", result.reason_codes)
+
+    @tag("batch_pages")
+    def test_password_signup_post_does_not_reuse_staged_fpjs_cookies(self):
+        request = self.factory.post(
+            "/signup",
+            {
+                "email": "user@example.com",
+                "password1": "pw",
+            },
+        )
+        request.COOKIES = {
+            "gobii_signup_fpjs_visitor_id": "visitor-stale",
+            "gobii_signup_fpjs_request_id": "request-stale",
+        }
+
+        extracted = extract_request_identity_signal_values(request, include_fpjs=True)
+
+        self.assertNotIn(UserIdentitySignalTypeChoices.FPJS_VISITOR_ID, extracted)
+        self.assertNotIn(UserIdentitySignalTypeChoices.FPJS_REQUEST_ID, extracted)
+
+    @tag("batch_pages")
+    def test_non_post_signup_flow_can_use_staged_fpjs_cookies(self):
+        request = self.factory.get("/accounts/google/login/callback/")
+        request.COOKIES = {
+            "gobii_signup_fpjs_visitor_id": "visitor-current",
+            "gobii_signup_fpjs_request_id": "request-current",
+        }
+
+        extracted = extract_request_identity_signal_values(request, include_fpjs=True)
+
+        self.assertEqual(
+            extracted[UserIdentitySignalTypeChoices.FPJS_VISITOR_ID],
+            "visitor-current",
+        )
+        self.assertEqual(
+            extracted[UserIdentitySignalTypeChoices.FPJS_REQUEST_ID],
+            "request-current",
         )
 
     @tag("batch_pages")

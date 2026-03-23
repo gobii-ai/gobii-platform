@@ -123,6 +123,25 @@ def _normalize_ga_client_id(raw: str | None) -> str:
     return value
 
 
+def _should_use_staged_fpjs_cookie_fallback(request) -> bool:
+    if request is None:
+        return False
+    return request.method != "POST"
+
+
+def _medium_signal_family(signal_type: str) -> str | None:
+    if signal_type == UserIdentitySignalTypeChoices.FBP:
+        return "fbp"
+    if signal_type == UserIdentitySignalTypeChoices.GA_CLIENT_ID:
+        return "ga_client_id"
+    if signal_type in {
+        UserIdentitySignalTypeChoices.IP_EXACT,
+        UserIdentitySignalTypeChoices.IP_PREFIX,
+    }:
+        return "ip"
+    return None
+
+
 def extract_request_identity_signal_values(request, *, include_fpjs: bool) -> dict[str, str]:
     if request is None:
         return {}
@@ -149,12 +168,11 @@ def extract_request_identity_signal_values(request, *, include_fpjs: bool) -> di
         values[UserIdentitySignalTypeChoices.IP_PREFIX] = ip_prefix
 
     if include_fpjs:
-        fpjs_visitor_id = _decode_value(request.POST.get("ufp")) or _decode_value(
-            request.COOKIES.get(SIGNUP_FPJS_VISITOR_COOKIE_NAME)
-        )
-        fpjs_request_id = _decode_value(request.POST.get("ufpr")) or _decode_value(
-            request.COOKIES.get(SIGNUP_FPJS_REQUEST_COOKIE_NAME)
-        )
+        fpjs_visitor_id = _decode_value(request.POST.get("ufp"))
+        fpjs_request_id = _decode_value(request.POST.get("ufpr"))
+        if _should_use_staged_fpjs_cookie_fallback(request):
+            fpjs_visitor_id = fpjs_visitor_id or _decode_value(request.COOKIES.get(SIGNUP_FPJS_VISITOR_COOKIE_NAME))
+            fpjs_request_id = fpjs_request_id or _decode_value(request.COOKIES.get(SIGNUP_FPJS_REQUEST_COOKIE_NAME))
         if fpjs_visitor_id:
             values[UserIdentitySignalTypeChoices.FPJS_VISITOR_ID] = fpjs_visitor_id
         if fpjs_request_id:
@@ -389,14 +407,15 @@ def evaluate_user_trial_eligibility(
             auto_status = UserTrialEligibilityAutoStatusChoices.NO_TRIAL
             reason_codes.append("fpjs_history_match")
         else:
-            medium_signal_types = {
-                UserIdentitySignalTypeChoices.FBP,
-                UserIdentitySignalTypeChoices.GA_CLIENT_ID,
-                UserIdentitySignalTypeChoices.IP_EXACT,
-                UserIdentitySignalTypeChoices.IP_PREFIX,
-            }
             medium_match = any(
-                len(signal_types & medium_signal_types) >= 2
+                len(
+                    {
+                        signal_family
+                        for signal_type in signal_types
+                        if (signal_family := _medium_signal_family(signal_type))
+                    }
+                )
+                >= 2
                 for signal_types in per_user_signal_types.values()
             )
             if medium_match:

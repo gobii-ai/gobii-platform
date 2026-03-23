@@ -36,6 +36,19 @@
       document.cookie = cookie;
     };
 
+    const deleteCookie = (name) => {
+      let cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`;
+      if (window.location.protocol === 'https:') {
+        cookie += '; Secure';
+      }
+      document.cookie = cookie;
+    };
+
+    const clearStagedFpjsCookies = () => {
+      deleteCookie('gobii_signup_fpjs_visitor_id');
+      deleteCookie('gobii_signup_fpjs_request_id');
+    };
+
     const withTimeout = (promise, timeoutMs, fallbackValue) => {
       let timerId = null;
       return Promise.race([
@@ -111,8 +124,10 @@
     );
 
     window.GobiiIdentitySignals = {
+      clearStagedFpjsCookies,
       createFpjsPromise,
       createGaClientIdPromise,
+      deleteCookie,
       normalizeGaClientId,
       readCookie,
       withTimeout,

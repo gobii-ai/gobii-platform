@@ -117,6 +117,8 @@
       : [];
     const fpjsTimeoutMs = 3000;
 
+    identitySignals.clearStagedFpjsCookies();
+
     const setFieldValue = (fieldId, value) => {
       const field = document.getElementById(fieldId);
       if (field) {
