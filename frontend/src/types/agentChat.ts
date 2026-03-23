@@ -33,6 +33,8 @@ export type AgentMessage = {
   senderUserId?: number | null
   senderName?: string | null
   senderAddress?: string | null
+  sourceKind?: string | null
+  sourceLabel?: string | null
 }
 
 export type ToolMeta = {

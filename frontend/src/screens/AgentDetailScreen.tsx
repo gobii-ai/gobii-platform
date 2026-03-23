@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleHelp,
+  Copy,
   Folder,
   Info,
   KeyRound,
@@ -245,13 +246,32 @@ type AgentWebhook = {
   url: string
 }
 
+type AgentInboundWebhook = {
+  id: string
+  name: string
+  url: string
+  isActive: boolean
+  lastTriggeredAt: string | null
+}
+
 type PendingWebhookAction =
   | { type: 'create'; tempId: string; name: string; url: string }
   | { type: 'update'; id: string; name: string; url: string }
   | { type: 'delete'; id: string }
 
+type PendingInboundWebhookAction =
+  | { type: 'create'; tempId: string; name: string; isActive: boolean }
+  | { type: 'update'; id: string; name: string; isActive: boolean }
+  | { type: 'delete'; id: string }
+  | { type: 'rotate_secret'; id: string }
+
 type DisplayWebhook = AgentWebhook & {
   pendingType?: PendingWebhookAction['type']
+  temp?: boolean
+}
+
+type DisplayInboundWebhook = AgentInboundWebhook & {
+  pendingType?: PendingInboundWebhookAction['type']
   temp?: boolean
 }
 
@@ -306,6 +326,7 @@ type AgentDetailPageData = {
   mcpServers: McpServersInfo
   peerLinks: PeerLinksInfo
   webhooks: AgentWebhook[]
+  inboundWebhooks: AgentInboundWebhook[]
   features: {
     organizations: boolean
   }
@@ -540,6 +561,7 @@ function buildCollaboratorRows(state: CollaboratorState, pendingActions: Pending
 }
 
 const normalizeWebhooks = (hooks: AgentWebhook[]): DisplayWebhook[] => hooks.map((hook) => ({ ...hook }))
+const normalizeInboundWebhooks = (hooks: AgentInboundWebhook[]): DisplayInboundWebhook[] => hooks.map((hook) => ({ ...hook }))
 
 function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   if (a.size !== b.size) {
@@ -606,6 +628,11 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [savedWebhooks, setSavedWebhooks] = useState<AgentWebhook[]>(initialData.webhooks)
   const [webhooksState, setWebhooksState] = useState<DisplayWebhook[]>(() => normalizeWebhooks(initialData.webhooks))
   const [pendingWebhookActions, setPendingWebhookActions] = useState<PendingWebhookAction[]>([])
+  const [savedInboundWebhooks, setSavedInboundWebhooks] = useState<AgentInboundWebhook[]>(initialData.inboundWebhooks)
+  const [inboundWebhooksState, setInboundWebhooksState] = useState<DisplayInboundWebhook[]>(() => normalizeInboundWebhooks(initialData.inboundWebhooks))
+  const [pendingInboundWebhookActions, setPendingInboundWebhookActions] = useState<PendingInboundWebhookAction[]>([])
+  const [copiedInboundWebhookId, setCopiedInboundWebhookId] = useState<string | null>(null)
+  const inboundWebhookCopyResetTimeoutRef = useRef<number | null>(null)
   const initialOrgServerSet = useMemo(() => {
     return new Set(initialData.mcpServers.organization.filter((server) => server.assigned).map((server) => server.id))
   }, [initialData.mcpServers.organization])
@@ -712,21 +739,35 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     }
   }, [avatarInputRef, clearAvatarPreviewUrl, initialData.agent.avatarUrl])
 
-useEffect(() => {
-  setSavedWebhooks(initialData.webhooks)
-  setWebhooksState(normalizeWebhooks(initialData.webhooks))
-  setPendingWebhookActions([])
-}, [initialData.webhooks])
+  useEffect(() => {
+    setSavedWebhooks(initialData.webhooks)
+    setWebhooksState(normalizeWebhooks(initialData.webhooks))
+    setPendingWebhookActions([])
+  }, [initialData.webhooks])
 
-useEffect(() => {
-  setSavedOrgServers(new Set(initialOrgServerSet))
-  setSelectedOrgServers(new Set(initialOrgServerSet))
-}, [initialOrgServerSet])
+  useEffect(() => {
+    setSavedInboundWebhooks(initialData.inboundWebhooks)
+    setInboundWebhooksState(normalizeInboundWebhooks(initialData.inboundWebhooks))
+    setPendingInboundWebhookActions([])
+  }, [initialData.inboundWebhooks])
 
-useEffect(() => {
-  setSavedPersonalServers(new Set(initialPersonalServerSet))
-  setSelectedPersonalServers(new Set(initialPersonalServerSet))
-}, [initialPersonalServerSet])
+  useEffect(() => {
+    return () => {
+      if (inboundWebhookCopyResetTimeoutRef.current !== null) {
+        window.clearTimeout(inboundWebhookCopyResetTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    setSavedOrgServers(new Set(initialOrgServerSet))
+    setSelectedOrgServers(new Set(initialOrgServerSet))
+  }, [initialOrgServerSet])
+
+  useEffect(() => {
+    setSavedPersonalServers(new Set(initialPersonalServerSet))
+    setSelectedPersonalServers(new Set(initialPersonalServerSet))
+  }, [initialPersonalServerSet])
 
   useEffect(() => {
     setSavedPeerLinks(initialData.peerLinks)
@@ -746,12 +787,12 @@ useEffect(() => {
     setPendingCollaboratorActions([])
   }, [initialData.collaborators])
 
-const mcpHasChanges = useMemo(
-  () =>
-    !areSetsEqual(selectedPersonalServers, savedPersonalServers) ||
-    !areSetsEqual(selectedOrgServers, savedOrgServers),
-  [selectedPersonalServers, savedPersonalServers, selectedOrgServers, savedOrgServers],
-)
+  const mcpHasChanges = useMemo(
+    () =>
+      !areSetsEqual(selectedPersonalServers, savedPersonalServers) ||
+      !areSetsEqual(selectedOrgServers, savedOrgServers),
+    [selectedPersonalServers, savedPersonalServers, selectedOrgServers, savedOrgServers],
+  )
 
 const togglePersonalServer = useCallback((serverId: string) => {
   setSelectedPersonalServers((prev) => {
@@ -875,6 +916,81 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       const next = prev.filter((action) => !(action.type === 'delete' && action.id === hook.id) && !(action.type === 'update' && action.id === hook.id))
       return [...next, { type: 'delete', id: hook.id }]
     })
+  }, [])
+
+  const handleInboundWebhookDraft = useCallback(
+    ({ id, name, isActive }: { id?: string; name: string; isActive: boolean }) => {
+      if (id) {
+        setInboundWebhooksState((prev) =>
+          prev.map((hook) => (hook.id === id ? { ...hook, name, isActive, pendingType: 'update' } : hook)),
+        )
+        setPendingInboundWebhookActions((prev) => {
+          const next = prev.filter((action) => !(action.type === 'update' && action.id === id))
+          return [...next, { type: 'update', id, name, isActive }]
+        })
+        return
+      }
+      const tempId = generateTempId()
+      setInboundWebhooksState((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          name,
+          url: '',
+          isActive,
+          lastTriggeredAt: null,
+          temp: true,
+          pendingType: 'create',
+        },
+      ])
+      setPendingInboundWebhookActions((prev) => [...prev, { type: 'create', tempId, name, isActive }])
+    },
+    [],
+  )
+
+  const stageInboundWebhookDelete = useCallback((hook: DisplayInboundWebhook) => {
+    if (hook.temp) {
+      setInboundWebhooksState((prev) => prev.filter((entry) => entry.id !== hook.id))
+      setPendingInboundWebhookActions((prev) => prev.filter((action) => !(action.type === 'create' && action.tempId === hook.id)))
+      return
+    }
+    setInboundWebhooksState((prev) => prev.map((entry) => (entry.id === hook.id ? { ...entry, pendingType: 'delete' } : entry)))
+    setPendingInboundWebhookActions((prev) => {
+      const next = prev.filter(
+        (action) =>
+          !((action.type === 'delete' || action.type === 'update' || action.type === 'rotate_secret') && action.id === hook.id),
+      )
+      return [...next, { type: 'delete', id: hook.id }]
+    })
+  }, [])
+
+  const stageInboundWebhookRotateSecret = useCallback((hook: DisplayInboundWebhook) => {
+    if (hook.temp) {
+      return
+    }
+    setInboundWebhooksState((prev) => prev.map((entry) => (entry.id === hook.id ? { ...entry, pendingType: 'rotate_secret' } : entry)))
+    setPendingInboundWebhookActions((prev) => {
+      const next = prev.filter((action) => !(action.type === 'rotate_secret' && action.id === hook.id))
+      return [...next, { type: 'rotate_secret', id: hook.id }]
+    })
+  }, [])
+
+  const copyInboundWebhookUrl = useCallback(async (hook: DisplayInboundWebhook) => {
+    if (!hook.url || typeof navigator === 'undefined' || !navigator.clipboard) {
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(hook.url)
+      setCopiedInboundWebhookId(hook.id)
+      if (inboundWebhookCopyResetTimeoutRef.current !== null) {
+        window.clearTimeout(inboundWebhookCopyResetTimeoutRef.current)
+      }
+      inboundWebhookCopyResetTimeoutRef.current = window.setTimeout(() => {
+        setCopiedInboundWebhookId(null)
+      }, 1600)
+    } catch (error) {
+      console.error('Copy failed', error)
+    }
   }, [])
 
   const stagePeerLinkCreate = useCallback(
@@ -1008,8 +1124,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
   const allowlistDirty = pendingAllowlistActions.length > 0
   const collaboratorDirty = pendingCollaboratorActions.length > 0
   const webhooksDirty = pendingWebhookActions.length > 0
+  const inboundWebhooksDirty = pendingInboundWebhookActions.length > 0
   const peerLinksDirty = pendingPeerActions.length > 0
-  const hasAnyChanges = generalHasChanges || mcpHasChanges || allowlistDirty || collaboratorDirty || webhooksDirty || peerLinksDirty
+  const hasAnyChanges = generalHasChanges || mcpHasChanges || allowlistDirty || collaboratorDirty || webhooksDirty || inboundWebhooksDirty || peerLinksDirty
 
   const applyPeerLinkPayload = useCallback((payload: PeerLinksInfo) => {
     setSavedPeerLinks(payload)
@@ -1101,6 +1218,36 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [submitFormData],
   )
 
+  const submitInboundWebhookAction = useCallback(
+    async (action: PendingInboundWebhookAction) => {
+      const formData = new FormData()
+      if (action.type === 'create') {
+        formData.append('inbound_webhook_action', 'create')
+        formData.append('inbound_webhook_name', action.name)
+        formData.append('inbound_webhook_is_active', String(action.isActive))
+      } else if (action.type === 'update') {
+        formData.append('inbound_webhook_action', 'update')
+        formData.append('inbound_webhook_id', action.id)
+        formData.append('inbound_webhook_name', action.name)
+        formData.append('inbound_webhook_is_active', String(action.isActive))
+      } else if (action.type === 'rotate_secret') {
+        formData.append('inbound_webhook_action', 'rotate_secret')
+        formData.append('inbound_webhook_id', action.id)
+      } else {
+        formData.append('inbound_webhook_action', 'delete')
+        formData.append('inbound_webhook_id', action.id)
+      }
+
+      const data = await submitFormData(formData)
+      if (data?.inboundWebhooks) {
+        const nextHooks = data.inboundWebhooks as AgentInboundWebhook[]
+        setSavedInboundWebhooks(nextHooks)
+        setInboundWebhooksState(normalizeInboundWebhooks(nextHooks))
+      }
+    },
+    [submitFormData],
+  )
+
   const submitPeerAction = useCallback(
     async (action: PendingPeerLinkAction) => {
       const formData = new FormData()
@@ -1143,6 +1290,8 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setPendingCollaboratorActions([])
     setPendingWebhookActions([])
     setWebhooksState(normalizeWebhooks(savedWebhooks))
+    setPendingInboundWebhookActions([])
+    setInboundWebhooksState(normalizeInboundWebhooks(savedInboundWebhooks))
     setPendingPeerActions([])
     setPeerLinksState(savedPeerLinks.entries)
     setPeerLinkCandidates(savedPeerLinks.candidates)
@@ -1151,7 +1300,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setSaveError(null)
     setSaveNotice(null)
     resetAvatarState()
-  }, [resetAvatarState, resetForm, savedOrgServers, savedPeerLinks, savedPersonalServers, savedWebhooks])
+  }, [resetAvatarState, resetForm, savedInboundWebhooks, savedOrgServers, savedPeerLinks, savedPersonalServers, savedWebhooks])
 
   const handleSaveAll = useCallback(async () => {
     if (!hasAnyChanges) {
@@ -1233,6 +1382,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       })
 
       await runPendingActionGroup({
+        actions: pendingInboundWebhookActions,
+        submitAction: submitInboundWebhookAction,
+        clearActions: () => setPendingInboundWebhookActions([]),
+        trimProcessedActions: (processedCount) => setPendingInboundWebhookActions((prev) => prev.slice(processedCount)),
+      })
+
+      await runPendingActionGroup({
         actions: pendingPeerActions,
         submitAction: submitPeerAction,
         clearActions: () => setPendingPeerActions([]),
@@ -1260,6 +1416,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     mcpHasChanges,
     pendingAllowlistActions,
     pendingCollaboratorActions,
+    pendingInboundWebhookActions,
     pendingPeerActions,
     pendingWebhookActions,
     savedAvatarUrl,
@@ -1268,6 +1425,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     sliderEmptyValue,
     submitAllowlistAction,
     submitCollaboratorAction,
+    submitInboundWebhookAction,
     submitPeerAction,
     submitFormData,
     submitWebhookAction,
@@ -1671,6 +1829,23 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       ))
     },
     [handleWebhookDraft, showModal],
+  )
+
+  const openInboundWebhookModal = useCallback(
+    (mode: 'create' | 'edit', webhook: DisplayInboundWebhook | null = null) => {
+      showModal((onClose) => (
+        <InboundWebhookModal
+          mode={mode}
+          webhook={webhook}
+          onSubmit={(draft) => {
+            handleInboundWebhookDraft(draft)
+            onClose()
+          }}
+          onClose={onClose}
+        />
+      ))
+    },
+    [handleInboundWebhookDraft, showModal],
   )
 
   const openPeerLinkModal = useCallback(
@@ -2138,6 +2313,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         onWebhookCreate={() => openWebhookModal('create')}
         onWebhookEdit={(hook) => openWebhookModal('edit', hook)}
         onWebhookDelete={stageWebhookDelete}
+        inboundWebhooks={inboundWebhooksState}
+        copiedInboundWebhookId={copiedInboundWebhookId}
+        onInboundWebhookCreate={() => openInboundWebhookModal('create')}
+        onInboundWebhookEdit={(hook) => openInboundWebhookModal('edit', hook)}
+        onInboundWebhookDelete={stageInboundWebhookDelete}
+        onInboundWebhookRotateSecret={stageInboundWebhookRotateSecret}
+        onInboundWebhookCopy={copyInboundWebhookUrl}
         onConfirmAction={openConfirmAction}
       />
 
@@ -2586,6 +2768,13 @@ type IntegrationsSectionProps = {
   onWebhookCreate: () => void
   onWebhookEdit: (webhook: DisplayWebhook) => void
   onWebhookDelete: (webhook: DisplayWebhook) => void
+  inboundWebhooks: DisplayInboundWebhook[]
+  copiedInboundWebhookId: string | null
+  onInboundWebhookCreate: () => void
+  onInboundWebhookEdit: (webhook: DisplayInboundWebhook) => void
+  onInboundWebhookDelete: (webhook: DisplayInboundWebhook) => void
+  onInboundWebhookRotateSecret: (webhook: DisplayInboundWebhook) => void
+  onInboundWebhookCopy: (webhook: DisplayInboundWebhook) => void
   onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
@@ -2604,6 +2793,13 @@ function IntegrationsSection({
   onWebhookCreate,
   onWebhookEdit,
   onWebhookDelete,
+  inboundWebhooks,
+  copiedInboundWebhookId,
+  onInboundWebhookCreate,
+  onInboundWebhookEdit,
+  onInboundWebhookDelete,
+  onInboundWebhookRotateSecret,
+  onInboundWebhookCopy,
   onConfirmAction,
 }: IntegrationsSectionProps) {
   return (
@@ -2902,6 +3098,131 @@ function IntegrationsSection({
             </div>
           )}
         </section>
+
+        <section className="p-6 sm:p-8 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div>
+              <h3 className="text-base font-semibold text-gray-800">Inbound Webhooks</h3>
+              <p className="text-sm text-gray-500">Webhook URLs trigger the agent and show up in live chat as inbound events.</p>
+            </div>
+            <button
+              type="button"
+              onClick={onInboundWebhookCreate}
+              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+              Add Inbound Webhook
+            </button>
+          </div>
+
+          {inboundWebhooks.length > 0 ? (
+            <div className="overflow-hidden border border-gray-200 rounded-xl">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Webhook URL</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Last Triggered</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {inboundWebhooks.map((webhook) => {
+                    const pendingLabel =
+                      webhook.pendingType === 'delete'
+                        ? 'Pending removal'
+                        : webhook.pendingType === 'update'
+                          ? 'Pending update'
+                          : webhook.pendingType === 'create'
+                            ? 'Pending create'
+                            : webhook.pendingType === 'rotate_secret'
+                              ? 'Pending secret rotation'
+                              : null
+                    const rowClasses = webhook.pendingType === 'delete' ? 'opacity-60' : ''
+                    const lastTriggeredLabel = webhook.lastTriggeredAt ? new Date(webhook.lastTriggeredAt).toLocaleString() : 'Never'
+                    const copyLabel = copiedInboundWebhookId === webhook.id ? 'Copied' : 'Copy URL'
+                    return (
+                      <tr key={webhook.id} className={rowClasses}>
+                        <td className="px-4 py-3 text-sm text-gray-800">
+                          <div className="flex flex-col">
+                            <span>{webhook.name}</span>
+                            {pendingLabel && <span className="text-xs text-amber-600">{pendingLabel}</span>}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 break-all">
+                          {webhook.url ? webhook.url : <span className="text-gray-400">URL available after save</span>}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          <span className={webhook.isActive ? 'text-green-600' : 'text-gray-500'}>
+                            {webhook.isActive ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{lastTriggeredLabel}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700 space-y-2">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => onInboundWebhookEdit(webhook)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => onInboundWebhookCopy(webhook)}
+                              disabled={!webhook.url}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            >
+                              {copiedInboundWebhookId === webhook.id ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
+                              {copyLabel}
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                              disabled={webhook.temp}
+                              onClick={() =>
+                                onConfirmAction({
+                                  title: 'Rotate inbound webhook secret',
+                                  body: `Rotate the secret for "${webhook.name}"? Existing callers will need the new URL after you save changes.`,
+                                  confirmLabel: 'Rotate secret',
+                                  onConfirm: () => onInboundWebhookRotateSecret(webhook),
+                                })
+                              }
+                            >
+                              <KeyRound className="w-3.5 h-3.5" aria-hidden="true" />
+                              Rotate Secret
+                            </button>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50"
+                              onClick={() =>
+                                onConfirmAction({
+                                  title: 'Delete inbound webhook',
+                                  body: `Remove the inbound webhook "${webhook.name}"? This cannot be undone.`,
+                                  confirmLabel: 'Delete inbound webhook',
+                                  tone: 'danger',
+                                  onConfirm: () => onInboundWebhookDelete(webhook),
+                                })
+                              }
+                            >
+                              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                              Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
+              No inbound webhooks yet. Add one to let external systems trigger this agent.
+            </div>
+          )}
+        </section>
       </div>
     </details>
   )
@@ -3101,6 +3422,67 @@ function WebhookModal({ mode, webhook, onSubmit, onClose }: WebhookModalProps) {
           </button>
           <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
             Save Webhook
+          </button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+type InboundWebhookModalProps = {
+  mode: 'create' | 'edit'
+  webhook: DisplayInboundWebhook | null
+  onSubmit: (draft: { id?: string; name: string; isActive: boolean }) => void
+  onClose: () => void
+}
+
+function InboundWebhookModal({ mode, webhook, onSubmit, onClose }: InboundWebhookModalProps) {
+  const [name, setName] = useState(webhook?.name ?? '')
+  const [isActive, setIsActive] = useState(webhook?.isActive ?? true)
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    onSubmit({ id: webhook?.id, name, isActive })
+  }
+
+  return (
+    <Modal
+      title={mode === 'create' ? 'Add Inbound Webhook' : 'Edit Inbound Webhook'}
+      subtitle="Save to generate or update the secret-bearing webhook URL."
+      onClose={onClose}
+      widthClass="sm:max-w-lg"
+    >
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        <div>
+          <label htmlFor="inbound-webhook-name-field" className="block text-sm font-medium text-gray-700">
+            Webhook Name
+          </label>
+          <input
+            type="text"
+            id="inbound-webhook-name-field"
+            name="inbound_webhook_name"
+            required
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            placeholder="A descriptive name for this inbound webhook"
+          />
+        </div>
+        <label className="inline-flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={isActive}
+            onChange={(event) => setIsActive(event.target.checked)}
+            className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+          />
+          <span>Webhook active</span>
+        </label>
+        <div className="flex items-center justify-end gap-3 pt-2">
+          <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+            Save Inbound Webhook
           </button>
         </div>
       </form>

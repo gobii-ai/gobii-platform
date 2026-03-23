@@ -28,6 +28,7 @@ from django.utils import timezone
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
 from ...models import (
+    PersistentAgentInboundWebhook,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgent,
@@ -36,6 +37,8 @@ from ...models import (
     PersistentAgentMessageAttachment,
     CommsChannel,
     DeliveryStatus,
+    build_inbound_webhook_agent_address,
+    build_inbound_webhook_sender_address,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -392,6 +395,28 @@ def _ensure_agent_web_endpoint(agent) -> PersistentAgentCommsEndpoint:
     if endpoint.owner_agent_id != agent.id:
         endpoint.owner_agent = agent
         endpoint.save(update_fields=["owner_agent"])
+    return endpoint
+
+
+@tracer.start_as_current_span("_ensure_agent_inbound_webhook_endpoint")
+def _ensure_agent_inbound_webhook_endpoint(agent) -> PersistentAgentCommsEndpoint:
+    """Ensure the agent has an OTHER-channel endpoint for inbound webhook routing."""
+
+    address = build_inbound_webhook_agent_address(agent.id)
+    endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.OTHER,
+        address=address,
+        defaults={"owner_agent": agent, "is_primary": True},
+    )
+    updates = []
+    if endpoint.owner_agent_id != agent.id:
+        endpoint.owner_agent = agent
+        updates.append("owner_agent")
+    if not endpoint.is_primary:
+        endpoint.is_primary = True
+        updates.append("is_primary")
+    if updates:
+        endpoint.save(update_fields=updates)
     return endpoint
 
 @tracer.start_as_current_span("_send_daily_credit_notice")
@@ -1163,6 +1188,51 @@ def ingest_inbound_message(
                     transaction.on_commit(_trigger_processing)
 
         return InboundMessageInfo(message=message)
+
+
+@tracer.start_as_current_span("ingest_inbound_webhook_message")
+def ingest_inbound_webhook_message(
+    webhook: PersistentAgentInboundWebhook,
+    *,
+    body: str,
+    raw_payload: MutableMapping[str, Any],
+    attachments: Iterable[Any] = (),
+    filespace_import_mode: str = "sync",
+) -> InboundMessageInfo:
+    """Persist an inbound webhook call as an OTHER-channel message and queue the agent."""
+
+    agent = webhook.agent
+    recipient_endpoint = _ensure_agent_inbound_webhook_endpoint(agent)
+    sender_address = build_inbound_webhook_sender_address(webhook.id)
+    recipient_address = recipient_endpoint.address
+
+    payload = dict(raw_payload or {})
+    payload.setdefault("source", "inbound_webhook")
+    payload.setdefault("source_kind", "webhook")
+    payload.setdefault("source_label", webhook.name)
+    payload.setdefault("webhook_id", str(webhook.id))
+    payload.setdefault("webhook_name", webhook.name)
+
+    parsed = ParsedMessage(
+        sender=sender_address,
+        recipient=recipient_address,
+        subject=None,
+        body=body,
+        attachments=list(attachments),
+        raw_payload=payload,
+        msg_channel=CommsChannel.OTHER.value,
+    )
+    info = ingest_inbound_message(
+        CommsChannel.OTHER,
+        parsed,
+        filespace_import_mode=filespace_import_mode,
+    )
+
+    conversation_id = getattr(info.message, "conversation_id", None)
+    if conversation_id:
+        PersistentAgentConversation.objects.filter(id=conversation_id).update(display_name=webhook.name)
+    webhook.mark_triggered()
+    return info
 
 @tracer.start_as_current_span("get_agent_id_from_address")
 def get_agent_id_from_address(channel: CommsChannel | str, address: str) -> UUID | None:

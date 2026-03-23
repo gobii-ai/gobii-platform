@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from urllib.parse import parse_qs, urlparse
+from unittest.mock import patch
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -11,6 +12,7 @@ from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
+from api.agent.comms.message_service import ingest_inbound_webhook_message
 from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
@@ -19,6 +21,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
+    PersistentAgentInboundWebhook,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -176,6 +179,37 @@ class AgentChatSignalTests(TestCase):
         payload = timeline.get("payload", {})
         self.assertEqual(payload.get("kind"), "thinking")
         self.assertEqual(payload.get("completionId"), str(completion.id))
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_message_emits_webhook_timeline_event(self, mock_delay):
+        webhook = PersistentAgentInboundWebhook.objects.create(
+            agent=self.agent,
+            name="Signal Hook",
+        )
+        self._drain_timeline_events()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_webhook_message(
+                webhook,
+                body="Signal payload",
+                raw_payload={
+                    "source": "inbound_webhook",
+                    "source_kind": "webhook",
+                    "source_label": webhook.name,
+                    "webhook_name": webhook.name,
+                },
+            )
+
+        timeline = self._receive_with_timeout()
+        self.assertEqual(timeline.get("type"), "timeline_event")
+        payload = timeline.get("payload", {})
+        self.assertEqual(payload.get("kind"), "message")
+        message_payload = payload.get("message", {})
+        self.assertEqual(message_payload.get("sourceKind"), "webhook")
+        self.assertEqual(message_payload.get("sourceLabel"), "Signal Hook")
+        self.assertEqual(message_payload.get("senderName"), "Signal Hook")
+        mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_chat")
     def test_avatar_update_emits_agent_profile_event(self):

@@ -28,6 +28,7 @@ from api.agent.comms.human_input_requests import serialize_human_input_tool_resu
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
+from api.agent.comms.source_metadata import get_message_source_metadata
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -538,7 +539,6 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
         "fileSizeLabel": size_label,
     }
 
-
 def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | None] | None = None) -> dict:
     message = env.message
     timestamp = message.timestamp
@@ -549,6 +549,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         channel = message.from_endpoint.channel
     attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
     conversation = message.conversation
+    source_kind, source_label = get_message_source_metadata(message.raw_payload)
     peer_link_id: str | None = None
     is_peer_dm = False
     if conversation and conversation.is_peer_dm:
@@ -591,6 +592,8 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         sender_name = (conversation.display_name or "").strip() if conversation else ""
         if not sender_name:
             sender_name = sender_address
+    if source_kind == "webhook" and source_label:
+        sender_name = source_label
 
     body_html = _message_body_html(message, channel, attachments)
 
@@ -615,6 +618,8 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
             "senderUserId": sender_user_id,
             "senderName": sender_name,
             "senderAddress": sender_address,
+            "sourceKind": source_kind,
+            "sourceLabel": source_label,
         },
     }
 

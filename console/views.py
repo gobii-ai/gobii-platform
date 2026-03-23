@@ -105,6 +105,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentEmailEndpoint,
+    PersistentAgentInboundWebhook,
     PersistentAgentWebhook,
     PersistentAgentMessage,
     IntelligenceTier,
@@ -3442,7 +3443,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['pending_contact_requests'] = pending_contact_requests
 
         context['agent_webhooks'] = agent.webhooks.order_by('name')
-
         # Add owner information for display
         context['owner_email'] = agent.user.email
 
@@ -3784,6 +3784,23 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             for webhook in agent.webhooks.order_by('name')
         ]
 
+    def _build_inbound_webhooks_payload(self, request: HttpRequest, agent: PersistentAgent) -> list[dict[str, object]]:
+        payload = []
+        for webhook in agent.inbound_webhooks.order_by('name'):
+            endpoint_url = request.build_absolute_uri(
+                reverse('api:inbound_agent_webhook', kwargs={'webhook_id': webhook.id})
+            )
+            payload.append(
+                {
+                    'id': str(webhook.id),
+                    'name': webhook.name,
+                    'url': f'{endpoint_url}?t={webhook.secret}',
+                    'isActive': webhook.is_active,
+                    'lastTriggeredAt': webhook.last_triggered_at.isoformat() if webhook.last_triggered_at else None,
+                }
+            )
+        return payload
+
     def _build_peer_links_payload(self, agent: PersistentAgent) -> dict[str, object]:
         peer_links_qs = (
             AgentPeerLink.objects.filter(Q(agent_a=agent) | Q(agent_b=agent))
@@ -4055,6 +4072,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             }
             for webhook in context.get('agent_webhooks', [])
         ]
+        inbound_webhooks = self._build_inbound_webhooks_payload(request, agent)
 
         mcp_manage_url = reverse('console-mcp-servers')
 
@@ -4124,6 +4142,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 },
             },
             'webhooks': webhooks,
+            'inboundWebhooks': inbound_webhooks,
             'features': features,
             'reassignment': reassignment,
             'llmIntelligence': llm_intelligence,
@@ -4147,6 +4166,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         peer_action = request.POST.get('peer_link_action')
         if peer_action:
             return self._handle_peer_link_action(request, agent, peer_action, ajax=is_ajax)
+
+        inbound_webhook_action = request.POST.get('inbound_webhook_action')
+        if inbound_webhook_action:
+            return self._handle_inbound_webhook_action(request, agent, inbound_webhook_action, ajax=is_ajax)
 
         webhook_action = request.POST.get('webhook_action')
         if webhook_action:
@@ -5237,6 +5260,81 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             })
 
         return redirect('agent_detail', pk=agent.pk)
+
+    def _handle_inbound_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
+        redirect_response = redirect('agent_detail', pk=agent.pk)
+        normalized_action = (action or "").lower()
+
+        def _error_response(message: str, status: int = 400):
+            if ajax:
+                return JsonResponse({'success': False, 'error': message}, status=status)
+            messages.error(request, message)
+            return redirect_response
+
+        def _success_response(message: str):
+            if ajax:
+                return JsonResponse(
+                    {
+                        'success': True,
+                        'message': message,
+                        'inboundWebhooks': self._build_inbound_webhooks_payload(request, agent),
+                    }
+                )
+            messages.success(request, message)
+            return redirect_response
+
+        if normalized_action not in {"create", "update", "delete", "rotate_secret"}:
+            return _error_response("Unsupported inbound webhook action.")
+
+        if normalized_action in {"delete", "rotate_secret", "update"}:
+            webhook_id = request.POST.get("inbound_webhook_id")
+            if not webhook_id:
+                return _error_response("Missing inbound webhook identifier.")
+            try:
+                webhook = agent.inbound_webhooks.get(id=webhook_id)
+            except PersistentAgentInboundWebhook.DoesNotExist:
+                return _error_response("Inbound webhook not found or no longer exists.")
+        else:
+            webhook = None
+
+        if normalized_action == "delete":
+            webhook.delete()
+            return _success_response("Inbound webhook removed.")
+
+        if normalized_action == "rotate_secret":
+            webhook.rotate_secret()
+            return _success_response("Inbound webhook secret rotated.")
+
+        name = (request.POST.get("inbound_webhook_name") or "").strip()
+        is_active_raw = request.POST.get("inbound_webhook_is_active")
+        is_active = True if is_active_raw is None else is_active_raw.lower() == "true"
+        if not name:
+            return _error_response("Inbound webhook name is required.")
+
+        if normalized_action == "create":
+            webhook = PersistentAgentInboundWebhook(agent=agent, name=name, is_active=is_active)
+        else:
+            webhook.name = name
+            webhook.is_active = is_active
+
+        try:
+            webhook.save()
+        except ValidationError as exc:
+            error_messages = []
+            if hasattr(exc, "message_dict"):
+                for values in exc.message_dict.values():
+                    error_messages.extend(values)
+            elif hasattr(exc, "messages"):
+                error_messages.extend(exc.messages)
+            else:
+                error_messages.append(str(exc))
+
+            message_text = "; ".join(error_messages) if error_messages else "Invalid data."
+            return _error_response(f"Unable to save inbound webhook: {message_text}")
+        except IntegrityError:
+            return _error_response("An inbound webhook with that name already exists for this agent.")
+
+        return _success_response("Inbound webhook saved.")
 
     def _handle_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
         redirect_response = redirect('agent_detail', pk=agent.pk)

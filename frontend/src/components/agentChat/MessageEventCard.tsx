@@ -42,8 +42,10 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
   const isAgent = Boolean(message.isOutbound)
   const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
+  const sourceKind = (message.sourceKind || '').toLowerCase()
+  const isWebhook = sourceKind === 'webhook'
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
-  const isPeer = Boolean(message.isPeer || hasPeerMetadata || channel === 'other')
+  const isPeer = Boolean(message.isPeer || hasPeerMetadata)
 
   const selfName = message.selfAgentName || agentFirstName || 'Agent'
   const peerName = message.peerAgent?.name || 'Linked agent'
@@ -76,12 +78,19 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
       || isViewerEmailSender)
 
   let authorLabel = isAgent ? agentFirstName || 'Agent' : (isViewerSender ? 'You' : (message.senderName?.trim() || 'User'))
+  if (isWebhook) {
+    authorLabel = message.sourceLabel?.trim() || message.senderName?.trim() || 'Webhook'
+  }
   if (isPeer) {
     authorLabel = peerDirectionLabel
   }
 
   let channelLabel = getChannelLabel(channel)
   let showChannelTag = channel !== 'web'
+  if (isWebhook) {
+    channelLabel = 'Webhook'
+    showChannelTag = true
+  }
   if (isPeer) {
     channelLabel = 'Peer DM'
     showChannelTag = true

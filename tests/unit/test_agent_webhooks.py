@@ -1,13 +1,21 @@
 from unittest.mock import MagicMock, patch
 
 from allauth.account.models import EmailAddress
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.urls import reverse
 from requests import RequestException
 
 from api.agent.tools.webhook_sender import execute_send_webhook_event
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentWebhook, ProxyServer
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentInboundWebhook,
+    PersistentAgentMessage,
+    PersistentAgentWebhook,
+    ProxyServer,
+)
 
 
 class AgentWebhookToolTests(TestCase):
@@ -261,3 +269,192 @@ class AgentWebhookConsoleViewTests(TestCase):
         self.assertFalse(
             PersistentAgentWebhook.objects.filter(pk=webhook.pk).exists()
         )
+
+    @tag("batch_agent_webhooks")
+    def test_console_creates_inbound_webhook(self):
+        response = self.client.post(
+            reverse("agent_detail", args=[self.agent_id]),
+            {
+                "inbound_webhook_action": "create",
+                "inbound_webhook_name": "Build Trigger",
+                "inbound_webhook_is_active": "true",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        webhook = PersistentAgentInboundWebhook.objects.get(agent=self.agent, name="Build Trigger")
+        self.assertTrue(webhook.is_active)
+        self.assertTrue(webhook.secret)
+
+    @tag("batch_agent_webhooks")
+    def test_console_updates_inbound_webhook(self):
+        webhook = PersistentAgentInboundWebhook.objects.create(
+            agent=self.agent,
+            name="Inbound Original",
+            is_active=True,
+        )
+        response = self.client.post(
+            reverse("agent_detail", args=[self.agent_id]),
+            {
+                "inbound_webhook_action": "update",
+                "inbound_webhook_id": str(webhook.id),
+                "inbound_webhook_name": "Inbound Updated",
+                "inbound_webhook_is_active": "false",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        webhook.refresh_from_db()
+        self.assertEqual(webhook.name, "Inbound Updated")
+        self.assertFalse(webhook.is_active)
+
+    @tag("batch_agent_webhooks")
+    def test_console_rotates_inbound_webhook_secret(self):
+        webhook = PersistentAgentInboundWebhook.objects.create(
+            agent=self.agent,
+            name="Rotate Me",
+        )
+        old_secret = webhook.secret
+        response = self.client.post(
+            reverse("agent_detail", args=[self.agent_id]),
+            {
+                "inbound_webhook_action": "rotate_secret",
+                "inbound_webhook_id": str(webhook.id),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        webhook.refresh_from_db()
+        self.assertNotEqual(webhook.secret, old_secret)
+
+    @tag("batch_agent_webhooks")
+    def test_console_deletes_inbound_webhook(self):
+        webhook = PersistentAgentInboundWebhook.objects.create(
+            agent=self.agent,
+            name="Inbound Delete",
+        )
+        response = self.client.post(
+            reverse("agent_detail", args=[self.agent_id]),
+            {
+                "inbound_webhook_action": "delete",
+                "inbound_webhook_id": str(webhook.id),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(
+            PersistentAgentInboundWebhook.objects.filter(pk=webhook.pk).exists()
+        )
+
+
+class InboundAgentWebhookEndpointTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.user = user_model.objects.create_user(
+            username="inbound-owner",
+            email="inbound@example.com",
+            password="password123",
+        )
+        EmailAddress.objects.create(
+            user=cls.user,
+            email=cls.user.email,
+            verified=True,
+            primary=True,
+        )
+        cls.browser_agent = BrowserUseAgent.objects.create(user=cls.user, name="Inbound Browser")
+        cls.agent = PersistentAgent.objects.create(
+            user=cls.user,
+            name="Inbound Receiver",
+            charter="Receive inbound webhook events",
+            browser_use_agent=cls.browser_agent,
+        )
+        cls.webhook = PersistentAgentInboundWebhook.objects.create(
+            agent=cls.agent,
+            name="Deploy Hook",
+        )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_accepts_json_payload(self, mock_delay):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+                data='{"status":"ok","build_id":42}',
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        payload = response.json()
+        self.assertTrue(payload["accepted"])
+        self.assertEqual(payload["webhookId"], str(self.webhook.id))
+
+        message = PersistentAgentMessage.objects.get(id=payload["messageId"])
+        self.assertEqual(message.owner_agent_id, self.agent.id)
+        self.assertEqual(message.conversation.channel, "other")
+        self.assertEqual(message.conversation.display_name, self.webhook.name)
+        self.assertEqual(message.raw_payload["source_kind"], "webhook")
+        self.assertEqual(message.raw_payload["webhook_name"], self.webhook.name)
+        self.assertIn('Inbound webhook "Deploy Hook" triggered.', message.body)
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_accepts_multipart_payload_and_attachments(self, mock_delay):
+        upload = SimpleUploadedFile("deploy.json", b'{"ok": true}', content_type="application/json")
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+                data={
+                    "environment": "prod",
+                    "build_id": "123",
+                    "artifact": upload,
+                },
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        message = PersistentAgentMessage.objects.get(id=response.json()["messageId"])
+        self.assertEqual(message.attachments.count(), 1)
+        self.assertIn("Form payload", message.body)
+        self.assertIn("Attachments:", message.body)
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    def test_inbound_webhook_rejects_invalid_secret(self):
+        response = self.client.post(
+            f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t=wrong-secret",
+            data='{"status":"ok"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+    @tag("batch_agent_webhooks")
+    def test_inbound_webhook_rejects_inactive_webhook(self):
+        self.webhook.is_active = False
+        self.webhook.save(update_fields=["is_active"])
+
+        response = self.client.post(
+            f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+            data='{"status":"ok"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 409)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_rotated_secret_invalidates_previous_url(self, mock_delay):
+        old_secret = self.webhook.secret
+        self.webhook.rotate_secret()
+        self.webhook.refresh_from_db()
+
+        old_response = self.client.post(
+            f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={old_secret}",
+            data='{"status":"stale"}',
+            content_type="application/json",
+        )
+        self.assertEqual(old_response.status_code, 403)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            new_response = self.client.post(
+                f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+                data='{"status":"fresh"}',
+                content_type="application/json",
+            )
+        self.assertEqual(new_response.status_code, 202, new_response.content)
+        mock_delay.assert_called_once_with(str(self.agent.id))

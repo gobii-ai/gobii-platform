@@ -1,7 +1,7 @@
 import logging
 
 from django.db import transaction
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.utils import timezone
@@ -9,6 +9,7 @@ from email.utils import getaddresses
 
 from api.agent.comms import (
     ingest_inbound_message,
+    ingest_inbound_webhook_message,
     TwilioSmsAdapter,
     PostmarkEmailAdapter,
     MailgunEmailAdapter,
@@ -16,6 +17,7 @@ from api.agent.comms import (
 from api.models import (
     CommsChannel,
     PersistentAgent,
+    PersistentAgentInboundWebhook,
     PersistentAgentCommsEndpoint,
     OutboundMessageAttempt,
     DeliveryStatus,
@@ -238,6 +240,176 @@ def sms_status_webhook(request):
     except Exception as e:
         logger.error(f"Error processing Twilio status webhook: {e}", exc_info=True)
         return HttpResponse(status=500)
+
+
+def _normalize_multivalue_mapping(mapping) -> dict[str, object]:
+    normalized: dict[str, object] = {}
+    for key in mapping.keys():
+        values = mapping.getlist(key)
+        if not values:
+            continue
+        normalized[key] = values[0] if len(values) == 1 else values
+    return normalized
+
+
+def _collect_uploaded_files(request) -> tuple[list[object], list[dict[str, object]]]:
+    attachments: list[object] = []
+    metadata: list[dict[str, object]] = []
+    for field_name, files in request.FILES.lists():
+        for uploaded in files:
+            attachments.append(uploaded)
+            metadata.append(
+                {
+                    "field_name": field_name,
+                    "filename": getattr(uploaded, "name", ""),
+                    "content_type": getattr(uploaded, "content_type", ""),
+                    "size": getattr(uploaded, "size", None),
+                }
+            )
+    return attachments, metadata
+
+
+def _build_inbound_agent_webhook_body(
+    webhook_name: str,
+    *,
+    content_type: str,
+    json_payload=None,
+    form_payload: dict[str, object] | None = None,
+    text_payload: str = "",
+    attachment_metadata: list[dict[str, object]] | None = None,
+) -> str:
+    sections = [f'Inbound webhook "{webhook_name}" triggered.']
+
+    if content_type:
+        sections.append(f"Content-Type: {content_type}")
+
+    if json_payload is not None:
+        rendered_json = json.dumps(json_payload, indent=2, sort_keys=True)
+        sections.append(f"JSON payload:\n{rendered_json}")
+    elif form_payload:
+        rendered_form = json.dumps(form_payload, indent=2, sort_keys=True)
+        sections.append(f"Form payload:\n{rendered_form}")
+    elif text_payload.strip():
+        sections.append(f"Body:\n{text_payload.strip()}")
+    else:
+        sections.append("Body: (no payload)")
+
+    if attachment_metadata:
+        filenames = [str(item.get("filename") or "").strip() for item in attachment_metadata]
+        filenames = [name for name in filenames if name]
+        if filenames:
+            sections.append("Attachments:\n" + "\n".join(f"- {name}" for name in filenames))
+
+    return "\n\n".join(sections)
+
+
+def _parse_inbound_agent_webhook_request(request) -> tuple[dict[str, object], list[object]]:
+    content_type = ((request.content_type or "").split(";", 1)[0]).strip().lower()
+    raw_text = (request.body or b"").decode(request.encoding or "utf-8", errors="replace")
+    attachments, attachment_metadata = _collect_uploaded_files(request)
+    form_payload: dict[str, object] = {}
+    json_payload = None
+    text_payload = raw_text
+
+    if content_type == "application/json":
+        if raw_text.strip():
+            try:
+                json_payload = json.loads(raw_text)
+            except json.JSONDecodeError as exc:
+                raise ValueError("Invalid JSON payload.") from exc
+        else:
+            json_payload = {}
+    elif content_type in {"multipart/form-data", "application/x-www-form-urlencoded"}:
+        form_payload = _normalize_multivalue_mapping(request.POST)
+        text_payload = ""
+    elif request.POST:
+        form_payload = _normalize_multivalue_mapping(request.POST)
+        text_payload = ""
+
+    query_payload = _normalize_multivalue_mapping(request.GET)
+    query_payload.pop("t", None)
+
+    raw_payload = {
+        "content_type": content_type or "",
+        "method": request.method,
+        "path": request.path,
+        "query_params": query_payload,
+        "form_payload": form_payload,
+        "json_payload": json_payload,
+        "text_payload": text_payload if text_payload.strip() else "",
+        "attachments": attachment_metadata,
+        "source": "inbound_webhook",
+        "source_kind": "webhook",
+    }
+    return raw_payload, attachments
+
+
+@csrf_exempt
+@require_POST
+@tracer.start_as_current_span("COMM inbound_agent_webhook")
+def inbound_agent_webhook(request, webhook_id):
+    secret = request.GET.get("t", "").strip()
+    if not secret:
+        return JsonResponse({"accepted": False, "error": "Missing webhook secret."}, status=400)
+
+    webhook = (
+        PersistentAgentInboundWebhook.objects
+        .select_related("agent__user", "agent__organization")
+        .filter(id=webhook_id)
+        .first()
+    )
+    if webhook is None:
+        return JsonResponse({"accepted": False, "error": "Webhook not found."}, status=404)
+    if not webhook.matches_secret(secret):
+        return JsonResponse({"accepted": False, "error": "Invalid webhook secret."}, status=403)
+    if not webhook.is_active:
+        return JsonResponse({"accepted": False, "error": "Webhook is inactive."}, status=409)
+    if not webhook.agent.is_active:
+        return JsonResponse({"accepted": False, "error": "Agent is inactive."}, status=409)
+
+    try:
+        raw_payload, attachments = _parse_inbound_agent_webhook_request(request)
+    except ValueError as exc:
+        return JsonResponse({"accepted": False, "error": str(exc)}, status=400)
+    except Exception:
+        logger.exception("Error parsing inbound webhook request %s", webhook_id)
+        return JsonResponse({"accepted": False, "error": "Unable to parse webhook request."}, status=400)
+
+    raw_payload["source_label"] = webhook.name
+    raw_payload["webhook_id"] = str(webhook.id)
+    raw_payload["webhook_name"] = webhook.name
+
+    body = _build_inbound_agent_webhook_body(
+        webhook.name,
+        content_type=str(raw_payload.get("content_type") or ""),
+        json_payload=raw_payload.get("json_payload"),
+        form_payload=raw_payload.get("form_payload") if isinstance(raw_payload.get("form_payload"), dict) else None,
+        text_payload=str(raw_payload.get("text_payload") or ""),
+        attachment_metadata=raw_payload.get("attachments") if isinstance(raw_payload.get("attachments"), list) else None,
+    )
+
+    try:
+        info = ingest_inbound_webhook_message(
+            webhook,
+            body=body,
+            raw_payload=raw_payload,
+            attachments=attachments,
+        )
+    except Exception:
+        logger.exception("Error ingesting inbound webhook %s", webhook_id)
+        return JsonResponse({"accepted": False, "error": "Failed to ingest webhook payload."}, status=500)
+
+    return JsonResponse(
+        {
+            "accepted": True,
+            "webhookId": str(webhook.id),
+            "webhookName": webhook.name,
+            "messageId": str(info.message.id),
+            "queued": True,
+            "receivedAt": info.message.timestamp.isoformat(),
+        },
+        status=202,
+    )
 
 
 def _handle_inbound_email(

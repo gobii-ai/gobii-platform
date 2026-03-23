@@ -18,7 +18,8 @@ from django.utils import timezone
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.comms.imap_adapter import ImapEmailAdapter
-from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
+from api.agent.core.prompt_context import build_prompt_context
 from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
@@ -33,6 +34,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentInboundWebhook,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentStep,
@@ -257,13 +259,11 @@ class AgentChatAPITests(TestCase):
         kinds = {event.get("kind") for event in events}
         self.assertIn("message", kinds)
         self.assertIn("steps", kinds)
-
         message_event = next(event for event in events if event["kind"] == "message")
         self.assertEqual(message_event["message"]["bodyText"], "Hello from the owner")
         self.assertEqual(message_event["message"]["senderUserId"], self.user.id)
         self.assertEqual(message_event["message"]["senderName"], self.user.email)
         self.assertEqual(message_event["message"]["senderAddress"], self.user_address)
-
         tool_cluster = next(event for event in events if event["kind"] == "steps")
         self.assertEqual(tool_cluster["entries"][0]["toolName"], "send_email")
         self.assertTrue(payload.get("newest_cursor"))
@@ -273,6 +273,96 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_timeline_serializes_inbound_webhook_messages(self, mock_delay):
+        webhook = PersistentAgentInboundWebhook.objects.create(
+            agent=self.agent,
+            name="Ops Deploy",
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_webhook_message(
+                webhook,
+                body='Inbound webhook "Ops Deploy" triggered.\n\nJSON payload:\n{"status":"ok"}',
+                raw_payload={
+                    "source": "inbound_webhook",
+                    "source_kind": "webhook",
+                    "source_label": "Ops Deploy",
+                    "webhook_id": str(webhook.id),
+                    "webhook_name": webhook.name,
+                },
+            )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        events = response.json().get("events", [])
+        message_event = next(
+            event for event in events
+            if event.get("kind") == "message" and event.get("message", {}).get("sourceKind") == "webhook"
+        )
+        message_payload = message_event["message"]
+        self.assertEqual(message_payload["sourceKind"], "webhook")
+        self.assertEqual(message_payload["sourceLabel"], "Ops Deploy")
+        self.assertEqual(message_payload["senderName"], "Ops Deploy")
+        self.assertEqual(message_payload["channel"], "other")
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_messages_group_by_webhook_thread(self, mock_delay):
+        first_hook = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Build Hook")
+        second_hook = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Deploy Hook")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_webhook_message(
+                first_hook,
+                body="Build started",
+                raw_payload={"source": "inbound_webhook", "source_kind": "webhook", "source_label": first_hook.name},
+            )
+            ingest_inbound_webhook_message(
+                first_hook,
+                body="Build finished",
+                raw_payload={"source": "inbound_webhook", "source_kind": "webhook", "source_label": first_hook.name},
+            )
+            ingest_inbound_webhook_message(
+                second_hook,
+                body="Deploy finished",
+                raw_payload={"source": "inbound_webhook", "source_kind": "webhook", "source_label": second_hook.name},
+            )
+
+        first_messages = PersistentAgentMessage.objects.filter(owner_agent=self.agent, conversation__display_name=first_hook.name)
+        second_messages = PersistentAgentMessage.objects.filter(owner_agent=self.agent, conversation__display_name=second_hook.name)
+        self.assertEqual(first_messages.count(), 2)
+        self.assertEqual(second_messages.count(), 1)
+        self.assertEqual(first_messages.values_list("conversation_id", flat=True).distinct().count(), 1)
+        self.assertEqual(second_messages.values_list("conversation_id", flat=True).distinct().count(), 1)
+        self.assertEqual(mock_delay.call_count, 3)
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_prompt_context_uses_webhook_label_for_other_channel_messages(self, mock_delay, _mock_comms_compacted, _mock_steps_compacted):
+        webhook = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Pager Trigger")
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_webhook_message(
+                webhook,
+                body="Alert fired",
+                raw_payload={
+                    "source": "inbound_webhook",
+                    "source_kind": "webhook",
+                    "source_label": webhook.name,
+                    "webhook_name": webhook.name,
+                },
+            )
+
+        context, _, _ = build_prompt_context(self.agent)
+        user_message = next((message for message in context if message["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        self.assertIn('Inbound webhook "Pager Trigger" triggered:', user_message["content"])
+        self.assertNotIn("On other, you received a message", user_message["content"])
+        mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_chat")
     def test_timeline_includes_create_image_preview_url(self):
