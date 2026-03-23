@@ -297,3 +297,134 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         self.assertEqual(result.get("status"), "ok")
         create_message_attachments_mock.assert_called_once()
+
+
+@tag("batch_email_sender_db")
+class EmailSenderConversationContextTests(TransactionTestCase):
+    """Tests for parent-message threading and blockquote injection."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="agent@example.com",
+            email="agent@example.com",
+            password="secret",
+        )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        browser_agent = create_browser_agent_without_proxy(self.user, "BA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="ThreadAgent",
+            charter="replies",
+            browser_use_agent=browser_agent,
+        )
+        default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
+        self.from_ep = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=f"thread-agent@{default_domain}",
+            is_primary=True,
+        )
+        # The external contact who will send inbound messages
+        self.human_ep = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+
+    def _mark_delivered(self, message):
+        message.latest_status = DeliveryStatus.DELIVERED
+        message.latest_sent_at = timezone.now()
+        message.latest_error_message = ""
+        message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
+
+    def _create_inbound(self, body="Hello agent!", raw_payload=None):
+        """Create a fake inbound message from the human endpoint to the agent."""
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.human_ep,
+            to_endpoint=self.from_ep,
+            is_outbound=False,
+            body=body,
+            raw_payload=raw_payload or {"message_id": "<abc123@mail.example.com>"},
+        )
+
+    def test_reply_sets_parent_on_outbound_message(self):
+        """When a previous inbound email exists, the outbound reply has parent set."""
+        inbound = self._create_inbound()
+        params = {
+            "to_address": self.user.email,
+            "subject": "Re: Hello",
+            "mobile_first_html": "<p>Hi back!</p>",
+        }
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        outbound = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(outbound.parent_id, inbound.id)
+
+    def test_reply_appends_blockquote_to_html_body(self):
+        """When a parent inbound message exists, its body is quoted at the bottom."""
+        self._create_inbound(body="<p>Please send the report.</p>")
+        params = {
+            "to_address": self.user.email,
+            "subject": "Re: Report",
+            "mobile_first_html": "<p>Here it is!</p>",
+        }
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        outbound = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertIn("<blockquote", outbound.body)
+        self.assertIn("Please send the report.", outbound.body)
+        # Original content should still be present
+        self.assertIn("Here it is!", outbound.body)
+
+    def test_no_parent_when_no_inbound_exists(self):
+        """Without a prior inbound message, parent is null and no blockquote is added."""
+        params = {
+            "to_address": self.user.email,
+            "subject": "Cold start",
+            "mobile_first_html": "<p>First contact.</p>",
+        }
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        outbound = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertIsNone(outbound.parent_id)
+        self.assertNotIn("<blockquote", outbound.body)
+
+    def test_blockquote_plaintext_parent_is_escaped(self):
+        """Plain-text parent bodies are HTML-escaped in the blockquote."""
+        self._create_inbound(body="Use & 'quotes' to express yourself", raw_payload={})
+        params = {
+            "to_address": self.user.email,
+            "subject": "Re: escaping",
+            "mobile_first_html": "<p>Got it.</p>",
+        }
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_delivered,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        outbound = PersistentAgentMessage.objects.get(id=result["message_id"])
+        # HTML-unsafe chars in a plain-text parent should be escaped
+        self.assertIn("&amp;", outbound.body)
+        self.assertIn("&#x27;", outbound.body)

@@ -1225,3 +1225,146 @@ Contact me at [john@company.com](mailto:john@company.com) if you have questions.
                 
                 # Ensure no markdown syntax remains
                 self.assertNotIn("](", result)
+
+
+@tag("batch_outbound_delivery")
+class EmailThreadingHeaderTests(TestCase):
+    """Tests that outbound delivery passes correct In-Reply-To/References headers."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="threading@example.com",
+            email="threading@example.com",
+            password="password",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Thread Agent",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Thread Agent",
+            charter="threading",
+            browser_use_agent=self.browser_agent,
+        )
+        default_domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
+        self.from_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=f"agent@{default_domain}",
+            is_primary=True,
+        )
+        self.to_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="contact@example.com",
+        )
+
+    def _make_inbound(self, raw_payload):
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.to_endpoint,
+            to_endpoint=self.from_endpoint,
+            is_outbound=False,
+            body="Hi there",
+            raw_payload=raw_payload,
+        )
+
+    def _make_outbound(self, parent=None):
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Reply body</p>",
+            raw_payload={"subject": "Re: Hello"},
+            parent=parent,
+        )
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch("api.agent.comms.outbound_delivery._prepare_email_content", return_value=("<p>Reply</p>", "Reply"))
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_in_reply_to_headers_set_from_parent_imap_message_id(self, mock_anymail, _mock_prepare):
+        """AnymailMessage receives In-Reply-To and References from parent's IMAP message_id."""
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "sent-id"
+
+        inbound = self._make_inbound({"message_id": "<thread-id@mail.example.com>"})
+        message = self._make_outbound(parent=inbound)
+
+        with patch("api.agent.comms.outbound_delivery.render_to_string", return_value="<html>Reply</html>"):
+            deliver_agent_email(message)
+
+        call_kwargs = mock_anymail.call_args[1]
+        extra = call_kwargs.get("extra_headers") or {}
+        self.assertEqual(extra.get("In-Reply-To"), "<thread-id@mail.example.com>")
+        self.assertEqual(extra.get("References"), "<thread-id@mail.example.com>")
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch("api.agent.comms.outbound_delivery._prepare_email_content", return_value=("<p>Reply</p>", "Reply"))
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_in_reply_to_headers_set_from_postmark_headers_list(self, mock_anymail, _mock_prepare):
+        """AnymailMessage receives In-Reply-To from Postmark-style Headers list in raw_payload."""
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "sent-id"
+
+        postmark_payload = {
+            "MessageID": "postmark-internal-id",
+            "Headers": [
+                {"Name": "Message-ID", "Value": "<postmark-msg@mail.example.com>"},
+                {"Name": "X-Custom", "Value": "other"},
+            ],
+        }
+        inbound = self._make_inbound(postmark_payload)
+        message = self._make_outbound(parent=inbound)
+
+        with patch("api.agent.comms.outbound_delivery.render_to_string", return_value="<html>Reply</html>"):
+            deliver_agent_email(message)
+
+        call_kwargs = mock_anymail.call_args[1]
+        extra = call_kwargs.get("extra_headers") or {}
+        self.assertEqual(extra.get("In-Reply-To"), "<postmark-msg@mail.example.com>")
+        self.assertEqual(extra.get("References"), "<postmark-msg@mail.example.com>")
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch("api.agent.comms.outbound_delivery._prepare_email_content", return_value=("<p>Fresh email</p>", "Fresh"))
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_no_extra_headers_when_no_parent(self, mock_anymail, _mock_prepare):
+        """When the message has no parent, extra_headers is None (no threading)."""
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "sent-id"
+
+        message = self._make_outbound(parent=None)
+
+        with patch("api.agent.comms.outbound_delivery.render_to_string", return_value="<html>Fresh</html>"):
+            deliver_agent_email(message)
+
+        call_kwargs = mock_anymail.call_args[1]
+        # extra_headers should be None or absent when there is no parent
+        self.assertIsNone(call_kwargs.get("extra_headers"))
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch("api.agent.comms.outbound_delivery._prepare_email_content", return_value=("<p>Reply</p>", "Reply"))
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_no_extra_headers_when_parent_lacks_message_id(self, mock_anymail, _mock_prepare):
+        """When parent's raw_payload has no Message-Id, no threading headers are sent."""
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "sent-id"
+
+        inbound = self._make_inbound({"subject": "Hello"})  # no message_id key
+        message = self._make_outbound(parent=inbound)
+
+        with patch("api.agent.comms.outbound_delivery.render_to_string", return_value="<html>Reply</html>"):
+            deliver_agent_email(message)
+
+        call_kwargs = mock_anymail.call_args[1]
+        self.assertIsNone(call_kwargs.get("extra_headers"))

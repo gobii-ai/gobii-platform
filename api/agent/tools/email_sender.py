@@ -7,6 +7,7 @@ including tool definition and execution logic.
 
 import logging
 import re
+from html import escape
 from typing import Dict, Any
 
 from ...models import (
@@ -48,6 +49,36 @@ _MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE = (
     "Email body claims attachments are included, but send_email.attachments is empty. "
     "Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
 )
+
+
+def _find_parent_inbound_message(
+    agent: PersistentAgent,
+    to_endpoint: PersistentAgentCommsEndpoint,
+) -> PersistentAgentMessage | None:
+    """Return the most recent inbound message from `to_endpoint` to this agent, if any."""
+    return (
+        PersistentAgentMessage.objects.filter(
+            from_endpoint=to_endpoint,
+            owner_agent=agent,
+            is_outbound=False,
+        )
+        .order_by("-timestamp")
+        .first()
+    )
+
+
+def _build_parent_blockquote(parent_body: str) -> str:
+    """Wrap the parent message body in a styled HTML blockquote for thread context."""
+    if _HTML_TAG_PATTERN.search(parent_body):
+        quoted = parent_body
+    else:
+        quoted = escape(parent_body).replace("\n", "<br>")
+    return (
+        '<blockquote style="margin:1em 0;padding:0.5em 1em;'
+        'border-left:3px solid #ccc;color:#555;font-size:0.9em">'
+        + quoted
+        + "</blockquote>"
+    )
 
 
 def _maybe_provision_simulated_from_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint | None:
@@ -257,6 +288,11 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             if not from_endpoint:
                 return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
 
+        # Look up the most recent inbound message from this recipient so we can thread the reply.
+        parent_msg = _find_parent_inbound_message(agent, to_endpoint)
+        if parent_msg:
+            mobile_first_html += _build_parent_blockquote(parent_msg.body)
+
         close_old_connections()
         try:
             message = PersistentAgentMessage.objects.create(
@@ -266,6 +302,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 is_outbound=True,
                 body=mobile_first_html,
                 raw_payload={"subject": subject},
+                parent=parent_msg,
             )
             # Add CC endpoints to the message
             if cc_endpoint_objects:
@@ -282,6 +319,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 is_outbound=True,
                 body=mobile_first_html,
                 raw_payload={"subject": subject},
+                parent=parent_msg,
             )
             # Add CC endpoints to the message
             if cc_endpoint_objects:

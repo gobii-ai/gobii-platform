@@ -319,6 +319,31 @@ def _normalized_email_subject(message: PersistentAgentMessage) -> str:
     return decode_unicode_escapes(str(raw_subject))
 
 
+def _get_parent_message_id(message: PersistentAgentMessage) -> str:
+    """Extract the RFC 2822 Message-Id from the parent message's raw_payload, if present.
+
+    Handles the three inbound adapters' storage conventions:
+    - IMAP: raw_payload["message_id"]
+    - Mailgun form data: raw_payload["Message-Id"] / raw_payload["Message-ID"]
+    - Postmark: raw_payload["Headers"] list of {"Name": ..., "Value": ...}
+    """
+    parent = message.parent
+    if parent is None:
+        return ""
+    raw = parent.raw_payload if isinstance(parent.raw_payload, dict) else {}
+    # IMAP adapter normalises the header into "message_id"
+    msg_id = raw.get("message_id") or raw.get("Message-Id") or raw.get("Message-ID") or ""
+    if msg_id:
+        return str(msg_id).strip()
+    # Postmark stores headers as a list of {"Name": ..., "Value": ...}
+    headers = raw.get("Headers", [])
+    if isinstance(headers, list):
+        for header in headers:
+            if isinstance(header, dict) and header.get("Name", "").lower() == "message-id":
+                return str(header.get("Value", "")).strip()
+    return ""
+
+
 def _extract_cid_references(html_body: str) -> list[dict[str, int | str]]:
     if not html_body:
         return []
@@ -679,6 +704,8 @@ def deliver_agent_email(message: PersistentAgentMessage):
             if message.cc_endpoints.exists():
                 recipient_list.extend(list(message.cc_endpoints.values_list("address", flat=True)))
 
+            parent_msg_id = _get_parent_message_id(message)
+
             with tracer.start_as_current_span("SMTP Transport Send") as smtp_span:
                 smtp_span.set_attribute("from", from_address)
                 smtp_span.set_attribute("to_count", 1)
@@ -696,6 +723,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     plaintext_body=plaintext_body,
                     html_body=html_body,
                     attempt_id=str(attempt.id),
+                    in_reply_to=parent_msg_id or None,
                 )
 
             now = timezone.now()
@@ -984,7 +1012,14 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 message.id,
                 cc_addresses
             )
-        
+
+        parent_msg_id = _get_parent_message_id(message)
+        extra_headers = (
+            {"In-Reply-To": parent_msg_id, "References": parent_msg_id}
+            if parent_msg_id
+            else None
+        )
+
         msg = AnymailMessage(
             subject=subject,
             body=plaintext_body,
@@ -998,6 +1033,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 "message_id": str(message.id),
                 "attempt_id": str(attempt.id),
             },
+            extra_headers=extra_headers,
         )
 
         attachment_count, rewritten_html_body = _attach_email_attachments(message, msg, html_body)
