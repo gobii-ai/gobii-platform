@@ -2066,8 +2066,8 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             should_subscribe = trial_conversion or (
                 billing_reason == "subscription_create" and not trial_start_invoice
             )
-            should_send_ga_renewal = billing_reason == "subscription_cycle" and not trial_conversion
-            if (should_subscribe or should_send_ga_renewal) and owner_type == "user" and owner:
+            is_standard_renewal_subscribe = billing_reason == "subscription_cycle" and not trial_conversion
+            if (should_subscribe or is_standard_renewal_subscribe) and owner_type == "user" and owner:
                 marketing_properties = {
                     "plan": plan_value,
                     "subscription_id": subscription_id,
@@ -2079,7 +2079,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     metadata = _coerce_metadata_dict(subscription_data.get("metadata"))
                 if not metadata:
                     metadata = _coerce_metadata_dict(payload.get("metadata"))
-                if should_send_ga_renewal:
+                if is_standard_renewal_subscribe:
                     # Use invoice-scoped event_id for renewals so repeated webhook deliveries dedupe safely
                     # while avoiding reuse of the original checkout event_id stored on the subscription.
                     renewal_event_id = payload.get("id")
@@ -2095,7 +2095,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     marketing_properties["transaction_value"] = value
                     marketing_properties["value"] = (
                         value
-                        if should_send_ga_renewal
+                        if is_standard_renewal_subscribe
                         else value * settings.CAPI_LTV_MULTIPLE
                     )
                 if currency:
@@ -2106,7 +2106,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                 if owner_type == "user":
                     subscribe_context = (
                         _build_off_session_marketing_context_from_user(owner)
-                        if should_send_ga_renewal
+                        if is_standard_renewal_subscribe
                         else _build_marketing_context_from_user(owner)
                     )
                 else:
@@ -2114,7 +2114,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                 checkout_source_url = metadata.get("checkout_source_url")
                 # Recurring renewals happen off-session, so reusing the original
                 # checkout URL would misattribute the conversion page.
-                if checkout_source_url and not should_send_ga_renewal:
+                if checkout_source_url and not is_standard_renewal_subscribe:
                     subscribe_context["page"] = {"url": checkout_source_url}
                 capi(
                     user=owner,
