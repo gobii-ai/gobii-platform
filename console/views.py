@@ -95,6 +95,7 @@ from console.daily_credit import (
 )
 from console.home_metrics import get_console_home_metrics
 from console.role_constants import BILLING_MANAGE_ROLES
+from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
 from api.models import (
     ApiKey,
     UserBilling,
@@ -594,8 +595,10 @@ def _get_checkout_trial_days() -> tuple[int, int]:
     return startup_trial_days, scale_trial_days
 
 
-def _is_checkout_trial_eligible(user) -> bool:
+def _is_checkout_trial_eligible(user, request: HttpRequest | None = None) -> bool:
     """Return whether a user can start an individual-plan free trial."""
+    if not is_user_trial_eligibility_enforcement_enabled(request):
+        return True
     try:
         return evaluate_user_trial_eligibility(user).eligible
     except (IntegrationDisabledError, stripe.error.StripeError, TypeError, ValueError):
@@ -2108,7 +2111,7 @@ def get_user_plan_api(request):
     from constants.plans import PlanNames
 
     startup_trial_days, scale_trial_days = _get_checkout_trial_days()
-    trial_eligible = _is_checkout_trial_eligible(request.user)
+    trial_eligible = _is_checkout_trial_eligible(request.user, request)
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
     cta_start_free_trial = _is_cta_start_free_trial_enabled(request)
     cta_pricing_cancel_text_under_btn = _is_cta_pricing_cancel_text_under_btn_enabled(request)
@@ -5778,7 +5781,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["is_collaborator"] = self.is_collaborator
         context["startup_trial_days"] = startup_trial_days
         context["scale_trial_days"] = scale_trial_days
-        context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user)
+        context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user, self.request)
         context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
         context["cta_pricing_cancel_text_under_btn"] = _is_cta_pricing_cancel_text_under_btn_enabled(self.request)
         context["cta_start_free_trial"] = _is_cta_start_free_trial_enabled(self.request)

@@ -1423,6 +1423,53 @@ class CheckoutRedirectTests(TestCase):
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions", return_value=[])
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_startup_checkout_applies_trial_when_enforcement_flag_disabled(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        _mock_existing_subs,
+        mock_ensure,
+        mock_trial_eligibility,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="trial_flag_off@test.com",
+            password="pw",
+            username="trial_flag_off_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            startup_additional_task_price_id="price_startup_meter",
+            startup_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_trial_flag_off")
+        mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
+        mock_ensure.return_value = (None, "absent")
+
+        with override_flag("user_trial_eligibility_enforcement", active=False):
+            resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+        mock_trial_eligibility.assert_not_called()
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.stripe.checkout.Session.create")
