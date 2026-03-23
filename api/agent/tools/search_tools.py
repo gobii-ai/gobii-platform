@@ -32,6 +32,7 @@ from .tool_manager import (
     CREATE_IMAGE_TOOL_NAME,
     HTTP_REQUEST_TOOL_NAME,
     get_available_builtin_tool_entries,
+    get_available_custom_tool_entries,
     get_enabled_tool_limit,
 )
 from .autotool_heuristics import find_matching_tools
@@ -703,8 +704,16 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         }
         for entry in get_available_builtin_tool_entries(agent).values()
     ]
+    custom_catalog: List[Dict[str, Any]] = [
+        {
+            "full_name": entry.full_name,
+            "description": entry.description,
+            "parameters": entry.parameters,
+        }
+        for entry in get_available_custom_tool_entries(agent).values()
+    ]
 
-    combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog
+    combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog
     pipedream_app_catalog: list[Any] = []
     enabled_app_slugs: list[str] = []
     if _has_active_pipedream_runtime():
@@ -745,7 +754,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Search your internal tool catalog to discover and enable tools for a task. "
+                "Search your internal tool catalog to discover and enable tools for a task, including saved custom tools. "
                 "NOT for web search - use the web search tool from the catalog (e.g., mcp_brightdata_search_engine). "
                 "Call this when tasks change and you need different capabilities."
             ),

@@ -84,6 +84,7 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
+from ..tools.custom_tools import get_custom_tools_prompt_summary
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_kanban import format_kanban_friendly_id
@@ -2148,6 +2149,15 @@ def build_prompt_context(
             non_shrinkable=True,
         )
 
+    custom_tools_block = get_custom_tools_prompt_summary(agent, recent_limit=3)
+    if custom_tools_block:
+        important_group.section_text(
+            "agent_custom_tools",
+            custom_tools_block,
+            weight=3,
+            shrinker="hmt",
+        )
+
     files_snapshot = _build_sqlite_files_snapshot(agent)
     store_files_for_prompt(files_snapshot.records)
 
@@ -2244,8 +2254,7 @@ def build_prompt_context(
     skills_note = (
         f"Agent skills table ({AGENT_SKILLS_TABLE}) stores recurring workflows with version history. "
         "Be eager to create/update skills. If a workflow is likely to recur, took real effort to figure out, used a repeated tool sequence, or user feedback/corrections/preferences should change how it runs next time, capture that as a skill. "
-        "Be aggressive about identifying reusable tool-chains. If you construct a multi-step sequence to solve a specific task, proactively abstract it into a generic, reusable skill without waiting for the task to repeat. Err on the side of saving successful playbooks. "
-        "Scheduled jobs, reports, reconciliations, investigations, research, and other multi-step workflows are strong candidates. When in doubt, err toward saving the workflow. "
+        "Scheduled jobs, reports, reconciliations, investigations, research, and other multi-step workflows are strong candidates. Err on the side of saving successful playbooks. "
         "Skill maintenance is internal memory work: do it silently. Do not tell the user that you are creating, updating, or saving a skill unless they explicitly ask about skills. "
         "Schema: name, description, version, tools, instructions. "
         "Version is auto-incremented per (name) and treated as read-only mirror metadata; do not set it manually. "

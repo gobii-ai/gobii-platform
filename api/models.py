@@ -7281,6 +7281,42 @@ class PersistentAgentEnabledTool(models.Model):
         return f"EnabledTool<{self.tool_full_name}> for {getattr(self.agent, 'name', 'agent')}"
 
 
+class PersistentAgentCustomTool(models.Model):
+    """Agent-authored custom tool metadata backed by source code in filespace."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="custom_tools",
+    )
+    name = models.CharField(max_length=128)
+    tool_name = models.CharField(max_length=128)
+    description = models.TextField()
+    source_path = models.CharField(max_length=512)
+    parameters_schema = models.JSONField(default=dict, blank=True)
+    entrypoint = models.CharField(max_length=64, default="run")
+    timeout_seconds = models.PositiveIntegerField(default=300)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "tool_name"],
+                name="unique_agent_custom_tool_name",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "-updated_at"], name="pa_ctool_agent_upd_idx"),
+            models.Index(fields=["agent", "source_path"], name="pa_ctool_agent_src_idx"),
+        ]
+        ordering = ["-updated_at", "tool_name"]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"CustomTool<{self.tool_name}> for {getattr(self.agent, 'name', 'agent')}"
+
+
 class PersistentAgentSkill(models.Model):
     """Versioned workflow skill authored by a persistent agent."""
 

@@ -12,6 +12,7 @@ from django.utils.html import format_html
 from agents.services import PretrainedWorkerTemplateService
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
 from api.agent.tasks import process_agent_events_task
+from api.agent.tools.custom_tools import CUSTOM_TOOL_PREFIX
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.core.llm_config import AgentLLMTier, resolve_intelligence_tier_for_owner
 from api.agent.tools.mcp_manager import get_mcp_manager
@@ -365,6 +366,8 @@ def create_persistent_agent_from_charter(
 
         if selected_template and selected_template.default_tools:
             for tool_name in selected_template.default_tools:
+                if isinstance(tool_name, str) and tool_name.startswith(CUSTOM_TOOL_PREFIX):
+                    continue
                 try:
                     mark_tool_enabled_without_discovery(persistent_agent, tool_name)
                 except Exception as exc:

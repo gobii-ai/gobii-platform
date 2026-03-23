@@ -6,6 +6,7 @@ from django.db.models import Q
 
 from agents.services import AgentService
 from api.models import AgentPeerLink, PersistentAgent
+from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 
 def _get_sleep_tool() -> Dict[str, object]:
     return {
@@ -20,7 +21,9 @@ def _get_sleep_tool() -> Dict[str, object]:
 
 def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     """Return static (always-present) tool definitions for an agent."""
+    from .custom_tools import get_create_custom_tool_tool
     from .email_sender import get_send_email_tool
+    from .file_str_replace import get_file_str_replace_tool
     from .request_human_input import get_request_human_input_tool
     from .request_contact_permission import get_request_contact_permission_tool
     from .search_tools import get_search_tools_tool
@@ -46,6 +49,11 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
 
     if not agent:
         return static_tools
+
+    static_tools.append(get_file_str_replace_tool())
+
+    if sandbox_compute_enabled_for_agent(agent):
+        static_tools.append(get_create_custom_tool_tool())
 
     owner = agent.organization if agent.organization_id else agent.user
     spawn_capacity = max(int(AgentService.get_agents_available(owner)), 0)

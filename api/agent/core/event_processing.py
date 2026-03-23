@@ -119,6 +119,8 @@ from ..tools.sqlite_agent_config import (
 from ..tools.sqlite_kanban import apply_sqlite_kanban_updates, seed_sqlite_kanban
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, seed_sqlite_skills
 from console.agent_chat.signals import broadcast_kanban_changes
+from ..tools.custom_tools import execute_create_custom_tool
+from ..tools.file_str_replace import execute_file_str_replace
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -1401,6 +1403,12 @@ def _execute_tool_call_runtime(
         result = execute_search_tools(agent, exec_params)
         updated_tools = get_agent_tools(agent)
         return result, updated_tools
+    if tool_name == "create_custom_tool":
+        result = execute_create_custom_tool(agent, exec_params)
+        updated_tools = get_agent_tools(agent)
+        return result, updated_tools
+    if tool_name == "file_str_replace":
+        return execute_file_str_replace(agent, exec_params), updated_tools
     return execute_enabled_tool(agent, tool_name, exec_params), updated_tools
 
 
