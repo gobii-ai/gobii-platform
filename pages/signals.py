@@ -779,6 +779,18 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     return context
 
 
+def _build_off_session_marketing_context_from_user(user: Any) -> dict[str, Any]:
+    """Return only durable identifiers that are safe for off-session conversions."""
+    context = _build_marketing_context_from_user(user)
+    off_session_context: dict[str, Any] = {"consent": context.get("consent", True)}
+
+    ga_client_id = context.get("ga_client_id")
+    if ga_client_id:
+        off_session_context["ga_client_id"] = ga_client_id
+
+    return off_session_context
+
+
 def _calculate_subscription_value(licensed_item: Mapping[str, Any] | None) -> tuple[float | None, str | None]:
     """Return estimated total value (in major units) and currency for the licensed item."""
     if not isinstance(licensed_item, Mapping):
@@ -2084,7 +2096,14 @@ def handle_invoice_payment_succeeded(event, **kwargs):
 
                 marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
 
-                subscribe_context = _build_marketing_context_from_user(owner) if owner_type == "user" else {}
+                if owner_type == "user":
+                    subscribe_context = (
+                        _build_off_session_marketing_context_from_user(owner)
+                        if should_send_ga_renewal
+                        else _build_marketing_context_from_user(owner)
+                    )
+                else:
+                    subscribe_context = {}
                 checkout_source_url = metadata.get("checkout_source_url")
                 # Recurring renewals happen off-session, so reusing the original
                 # checkout URL would misattribute the conversion page.

@@ -2593,6 +2593,22 @@ class PaymentSucceededSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="success-user", email="success@example.com", password="pw")
 
+    def _seed_last_touch_attribution(self):
+        UserAttribution.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "fbc": "fb.1.1700000000000.latest-fbclid",
+                "fbclid": "latest-fbclid",
+                "fbp": "fb.1.1700000000000.123456789",
+                "rdt_cid_last": "reddit-latest-click",
+                "utm_source_last": "retargeting-campaign",
+                "utm_campaign_last": "renewal-promo",
+                "last_client_ip": "203.0.113.5",
+                "last_user_agent": "pytest-renewal-agent",
+                "ga_client_id": "GA1.2.111.222",
+            },
+        )
+
     def test_invoice_payment_succeeded_does_not_resume_paused_owner(self):
         UserBilling.objects.update_or_create(
             user=self.user,
@@ -2719,6 +2735,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["event_id"], "evt-123")
 
     def test_invoice_payment_succeeded_emits_subscribe_for_standard_renewal_with_real_value(self):
+        self._seed_last_touch_attribution()
         payload = _build_invoice_payload(
             customer_id="cus_user_succeeded",
             subscription_id="sub_user_succeeded",
@@ -2769,7 +2786,14 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], payload["id"])
         self.assertNotIn("predicted_ltv", props)
-        self.assertNotIn("page", capi_kwargs["context"])
+        context = capi_kwargs["context"]
+        self.assertTrue(context["consent"])
+        self.assertEqual(context["ga_client_id"], "GA1.2.111.222")
+        self.assertNotIn("click_ids", context)
+        self.assertNotIn("utm", context)
+        self.assertNotIn("client_ip", context)
+        self.assertNotIn("user_agent", context)
+        self.assertNotIn("page", context)
 
     def test_invoice_payment_succeeded_does_not_emit_subscribe_for_trial_start(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
@@ -2843,6 +2867,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
 
     def test_invoice_payment_succeeded_emits_single_subscribe_when_line_period_missing(self):
+        self._seed_last_touch_attribution()
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
         payload = _build_invoice_payload(
             customer_id="cus_user_succeeded",
@@ -2893,7 +2918,14 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], payload["id"])
         self.assertNotIn("predicted_ltv", props)
-        self.assertNotIn("page", capi_kwargs["context"])
+        context = capi_kwargs["context"]
+        self.assertTrue(context["consent"])
+        self.assertEqual(context["ga_client_id"], "GA1.2.111.222")
+        self.assertNotIn("click_ids", context)
+        self.assertNotIn("utm", context)
+        self.assertNotIn("client_ip", context)
+        self.assertNotIn("user_agent", context)
+        self.assertNotIn("page", context)
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")
