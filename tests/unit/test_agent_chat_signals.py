@@ -192,11 +192,15 @@ class AgentChatSignalTests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             ingest_inbound_webhook_message(
                 webhook,
-                body="Signal payload",
+                body='{\n  "signal": true\n}',
                 raw_payload={
                     "source": "inbound_webhook",
                     "source_kind": "webhook",
                     "source_label": webhook.name,
+                    "content_type": "application/json",
+                    "method": "POST",
+                    "payload_kind": "json",
+                    "json_payload": {"signal": True},
                     "webhook_name": webhook.name,
                 },
             )
@@ -209,6 +213,8 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(message_payload.get("sourceKind"), "webhook")
         self.assertEqual(message_payload.get("sourceLabel"), "Signal Hook")
         self.assertEqual(message_payload.get("senderName"), "Signal Hook")
+        self.assertEqual(message_payload.get("webhookMeta", {}).get("payloadKind"), "json")
+        self.assertEqual(message_payload.get("webhookMeta", {}).get("payload"), {"signal": True})
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_chat")

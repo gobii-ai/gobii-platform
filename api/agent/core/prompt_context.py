@@ -5306,6 +5306,25 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             else:
                 event_type = f"{event_prefix}_{channel.lower()}"
             components = {"header": header}
+            if (
+                channel == CommsChannel.OTHER
+                and str(source_kind).strip().lower() == "webhook"
+                and isinstance(m.raw_payload, dict)
+            ):
+                webhook_meta_lines = []
+                content_type = m.raw_payload.get("content_type")
+                method = m.raw_payload.get("method")
+                query_params = m.raw_payload.get("query_params")
+                if isinstance(method, str) and method.strip():
+                    webhook_meta_lines.append(f"Method: {method.strip()}")
+                if isinstance(content_type, str) and content_type.strip():
+                    webhook_meta_lines.append(f"Content-Type: {content_type.strip()}")
+                if isinstance(query_params, dict) and query_params:
+                    webhook_meta_lines.append(
+                        f"Query params: {json.dumps(query_params, sort_keys=True)}"
+                    )
+                if webhook_meta_lines:
+                    components["webhook_meta"] = "\n".join(webhook_meta_lines)
 
             # Handle email messages with structured components
             if channel == CommsChannel.EMAIL:
@@ -5396,6 +5415,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
+            "webhook_meta": 3, # High priority - webhook request metadata
             "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading
             "subject": 2,     # Medium priority - email subject
             "body": 1,        # Low priority - email body (can be long and shrunk)

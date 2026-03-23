@@ -13,6 +13,15 @@ export type PeerAgentRef = {
   name?: string | null
 }
 
+export type WebhookMeta = {
+  contentType?: string | null
+  method?: string | null
+  path?: string | null
+  queryParams?: Record<string, unknown> | null
+  payloadKind?: string | null
+  payload?: unknown
+}
+
 export type AgentMessage = {
   id: string
   cursor?: string
@@ -35,6 +44,7 @@ export type AgentMessage = {
   senderAddress?: string | null
   sourceKind?: string | null
   sourceLabel?: string | null
+  webhookMeta?: WebhookMeta | null
 }
 
 export type ToolMeta = {

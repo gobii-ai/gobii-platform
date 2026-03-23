@@ -1,3 +1,4 @@
+import ReactJsonView from '@microlink/react-json-view'
 import { memo } from 'react'
 import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
@@ -102,6 +103,25 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
   const metaLabel = statusLabel || relativeLabel || message.timestamp || ''
   const metaTitle = message.error || message.timestamp || undefined
   const palette = !isPeer && !isAgent ? buildUserChatPalette(agentColorHex) : null
+  const webhookMeta = isWebhook ? message.webhookMeta : null
+  const webhookPayloadKind = (webhookMeta?.payloadKind || '').toLowerCase()
+  const webhookPayloadObject = webhookMeta?.payload
+  const shouldRenderWebhookJson = Boolean(
+    isWebhook
+    && (webhookPayloadKind === 'json' || webhookPayloadKind === 'form')
+    && webhookPayloadObject !== undefined
+    && webhookPayloadObject !== null,
+  )
+  const webhookJsonSrc = shouldRenderWebhookJson
+    ? (typeof webhookPayloadObject === 'object' ? webhookPayloadObject : { value: webhookPayloadObject })
+    : null
+  const webhookMetaBits = [
+    webhookMeta?.method?.trim()?.toUpperCase(),
+    webhookMeta?.contentType?.trim() || null,
+    webhookMeta?.queryParams && Object.keys(webhookMeta.queryParams).length > 0
+      ? `${Object.keys(webhookMeta.queryParams).length} query param${Object.keys(webhookMeta.queryParams).length === 1 ? '' : 's'}`
+      : null,
+  ].filter(Boolean)
 
   const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : ''
 
@@ -138,16 +158,41 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
           {showChannelTag ? <span className={channelTagClass}>{channelLabel}</span> : null}
           <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
         </div>
-        <div
-          className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
-        >
-          <MessageContent
-            bodyHtml={message.bodyHtml}
-            bodyText={message.bodyText}
-            showEmptyState={!message.attachments || message.attachments.length === 0}
-            animateIn={shouldAnimate}
-          />
-        </div>
+        {isWebhook && webhookMetaBits.length > 0 ? (
+          <div className="mb-2 flex flex-wrap gap-2 text-[11px] font-medium text-slate-500">
+            {webhookMetaBits.map((bit) => (
+              <span key={bit} className="inline-flex items-center rounded-full border border-slate-200 bg-white/80 px-2 py-0.5">
+                {bit}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {shouldRenderWebhookJson && webhookJsonSrc ? (
+          <div className="chat-content overflow-hidden rounded-xl border border-slate-200/80 bg-white/80 p-3">
+            <ReactJsonView
+              src={webhookJsonSrc}
+              name={false}
+              collapsed={1}
+              displayDataTypes={false}
+              displayObjectSize={false}
+              enableClipboard
+              iconStyle="triangle"
+              sortKeys
+              style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
+            />
+          </div>
+        ) : (
+          <div
+            className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
+          >
+            <MessageContent
+              bodyHtml={message.bodyHtml}
+              bodyText={message.bodyText}
+              showEmptyState={!message.attachments || message.attachments.length === 0}
+              animateIn={shouldAnimate}
+            />
+          </div>
+        )}
         {message.attachments && message.attachments.length > 0 ? (
           <div className="chat-attachments">
             {message.attachments.map((attachment) => {

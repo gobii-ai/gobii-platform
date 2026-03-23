@@ -270,40 +270,21 @@ def _collect_uploaded_files(request) -> tuple[list[object], list[dict[str, objec
 
 
 def _build_inbound_agent_webhook_body(
-    webhook_name: str,
     *,
-    content_type: str,
     json_payload=None,
     form_payload: dict[str, object] | None = None,
     text_payload: str = "",
-    attachment_metadata: list[dict[str, object]] | None = None,
-) -> str:
-    sections = [f'Inbound webhook "{webhook_name}" triggered.']
-
-    if content_type:
-        sections.append(f"Content-Type: {content_type}")
-
+) -> tuple[str, str]:
     if json_payload is not None:
-        rendered_json = json.dumps(json_payload, indent=2, sort_keys=True)
-        sections.append(f"JSON payload:\n{rendered_json}")
-    elif form_payload:
-        rendered_form = json.dumps(form_payload, indent=2, sort_keys=True)
-        sections.append(f"Form payload:\n{rendered_form}")
-    elif text_payload.strip():
-        sections.append(f"Body:\n{text_payload.strip()}")
-    else:
-        sections.append("Body: (no payload)")
-
-    if attachment_metadata:
-        filenames = [str(item.get("filename") or "").strip() for item in attachment_metadata]
-        filenames = [name for name in filenames if name]
-        if filenames:
-            sections.append("Attachments:\n" + "\n".join(f"- {name}" for name in filenames))
-
-    return "\n\n".join(sections)
+        return json.dumps(json_payload, indent=2, sort_keys=True), "json"
+    if form_payload:
+        return json.dumps(form_payload, indent=2, sort_keys=True), "form"
+    if text_payload.strip():
+        return text_payload.strip(), "text"
+    return "", "empty"
 
 
-def _parse_inbound_agent_webhook_request(request) -> tuple[dict[str, object], list[object]]:
+def _parse_inbound_agent_webhook_request(request) -> tuple[str, dict[str, object], list[object]]:
     content_type = ((request.content_type or "").split(";", 1)[0]).strip().lower()
     raw_text = (request.body or b"").decode(request.encoding or "utf-8", errors="replace")
     attachments, attachment_metadata = _collect_uploaded_files(request)
@@ -329,6 +310,12 @@ def _parse_inbound_agent_webhook_request(request) -> tuple[dict[str, object], li
     query_payload = _normalize_multivalue_mapping(request.GET)
     query_payload.pop("t", None)
 
+    body, payload_kind = _build_inbound_agent_webhook_body(
+        json_payload=json_payload,
+        form_payload=form_payload,
+        text_payload=text_payload,
+    )
+
     raw_payload = {
         "content_type": content_type or "",
         "method": request.method,
@@ -338,10 +325,11 @@ def _parse_inbound_agent_webhook_request(request) -> tuple[dict[str, object], li
         "json_payload": json_payload,
         "text_payload": text_payload if text_payload.strip() else "",
         "attachments": attachment_metadata,
+        "payload_kind": payload_kind,
         "source": "inbound_webhook",
         "source_kind": "webhook",
     }
-    return raw_payload, attachments
+    return body, raw_payload, attachments
 
 
 @csrf_exempt
@@ -368,7 +356,7 @@ def inbound_agent_webhook(request, webhook_id):
         return JsonResponse({"accepted": False, "error": "Agent is inactive."}, status=409)
 
     try:
-        raw_payload, attachments = _parse_inbound_agent_webhook_request(request)
+        body, raw_payload, attachments = _parse_inbound_agent_webhook_request(request)
     except ValueError as exc:
         return JsonResponse({"accepted": False, "error": str(exc)}, status=400)
     except Exception:
@@ -378,15 +366,6 @@ def inbound_agent_webhook(request, webhook_id):
     raw_payload["source_label"] = webhook.name
     raw_payload["webhook_id"] = str(webhook.id)
     raw_payload["webhook_name"] = webhook.name
-
-    body = _build_inbound_agent_webhook_body(
-        webhook.name,
-        content_type=str(raw_payload.get("content_type") or ""),
-        json_payload=raw_payload.get("json_payload"),
-        form_payload=raw_payload.get("form_payload") if isinstance(raw_payload.get("form_payload"), dict) else None,
-        text_payload=str(raw_payload.get("text_payload") or ""),
-        attachment_metadata=raw_payload.get("attachments") if isinstance(raw_payload.get("attachments"), list) else None,
-    )
 
     try:
         info = ingest_inbound_webhook_message(

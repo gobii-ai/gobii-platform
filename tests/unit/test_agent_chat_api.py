@@ -284,11 +284,16 @@ class AgentChatAPITests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             ingest_inbound_webhook_message(
                 webhook,
-                body='Inbound webhook "Ops Deploy" triggered.\n\nJSON payload:\n{"status":"ok"}',
+                body='{\n  "status": "ok"\n}',
                 raw_payload={
                     "source": "inbound_webhook",
                     "source_kind": "webhook",
                     "source_label": "Ops Deploy",
+                    "content_type": "application/json",
+                    "method": "POST",
+                    "payload_kind": "json",
+                    "json_payload": {"status": "ok"},
+                    "query_params": {"source": "ci"},
                     "webhook_id": str(webhook.id),
                     "webhook_name": webhook.name,
                 },
@@ -306,6 +311,10 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message_payload["sourceLabel"], "Ops Deploy")
         self.assertEqual(message_payload["senderName"], "Ops Deploy")
         self.assertEqual(message_payload["channel"], "other")
+        self.assertEqual(message_payload["bodyText"], '{\n  "status": "ok"\n}')
+        self.assertEqual(message_payload["webhookMeta"]["payloadKind"], "json")
+        self.assertEqual(message_payload["webhookMeta"]["payload"], {"status": "ok"})
+        self.assertEqual(message_payload["webhookMeta"]["contentType"], "application/json")
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_chat")
@@ -353,6 +362,11 @@ class AgentChatAPITests(TestCase):
                     "source": "inbound_webhook",
                     "source_kind": "webhook",
                     "source_label": webhook.name,
+                    "content_type": "application/json",
+                    "method": "POST",
+                    "payload_kind": "json",
+                    "json_payload": {"alert": "fired"},
+                    "query_params": {"priority": "high"},
                     "webhook_name": webhook.name,
                 },
             )
@@ -361,6 +375,8 @@ class AgentChatAPITests(TestCase):
         user_message = next((message for message in context if message["role"] == "user"), None)
         self.assertIsNotNone(user_message)
         self.assertIn('Inbound webhook "Pager Trigger" triggered:', user_message["content"])
+        self.assertIn("Content-Type: application/json", user_message["content"])
+        self.assertIn('Query params: {"priority": "high"}', user_message["content"])
         self.assertNotIn("On other, you received a message", user_message["content"])
         mock_delay.assert_called_once_with(str(self.agent.id))
 

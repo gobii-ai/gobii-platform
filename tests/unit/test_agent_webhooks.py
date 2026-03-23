@@ -1,4 +1,5 @@
 from unittest.mock import MagicMock, patch
+import json
 
 from allauth.account.models import EmailAddress
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -391,7 +392,8 @@ class InboundAgentWebhookEndpointTests(TestCase):
         self.assertEqual(message.conversation.display_name, self.webhook.name)
         self.assertEqual(message.raw_payload["source_kind"], "webhook")
         self.assertEqual(message.raw_payload["webhook_name"], self.webhook.name)
-        self.assertIn('Inbound webhook "Deploy Hook" triggered.', message.body)
+        self.assertEqual(message.raw_payload["payload_kind"], "json")
+        self.assertEqual(message.body, json.dumps({"build_id": 42, "status": "ok"}, indent=2, sort_keys=True))
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
@@ -411,8 +413,11 @@ class InboundAgentWebhookEndpointTests(TestCase):
         self.assertEqual(response.status_code, 202, response.content)
         message = PersistentAgentMessage.objects.get(id=response.json()["messageId"])
         self.assertEqual(message.attachments.count(), 1)
-        self.assertIn("Form payload", message.body)
-        self.assertIn("Attachments:", message.body)
+        self.assertEqual(message.raw_payload["payload_kind"], "form")
+        self.assertEqual(
+            message.body,
+            json.dumps({"build_id": "123", "environment": "prod"}, indent=2, sort_keys=True),
+        )
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")

@@ -28,7 +28,7 @@ from api.agent.comms.human_input_requests import serialize_human_input_tool_resu
 from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
-from api.agent.comms.source_metadata import get_message_source_metadata
+from api.agent.comms.source_metadata import get_message_source_metadata, get_webhook_timeline_metadata
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -550,6 +550,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
     attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
     conversation = message.conversation
     source_kind, source_label = get_message_source_metadata(message.raw_payload)
+    webhook_meta = get_webhook_timeline_metadata(message.raw_payload)
     peer_link_id: str | None = None
     is_peer_dm = False
     if conversation and conversation.is_peer_dm:
@@ -620,6 +621,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
             "senderAddress": sender_address,
             "sourceKind": source_kind,
             "sourceLabel": source_label,
+            "webhookMeta": webhook_meta,
         },
     }
 
