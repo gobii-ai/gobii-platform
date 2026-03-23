@@ -5284,6 +5284,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             if channel == CommsChannel.WEB and m.from_endpoint_id:
                 from_addr = _format_web_party(from_addr, m.from_endpoint_id)
             source_kind, source_label = get_message_source_metadata(m.raw_payload)
+            is_webhook = channel == CommsChannel.OTHER and str(source_kind).strip().lower() == "webhook"
             if m.is_outbound:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
                 if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:
@@ -5295,22 +5296,18 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                     f"you sent a message to {to_addr}{attachment_status_suffix}:"
                 )
             else:
-                if channel == CommsChannel.OTHER and str(source_kind).strip().lower() == "webhook":
+                if is_webhook:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
                     header = f'[{m.timestamp.isoformat()}]{recent_minutes_suffix} Inbound webhook "{label}" triggered:'
                 else:
                     header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you received a message from {from_addr}:"
 
-            if channel == CommsChannel.OTHER and str(source_kind).strip().lower() == "webhook":
+            if is_webhook:
                 event_type = f"{event_prefix}_webhook"
             else:
                 event_type = f"{event_prefix}_{channel.lower()}"
             components = {"header": header}
-            if (
-                channel == CommsChannel.OTHER
-                and str(source_kind).strip().lower() == "webhook"
-                and isinstance(m.raw_payload, dict)
-            ):
+            if is_webhook and isinstance(m.raw_payload, dict):
                 webhook_meta_lines = []
                 content_type = m.raw_payload.get("content_type")
                 method = m.raw_payload.get("method")

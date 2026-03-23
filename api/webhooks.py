@@ -284,15 +284,20 @@ def _build_inbound_agent_webhook_body(
     return "", "empty"
 
 
+def _decode_request_text_body(request) -> str:
+    return (request.body or b"").decode(request.encoding or "utf-8", errors="replace")
+
+
 def _parse_inbound_agent_webhook_request(request) -> tuple[str, dict[str, object], list[object]]:
     content_type = ((request.content_type or "").split(";", 1)[0]).strip().lower()
-    raw_text = (request.body or b"").decode(request.encoding or "utf-8", errors="replace")
     attachments, attachment_metadata = _collect_uploaded_files(request)
     form_payload: dict[str, object] = {}
     json_payload = None
-    text_payload = raw_text
+    text_payload = ""
 
     if content_type == "application/json":
+        raw_text = _decode_request_text_body(request)
+        text_payload = raw_text
         if raw_text.strip():
             try:
                 json_payload = json.loads(raw_text)
@@ -302,10 +307,10 @@ def _parse_inbound_agent_webhook_request(request) -> tuple[str, dict[str, object
             json_payload = {}
     elif content_type in {"multipart/form-data", "application/x-www-form-urlencoded"}:
         form_payload = _normalize_multivalue_mapping(request.POST)
-        text_payload = ""
     elif request.POST:
         form_payload = _normalize_multivalue_mapping(request.POST)
-        text_payload = ""
+    else:
+        text_payload = _decode_request_text_body(request)
 
     query_payload = _normalize_multivalue_mapping(request.GET)
     query_payload.pop("t", None)

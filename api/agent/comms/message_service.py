@@ -925,13 +925,22 @@ def ingest_inbound_message(
             pause_state = {"paused": False, "reason": "", "paused_at": None}
 
             try:
-                if agent_obj and channel_val in {CommsChannel.EMAIL, CommsChannel.SMS}:
+                is_inbound_webhook = (
+                    channel_val == CommsChannel.OTHER
+                    and isinstance(parsed.raw_payload, dict)
+                    and str(parsed.raw_payload.get("source_kind", "")).strip().lower() == "webhook"
+                )
+                if agent_obj and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook):
                     owner = resolve_agent_owner(agent_obj)
                     pause_state = get_owner_execution_pause_state(owner)
                     pause_reason = pause_state["reason"] or ""
                     if pause_state["paused"] and is_billing_execution_pause_reason(pause_reason):
                         should_skip_processing = True
-                        if parsed.sender and agent_obj.is_sender_whitelisted(channel_val, parsed.sender):
+                        if (
+                            channel_val in {CommsChannel.EMAIL, CommsChannel.SMS}
+                            and parsed.sender
+                            and agent_obj.is_sender_whitelisted(channel_val, parsed.sender)
+                        ):
                             try:
                                 send_billing_pause_auto_reply(
                                     agent_obj,

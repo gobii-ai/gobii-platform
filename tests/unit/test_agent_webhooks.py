@@ -4,8 +4,11 @@ import json
 from allauth.account.models import EmailAddress
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
+from django.http import QueryDict
 from django.test import TestCase, tag
 from django.urls import reverse
+from django.utils import timezone
+from django.utils.datastructures import MultiValueDict
 from requests import RequestException
 
 from api.agent.tools.webhook_sender import execute_send_webhook_event
@@ -17,6 +20,7 @@ from api.models import (
     PersistentAgentWebhook,
     ProxyServer,
 )
+from api.webhooks import _parse_inbound_agent_webhook_request
 
 
 class AgentWebhookToolTests(TestCase):
@@ -442,6 +446,39 @@ class InboundAgentWebhookEndpointTests(TestCase):
         self.assertEqual(response.status_code, 409)
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.comms.message_service.send_billing_pause_auto_reply")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_skips_processing_when_owner_billing_paused(self, mock_delay, mock_auto_reply):
+        billing = self.user.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = "billing_delinquency"
+        billing.execution_paused_at = timezone.now()
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+                data='{"status":"paused"}',
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        payload = response.json()
+        self.assertTrue(payload["accepted"])
+        self.assertTrue(PersistentAgentMessage.objects.filter(id=payload["messageId"]).exists())
+        mock_delay.assert_not_called()
+        mock_auto_reply.assert_not_called()
+
+        self.webhook.refresh_from_db()
+        self.assertIsNotNone(self.webhook.last_triggered_at)
+
+    @tag("batch_agent_webhooks")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_rotated_secret_invalidates_previous_url(self, mock_delay):
         old_secret = self.webhook.secret
@@ -463,3 +500,36 @@ class InboundAgentWebhookEndpointTests(TestCase):
             )
         self.assertEqual(new_response.status_code, 202, new_response.content)
         mock_delay.assert_called_once_with(str(self.agent.id))
+
+
+class InboundAgentWebhookParsingTests(TestCase):
+    @tag("batch_agent_webhooks")
+    def test_parse_multipart_request_does_not_access_raw_body(self):
+        upload = SimpleUploadedFile("deploy.json", b'{"ok": true}', content_type="application/json")
+        post_data = QueryDict("", mutable=True)
+        post_data["environment"] = "prod"
+        post_data["build_id"] = "123"
+
+        class MultipartRequest:
+            content_type = "multipart/form-data; boundary=test-boundary"
+            encoding = "utf-8"
+            method = "POST"
+            path = "/api/webhooks/inbound/test/"
+            POST = post_data
+            FILES = MultiValueDict({"artifact": [upload]})
+            GET = QueryDict("t=secret&source=ci")
+
+            @property
+            def body(self):
+                raise AssertionError("multipart webhook parsing should not read request.body")
+
+        body, raw_payload, attachments = _parse_inbound_agent_webhook_request(MultipartRequest())
+
+        self.assertEqual(
+            body,
+            json.dumps({"build_id": "123", "environment": "prod"}, indent=2, sort_keys=True),
+        )
+        self.assertEqual(raw_payload["payload_kind"], "form")
+        self.assertEqual(raw_payload["query_params"], {"source": "ci"})
+        self.assertEqual(raw_payload["attachments"][0]["filename"], "deploy.json")
+        self.assertEqual(attachments, [upload])
