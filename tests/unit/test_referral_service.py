@@ -381,6 +381,13 @@ class DeferredReferralGrantTests(TestCase):
         self.assertIsNone(attribution.referral_credit_granted_at)
         self.assertFalse(ReferralGrant.objects.filter(referred=self.new_user).exists())
 
+    def test_resolve_plan_choice_is_callable(self):
+        """Regression: duplicate @classmethod caused TypeError when calling _resolve_plan_choice."""
+        from constants.plans import PlanNamesChoices
+        # Should not raise TypeError from double-wrapped classmethod descriptor
+        result = ReferralService._resolve_plan_choice(self.new_user)
+        self.assertIsInstance(result, PlanNamesChoices)
+
     def test_referrer_cap_skips_referrer_credit(self):
         """Test that referrer credits respect the lifetime cap but referred still receives credits."""
         config = ReferralIncentiveConfig.get_solo()
