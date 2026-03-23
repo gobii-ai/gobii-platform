@@ -901,7 +901,108 @@ class MCPToolManagerTests(TestCase):
         mock_post.assert_not_called()
         self.assertEqual(runtime.oauth_access_token, "valid-token")
         self.assertEqual(runtime.oauth_token_type, "Bearer")
-        
+
+    def _make_expired_oauth_config(self, username_suffix: str):
+        """Helper: create a USER-scoped config + expired credential ready to be refreshed."""
+        user = get_user_model().objects.create_user(
+            username=f"user-{username_suffix}",
+            email=f"{username_suffix}@example.com",
+        )
+        config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=user,
+            name=f"notion-{username_suffix}",
+            display_name="Notion",
+            url="https://notion.example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+        )
+        credential = MCPServerOAuthCredential.objects.create(
+            server_config=config,
+            user=user,
+            client_id="client-test",
+        )
+        credential.client_secret = "secret-test"
+        credential.access_token = "old-access"
+        credential.refresh_token = "old-refresh"
+        credential.token_type = "Bearer"
+        credential.expires_at = timezone.now() - timedelta(minutes=5)
+        credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
+        credential.save()
+        return config, credential
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.mcp_manager.requests.post")
+    def test_refresh_deletes_credential_on_400(self, mock_post):
+        """A 400 response during token refresh deletes the credential and returns None."""
+        import requests as req_lib
+
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            config, credential = self._make_expired_oauth_config("400test")
+
+        http_error = req_lib.exceptions.HTTPError(response=MagicMock(status_code=400))
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(side_effect=http_error))
+
+        manager = MCPToolManager()
+        result = manager._maybe_refresh_oauth_credential(config, credential)
+
+        self.assertIsNone(result)
+        self.assertFalse(MCPServerOAuthCredential.objects.filter(id=credential.id).exists())
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.mcp_manager.requests.post")
+    def test_refresh_deletes_credential_on_401(self, mock_post):
+        """A 401 response during token refresh deletes the credential and returns None."""
+        import requests as req_lib
+
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            config, credential = self._make_expired_oauth_config("401test")
+
+        http_error = req_lib.exceptions.HTTPError(response=MagicMock(status_code=401))
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(side_effect=http_error))
+
+        manager = MCPToolManager()
+        result = manager._maybe_refresh_oauth_credential(config, credential)
+
+        self.assertIsNone(result)
+        self.assertFalse(MCPServerOAuthCredential.objects.filter(id=credential.id).exists())
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.mcp_manager.requests.post")
+    def test_refresh_keeps_credential_on_5xx(self, mock_post):
+        """A 5xx response during token refresh keeps the credential intact (transient error)."""
+        import requests as req_lib
+
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            config, credential = self._make_expired_oauth_config("5xxtest")
+
+        http_error = req_lib.exceptions.HTTPError(response=MagicMock(status_code=503))
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(side_effect=http_error))
+
+        manager = MCPToolManager()
+        result = manager._maybe_refresh_oauth_credential(config, credential)
+
+        self.assertEqual(result, credential)
+        self.assertTrue(MCPServerOAuthCredential.objects.filter(id=credential.id).exists())
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.mcp_manager.requests.post")
+    def test_build_runtime_returns_no_token_when_credential_deleted_on_4xx(self, mock_post):
+        """_build_runtime_from_config returns no oauth token when refresh deletes the credential."""
+        import requests as req_lib
+
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            config, credential = self._make_expired_oauth_config("build400test")
+
+        http_error = req_lib.exceptions.HTTPError(response=MagicMock(status_code=400))
+        mock_post.return_value = MagicMock(raise_for_status=MagicMock(side_effect=http_error))
+
+        manager = MCPToolManager()
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            runtime = manager._build_runtime_from_config(config)
+
+        self.assertIsNone(runtime.oauth_access_token)
+        self.assertFalse(MCPServerOAuthCredential.objects.filter(id=credential.id).exists())
+
     def test_default_enabled_tools_defined(self):
         """Test that default enabled tools list is defined."""
         self.assertIn("mcp_brightdata_scrape_as_markdown", MCPToolManager.DEFAULT_ENABLED_TOOLS)

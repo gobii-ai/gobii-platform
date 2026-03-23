@@ -787,6 +787,7 @@ class MCPToolManager:
 
         if credential:
             credential = self._maybe_refresh_oauth_credential(cfg, credential)
+        if credential:
             token_value = (credential.access_token or "").strip()
             token_type_value = (credential.token_type or "").strip()
             oauth_access_token = token_value or None
@@ -873,6 +874,25 @@ class MCPToolManager:
                 timeout=self.OAUTH_REFRESH_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
+        except requests.exceptions.HTTPError as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code is not None and 400 <= status_code < 500:
+                # The refresh token has been revoked or is otherwise invalid.
+                # Delete the dead credential so the user is prompted to re-authenticate
+                # instead of looping on the same failed refresh indefinitely.
+                logger.error(
+                    "Deleting OAuth credential for MCP server %s after %s response during token refresh",
+                    cfg.id,
+                    status_code,
+                )
+                credential.delete()
+                return None
+            logger.error(
+                "Failed to refresh OAuth token for MCP server %s: %s",
+                cfg.id,
+                exc,
+            )
+            return credential
         except Exception as exc:
             logger.error(
                 "Failed to refresh OAuth token for MCP server %s: %s",
