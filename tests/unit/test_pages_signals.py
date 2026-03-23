@@ -2735,7 +2735,15 @@ class PaymentSucceededSignalTests(TestCase):
         invoice_obj = SimpleNamespace(
             id=payload["id"],
             customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
-            subscription=SimpleNamespace(id="sub_user_succeeded", stripe_data={"metadata": {"gobii_event_id": "evt-renew"}}),
+            subscription=SimpleNamespace(
+                id="sub_user_succeeded",
+                stripe_data={
+                    "metadata": {
+                        "gobii_event_id": "evt-renew",
+                        "checkout_source_url": "https://app.gobii.ai/billing/checkout?src=ads",
+                    }
+                },
+            ),
             number=payload["number"],
         )
 
@@ -2761,6 +2769,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], payload["id"])
         self.assertNotIn("predicted_ltv", props)
+        self.assertNotIn("page", capi_kwargs["context"])
 
     def test_invoice_payment_succeeded_does_not_emit_subscribe_for_trial_start(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
@@ -2857,6 +2866,9 @@ class PaymentSucceededSignalTests(TestCase):
                 stripe_data={
                     "trial_end": str(trial_end),
                     "current_period_start": str(trial_end),
+                    "metadata": {
+                        "checkout_source_url": "https://app.gobii.ai/billing/checkout?src=ads",
+                    },
                 },
             ),
             number=payload["number"],
@@ -2881,6 +2893,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], payload["id"])
         self.assertNotIn("predicted_ltv", props)
+        self.assertNotIn("page", capi_kwargs["context"])
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")

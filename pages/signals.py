@@ -2086,7 +2086,9 @@ def handle_invoice_payment_succeeded(event, **kwargs):
 
                 subscribe_context = _build_marketing_context_from_user(owner) if owner_type == "user" else {}
                 checkout_source_url = metadata.get("checkout_source_url")
-                if checkout_source_url:
+                # Recurring renewals happen off-session, so reusing the original
+                # checkout URL would misattribute the conversion page.
+                if checkout_source_url and not should_send_ga_renewal:
                     subscribe_context["page"] = {"url": checkout_source_url}
                 capi(
                     user=owner,
