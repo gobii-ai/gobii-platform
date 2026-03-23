@@ -3025,7 +3025,7 @@ function IntegrationsSection({
               className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700"
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
-              Add Webhook
+              Add Outbound Webhook
             </button>
           </div>
 
