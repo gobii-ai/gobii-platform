@@ -2718,7 +2718,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], "evt-123")
 
-    def test_invoice_payment_succeeded_emits_ga_only_subscribe_for_standard_renewal(self):
+    def test_invoice_payment_succeeded_emits_subscribe_for_standard_renewal_with_real_value(self):
         payload = _build_invoice_payload(
             customer_id="cus_user_succeeded",
             subscription_id="sub_user_succeeded",
@@ -2751,14 +2751,16 @@ class PaymentSucceededSignalTests(TestCase):
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "Subscribe")
-        self.assertEqual(capi_kwargs["provider_targets"], ["google_analytics"])
+        self.assertNotIn("provider_targets", capi_kwargs)
         props = capi_kwargs["properties"]
         self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
         self.assertEqual(props["subscription_id"], "sub_user_succeeded")
         self.assertEqual(props["stripe.invoice_id"], payload["id"])
         self.assertEqual(props["transaction_value"], 30.0)
+        self.assertEqual(props["value"], 30.0)
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], payload["id"])
+        self.assertNotIn("predicted_ltv", props)
 
     def test_invoice_payment_succeeded_does_not_emit_subscribe_for_trial_start(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
@@ -2831,7 +2833,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
         self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
 
-    def test_invoice_payment_succeeded_emits_subscribe_for_trial_conversion_without_line_period(self):
+    def test_invoice_payment_succeeded_emits_single_subscribe_when_line_period_missing(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
         payload = _build_invoice_payload(
             customer_id="cus_user_succeeded",
@@ -2869,23 +2871,16 @@ class PaymentSucceededSignalTests(TestCase):
 
             handle_invoice_payment_succeeded(event)
 
-        self.assertEqual(mock_capi.call_count, 2)
-
-        first_call = mock_capi.call_args_list[0].kwargs
-        self.assertEqual(first_call["event_name"], "Subscribe")
-        self.assertEqual(first_call["provider_targets"], ["google_analytics"])
-        first_props = first_call["properties"]
-        self.assertEqual(first_props["transaction_value"], 30.0)
-        self.assertEqual(first_props["currency"], "USD")
-        self.assertEqual(first_props["event_id"], payload["id"])
-
-        second_call = mock_capi.call_args_list[1].kwargs
-        self.assertEqual(second_call["event_name"], "Subscribe")
-        self.assertEqual(second_call["provider_targets"], ["reddit"])
-        second_props = second_call["properties"]
-        self.assertEqual(second_props["transaction_value"], 30.0)
-        self.assertEqual(second_props["currency"], "USD")
-        self.assertEqual(second_props["event_id"], payload["id"])
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
+        self.assertNotIn("provider_targets", capi_kwargs)
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["transaction_value"], 30.0)
+        self.assertEqual(props["value"], 30.0)
+        self.assertEqual(props["currency"], "USD")
+        self.assertEqual(props["event_id"], payload["id"])
+        self.assertNotIn("predicted_ltv", props)
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")

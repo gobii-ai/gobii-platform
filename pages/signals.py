@@ -1998,29 +1998,12 @@ def handle_invoice_payment_succeeded(event, **kwargs):
         if trial_end_dt is None:
             trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_obj, "trial_end"))
         line_start_dt = _line_period_start(lines)
-        subscription_current_period_start_dt = _coerce_datetime(
-            _get_stripe_data_value(subscription_data, "current_period_start")
-        )
-        if subscription_current_period_start_dt is None:
-            subscription_current_period_start_dt = _coerce_datetime(
-                _get_stripe_data_value(subscription_obj, "current_period_start")
-            )
         trial_conversion_line_match = bool(
             trial_end_dt and line_start_dt and trial_end_dt.date() == line_start_dt.date()
-        )
-        trial_conversion_subscription_match = bool(
-            trial_end_dt
-            and subscription_current_period_start_dt
-            and trial_end_dt.date() == subscription_current_period_start_dt.date()
         )
         trial_conversion = bool(
             billing_reason == "subscription_cycle"
             and trial_conversion_line_match
-        )
-        reddit_trial_conversion_fallback = bool(
-            billing_reason == "subscription_cycle"
-            and (not trial_conversion_line_match)
-            and trial_conversion_subscription_match
         )
 
         try:
@@ -2060,7 +2043,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             )
             # Stripe can emit invoice.payment_succeeded when a trial starts (often amount=0).
             # Keep Subscribe for non-trial subscription starts and trial conversion billing.
-            # Standard renewals are also sent to GA as purchase events, but not to other CAPI providers.
+            # Standard renewals also emit Subscribe, but should use only settled revenue, not projected LTV.
             should_subscribe = trial_conversion or (
                 billing_reason == "subscription_create" and not trial_start_invoice
             )
@@ -2089,10 +2072,13 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                         marketing_properties["event_id"] = event_id_override.strip()
 
                 value, currency = _calculate_subscription_value_from_lines(lines)
-                ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
                 if value is not None:
                     marketing_properties["transaction_value"] = value
-                    marketing_properties["value"] = value * ltv_multiple
+                    marketing_properties["value"] = (
+                        value
+                        if should_send_ga_renewal
+                        else value * settings.CAPI_LTV_MULTIPLE
+                    )
                 if currency:
                     marketing_properties["currency"] = currency
 
@@ -2108,17 +2094,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     properties=marketing_properties,
                     request=None,
                     context=subscribe_context,
-                    provider_targets=["google_analytics"] if should_send_ga_renewal else None,
                 )
-                if reddit_trial_conversion_fallback:
-                    capi(
-                        user=owner,
-                        event_name="Subscribe",
-                        properties=marketing_properties,
-                        request=None,
-                        context=subscribe_context,
-                        provider_targets=["reddit"],
-                    )
         except Exception:
             logger.exception(
                 "Failed to enqueue marketing Subscribe event for invoice %s",
