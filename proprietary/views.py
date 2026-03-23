@@ -18,10 +18,9 @@ from proprietary.forms import SupportForm, PrequalifyForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.waffle_flags import is_waffle_flag_active
 from util.subscription_helper import (
-    customer_has_any_individual_subscription,
-    get_stripe_customer,
     get_user_plan,
 )
+from api.services.trial_abuse import evaluate_user_trial_eligibility
 from util.fish_collateral import is_fish_collateral_enabled
 from constants.feature_flags import CTA_PRICING_CANCEL_TEXT_UNDER_BTN, CTA_START_FREE_TRIAL, SUPPORT_INTERCOM
 from constants.plans import PlanNames
@@ -56,10 +55,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             if not authenticated:
                 return True
             try:
-                customer = get_stripe_customer(self.request.user)
-                if not customer or not getattr(customer, "id", None):
-                    return True
-                return not customer_has_any_individual_subscription(str(customer.id))
+                return evaluate_user_trial_eligibility(self.request.user).eligible
             except Exception:
                 logger.warning(
                     "Failed to resolve trial eligibility; defaulting to no trial for user %s",

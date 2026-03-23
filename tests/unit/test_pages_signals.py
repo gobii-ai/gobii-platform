@@ -6,15 +6,24 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.apps import apps
+from django.conf import settings
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
 
-from api.models import UserBilling, Organization, UserAttribution
-from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
+from api.models import (
+    DedicatedProxyAllocation,
+    Organization,
+    ProxyServer,
+    UserAttribution,
+    UserBilling,
+    UserIdentitySignal,
+    UserIdentitySignalTypeChoices,
+)
 from constants.plans import PlanNames, PlanNamesChoices
 from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
+from api.services.trial_abuse import SIGNAL_SOURCE_SIGNUP
 from pages.signals import (
     handle_subscription_event,
     handle_user_signed_up,
@@ -131,6 +140,53 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(properties["utm_source_first"], "first-source")
         self.assertEqual(properties["utm_source_last"], "last-source")
         self.assertEqual(context_campaign["source"], "last-source")
+
+    @patch("pages.signals.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=True))
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_signup_captures_identity_signals(self, _mock_identify, _mock_track, _mock_trial_eligibility):
+        request = self.factory.post(
+            "/signup",
+            {
+                "ufp": "visitor-123",
+                "ufpr": "request-456",
+                "uga": "GA1.2.333.444",
+            },
+        )
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        request.META["HTTP_USER_AGENT"] = "SignupSignalTest/1.0"
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+        request.COOKIES = {
+            settings.FBP_COOKIE_NAME: "fb.1.111.abcdef",
+        }
+
+        handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        signal_values = set(
+            UserIdentitySignal.objects.filter(user=self.user).values_list("signal_type", "signal_value")
+        )
+        self.assertSetEqual(
+            signal_values,
+            {
+                (UserIdentitySignalTypeChoices.FPJS_VISITOR_ID, "visitor-123"),
+                (UserIdentitySignalTypeChoices.FPJS_REQUEST_ID, "request-456"),
+                (UserIdentitySignalTypeChoices.FBP, "fb.1.111.abcdef"),
+                (UserIdentitySignalTypeChoices.GA_CLIENT_ID, "333.444"),
+                (UserIdentitySignalTypeChoices.IP_EXACT, "198.51.100.24"),
+                (UserIdentitySignalTypeChoices.IP_PREFIX, "198.51.100.0/24"),
+            },
+        )
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.ga_client_id, "333.444")
+        self.assertEqual(attribution.fbp, "fb.1.111.abcdef")
+        self.assertEqual(attribution.last_client_ip, "198.51.100.24")
+        _mock_trial_eligibility.assert_called_once_with(
+            self.user,
+            assessment_source=SIGNAL_SOURCE_SIGNUP,
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_REGISTRATION_VALUE=12.5)
     @patch("pages.signals.capi")

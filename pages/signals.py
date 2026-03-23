@@ -67,6 +67,13 @@ from api.services.dedicated_proxy_service import (
 )
 from api.services.owner_execution_pause import resume_owner_execution
 from api.services.referral_service import ReferralService
+from api.services.trial_abuse import (
+    SIGNUP_GA_CLIENT_COOKIE_NAME,
+    SIGNAL_SOURCE_LOGIN,
+    SIGNAL_SOURCE_SIGNUP,
+    capture_request_identity_signals_and_attribution,
+    evaluate_user_trial_eligibility,
+)
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.subscription_helper import (
@@ -1309,7 +1316,11 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         last_path = _decode_cookie_value(request.COOKIES.get('last_path')) or request.get_full_path()
 
         segment_anonymous_id = _decode_cookie_value(request.COOKIES.get('ajs_anonymous_id'))
-        ga_client_id = _decode_cookie_value(request.COOKIES.get('_ga'))
+        ga_client_id = (
+            _decode_cookie_value(request.POST.get("uga"))
+            or _decode_cookie_value(request.COOKIES.get(SIGNUP_GA_CLIENT_COOKIE_NAME))
+            or _decode_cookie_value(request.COOKIES.get('_ga'))
+        )
 
         # ── Referral tracking ──────────────────────────────────────────
         # Direct referral: ?ref=<code> captured into session
@@ -1391,6 +1402,17 @@ def handle_user_signed_up(sender, request, user, **kwargs):
     )
         except Exception:
             logger.exception("Failed to persist user attribution for user %s", user.id)
+
+        capture_request_identity_signals_and_attribution(
+            user,
+            request,
+            source=SIGNAL_SOURCE_SIGNUP,
+            include_fpjs=True,
+        )
+        evaluate_user_trial_eligibility(
+            user,
+            assessment_source=SIGNAL_SOURCE_SIGNUP,
+        )
 
         # ── Handle Referral ────────────────────────────────────────────
         # Process referral signup - identifies referrer and (TODO) grants credits
@@ -1591,12 +1613,12 @@ def handle_user_logged_in(sender, request, user, **kwargs):
     logger.info(f"User logged in: {user.id} ({user.email})")
 
     try:
-        client_ip = _safe_client_ip(request)
-        if client_ip:
-            UserAttribution.objects.update_or_create(
-                user=user,
-                defaults={'last_client_ip': client_ip},
-            )
+        capture_request_identity_signals_and_attribution(
+            user,
+            request,
+            source=SIGNAL_SOURCE_LOGIN,
+            include_fpjs=False,
+        )
         Analytics.identify(user.id, {
             'first_name': user.first_name or '',
             'last_name': user.last_name or '',

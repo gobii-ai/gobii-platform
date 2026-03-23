@@ -60,12 +60,15 @@ from .models import (
     AgentComputeSession,
     ComputeSnapshot,
     UserPreference,
+    UserIdentitySignal,
+    UserTrialEligibility,
     ExecutionPauseReasonChoices,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
 from django.urls import NoReverseMatch, reverse, path
 from django.utils.html import format_html
+from django.utils import timezone
 from django.http import HttpResponseRedirect, FileResponse, StreamingHttpResponse
 from django.template.response import TemplateResponse
 from django.core.exceptions import ValidationError
@@ -1735,6 +1738,88 @@ class UserPreferenceAdmin(admin.ModelAdmin):
         updated_preferences = dict(current_preferences)
         updated_preferences[UserPreference.KEY_USER_TIMEZONE] = timezone_value
         obj.preferences = updated_preferences
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(UserIdentitySignal)
+class UserIdentitySignalAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "signal_type",
+        "signal_value",
+        "first_seen_source",
+        "last_seen_source",
+        "last_seen_at",
+        "observation_count",
+    )
+    search_fields = ("user__email", "user__id", "signal_value")
+    list_filter = ("signal_type", "first_seen_source", "last_seen_source")
+    readonly_fields = (
+        "user",
+        "signal_type",
+        "signal_value",
+        "first_seen_at",
+        "last_seen_at",
+        "first_seen_source",
+        "last_seen_source",
+        "observation_count",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(UserTrialEligibility)
+class UserTrialEligibilityAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "effective_status_display",
+        "auto_status",
+        "manual_action",
+        "evaluated_at",
+        "reviewed_by",
+        "reviewed_at",
+    )
+    search_fields = ("user__email", "user__id", "review_note")
+    list_filter = ("auto_status", "manual_action", "reviewed_at")
+    readonly_fields = (
+        "effective_status_display",
+        "auto_status",
+        "reason_codes",
+        "evidence_summary",
+        "evaluated_at",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    )
+    fields = (
+        "user",
+        "effective_status_display",
+        "auto_status",
+        "manual_action",
+        "reason_codes",
+        "evidence_summary",
+        "review_note",
+        "evaluated_at",
+        "reviewed_by",
+        "reviewed_at",
+        "created_at",
+        "updated_at",
+    )
+
+    @admin.display(description="Effective Status")
+    def effective_status_display(self, obj):
+        if obj is None:
+            return "-"
+        return obj.effective_status
+
+    def save_model(self, request, obj, form, change):
+        if change and form.changed_data:
+            obj.reviewed_by = request.user
+            obj.reviewed_at = timezone.now()
         super().save_model(request, obj, form, change)
 
 

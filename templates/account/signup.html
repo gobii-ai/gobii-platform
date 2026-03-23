@@ -23,6 +23,7 @@
     {% if has_google_provider and account_allow_social_signup %}
       <div class="flex justify-center mt-6">
         <a href="{% provider_login_url 'google' %}"
+           data-social-signup-link
            class="w-full inline-flex justify-center items-center gap-x-2 rounded-lg
                   border border-gray-200 bg-white text-gray-800 text-sm font-medium py-3
                   shadow-2xs hover:bg-gray-50">
@@ -45,8 +46,11 @@
     {% endif %}
 
     {% if account_allow_password_signup %}
-    <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
+    <form method="post" action="{% url 'account_signup' %}" class="space-y-4" data-password-signup-form>
       {% csrf_token %}
+      <input type="hidden" name="ufp" value="" id="ufp" />
+      <input type="hidden" name="ufpr" value="" id="ufpr" />
+      <input type="hidden" name="uga" value="" id="uga" />
       {% if redirect_field_value %}
         <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
       {% endif %}
@@ -96,4 +100,97 @@
     {% endif %}
   </div>
 </div>
+
+{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}
+{% include "account/_identity_signal_helpers.html" %}
+<script>
+  (() => {
+    const cookieMaxAge = 60 * 60 * 2;
+    const measurementId = '{{ settings.GA_MEASUREMENT_ID|escapejs }}';
+    const identitySignals = window.GobiiIdentitySignals;
+    const fpjsLoaderUrl = '{{ settings.FINGERPRINT_JS_URL|escapejs }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY|escapejs }}';
+    const behaviorUrl = '{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|escapejs }}';
+    const socialLinks = Array.from(document.querySelectorAll('[data-social-signup-link]'));
+    const signupForm = document.querySelector('[data-password-signup-form]');
+    const signupSubmitButtons = signupForm
+      ? Array.from(signupForm.querySelectorAll('button[type="submit"], input[type="submit"]'))
+      : [];
+    const fpjsTimeoutMs = 3000;
+
+    identitySignals.clearStagedFpjsCookies();
+
+    const setFieldValue = (fieldId, value) => {
+      const field = document.getElementById(fieldId);
+      if (field) {
+        field.value = value || '';
+      }
+    };
+
+    const setSignupSubmitDisabled = (disabled) => {
+      signupSubmitButtons.forEach((button) => {
+        button.disabled = disabled;
+      });
+    };
+
+    const gaClientIdPromise = identitySignals.createGaClientIdPromise({
+      measurementId,
+      onResolved: (normalizedGaClientId) => {
+        setFieldValue('uga', normalizedGaClientId);
+        identitySignals.writeCookie('gobii_signup_ga_client_id', normalizedGaClientId, cookieMaxAge);
+      },
+    });
+
+    const fpjsPromise = identitySignals.createFpjsPromise({
+      loaderUrl: fpjsLoaderUrl,
+      behaviorUrl,
+      timeoutMs: fpjsTimeoutMs,
+      onResolved: (result) => {
+        setFieldValue('ufp', result.visitorId);
+        setFieldValue('ufpr', result.requestId);
+        identitySignals.writeCookie('gobii_signup_fpjs_visitor_id', result.visitorId, cookieMaxAge);
+        identitySignals.writeCookie('gobii_signup_fpjs_request_id', result.requestId, cookieMaxAge);
+      },
+    });
+
+    const clientSignalsReady = Promise.allSettled([fpjsPromise, gaClientIdPromise]);
+    let clientSignalsSettled = false;
+    let replayingSignupSubmit = false;
+    clientSignalsReady.finally(() => {
+      clientSignalsSettled = true;
+    });
+
+    if (signupForm) {
+      signupForm.addEventListener('submit', (event) => {
+        if (replayingSignupSubmit || clientSignalsSettled) {
+          return;
+        }
+        event.preventDefault();
+        if (signupForm.dataset.clientSignalsPending === 'true') {
+          return;
+        }
+        signupForm.dataset.clientSignalsPending = 'true';
+        setSignupSubmitDisabled(true);
+        clientSignalsReady.finally(() => {
+          signupForm.dataset.clientSignalsReady = 'true';
+          replayingSignupSubmit = true;
+          signupForm.submit();
+        });
+      });
+    }
+
+    socialLinks.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        if (link.dataset.clientSignalsReady === 'true') {
+          return;
+        }
+        event.preventDefault();
+        clientSignalsReady.finally(() => {
+          link.dataset.clientSignalsReady = 'true';
+          window.location.href = link.href;
+        });
+      }, { once: true });
+    });
+  })();
+</script>
+{% endif %}
 {% endblock %} 
