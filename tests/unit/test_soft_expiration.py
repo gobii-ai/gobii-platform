@@ -36,6 +36,36 @@ class SoftExpirationTaskTests(TestCase):
     def _restore_release_env(self):
         settings.GOBII_RELEASE_ENV = self._old_release_env
 
+    def _create_org_owned_agent(self, *, name: str, subscription: str, org_plan: str = "free"):
+        from api.models import Organization, PersistentAgent
+
+        organization = Organization.objects.create(
+            name=f"{name}-org",
+            slug=f"{name}-org",
+            plan=org_plan,
+            created_by=self.user,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 1
+        billing.subscription = subscription
+        billing.save(update_fields=["purchased_seats", "subscription"])
+
+        browser = _create_browser_agent_without_proxy(self.user, f"{name}-browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            name=name,
+            charter="Test",
+            schedule="@daily",
+            is_active=True,
+            browser_use_agent=browser,
+        )
+        agent.last_interaction_at = timezone.now() - timedelta(
+            days=settings.AGENT_SOFT_EXPIRATION_INACTIVITY_DAYS + 1
+        )
+        agent.save(update_fields=["last_interaction_at"])
+        return agent, organization
+
     @patch('api.tasks.soft_expiration_task.switch_is_active', return_value=True)
     @patch('api.tasks.soft_expiration_task._send_sleep_notification')
     def test_soft_expire_free_inactive_agent(self, mock_notify: MagicMock, mock_switch):
@@ -169,6 +199,66 @@ class SoftExpirationTaskTests(TestCase):
         self.assertEqual(expired2, 1)
         agent.refresh_from_db()
         self.assertEqual(agent.life_state, PersistentAgent.LifeState.EXPIRED)
+
+    @patch('api.tasks.soft_expiration_task.switch_is_active', return_value=True)
+    @patch('api.tasks.soft_expiration_task._send_sleep_notification')
+    def test_soft_expire_org_owned_free_billing(self, mock_notify: MagicMock, mock_switch):
+        from api.models import PersistentAgent
+        from api.tasks.soft_expiration_task import soft_expire_inactive_agents_task
+
+        agent, _organization = self._create_org_owned_agent(
+            name="org-free-agent",
+            subscription=PlanNamesChoices.FREE,
+        )
+
+        expired = soft_expire_inactive_agents_task()
+
+        self.assertEqual(expired, 1)
+        agent.refresh_from_db()
+        self.assertEqual(agent.life_state, PersistentAgent.LifeState.EXPIRED)
+        self.assertEqual(agent.schedule_snapshot, "@daily")
+        self.assertEqual(agent.schedule, "")
+        mock_notify.assert_called_once()
+
+    @patch('api.tasks.soft_expiration_task.switch_is_active', return_value=True)
+    @patch('api.tasks.soft_expiration_task._send_sleep_notification')
+    def test_soft_expire_skips_org_owned_paid_billing(self, mock_notify: MagicMock, mock_switch):
+        from api.models import PersistentAgent
+        from api.tasks.soft_expiration_task import soft_expire_inactive_agents_task
+
+        agent, _organization = self._create_org_owned_agent(
+            name="org-paid-agent",
+            subscription=PlanNamesChoices.ORG_TEAM,
+        )
+
+        expired = soft_expire_inactive_agents_task()
+
+        self.assertEqual(expired, 0)
+        agent.refresh_from_db()
+        self.assertEqual(agent.life_state, PersistentAgent.LifeState.ACTIVE)
+        self.assertEqual(agent.schedule, "@daily")
+        mock_notify.assert_not_called()
+
+    @patch('api.tasks.soft_expiration_task.switch_is_active', return_value=True)
+    @patch('api.tasks.soft_expiration_task._send_sleep_notification')
+    def test_soft_expire_org_owned_uses_billing_over_legacy_org_plan(self, mock_notify: MagicMock, mock_switch):
+        from api.models import PersistentAgent
+        from api.tasks.soft_expiration_task import soft_expire_inactive_agents_task
+
+        agent, organization = self._create_org_owned_agent(
+            name="org-billing-wins-agent",
+            subscription=PlanNamesChoices.ORG_TEAM,
+            org_plan=PlanNamesChoices.FREE,
+        )
+        self.assertEqual(organization.plan, PlanNamesChoices.FREE)
+
+        expired = soft_expire_inactive_agents_task()
+
+        self.assertEqual(expired, 0)
+        agent.refresh_from_db()
+        self.assertEqual(agent.life_state, PersistentAgent.LifeState.ACTIVE)
+        self.assertEqual(agent.schedule, "@daily")
+        mock_notify.assert_not_called()
 
 @tag("batch_soft_expiration")
 class PersistentAgentInteractionResetTests(TestCase):

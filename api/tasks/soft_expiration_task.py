@@ -26,11 +26,18 @@ logger = logging.getLogger(__name__)
 
 def _is_free_plan_for_agent(agent) -> bool:
     """Return True if the owning account for this agent is on the free plan."""
-    # Org-owned agents use the organization's plan if available
+    # Org-owned agents use OrganizationBilling.subscription
     if agent.organization_id:
-        # Guard against odd states but avoid masking real errors
-        plan = getattr(getattr(agent, "organization", None), "plan", PlanNames.FREE)
-        return (plan or PlanNames.FREE) == PlanNames.FREE
+        try:
+            sub = agent.organization.billing.subscription  # reverse OneToOne may raise DoesNotExist
+            return (sub or PlanNames.FREE) == PlanNames.FREE
+        except (AttributeError, ObjectDoesNotExist) as e:
+            logger.warning(
+                "No billing record for organization %s while checking plan; defaulting to FREE. err=%s",
+                getattr(agent.organization, "id", None),
+                e,
+            )
+            return True
 
     # User-owned agents: consult UserBilling.subscription
     try:
@@ -179,7 +186,7 @@ def soft_expire_inactive_agents_task() -> int:
     # Eligible: active life_state, schedule present, is_active True, free plan, not within downgrade grace
     qs = (
         PersistentAgent.objects
-        .select_related("user", "user__billing", "organization")
+        .select_related("user", "user__billing", "organization", "organization__billing")
         .filter(life_state=PersistentAgent.LifeState.ACTIVE)
         .filter(is_active=True)
         .exclude(schedule__isnull=True)
