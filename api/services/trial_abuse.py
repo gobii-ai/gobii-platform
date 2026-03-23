@@ -19,7 +19,7 @@ from api.models import (
     UserTrialEligibilityManualActionChoices,
 )
 from constants.plans import PlanNames
-from util.analytics import Analytics
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import IntegrationDisabledError
 from util.subscription_helper import (
     customer_has_any_individual_subscription,
@@ -288,7 +288,42 @@ def _filter_users_with_trial_or_subscription_history(user_ids: set[int]) -> set[
     return matched
 
 
-def evaluate_user_trial_eligibility(user, *, request=None, capture_source: str | None = None) -> TrialEligibilityResult:
+def _track_trial_eligibility_assessment(
+    user,
+    *,
+    assessment_source: str,
+    auto_status: str,
+    effective_status: str,
+    manual_action: str,
+    reason_codes: list[str],
+    evidence_summary: dict[str, Any],
+) -> None:
+    matched_signal_users = evidence_summary.get("matched_signal_users") or {}
+    Analytics.track_event(
+        user_id=user.id,
+        event=AnalyticsEvent.PERSONAL_TRIAL_ELIGIBILITY_ASSESSED,
+        source=AnalyticsSource.WEB,
+        properties={
+            "assessment_source": assessment_source,
+            "auto_status": auto_status,
+            "decision": effective_status,
+            "eligible": effective_status == UserTrialEligibilityAutoStatusChoices.ELIGIBLE,
+            "manual_action": manual_action,
+            "has_manual_override": manual_action != UserTrialEligibilityManualActionChoices.INHERIT,
+            "reason_codes": list(reason_codes),
+            "matched_signal_types": list(evidence_summary.get("matched_signal_types") or []),
+            "matched_signal_user_count": len(matched_signal_users),
+        },
+    )
+
+
+def evaluate_user_trial_eligibility(
+    user,
+    *,
+    request=None,
+    capture_source: str | None = None,
+    assessment_source: str | None = None,
+) -> TrialEligibilityResult:
     if not user or not getattr(user, "pk", None):
         return TrialEligibilityResult(
             eligible=True,
@@ -384,6 +419,16 @@ def evaluate_user_trial_eligibility(user, *, request=None, capture_source: str |
     )
 
     effective_status = eligibility.effective_status
+    if assessment_source:
+        _track_trial_eligibility_assessment(
+            user,
+            assessment_source=assessment_source,
+            auto_status=auto_status,
+            effective_status=effective_status,
+            manual_action=eligibility.manual_action,
+            reason_codes=reason_codes,
+            evidence_summary=evidence_summary,
+        )
     return TrialEligibilityResult(
         eligible=effective_status == UserTrialEligibilityAutoStatusChoices.ELIGIBLE,
         decision=effective_status,

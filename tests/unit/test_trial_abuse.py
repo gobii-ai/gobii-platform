@@ -22,6 +22,7 @@ from api.services.trial_abuse import (
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 User = get_user_model()
@@ -179,6 +180,70 @@ class TrialAbuseServiceTests(TestCase):
                 UserIdentitySignalTypeChoices.GA_CLIENT_ID,
             ],
         )
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse.Analytics.track_event")
+    @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
+    def test_tracks_trial_assessment_event_for_explicit_source(
+        self,
+        _mock_get_stripe_customer,
+        mock_track_event,
+    ):
+        historical_user = self._create_user("historical-event@example.com")
+        current_user = self._create_user("current-event@example.com")
+        self._grant_trial_history(historical_user)
+
+        UserIdentitySignal.objects.create(
+            user=historical_user,
+            signal_type=UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
+            signal_value="visitor-shared-event",
+        )
+        UserIdentitySignal.objects.create(
+            user=current_user,
+            signal_type=UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
+            signal_value="visitor-shared-event",
+        )
+
+        result = evaluate_user_trial_eligibility(
+            current_user,
+            assessment_source=SIGNAL_SOURCE_SIGNUP,
+        )
+
+        self.assertFalse(result.eligible)
+        mock_track_event.assert_called_once()
+        call_kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(call_kwargs["user_id"], current_user.id)
+        self.assertEqual(call_kwargs["event"], AnalyticsEvent.PERSONAL_TRIAL_ELIGIBILITY_ASSESSED)
+        self.assertEqual(call_kwargs["source"], AnalyticsSource.WEB)
+        self.assertEqual(
+            call_kwargs["properties"],
+            {
+                "assessment_source": SIGNAL_SOURCE_SIGNUP,
+                "auto_status": UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+                "decision": UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+                "eligible": False,
+                "manual_action": UserTrialEligibilityManualActionChoices.INHERIT,
+                "has_manual_override": False,
+                "reason_codes": ["fpjs_history_match"],
+                "matched_signal_types": [UserIdentitySignalTypeChoices.FPJS_VISITOR_ID],
+                "matched_signal_user_count": 1,
+            },
+        )
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse.Analytics.track_event")
+    @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
+    def test_does_not_track_trial_assessment_event_without_explicit_source(
+        self,
+        _mock_get_stripe_customer,
+        mock_track_event,
+    ):
+        current_user = self._create_user("current-no-event@example.com")
+
+        result = evaluate_user_trial_eligibility(current_user)
+
+        self.assertTrue(result.eligible)
+        mock_track_event.assert_not_called()
 
     @tag("batch_pages")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)

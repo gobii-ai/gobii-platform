@@ -1409,7 +1409,10 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             source=SIGNAL_SOURCE_SIGNUP,
             include_fpjs=True,
         )
-        evaluate_user_trial_eligibility(user)
+        evaluate_user_trial_eligibility(
+            user,
+            assessment_source=SIGNAL_SOURCE_SIGNUP,
+        )
 
         # ── Handle Referral ────────────────────────────────────────────
         # Process referral signup - identifies referrer and (TODO) grants credits

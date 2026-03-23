@@ -16,6 +16,7 @@ from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAll
 from constants.plans import PlanNames, PlanNamesChoices
 from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
+from api.services.trial_abuse import SIGNAL_SOURCE_SIGNUP
 from pages.signals import (
     handle_subscription_event,
     handle_user_signed_up,
@@ -175,6 +176,10 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(attribution.ga_client_id, "333.444")
         self.assertEqual(attribution.fbp, "fb.1.111.abcdef")
         self.assertEqual(attribution.last_client_ip, "198.51.100.24")
+        _mock_trial_eligibility.assert_called_once_with(
+            self.user,
+            assessment_source=SIGNAL_SOURCE_SIGNUP,
+        )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_REGISTRATION_VALUE=12.5)
     @patch("pages.signals.capi")

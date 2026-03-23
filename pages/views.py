@@ -308,6 +308,7 @@ def _is_individual_trial_eligible(user, *, request=None, capture_source: str | N
         user,
         request=request,
         capture_source=capture_source,
+        assessment_source=capture_source,
     ).eligible
 
 
