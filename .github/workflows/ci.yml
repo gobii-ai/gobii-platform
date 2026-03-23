@@ -474,7 +474,7 @@ jobs:
     needs: [tests]
     if: >
       github.event_name == 'pull_request' &&
-      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Generate GitHub App token
         id: app-token
