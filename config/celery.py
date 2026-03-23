@@ -68,9 +68,16 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
     """
     Close old database connections after each task completes.
     This prevents connection leaks and ensures clean cleanup.
+    Also cleans up MCP subprocesses to prevent accumulation in celery workers.
     """
     from django.db import close_old_connections
     close_old_connections()
+
+    try:
+        from api.agent.tools.mcp_manager import cleanup_mcp_tools
+        cleanup_mcp_tools()
+    except Exception as e:
+        print(f"Error during MCP tools cleanup: {e}")
 
 @worker_shutdown.connect
 def worker_shutdown_handler(**_):
