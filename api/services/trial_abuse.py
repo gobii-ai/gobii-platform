@@ -75,20 +75,14 @@ class TrialEligibilityResult:
 def _decode_value(raw: str | None) -> str:
     if not raw:
         return ""
-    try:
-        decoded = unquote(raw)
-    except Exception:
-        decoded = raw
+    decoded = unquote(raw)
     return decoded.strip().strip('"')
 
 
 def _safe_client_ip(request) -> str:
     if request is None:
         return ""
-    try:
-        ip = Analytics.get_client_ip(request)
-    except Exception:
-        return ""
+    ip = Analytics.get_client_ip(request)
     if not ip or ip == "0":
         return ""
     return str(ip).strip()

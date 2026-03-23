@@ -11,8 +11,15 @@ from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
 
-from api.models import UserBilling, Organization, UserAttribution, UserIdentitySignal, UserIdentitySignalTypeChoices
-from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
+from api.models import (
+    DedicatedProxyAllocation,
+    Organization,
+    ProxyServer,
+    UserAttribution,
+    UserBilling,
+    UserIdentitySignal,
+    UserIdentitySignalTypeChoices,
+)
 from constants.plans import PlanNames, PlanNamesChoices
 from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
