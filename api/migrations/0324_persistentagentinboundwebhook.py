@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0321_persistentagentwebsession_visibility_state'),
+        ('api', '0323_backfill_user_identity_signals_from_attribution'),
     ]
 
     operations = [
