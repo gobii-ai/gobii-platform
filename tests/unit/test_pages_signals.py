@@ -654,7 +654,7 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
-    @override_settings(CAPI_LTV_MULTIPLE=2.0)
+    @override_settings(CAPI_LTV_MULTIPLE=2.0, CAPI_START_TRIAL_CONV_RATE=0.5)
     def test_subscription_capi_value_applies_ltv_multiple(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
@@ -682,7 +682,7 @@ class SubscriptionSignalTests(TestCase):
         props = self.mock_capi.call_args.kwargs["properties"]
         # Base value from payload is 29.99; with 2x multiplier expect ~59.98
         self.assertAlmostEqual(props["predicted_ltv"], 59.98, places=2)
-        self.assertEqual(props["value"], 0)
+        self.assertAlmostEqual(props["value"], 29.99, places=2)
         self.assertEqual(props["currency"], "USD")
 
     @tag("batch_pages")
@@ -1017,6 +1017,7 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
+    @override_settings(CAPI_START_TRIAL_CONV_RATE=0.3)
     def test_trialing_subscription_grants_full_credits(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
@@ -1058,7 +1059,7 @@ class SubscriptionSignalTests(TestCase):
         capi_kwargs = self.mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "StartTrial")
         props = capi_kwargs["properties"]
-        self.assertEqual(props["value"], 0)
+        self.assertAlmostEqual(props["value"], props["predicted_ltv"] * 0.3, places=6)
         self.assertEqual(props["currency"], "USD")
 
         events = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
@@ -2592,6 +2593,22 @@ class PaymentSucceededSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="success-user", email="success@example.com", password="pw")
 
+    def _seed_last_touch_attribution(self):
+        UserAttribution.objects.update_or_create(
+            user=self.user,
+            defaults={
+                "fbc": "fb.1.1700000000000.latest-fbclid",
+                "fbclid": "latest-fbclid",
+                "fbp": "fb.1.1700000000000.123456789",
+                "rdt_cid_last": "reddit-latest-click",
+                "utm_source_last": "retargeting-campaign",
+                "utm_campaign_last": "renewal-promo",
+                "last_client_ip": "203.0.113.5",
+                "last_user_agent": "pytest-renewal-agent",
+                "ga_client_id": "GA1.2.111.222",
+            },
+        )
+
     def test_invoice_payment_succeeded_does_not_resume_paused_owner(self):
         UserBilling.objects.update_or_create(
             user=self.user,
@@ -2717,7 +2734,8 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], "evt-123")
 
-    def test_invoice_payment_succeeded_emits_ga_only_subscribe_for_standard_renewal(self):
+    def test_invoice_payment_succeeded_emits_subscribe_for_standard_renewal_with_real_value(self):
+        self._seed_last_touch_attribution()
         payload = _build_invoice_payload(
             customer_id="cus_user_succeeded",
             subscription_id="sub_user_succeeded",
@@ -2734,7 +2752,15 @@ class PaymentSucceededSignalTests(TestCase):
         invoice_obj = SimpleNamespace(
             id=payload["id"],
             customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
-            subscription=SimpleNamespace(id="sub_user_succeeded", stripe_data={"metadata": {"gobii_event_id": "evt-renew"}}),
+            subscription=SimpleNamespace(
+                id="sub_user_succeeded",
+                stripe_data={
+                    "metadata": {
+                        "gobii_event_id": "evt-renew",
+                        "checkout_source_url": "https://app.gobii.ai/billing/checkout?src=ads",
+                    }
+                },
+            ),
             number=payload["number"],
         )
 
@@ -2750,14 +2776,24 @@ class PaymentSucceededSignalTests(TestCase):
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "Subscribe")
-        self.assertEqual(capi_kwargs["provider_targets"], ["google_analytics"])
+        self.assertNotIn("provider_targets", capi_kwargs)
         props = capi_kwargs["properties"]
         self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
         self.assertEqual(props["subscription_id"], "sub_user_succeeded")
         self.assertEqual(props["stripe.invoice_id"], payload["id"])
         self.assertEqual(props["transaction_value"], 30.0)
+        self.assertEqual(props["value"], 30.0)
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], payload["id"])
+        self.assertNotIn("predicted_ltv", props)
+        context = capi_kwargs["context"]
+        self.assertTrue(context["consent"])
+        self.assertEqual(context["ga_client_id"], "GA1.2.111.222")
+        self.assertNotIn("click_ids", context)
+        self.assertNotIn("utm", context)
+        self.assertNotIn("client_ip", context)
+        self.assertNotIn("user_agent", context)
+        self.assertNotIn("page", context)
 
     def test_invoice_payment_succeeded_does_not_emit_subscribe_for_trial_start(self):
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
@@ -2830,7 +2866,8 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
         self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
 
-    def test_invoice_payment_succeeded_emits_subscribe_for_trial_conversion_without_line_period(self):
+    def test_invoice_payment_succeeded_treats_missing_line_period_as_trial_conversion(self):
+        self._seed_last_touch_attribution()
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
         payload = _build_invoice_payload(
             customer_id="cus_user_succeeded",
@@ -2854,6 +2891,10 @@ class PaymentSucceededSignalTests(TestCase):
                 stripe_data={
                     "trial_end": str(trial_end),
                     "current_period_start": str(trial_end),
+                    "metadata": {
+                        "gobii_event_id": "evt-trial-conversion",
+                        "checkout_source_url": "https://app.gobii.ai/billing/checkout?src=ads",
+                    },
                 },
             ),
             number=payload["number"],
@@ -2862,29 +2903,36 @@ class PaymentSucceededSignalTests(TestCase):
         with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
             patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
             patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
-            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
             patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
             patch("pages.signals.capi") as mock_capi:
 
             handle_invoice_payment_succeeded(event)
 
-        self.assertEqual(mock_capi.call_count, 2)
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
+        self.assertNotIn("provider_targets", capi_kwargs)
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["transaction_value"], 30.0)
+        self.assertEqual(props["value"], 30.0 * settings.CAPI_LTV_MULTIPLE)
+        self.assertEqual(props["currency"], "USD")
+        self.assertEqual(props["event_id"], "evt-trial-conversion")
+        self.assertNotIn("predicted_ltv", props)
+        context = capi_kwargs["context"]
+        self.assertTrue(context["consent"])
+        self.assertEqual(context["ga_client_id"], "GA1.2.111.222")
+        self.assertEqual(context["click_ids"]["rdt_cid"], "reddit-latest-click")
+        self.assertEqual(context["utm"]["utm_source"], "retargeting-campaign")
+        self.assertEqual(context["client_ip"], "203.0.113.5")
+        self.assertEqual(context["user_agent"], "pytest-renewal-agent")
+        self.assertEqual(context["page"]["url"], "https://app.gobii.ai/billing/checkout?src=ads")
 
-        first_call = mock_capi.call_args_list[0].kwargs
-        self.assertEqual(first_call["event_name"], "Subscribe")
-        self.assertEqual(first_call["provider_targets"], ["google_analytics"])
-        first_props = first_call["properties"]
-        self.assertEqual(first_props["transaction_value"], 30.0)
-        self.assertEqual(first_props["currency"], "USD")
-        self.assertEqual(first_props["event_id"], payload["id"])
-
-        second_call = mock_capi.call_args_list[1].kwargs
-        self.assertEqual(second_call["event_name"], "Subscribe")
-        self.assertEqual(second_call["provider_targets"], ["reddit"])
-        second_props = second_call["properties"]
-        self.assertEqual(second_props["transaction_value"], 30.0)
-        self.assertEqual(second_props["currency"], "USD")
-        self.assertEqual(second_props["event_id"], payload["id"])
+        events = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
+        self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
+        self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
+        mock_identify.assert_called_once_with(self.user.id, {"is_trial": False, "plan": PlanNamesChoices.STARTUP.value})
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")

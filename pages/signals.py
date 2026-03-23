@@ -36,6 +36,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from marketing_events.api import capi
 from marketing_events.context import extract_click_context
 from marketing_events.telemetry import record_fbc_synthesized
+from marketing_events.value_utils import calculate_start_trial_values
 import logging
 import stripe
 
@@ -43,6 +44,7 @@ from billing.addons import AddonEntitlementService
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
     is_trial_cancel_scheduled,
+    is_trial_conversion_charge,
     is_trial_conversion_failure,
     is_trial_conversion_invoice,
     is_trial_ended_non_renewal,
@@ -776,6 +778,18 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
         context["ga_client_id"] = ga_client_id
 
     return context
+
+
+def _build_off_session_marketing_context_from_user(user: Any) -> dict[str, Any]:
+    """Return only durable identifiers that are safe for off-session conversions."""
+    context = _build_marketing_context_from_user(user)
+    off_session_context: dict[str, Any] = {"consent": context.get("consent", True)}
+
+    ga_client_id = context.get("ga_client_id")
+    if ga_client_id:
+        off_session_context["ga_client_id"] = ga_client_id
+
+    return off_session_context
 
 
 def _calculate_subscription_value(licensed_item: Mapping[str, Any] | None) -> tuple[float | None, str | None]:
@@ -2004,22 +2018,11 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             subscription_current_period_start_dt = _coerce_datetime(
                 _get_stripe_data_value(subscription_obj, "current_period_start")
             )
-        trial_conversion_line_match = bool(
-            trial_end_dt and line_start_dt and trial_end_dt.date() == line_start_dt.date()
-        )
-        trial_conversion_subscription_match = bool(
-            trial_end_dt
-            and subscription_current_period_start_dt
-            and trial_end_dt.date() == subscription_current_period_start_dt.date()
-        )
-        trial_conversion = bool(
-            billing_reason == "subscription_cycle"
-            and trial_conversion_line_match
-        )
-        reddit_trial_conversion_fallback = bool(
-            billing_reason == "subscription_cycle"
-            and (not trial_conversion_line_match)
-            and trial_conversion_subscription_match
+        trial_conversion = is_trial_conversion_charge(
+            billing_reason=billing_reason,
+            trial_end_dt=trial_end_dt,
+            line_period_start_dt=line_start_dt,
+            subscription_current_period_start_dt=subscription_current_period_start_dt,
         )
 
         try:
@@ -2059,12 +2062,12 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             )
             # Stripe can emit invoice.payment_succeeded when a trial starts (often amount=0).
             # Keep Subscribe for non-trial subscription starts and trial conversion billing.
-            # Standard renewals are also sent to GA as purchase events, but not to other CAPI providers.
+            # Standard renewals also emit Subscribe, but should use only settled revenue, not projected LTV.
             should_subscribe = trial_conversion or (
                 billing_reason == "subscription_create" and not trial_start_invoice
             )
-            should_send_ga_renewal = billing_reason == "subscription_cycle" and not trial_conversion
-            if (should_subscribe or should_send_ga_renewal) and owner_type == "user" and owner:
+            is_standard_renewal_subscribe = billing_reason == "subscription_cycle" and not trial_conversion
+            if (should_subscribe or is_standard_renewal_subscribe) and owner_type == "user" and owner:
                 marketing_properties = {
                     "plan": plan_value,
                     "subscription_id": subscription_id,
@@ -2076,7 +2079,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     metadata = _coerce_metadata_dict(subscription_data.get("metadata"))
                 if not metadata:
                     metadata = _coerce_metadata_dict(payload.get("metadata"))
-                if should_send_ga_renewal:
+                if is_standard_renewal_subscribe:
                     # Use invoice-scoped event_id for renewals so repeated webhook deliveries dedupe safely
                     # while avoiding reuse of the original checkout event_id stored on the subscription.
                     renewal_event_id = payload.get("id")
@@ -2088,18 +2091,30 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                         marketing_properties["event_id"] = event_id_override.strip()
 
                 value, currency = _calculate_subscription_value_from_lines(lines)
-                ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
                 if value is not None:
                     marketing_properties["transaction_value"] = value
-                    marketing_properties["value"] = value * ltv_multiple
+                    marketing_properties["value"] = (
+                        value
+                        if is_standard_renewal_subscribe
+                        else value * settings.CAPI_LTV_MULTIPLE
+                    )
                 if currency:
                     marketing_properties["currency"] = currency
 
                 marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
 
-                subscribe_context = _build_marketing_context_from_user(owner) if owner_type == "user" else {}
+                if owner_type == "user":
+                    subscribe_context = (
+                        _build_off_session_marketing_context_from_user(owner)
+                        if is_standard_renewal_subscribe
+                        else _build_marketing_context_from_user(owner)
+                    )
+                else:
+                    subscribe_context = {}
                 checkout_source_url = metadata.get("checkout_source_url")
-                if checkout_source_url:
+                # Recurring renewals happen off-session, so reusing the original
+                # checkout URL would misattribute the conversion page.
+                if checkout_source_url and not is_standard_renewal_subscribe:
                     subscribe_context["page"] = {"url": checkout_source_url}
                 capi(
                     user=owner,
@@ -2107,17 +2122,7 @@ def handle_invoice_payment_succeeded(event, **kwargs):
                     properties=marketing_properties,
                     request=None,
                     context=subscribe_context,
-                    provider_targets=["google_analytics"] if should_send_ga_renewal else None,
                 )
-                if reddit_trial_conversion_fallback:
-                    capi(
-                        user=owner,
-                        event_name="Subscribe",
-                        properties=marketing_properties,
-                        request=None,
-                        context=subscribe_context,
-                        provider_targets=["reddit"],
-                    )
         except Exception:
             logger.exception(
                 "Failed to enqueue marketing Subscribe event for invoice %s",
@@ -2822,10 +2827,15 @@ def handle_subscription_event(event, **kwargs):
 
                     if sub.status == "trialing":
                         value, currency = _calculate_subscription_value(licensed_item)
-                        ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
-                        if value is not None:
-                            marketing_properties["predicted_ltv"] = value * ltv_multiple
-                        marketing_properties["value"] = 0
+                        predicted_ltv, conversion_value = calculate_start_trial_values(
+                            value,
+                            ltv_multiple=settings.CAPI_LTV_MULTIPLE,
+                            conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+                        )
+                        if predicted_ltv is not None:
+                            marketing_properties["predicted_ltv"] = predicted_ltv
+                        if conversion_value is not None:
+                            marketing_properties["value"] = conversion_value
                         marketing_properties["currency"] = "USD"
 
                     marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
