@@ -22,6 +22,8 @@ from constants.plans import PlanNames
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import IntegrationDisabledError
 from util.subscription_helper import (
+    _individual_plan_price_ids,
+    _individual_plan_product_ids,
     customer_has_any_individual_subscription,
     get_stripe_customer,
 )
@@ -30,6 +32,11 @@ try:
     import stripe
 except Exception:  # pragma: no cover - optional dependency
     stripe = None  # type: ignore
+
+try:
+    from djstripe.models import Subscription as DjstripeSubscription
+except Exception:  # pragma: no cover - optional dependency
+    DjstripeSubscription = None  # type: ignore
 
 
 SIGNUP_FPJS_VISITOR_COOKIE_NAME = "gobii_signup_fpjs_visitor_id"
@@ -286,6 +293,60 @@ def _user_ids_with_matching_signal_values(user, signal_type: str) -> set[int]:
     )
 
 
+def _subscription_data_has_individual_plan(
+    stripe_data: Any,
+    *,
+    plan_products: set[str],
+    plan_price_ids: set[str],
+) -> bool:
+    if not isinstance(stripe_data, dict):
+        return False
+
+    items = (stripe_data.get("items") or {}).get("data", []) or []
+    for item in items:
+        price = item.get("price") or {}
+        if not isinstance(price, dict):
+            continue
+
+        product = price.get("product")
+        if isinstance(product, dict):
+            product = product.get("id")
+
+        price_id = price.get("id")
+        if (product and str(product) in plan_products) or (price_id and str(price_id) in plan_price_ids):
+            return True
+
+    return False
+
+
+def _user_ids_with_local_individual_subscription_history(user_ids: set[int]) -> set[int]:
+    if not user_ids or DjstripeSubscription is None:
+        return set()
+
+    plan_products = _individual_plan_product_ids()
+    plan_price_ids = _individual_plan_price_ids()
+    if not plan_products and not plan_price_ids:
+        return set()
+
+    matched: set[int] = set()
+    subscription_rows = (
+        DjstripeSubscription.objects.filter(
+            customer__subscriber_id__in=user_ids,
+        )
+        .values_list("customer__subscriber_id", "stripe_data")
+        .iterator()
+    )
+    for user_id, stripe_data in subscription_rows:
+        if _subscription_data_has_individual_plan(
+            stripe_data,
+            plan_products=plan_products,
+            plan_price_ids=plan_price_ids,
+        ):
+            matched.add(int(user_id))
+
+    return matched
+
+
 def _filter_users_with_trial_or_subscription_history(user_ids: set[int]) -> set[int]:
     if not user_ids:
         return set()
@@ -303,6 +364,7 @@ def _filter_users_with_trial_or_subscription_history(user_ids: set[int]) -> set[
         .exclude(subscription=PlanNames.FREE)
         .values_list("user_id", flat=True)
     )
+    matched.update(_user_ids_with_local_individual_subscription_history(user_ids))
     return matched
 
 

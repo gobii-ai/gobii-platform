@@ -6,6 +6,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase, tag
 from django.utils import timezone
+from djstripe.models import Customer, Subscription as DjstripeSubscription
 
 from api.models import (
     TaskCredit,
@@ -149,6 +150,61 @@ class TrialAbuseServiceTests(TestCase):
             result.evidence_summary["matched_signal_types"],
             [UserIdentitySignalTypeChoices.FPJS_VISITOR_ID],
         )
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse._individual_plan_price_ids", return_value=set())
+    @patch("api.services.trial_abuse._individual_plan_product_ids", return_value={"prod_individual"})
+    @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
+    def test_fpjs_match_blocks_trial_for_churned_local_subscription_history(
+        self,
+        _mock_get_stripe_customer,
+        _mock_plan_products,
+        _mock_plan_prices,
+    ):
+        historical_user = self._create_user("historical-churned@example.com")
+        current_user = self._create_user("current-churned@example.com")
+
+        customer = Customer.objects.create(
+            id="cus_historical_churned",
+            subscriber=historical_user,
+        )
+        DjstripeSubscription.objects.create(
+            id="sub_historical_churned",
+            customer=customer,
+            status="canceled",
+            current_period_start=timezone.now() - timedelta(days=30),
+            current_period_end=timezone.now() - timedelta(days=1),
+            stripe_data={
+                "status": "canceled",
+                "items": {
+                    "data": [
+                        {
+                            "price": {
+                                "id": "price_individual",
+                                "product": "prod_individual",
+                            }
+                        }
+                    ]
+                },
+            },
+        )
+
+        UserIdentitySignal.objects.create(
+            user=historical_user,
+            signal_type=UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
+            signal_value="visitor-shared-churned",
+        )
+        UserIdentitySignal.objects.create(
+            user=current_user,
+            signal_type=UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
+            signal_value="visitor-shared-churned",
+        )
+
+        result = evaluate_user_trial_eligibility(current_user)
+
+        self.assertFalse(result.eligible)
+        self.assertEqual(result.decision, UserTrialEligibilityAutoStatusChoices.NO_TRIAL)
+        self.assertIn("fpjs_history_match", result.reason_codes)
 
     @tag("batch_pages")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)

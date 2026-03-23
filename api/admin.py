@@ -1812,6 +1812,8 @@ class UserTrialEligibilityAdmin(admin.ModelAdmin):
 
     @admin.display(description="Effective Status")
     def effective_status_display(self, obj):
+        if obj is None:
+            return "-"
         return obj.effective_status
 
     def save_model(self, request, obj, form, change):
