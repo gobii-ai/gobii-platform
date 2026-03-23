@@ -109,6 +109,12 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
     """Realtime channel for persistent agent updates with a session-level connection."""
 
     async def connect(self):
+        # Initialize subscription attributes before any early-exit so that
+        # disconnect() → _clear_subscription() never hits AttributeError.
+        self.agent_id = None
+        self.group_name = None
+        self.user_group_name = None
+
         user = self.scope.get("user")
         session = self.scope.get("session")
         if user is None or not getattr(user, "is_authenticated", False):
@@ -118,9 +124,6 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
         self.user = user
         self.session = session
-        self.agent_id = None
-        self.group_name = None
-        self.user_group_name = None
         self.profile_group_name = user_profile_group_name(user.id)
 
         if self.channel_layer is None:
