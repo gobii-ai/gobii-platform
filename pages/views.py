@@ -48,6 +48,7 @@ from util.onboarding import (
     normalize_trial_onboarding_target,
     set_trial_onboarding_intent,
 )
+from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
@@ -303,6 +304,8 @@ POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
 
 def _is_individual_trial_eligible(user, *, request=None, capture_source: str | None = None) -> bool:
     if not user or not getattr(user, "pk", None):
+        return True
+    if not is_user_trial_eligibility_enforcement_enabled(request):
         return True
     return evaluate_user_trial_eligibility(
         user,

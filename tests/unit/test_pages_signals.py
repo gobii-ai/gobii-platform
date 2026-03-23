@@ -10,6 +10,7 @@ from django.conf import settings
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
+from waffle.testutils import override_flag
 
 from api.models import (
     DedicatedProxyAllocation,
@@ -184,6 +185,28 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(attribution.fbp, "fb.1.111.abcdef")
         self.assertEqual(attribution.last_client_ip, "198.51.100.24")
         _mock_trial_eligibility.assert_called_once_with(
+            self.user,
+            assessment_source=SIGNAL_SOURCE_SIGNUP,
+        )
+
+    @patch("pages.signals.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=True))
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_signup_still_assesses_trial_eligibility_when_enforcement_flag_disabled(
+        self,
+        _mock_identify,
+        _mock_track,
+        mock_trial_eligibility,
+    ):
+        request = self.factory.post("/signup")
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        with override_flag("user_trial_eligibility_enforcement", active=False):
+            handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        mock_trial_eligibility.assert_called_once_with(
             self.user,
             assessment_source=SIGNAL_SOURCE_SIGNUP,
         )

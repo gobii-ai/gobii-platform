@@ -22,6 +22,7 @@ from util.subscription_helper import (
 )
 from api.services.trial_abuse import evaluate_user_trial_eligibility
 from util.fish_collateral import is_fish_collateral_enabled
+from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
 from constants.feature_flags import CTA_PRICING_CANCEL_TEXT_UNDER_BTN, CTA_START_FREE_TRIAL, SUPPORT_INTERCOM
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
@@ -53,6 +54,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         def _is_trial_eligible() -> bool:
             if not authenticated:
+                return True
+            if not is_user_trial_eligibility_enforcement_enabled(self.request):
                 return True
             try:
                 return evaluate_user_trial_eligibility(self.request.user).eligible

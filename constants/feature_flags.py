@@ -25,6 +25,9 @@ CTA_PRICING_CANCEL_TEXT_UNDER_BTN = "cta_pricing_cancel_text_under_btn"
 # Controls whether pricing trial CTA buttons omit the explicit day count.
 CTA_START_FREE_TRIAL = "cta_start_free_trial"
 
+# Controls whether UserTrialEligibility decisions block trial CTAs and checkout trial periods.
+USER_TRIAL_ELIGIBILITY_ENFORCEMENT = "user_trial_eligibility_enforcement"
+
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
 # switch not flag

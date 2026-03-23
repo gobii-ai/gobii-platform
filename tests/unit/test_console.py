@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 from api.services.daily_credit_settings import get_daily_credit_settings_for_plan
 from constants.plans import PlanNames
 from django.core.files.uploadedfile import SimpleUploadedFile
+from waffle.testutils import override_flag
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
@@ -433,6 +434,20 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("trial_eligible"))
+
+    @tag("batch_console_agents")
+    @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
+    def test_checkout_trial_eligibility_bypasses_service_when_enforcement_flag_disabled(
+        self,
+        mock_trial_eligibility,
+    ):
+        from console.views import _is_checkout_trial_eligible
+
+        with override_flag("user_trial_eligibility_enforcement", active=False):
+            eligible = _is_checkout_trial_eligible(self.user)
+
+        self.assertTrue(eligible)
+        mock_trial_eligibility.assert_not_called()
 
     @tag("batch_console_agents")
     @patch("console.views._is_checkout_trial_eligible", return_value=True)
