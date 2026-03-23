@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0323_backfill_user_identity_signals_from_attribution'),
+        ('api', '0324_add_user_trial_eligibility_enforcement_flag'),
     ]
 
     operations = [
