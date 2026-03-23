@@ -12,6 +12,7 @@ from typing import Dict, Any
 from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     CommsChannel,
     DeliveryStatus,
@@ -19,6 +20,7 @@ from ...models import (
 from django.conf import settings
 from ..comms.outbound_delivery import deliver_agent_email
 from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
+from ..comms.message_service import _ensure_participant, _get_or_create_conversation
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
@@ -114,6 +116,89 @@ def _email_claims_attachments(html: str) -> bool:
     return any(pattern.search(plain_text) for pattern in _ATTACHMENT_CLAIM_PATTERNS)
 
 
+def _normalize_email_address(address: str) -> str:
+    normalized = PersistentAgentCommsEndpoint.normalize_address(CommsChannel.EMAIL, address or "")
+    return normalized or (address or "").strip()
+
+
+def _message_channel(message: PersistentAgentMessage) -> str:
+    if message.from_endpoint_id and message.from_endpoint:
+        return message.from_endpoint.channel
+    if message.conversation_id and message.conversation:
+        return message.conversation.channel
+    return ""
+
+
+def _message_contact_address(message: PersistentAgentMessage) -> str:
+    if message.conversation_id and message.conversation and message.conversation.address:
+        return _normalize_email_address(message.conversation.address)
+    if message.is_outbound and message.to_endpoint_id and message.to_endpoint:
+        return _normalize_email_address(message.to_endpoint.address)
+    if not message.is_outbound and message.from_endpoint_id and message.from_endpoint:
+        return _normalize_email_address(message.from_endpoint.address)
+    return ""
+
+
+def _get_message_rfc_message_id(message: PersistentAgentMessage) -> str:
+    raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
+    candidate_values = [raw_payload.get("message_id")]
+    headers = raw_payload.get("headers")
+    if isinstance(headers, dict):
+        candidate_values.extend([
+            headers.get("Message-ID"),
+            headers.get("Message-Id"),
+            headers.get("message-id"),
+        ])
+
+    for candidate in candidate_values:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _resolve_reply_target(
+    agent: PersistentAgent,
+    reply_to_message_id: str,
+    normalized_to_address: str,
+) -> tuple[PersistentAgentMessage | None, dict[str, Any] | None]:
+    if not reply_to_message_id:
+        return None, None
+
+    try:
+        target_message = (
+            PersistentAgentMessage.objects
+            .select_related("from_endpoint", "to_endpoint", "conversation")
+            .get(id=reply_to_message_id, owner_agent=agent)
+        )
+    except PersistentAgentMessage.DoesNotExist:
+        return None, {
+            "status": "error",
+            "message": "reply_to_message_id must reference one of this agent's email messages.",
+        }
+
+    if _message_channel(target_message) != CommsChannel.EMAIL:
+        return None, {
+            "status": "error",
+            "message": "reply_to_message_id must reference an email message.",
+        }
+
+    if not _get_message_rfc_message_id(target_message):
+        return None, {
+            "status": "error",
+            "message": "reply_to_message_id must reference an email message with a stored RFC Message-ID.",
+        }
+
+    target_address = _message_contact_address(target_message)
+    if not target_address or target_address != normalized_to_address:
+        return None, {
+            "status": "error",
+            "message": "reply_to_message_id does not match to_address.",
+        }
+
+    return target_message, None
+
+
 def get_send_email_tool() -> Dict[str, Any]:
     """Return the send_email tool definition for the LLM."""
     return {
@@ -137,6 +222,14 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "description": "List of CC email addresses (optional)"
                     },
                     "subject": {"type": "string", "description": "Email subject."},
+                    "reply_to_message_id": {
+                        "type": "string",
+                        "description": (
+                            "Optional internal Gobii message id for replying in an existing email thread. "
+                            "Omit this to start a new thread. Pass the email message id from recent contacts "
+                            "or unified history to reply in that thread."
+                        ),
+                    },
                     "mobile_first_html": {"type": "string", "description": "Email content as HTML, excluding <html>, <head>, and <body> tags. Use single quotes for attributes, e.g. <a href='https://news.ycombinator.com'>News</a>. Must be actual email content, NOT tool call syntax. XML like <function_calls> or <invoke> does NOT execute tools—it will be sent as literal text."},
                     "attachments": {
                         "type": "array",
@@ -161,16 +254,17 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     except EmailVerificationError as e:
         return e.to_tool_response()
 
-    to_address = params.get("to_address")
+    to_address = _normalize_email_address(params.get("to_address"))
     subject = params.get("subject")
     # Decode escape sequences and strip control chars from HTML body
     mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
     mobile_first_html = strip_control_chars(mobile_first_html)
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
-    cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
+    cc_addresses = [_normalize_email_address(addr) for addr in params.get("cc_addresses", [])]
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
+    reply_to_message_id = str(params.get("reply_to_message_id") or "").strip()
 
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
@@ -196,17 +290,6 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         # Ensure a healthy DB connection for subsequent ORM ops
         from django.db import close_old_connections
         from django.db.utils import OperationalError
-        duplicate = detect_recent_duplicate_message(
-            agent,
-            channel=CommsChannel.EMAIL,
-            body=mobile_first_html,
-            to_address=to_address,
-        )
-        if duplicate:
-            return duplicate.to_error_response()
-
-        close_old_connections()
-
         all_recipients = [to_address] + cc_addresses
         for recipient in all_recipients:
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, recipient):
@@ -245,6 +328,24 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 )
                 cc_endpoint_objects.append(cc_endpoint)
 
+        conversation = _get_or_create_conversation(
+            CommsChannel.EMAIL,
+            to_address,
+            owner_agent=agent,
+        )
+        reply_target, reply_error = _resolve_reply_target(agent, reply_to_message_id, to_address)
+        if reply_error:
+            return reply_error
+
+        duplicate = detect_recent_duplicate_message(
+            agent,
+            channel=CommsChannel.EMAIL,
+            body=mobile_first_html,
+            conversation_id=conversation.id,
+        )
+        if duplicate:
+            return duplicate.to_error_response()
+
         from_endpoint = resolve_agent_email_sender_endpoint_for_message(
             agent,
             to_endpoint=to_endpoint,
@@ -257,12 +358,24 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             if not from_endpoint:
                 return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
 
+        _ensure_participant(
+            conversation,
+            from_endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+        )
+        _ensure_participant(
+            conversation,
+            to_endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        )
+
         close_old_connections()
         try:
             message = PersistentAgentMessage.objects.create(
                 owner_agent=agent,
                 from_endpoint=from_endpoint,
-                to_endpoint=to_endpoint,
+                conversation=conversation,
+                parent=reply_target,
                 is_outbound=True,
                 body=mobile_first_html,
                 raw_payload={"subject": subject},
@@ -278,7 +391,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             message = PersistentAgentMessage.objects.create(
                 owner_agent=agent,
                 from_endpoint=from_endpoint,
-                to_endpoint=to_endpoint,
+                conversation=conversation,
+                parent=reply_target,
                 is_outbound=True,
                 body=mobile_first_html,
                 raw_payload={"subject": subject},

@@ -35,6 +35,9 @@ class SmtpTransport:
         plaintext_body: str,
         html_body: str,
         attempt_id: str,
+        message_id: str | None = None,
+        in_reply_to: str | None = None,
+        references: str | None = None,
     ) -> str:
         """Send email using the provided account.
 
@@ -59,8 +62,12 @@ class SmtpTransport:
         # If there are more than 1 recipients, put the rest in Cc
         if to_addrs and len(to_addrs) > 1:
             msg["Cc"] = ", ".join(list(to_addrs)[1:])
-        msg["Message-ID"] = make_msgid()
+        msg["Message-ID"] = message_id or make_msgid()
         msg["X-Gobii-Message-ID"] = str(attempt_id)
+        if in_reply_to:
+            msg["In-Reply-To"] = in_reply_to
+        if references:
+            msg["References"] = references
 
         # Text and HTML alternatives
         msg.set_content(plaintext_body or "")

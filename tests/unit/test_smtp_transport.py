@@ -118,3 +118,27 @@ class TestSmtpTransport(TestCase):
         self.assertEqual(auth_args[0], "XOAUTH2")
         auth_callback = auth_args[1]
         self.assertIn("oauth-token", auth_callback(b""))
+
+    @patch("smtplib.SMTP")
+    def test_send_sets_explicit_message_id_and_reply_headers(self, mock_smtp):
+        acct = self._create_acct()
+        client = MagicMock()
+        mock_smtp.return_value = client
+
+        SmtpTransport.send(
+            account=acct,
+            from_addr=self.from_ep.address,
+            to_addrs=[self.to_addr],
+            subject="Reply",
+            plaintext_body="Hi",
+            html_body="<p>Hi</p>",
+            attempt_id="attempt-4",
+            message_id="<explicit@example.com>",
+            in_reply_to="<parent@example.com>",
+            references="<older@example.com> <parent@example.com>",
+        )
+
+        sent_message = client.send_message.call_args.args[0]
+        self.assertEqual(sent_message["Message-ID"], "<explicit@example.com>")
+        self.assertEqual(sent_message["In-Reply-To"], "<parent@example.com>")
+        self.assertEqual(sent_message["References"], "<older@example.com> <parent@example.com>")

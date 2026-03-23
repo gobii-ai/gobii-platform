@@ -2,7 +2,7 @@ import logging
 import os
 import re
 from email.message import MIMEPart
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 from urllib.parse import unquote
 
 from django.core.mail import get_connection
@@ -241,6 +241,7 @@ logger = logging.getLogger(__name__)
 
 _postmark_connection = None
 _CID_UNSAFE_CHARS_RE = re.compile(r"[^a-z0-9._-]+")
+_EMAIL_REFERENCE_ID_RE = re.compile(r"<[^>]+>")
 
 
 def _get_postmark_connection():
@@ -317,6 +318,87 @@ def _normalized_email_subject(message: PersistentAgentMessage) -> str:
     if raw_subject is None:
         return ""
     return decode_unicode_escapes(str(raw_subject))
+
+
+def _get_email_primary_recipient(message: PersistentAgentMessage) -> str:
+    if message.to_endpoint and message.to_endpoint.address:
+        return message.to_endpoint.address
+    if message.conversation and message.conversation.address:
+        return message.conversation.address
+    return ""
+
+
+def _get_message_raw_payload(message: PersistentAgentMessage) -> dict:
+    return message.raw_payload if isinstance(message.raw_payload, dict) else {}
+
+
+def _get_message_rfc_message_id(message: PersistentAgentMessage) -> str:
+    raw_payload = _get_message_raw_payload(message)
+    candidate_values = [raw_payload.get("message_id")]
+    headers = raw_payload.get("headers")
+    if isinstance(headers, dict):
+        candidate_values.extend([
+            headers.get("Message-ID"),
+            headers.get("Message-Id"),
+            headers.get("message-id"),
+        ])
+
+    for candidate in candidate_values:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _ensure_outbound_email_message_id(message: PersistentAgentMessage) -> str:
+    raw_payload = _get_message_raw_payload(message)
+    existing = _get_message_rfc_message_id(message)
+    if existing:
+        return existing
+
+    next_payload = dict(raw_payload)
+    next_payload["message_id"] = make_msgid()
+    message.raw_payload = next_payload
+    message.save(update_fields=["raw_payload"])
+    return next_payload["message_id"]
+
+
+def _split_email_reference_ids(raw_references: str) -> list[str]:
+    value = str(raw_references or "").strip()
+    if not value:
+        return []
+
+    matches = _EMAIL_REFERENCE_ID_RE.findall(value)
+    if matches:
+        return matches
+
+    return [part for part in value.split() if part]
+
+
+def _build_reply_headers(message: PersistentAgentMessage) -> dict[str, str]:
+    parent = getattr(message, "parent", None)
+    if not parent:
+        return {}
+
+    parent_message_id = _get_message_rfc_message_id(parent)
+    if not parent_message_id:
+        return {}
+
+    parent_payload = _get_message_raw_payload(parent)
+    references: list[str] = []
+    seen: set[str] = set()
+    for reference_id in _split_email_reference_ids(parent_payload.get("references", "")):
+        normalized = reference_id.strip()
+        if normalized and normalized not in seen:
+            references.append(normalized)
+            seen.add(normalized)
+    if parent_message_id not in seen:
+        references.append(parent_message_id)
+
+    headers = {"In-Reply-To": parent_message_id}
+    if references:
+        headers["References"] = " ".join(references)
+    return headers
 
 
 def _extract_cid_references(html_body: str) -> list[dict[str, int | str]]:
@@ -633,6 +715,9 @@ def deliver_agent_email(message: PersistentAgentMessage):
         )
         return
     subject = _normalized_email_subject(message)
+    to_address = _get_email_primary_recipient(message)
+    message_rfc_id = _ensure_outbound_email_message_id(message)
+    reply_headers = _build_reply_headers(message)
 
     # First: per-endpoint SMTP override
     acct = None
@@ -664,7 +749,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         try:
             from_address = message.from_endpoint.address
-            to_address = message.to_endpoint.address if message.to_endpoint else ""
             body_raw = message.body
 
             # content conversion
@@ -696,6 +780,9 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     plaintext_body=plaintext_body,
                     html_body=html_body,
                     attempt_id=str(attempt.id),
+                    message_id=message_rfc_id,
+                    in_reply_to=reply_headers.get("In-Reply-To"),
+                    references=reply_headers.get("References"),
                 )
 
             now = timezone.now()
@@ -743,7 +830,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 "SMTP error sending message %s from %r to %r",
                 message.id,
                 getattr(message.from_endpoint, 'address', None),
-                getattr(message.to_endpoint, 'address', None),
+                to_address,
             )
             error_str = str(e)
             attempt.status = DeliveryStatus.FAILED
@@ -785,7 +872,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         logger.info(
             "--- SIMULATED EMAIL ---\nFrom: %s\nTo: %s\nSubject: %s\n\n=== ORIGINAL RAW BODY ===\n%s\n\n=== CONVERTED HTML VERSION ===\n%s\n\n=== CONVERTED PLAINTEXT VERSION ===\n%s\n-----------------------",
             _build_from_header(message),
-            message.to_endpoint.address,
+            to_address,
             subject,
             message.body,
             html_snippet,
@@ -811,7 +898,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             span.add_event('Email - Simulated Delivery (flag)', {
                 'message_id': str(message.id),
                 'from_address': message.from_endpoint.address,
-                'to_address': message.to_endpoint.address,
+                'to_address': to_address,
             })
         return
 
@@ -829,7 +916,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "from=%r, to=%r, subject=%r, body_length=%d",
             message.id,
             message.from_endpoint.address,
-            message.to_endpoint.address,
+            to_address,
             subject,
             len(body_raw)
         )
@@ -854,7 +941,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "=== CONVERTED PLAINTEXT VERSION ===\n%s\n"
             "-----------------------",
             _build_from_header(message),
-            message.to_endpoint.address,
+            to_address,
             subject,
             message.body,
             html_snippet,
@@ -881,7 +968,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             span.add_event('Email - Simulated Delivery', {
                 'message_id': str(message.id),
                 'from_address': message.from_endpoint.address,
-                'to_address': message.to_endpoint.address,
+                'to_address': to_address,
             })
 
         return
@@ -899,7 +986,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
     try:
         from_address = message.from_endpoint.address
         from_header = _build_from_header(message)
-        to_address = message.to_endpoint.address
         body_raw = message.body
         
         # Log the raw message received from the agent
@@ -993,6 +1079,10 @@ def deliver_agent_email(message: PersistentAgentMessage):
             cc=cc_addresses if cc_addresses else None,
             connection=_get_postmark_connection(),
             tags=["persistent-agent"],
+            headers={
+                "Message-ID": message_rfc_id,
+                **reply_headers,
+            },
             metadata={
                 "agent_id": str(message.owner_agent_id),
                 "message_id": str(message.id),
@@ -1069,7 +1159,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "Postmark API error sending message %s. Message details: from=%r, to=%r, subject=%r",
             message.id,
             message.from_endpoint.address,
-            message.to_endpoint.address,
+            to_address,
             subject,
         )
         error_str = str(e)
@@ -1092,7 +1182,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "Unexpected error sending message %s. Message details: from=%r, to=%r, subject=%r",
             message.id,
             message.from_endpoint.address,
-            message.to_endpoint.address,
+            to_address,
             subject,
         )
         error_str = f"An unexpected error occurred: {str(e)}"

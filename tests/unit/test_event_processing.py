@@ -38,6 +38,7 @@ from api.agent.tools.tool_manager import enable_tools
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
 from api.models import (
+    CommsChannel,
     BrowserUseAgent,
     MCPServerConfig,
     Organization,
@@ -579,6 +580,64 @@ class PromptContextBuilderTests(TestCase):
             ),
             content,
         )
+
+    def test_recent_contacts_include_email_message_id(self):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.external_endpoint.address,
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.endpoint,
+            conversation=conversation,
+            is_outbound=True,
+            body="Recent thread body",
+            raw_payload={"subject": "Recent thread subject"},
+            seq=f"RCMID{int(timezone.now().timestamp() * 1_000_000):020d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn("<recent_contacts>", content)
+        self.assertIn(f"message_id: {message.id}", content)
+        self.assertIn("recent subj: Recent thread subject", content)
+
+    def test_unified_history_includes_email_message_id_component(self):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.external_endpoint.address,
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.endpoint,
+            conversation=conversation,
+            is_outbound=True,
+            body="History body",
+            raw_payload={"subject": "History subject"},
+            seq=f"HISTMID{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn(
+            f"On email, you sent a message to {self.external_endpoint.address} [attachments: 0]:",
+            content,
+        )
+        self.assertIn(str(message.id), content)
 
     def test_system_prompt_includes_attachment_preflight_guidance(self):
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
