@@ -44,6 +44,7 @@ from billing.addons import AddonEntitlementService
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
     is_trial_cancel_scheduled,
+    is_trial_conversion_charge,
     is_trial_conversion_failure,
     is_trial_conversion_invoice,
     is_trial_ended_non_renewal,
@@ -2010,12 +2011,18 @@ def handle_invoice_payment_succeeded(event, **kwargs):
         if trial_end_dt is None:
             trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_obj, "trial_end"))
         line_start_dt = _line_period_start(lines)
-        trial_conversion_line_match = bool(
-            trial_end_dt and line_start_dt and trial_end_dt.date() == line_start_dt.date()
+        subscription_current_period_start_dt = _coerce_datetime(
+            _get_stripe_data_value(subscription_data, "current_period_start")
         )
-        trial_conversion = bool(
-            billing_reason == "subscription_cycle"
-            and trial_conversion_line_match
+        if subscription_current_period_start_dt is None:
+            subscription_current_period_start_dt = _coerce_datetime(
+                _get_stripe_data_value(subscription_obj, "current_period_start")
+            )
+        trial_conversion = is_trial_conversion_charge(
+            billing_reason=billing_reason,
+            trial_end_dt=trial_end_dt,
+            line_period_start_dt=line_start_dt,
+            subscription_current_period_start_dt=subscription_current_period_start_dt,
         )
 
         try:

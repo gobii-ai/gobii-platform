@@ -2866,7 +2866,7 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
         self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
 
-    def test_invoice_payment_succeeded_emits_single_subscribe_when_line_period_missing(self):
+    def test_invoice_payment_succeeded_treats_missing_line_period_as_trial_conversion(self):
         self._seed_last_touch_attribution()
         trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
         payload = _build_invoice_payload(
@@ -2892,6 +2892,7 @@ class PaymentSucceededSignalTests(TestCase):
                     "trial_end": str(trial_end),
                     "current_period_start": str(trial_end),
                     "metadata": {
+                        "gobii_event_id": "evt-trial-conversion",
                         "checkout_source_url": "https://app.gobii.ai/billing/checkout?src=ads",
                     },
                 },
@@ -2902,7 +2903,8 @@ class PaymentSucceededSignalTests(TestCase):
         with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
             patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
             patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
-            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
             patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
             patch("pages.signals.capi") as mock_capi:
 
@@ -2914,18 +2916,23 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertNotIn("provider_targets", capi_kwargs)
         props = capi_kwargs["properties"]
         self.assertEqual(props["transaction_value"], 30.0)
-        self.assertEqual(props["value"], 30.0)
+        self.assertEqual(props["value"], 30.0 * settings.CAPI_LTV_MULTIPLE)
         self.assertEqual(props["currency"], "USD")
-        self.assertEqual(props["event_id"], payload["id"])
+        self.assertEqual(props["event_id"], "evt-trial-conversion")
         self.assertNotIn("predicted_ltv", props)
         context = capi_kwargs["context"]
         self.assertTrue(context["consent"])
         self.assertEqual(context["ga_client_id"], "GA1.2.111.222")
-        self.assertNotIn("click_ids", context)
-        self.assertNotIn("utm", context)
-        self.assertNotIn("client_ip", context)
-        self.assertNotIn("user_agent", context)
-        self.assertNotIn("page", context)
+        self.assertEqual(context["click_ids"]["rdt_cid"], "reddit-latest-click")
+        self.assertEqual(context["utm"]["utm_source"], "retargeting-campaign")
+        self.assertEqual(context["client_ip"], "203.0.113.5")
+        self.assertEqual(context["user_agent"], "pytest-renewal-agent")
+        self.assertEqual(context["page"]["url"], "https://app.gobii.ai/billing/checkout?src=ads")
+
+        events = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
+        self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
+        self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
+        mock_identify.assert_called_once_with(self.user.id, {"is_trial": False, "plan": PlanNamesChoices.STARTUP.value})
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")
