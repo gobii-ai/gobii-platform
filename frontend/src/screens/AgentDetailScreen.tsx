@@ -3141,7 +3141,7 @@ function IntegrationsSection({
                               : null
                     const rowClasses = webhook.pendingType === 'delete' ? 'opacity-60' : ''
                     const lastTriggeredLabel = webhook.lastTriggeredAt ? new Date(webhook.lastTriggeredAt).toLocaleString() : 'Never'
-                    const copyLabel = copiedInboundWebhookId === webhook.id ? 'Copied' : 'Copy URL'
+                    const copyLabel = copiedInboundWebhookId === webhook.id ? 'Copied' : 'Copy'
                     return (
                       <tr key={webhook.id} className={rowClasses}>
                         <td className="px-4 py-3 text-sm text-gray-800">
@@ -3150,8 +3150,27 @@ function IntegrationsSection({
                             {pendingLabel && <span className="text-xs text-amber-600">{pendingLabel}</span>}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 break-all">
-                          {webhook.url ? webhook.url : <span className="text-gray-400">URL available after save</span>}
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          <div className="flex min-w-0 items-stretch overflow-hidden rounded-lg border border-gray-200">
+                            <input
+                              type="text"
+                              value={webhook.url ?? ''}
+                              readOnly
+                              placeholder="URL available after save"
+                              aria-label={`Webhook URL for ${webhook.name}`}
+                              onFocus={(event) => event.currentTarget.select()}
+                              className="min-w-0 flex-1 border-0 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => onInboundWebhookCopy(webhook)}
+                              disabled={!webhook.url}
+                              className="inline-flex shrink-0 items-center gap-1.5 border-l border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
+                            >
+                              {copiedInboundWebhookId === webhook.id ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
+                              {copyLabel}
+                            </button>
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-700">
                           <span className={webhook.isActive ? 'text-green-600' : 'text-gray-500'}>
@@ -3167,15 +3186,6 @@ function IntegrationsSection({
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50"
                             >
                               Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onInboundWebhookCopy(webhook)}
-                              disabled={!webhook.url}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                            >
-                              {copiedInboundWebhookId === webhook.id ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
-                              {copyLabel}
                             </button>
                             <button
                               type="button"
