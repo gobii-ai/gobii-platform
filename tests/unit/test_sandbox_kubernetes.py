@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 from django.test import SimpleTestCase, tag
 
 from api.services.sandbox_kubernetes import (
+    _build_sandbox_service_manifest,
     KubernetesSandboxBackend,
     _build_egress_proxy_pod_manifest,
     _build_proxy_env,
@@ -16,6 +17,7 @@ from api.services.sandbox_kubernetes import (
 class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
     def _backend(self) -> KubernetesSandboxBackend:
         backend = object.__new__(KubernetesSandboxBackend)
+        backend._client = Mock()
         backend._no_proxy = ""
         backend._namespace = "default"
         backend._compute_api_token = "supervisor-token"
@@ -135,9 +137,16 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
 
     def test_proxy_post_forwards_supervisor_token_header(self):
         backend = self._backend()
-        backend._client = SimpleNamespace(request_json=lambda *args, **kwargs: {"status": "ok"})
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.text = '{"status": "ok"}'
+        response.json.return_value = {"status": "ok"}
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        session.post.return_value = response
 
-        with patch.object(backend._client, "request_json", return_value={"status": "ok"}) as mock_request:
+        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session) as mock_session:
             result = backend._proxy_post(
                 "sandbox-agent-agent-1",
                 "/sandbox/compute/run_command",
@@ -145,9 +154,14 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             )
 
         self.assertEqual(result.get("status"), "ok")
+        self.assertFalse(session.trust_env)
         self.assertEqual(
-            mock_request.call_args.kwargs["extra_headers"],
+            session.post.call_args.kwargs["headers"],
             {"X-Sandbox-Compute-Token": "supervisor-token"},
+        )
+        self.assertEqual(
+            session.post.call_args.args[0],
+            "http://sandbox-agent-agent-1.default.svc.cluster.local:8080/sandbox/compute/run_command",
         )
 
     def test_ensure_egress_proxy_allows_socks5_upstream(self):
@@ -171,9 +185,70 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(service_name, "sandbox-egress-agent-socks")
         backend._create_egress_proxy_pod.assert_called_once()
 
+    def test_deploy_or_resume_creates_agent_service_when_missing(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-svc")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(return_value=None)
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[False, False]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._create_service.assert_called_once_with("sandbox-agent-agent-svc", agent_id="agent-svc")
+        backend._create_pod.assert_called_once()
+
+    def test_deploy_or_resume_keeps_sandbox_service_separate_from_egress_service(self):
+        backend = self._backend()
+        backend._egress_proxy_image = "ghcr.io/example/egress:latest"
+        backend._egress_proxy_service_port = 3128
+        agent = SimpleNamespace(id="agent-proxy")
+        session = SimpleNamespace(
+            proxy_server=SimpleNamespace(id="proxy-1"),
+            workspace_snapshot=None,
+        )
+        backend._ensure_egress_proxy = Mock(return_value="sandbox-egress-agent-proxy")
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(return_value=None)
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[False, False]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._ensure_egress_proxy.assert_called_once_with(agent, session.proxy_server)
+        backend._create_service.assert_called_once_with("sandbox-agent-agent-proxy", agent_id="agent-proxy")
+        backend._create_pod.assert_called_once_with(
+            "sandbox-agent-agent-proxy",
+            "sandbox-workspace-agent-proxy",
+            agent_id="agent-proxy",
+            proxy_url="http://sandbox-egress-agent-proxy:3128",
+            no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
+        )
+
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):
+    def test_sandbox_service_manifest_targets_agent_pod(self):
+        manifest = _build_sandbox_service_manifest(
+            service_name="sandbox-agent-agent-1",
+            namespace="default",
+            agent_id="agent-1",
+            port=8080,
+            target_port=8080,
+        )
+
+        self.assertEqual(manifest["spec"]["selector"]["app"], "sandbox-compute")
+        self.assertEqual(manifest["spec"]["selector"]["agent_id"], "agent-1")
+        self.assertEqual(manifest["spec"]["ports"][0]["port"], 8080)
+        self.assertEqual(manifest["spec"]["ports"][0]["targetPort"], 8080)
+
     def test_agent_pod_manifest_disables_service_account_token_automount(self):
         manifest = _build_pod_manifest(
             pod_name="sandbox-agent-agent-1",
