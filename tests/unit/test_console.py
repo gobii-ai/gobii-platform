@@ -29,6 +29,7 @@ from util.onboarding import (
 from api.models import MCPServerConfig, PipedreamAppSelection
 from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
 from api.services.pipedream_apps import get_owner_apps_state
+from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
 
 @tag("batch_console_agents")
@@ -1037,6 +1038,7 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
     @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
+    @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
     @patch("console.agent_creation.process_agent_events_task.delay")
     @tag("batch_console_agents")
     def test_trial_required_quick_create_preserves_draft_for_quick_spawn_resume(self, _mock_delay):
@@ -1087,7 +1089,10 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(resume_response.status_code, 302)
         parsed = urlparse(resume_response["Location"])
-        self.assertTrue(parsed.path.startswith("/app/agents/"))
+        self.assertTrue(
+            parsed.path.startswith("/app/agents/"),
+            resume_response["Location"],
+        )
 
         agent_id = parsed.path.rstrip("/").rsplit("/", 1)[-1]
         created_agent = PersistentAgent.objects.get(id=agent_id)
