@@ -160,6 +160,40 @@ class TestParallelToolCallsExecution(TestCase):
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
+    def test_parallel_safe_batch_respects_configured_worker_limit(self, mock_execute_enabled, _mock_credit):
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def side_effect(_agent, _tool_name, _params, isolated_mcp=False):
+            nonlocal active, max_active
+            self.assertTrue(isolated_mcp)
+            with lock:
+                active += 1
+                max_active = max(max_active, active)
+            time.sleep(0.05)
+            with lock:
+                active -= 1
+            return {"status": "ok", "auto_sleep_ok": True}
+
+        mock_execute_enabled.side_effect = side_effect
+
+        with patch("api.agent.core.event_processing.get_max_parallel_tool_calls", return_value=4):
+            self._run_single_iteration(
+                [
+                    _tool_call("read_file", '{"path": "/exports/a.txt"}'),
+                    _tool_call("mcp_brightdata_search_engine", '{"query": "openai"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/one.json"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/two.json"}'),
+                    _tool_call("http_request", '{"method": "GET", "url": "https://api.example.com/three.json"}'),
+                ]
+            )
+
+        self.assertEqual(mock_execute_enabled.call_count, 5)
+        self.assertEqual(max_active, 4)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
     @patch("api.agent.core.event_processing.execute_send_sms")
     def test_mixed_batch_falls_back_to_serial(
         self,

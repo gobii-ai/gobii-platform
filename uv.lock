@@ -1686,7 +1686,7 @@ requires-dist = [
     { name = "inscriptis", specifier = "==2.6.0" },
     { name = "json-schema-to-pydantic", specifier = "~=0.4.1" },
     { name = "json5", specifier = ">=0.13.0" },
-    { name = "litellm", specifier = "==1.82.1" },
+    { name = "litellm", git = "https://github.com/gobii-ai/litellm?rev=7c5e2e83898105d565ef2f2032fb389b3523d77a" },
     { name = "mail-parser", specifier = "==4.1.4" },
     { name = "mailchecker", specifier = "~=6.0.0" },
     { name = "markdown", specifier = "~=3.8" },
@@ -2540,7 +2540,7 @@ wheels = [
 [[package]]
 name = "litellm"
 version = "1.82.1"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/gobii-ai/litellm?rev=7c5e2e83898105d565ef2f2032fb389b3523d77a#7c5e2e83898105d565ef2f2032fb389b3523d77a" }
 dependencies = [
     { name = "aiohttp" },
     { name = "click" },
@@ -2554,10 +2554,6 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "tiktoken" },
     { name = "tokenizers" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/34/bd/6251e9a965ae2d7bc3342ae6c1a2d25dd265d354c502e63225451b135016/litellm-1.82.1.tar.gz", hash = "sha256:bc8427cdccc99e191e08e36fcd631c93b27328d1af789839eb3ac01a7d281890", size = 17197496, upload-time = "2026-03-10T09:10:04.438Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/77/0c6eca2cb049793ddf8ce9cdcd5123a35666c4962514788c4fc90edf1d3b/litellm-1.82.1-py3-none-any.whl", hash = "sha256:a9ec3fe42eccb1611883caaf8b1bf33c9f4e12163f94c7d1004095b14c379eb2", size = 15341896, upload-time = "2026-03-10T09:10:00.702Z" },
 ]
 
 [[package]]

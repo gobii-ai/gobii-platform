@@ -106,6 +106,16 @@ SYSTEM_SETTING_DEFINITIONS = (
         min_value=1,
     ),
     SystemSettingDefinition(
+        key="MAX_PARALLEL_TOOL_CALLS",
+        label="Max parallel tool calls",
+        description="Maximum number of safe tool calls that can run concurrently in one batch.",
+        value_type=VALUE_TYPE_INT,
+        env_var="MAX_PARALLEL_TOOL_CALLS",
+        default_getter=lambda: settings.MAX_PARALLEL_TOOL_CALLS,
+        category="Agents",
+        min_value=1,
+    ),
+    SystemSettingDefinition(
         key="SANDBOX_COMPUTE_ENABLED",
         label="Sandbox compute enabled",
         description="Enable sandbox compute for eligible agents.",
@@ -453,6 +463,10 @@ def get_mcp_stdio_timeout_seconds() -> float:
 
 def get_litellm_timeout_seconds() -> int:
     return int(get_setting_value("LITELLM_TIMEOUT_SECONDS"))
+
+
+def get_max_parallel_tool_calls() -> int:
+    return int(get_setting_value("MAX_PARALLEL_TOOL_CALLS"))
 
 
 def get_account_allow_password_signup() -> bool:

@@ -138,3 +138,35 @@ class SandboxSystemSettingsTests(SimpleTestCase):
                 system_settings.get_sandbox_egress_proxy_pod_image(),
                 "ghcr.io/gobii-ai/gobii-sandbox-egress-proxy:main",
             )
+
+
+@tag("batch_system_settings")
+class ParallelToolCallSystemSettingsTests(SimpleTestCase):
+    @override_settings(MAX_PARALLEL_TOOL_CALLS=4)
+    def test_parallel_tool_call_definition_exists(self) -> None:
+        definition = system_settings.get_setting_definition("MAX_PARALLEL_TOOL_CALLS")
+        self.assertIsNotNone(definition)
+        definition = system_settings.SYSTEM_SETTING_DEFINITIONS_BY_KEY["MAX_PARALLEL_TOOL_CALLS"]
+        self.assertEqual(definition.category, "Agents")
+        self.assertEqual(definition.value_type, "int")
+        self.assertEqual(definition.min_value, 1)
+        self.assertEqual(definition.env_var, "MAX_PARALLEL_TOOL_CALLS")
+
+    @override_settings(MAX_PARALLEL_TOOL_CALLS=4)
+    def test_parallel_tool_call_setting_defaults_to_configured_value(self) -> None:
+        definition = system_settings.SYSTEM_SETTING_DEFINITIONS_BY_KEY["MAX_PARALLEL_TOOL_CALLS"]
+        with patch.object(system_settings, "_load_db_values", return_value={}):
+            payload = system_settings.serialize_setting(definition)
+
+        self.assertEqual(payload["source"], "default")
+        self.assertEqual(payload["effective_value"], 4)
+        self.assertEqual(payload["fallback_value"], 4)
+
+    @override_settings(MAX_PARALLEL_TOOL_CALLS=4)
+    def test_parallel_tool_call_getter_applies_database_override(self) -> None:
+        with patch.object(
+            system_settings,
+            "_load_db_values",
+            return_value={"MAX_PARALLEL_TOOL_CALLS": "2"},
+        ):
+            self.assertEqual(system_settings.get_max_parallel_tool_calls(), 2)
