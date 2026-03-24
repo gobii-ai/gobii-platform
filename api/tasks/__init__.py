@@ -54,6 +54,9 @@ from .burn_rate_snapshots import refresh_burn_rate_snapshots_task  # noqa: F401
 # Proactive agent scheduler
 from .proactive_agents import schedule_proactive_agents_task  # noqa: F401
 
+# Trial-user activation assessment
+from .trial_activation import assess_trial_user_activation_task  # noqa: F401
+
 # Avatar backfill scheduler
 from .avatar_backfill import schedule_agent_avatar_backfill_task  # noqa: F401
 

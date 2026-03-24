@@ -34,7 +34,8 @@ from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from marketing_events.api import capi
-from marketing_events.context import extract_click_context
+from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
+from marketing_events.context import build_marketing_context_from_user, extract_click_context
 from marketing_events.telemetry import record_fbc_synthesized
 from marketing_events.value_utils import calculate_start_trial_values
 import logging
@@ -104,7 +105,6 @@ CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid')
 TRIAL_CONVERSION_PAYMENT_FAILED_EVENT = "TrialConversionPaymentFailed"
 TRIAL_CONVERSION_PAYMENT_FAILED_FINAL_EVENT = "TrialConversionPaymentFailedFinal"
 SUBSCRIPTION_PAYMENT_FAILED_EVENT = "SubscriptionPaymentFailed"
-AD_CAPI_PROVIDER_TARGETS = ["meta", "reddit", "tiktok"]
 
 
 def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
@@ -719,65 +719,11 @@ def _safe_client_ip(request) -> str | None:
 
 
 def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
-    """Construct marketing context payload from persisted attribution data."""
-    context: dict[str, Any] = {"consent": True}
-    if not user:
-        return context
-
-    try:
-        attribution = user.attribution
-    except UserAttribution.DoesNotExist:
-        return context
-    except AttributeError:
-        return context
-
-    click_ids: dict[str, str] = {}
-    fbc = getattr(attribution, "fbc", "")
-    fbclid = getattr(attribution, "fbclid", "")
-    fbp = getattr(attribution, "fbp", "")
-    rdt_cid = getattr(attribution, "rdt_cid_last", "") or getattr(attribution, "rdt_cid_first", "")
-
-    if fbc:
-        click_ids["fbc"] = fbc
-    elif fbclid:
-        # Use first_touch_at for a timestamp closer to the actual ad click
-        touch_ts = getattr(attribution, "first_touch_at", None)
-        ts_ms = int(touch_ts.timestamp() * 1000) if touch_ts else int(timezone.now().timestamp() * 1000)
-        click_ids["fbc"] = f"fb.1.{ts_ms}.{fbclid}"
-        record_fbc_synthesized(source="pages.signals.build_marketing_context_from_user")
-    if fbclid:
-        click_ids["fbclid"] = fbclid
-    if fbp:
-        click_ids["fbp"] = fbp
-    if rdt_cid:
-        click_ids["rdt_cid"] = rdt_cid
-    if click_ids:
-        context["click_ids"] = click_ids
-
-    utm_candidates = {
-        "utm_source": getattr(attribution, "utm_source_last", None) or getattr(attribution, "utm_source_first", None),
-        "utm_medium": getattr(attribution, "utm_medium_last", None) or getattr(attribution, "utm_medium_first", None),
-        "utm_campaign": getattr(attribution, "utm_campaign_last", None) or getattr(attribution, "utm_campaign_first", None),
-        "utm_content": getattr(attribution, "utm_content_last", None) or getattr(attribution, "utm_content_first", None),
-        "utm_term": getattr(attribution, "utm_term_last", None) or getattr(attribution, "utm_term_first", None),
-    }
-    utm = {key: value for key, value in utm_candidates.items() if value}
-    if utm:
-        context["utm"] = utm
-
-    last_client_ip = getattr(attribution, "last_client_ip", None)
-    if last_client_ip:
-        context["client_ip"] = last_client_ip
-
-    last_user_agent = getattr(attribution, "last_user_agent", None)
-    if last_user_agent:
-        context["user_agent"] = last_user_agent
-
-    ga_client_id = getattr(attribution, "ga_client_id", None)
-    if ga_client_id:
-        context["ga_client_id"] = ga_client_id
-
-    return context
+    return build_marketing_context_from_user(
+        user,
+        synthesized_fbc_source="pages.signals.build_marketing_context_from_user",
+        record_fbc_synthesized_fn=record_fbc_synthesized,
+    )
 
 
 def _build_off_session_marketing_context_from_user(user: Any) -> dict[str, Any]:

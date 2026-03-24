@@ -4245,6 +4245,30 @@ class UserTrialEligibility(models.Model):
         return f"Trial eligibility for user {self.user_id}: {self.effective_status}"
 
 
+class UserTrialActivation(models.Model):
+    """Persist the current activation state for an individual trial user."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="trial_activation",
+    )
+    is_activated = models.BooleanField(default=False)
+    activated_at = models.DateTimeField(null=True, blank=True)
+    last_assessed_at = models.DateTimeField(null=True, blank=True)
+    activation_version = models.PositiveIntegerField(default=1)
+    activation_reason = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User trial activation"
+        verbose_name_plural = "User trial activations"
+
+    def __str__(self):
+        return f"Trial activation for user {self.user_id}: {self.is_activated}"
+
+
 class ReferralGrant(models.Model):
     """Audit record for referral credit grants."""
 
