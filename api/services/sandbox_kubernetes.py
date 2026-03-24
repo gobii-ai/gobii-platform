@@ -14,7 +14,6 @@ from api.services.sandbox_compute import (
     SandboxComputeBackend,
     SandboxComputeUnavailable,
     SandboxSessionUpdate,
-    _proxy_env_for_session,
     _proxy_env_values,
     _requires_agent_pod_discovery,
 )
@@ -381,9 +380,6 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             "reason": reason,
             "server": server_payload,
         }
-        proxy_env = _proxy_env_for_session(session)
-        if proxy_env:
-            payload["proxy_env"] = proxy_env
 
         return self._proxy_post(
             service_name,

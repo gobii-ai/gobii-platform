@@ -66,7 +66,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(proxy_args[1], "/sandbox/compute/discover_mcp_tools")
         payload = mock_proxy_post.call_args.args[2]
         self.assertEqual(payload["agent_id"], str(agent.id))
-        self.assertEqual(payload["proxy_env"]["HTTP_PROXY"], session.proxy_server.proxy_url)
+        self.assertNotIn("proxy_env", payload)
 
     def test_discovery_uses_local_discovery_for_user_scope_http_server(self):
         backend = self._backend()
