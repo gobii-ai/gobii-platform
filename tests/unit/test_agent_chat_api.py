@@ -53,6 +53,13 @@ from console.agent_chat.kanban_events import persist_kanban_event
 from console.agent_chat.timeline import build_processing_snapshot
 from console.agent_chat.timeline import fetch_timeline_window
 from console.agent_chat.timeline import serialize_kanban_event
+from util.onboarding import (
+    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE
 from util.analytics import AnalyticsEvent
 
 CHANNEL_LAYER_SETTINGS = {
@@ -204,6 +211,29 @@ class AgentChatAPITests(TestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json().get("error"), "Invalid context override.")
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_agent_chat")
+    def test_quick_create_returns_trial_onboarding_metadata_when_trial_required(self):
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": "Create from immersive app"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload.get("error"), PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
+        self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
+        self.assertTrue(payload.get("requires_plan_selection"))
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
     @tag("batch_agent_chat")
     def test_quick_create_ignores_unsupported_tier_selection(self):

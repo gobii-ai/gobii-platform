@@ -1,6 +1,7 @@
 """Custom django-allauth social account adapter hooks."""
 
 import logging
+import secrets
 
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
@@ -13,6 +14,7 @@ from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
 from api.services.system_settings import get_account_allow_social_signup
+from config.redis_client import get_redis_client
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
@@ -28,6 +30,8 @@ OAUTH_CHARTER_SESSION_KEYS = (
     "agent_charter_override",
     PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
     "agent_charter_source",
+    "agent_preferred_llm_tier",
+    "agent_selected_pipedream_app_slugs",
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
@@ -46,6 +50,63 @@ OAUTH_ATTRIBUTION_SESSION_KEYS = (
 # Cookie name for stashing charter data during OAuth
 OAUTH_CHARTER_COOKIE = "gobii_oauth_charter"
 OAUTH_ATTRIBUTION_COOKIE = "gobii_oauth_attribution"
+OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY = "server_side_token"
+OAUTH_CHARTER_STASH_CACHE_KEY_PREFIX = "oauth_charter_stash"
+OAUTH_STASH_TTL_SECONDS = 7200
+
+
+def build_oauth_charter_stash_cache_key(token: str) -> str:
+    return f"{OAUTH_CHARTER_STASH_CACHE_KEY_PREFIX}:{token}"
+
+
+def serialize_oauth_charter_cookie_payload(
+    payload: dict[str, object],
+    *,
+    server_side: bool = False,
+) -> str | None:
+    if not server_side:
+        return signing.dumps(payload, compress=True)
+
+    token = secrets.token_urlsafe(24)
+    try:
+        redis_client = get_redis_client()
+        redis_client.set(
+            build_oauth_charter_stash_cache_key(token),
+            signing.dumps(payload, compress=True),
+            ex=OAUTH_STASH_TTL_SECONDS,
+        )
+    except Exception:
+        logger.exception("Failed to persist server-side OAuth charter stash")
+        return None
+    return signing.dumps(
+        {OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY: token},
+        compress=True,
+    )
+
+
+def _resolve_oauth_charter_cookie_payload(stashed: object) -> dict[str, object] | None:
+    if not isinstance(stashed, dict):
+        return None
+
+    token = stashed.get(OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY)
+    if token is None:
+        return stashed
+    if not isinstance(token, str) or not token.strip():
+        return None
+
+    try:
+        redis_client = get_redis_client()
+        cached = redis_client.get(build_oauth_charter_stash_cache_key(token))
+        if not isinstance(cached, str) or not cached:
+            return None
+        resolved = signing.loads(cached)
+    except Exception:
+        logger.exception("Failed loading server-side OAuth charter stash")
+        return None
+
+    if not isinstance(resolved, dict):
+        return None
+    return resolved
 
 
 def _restore_session_keys_from_cookie(
@@ -60,18 +121,28 @@ def _restore_session_keys_from_cookie(
         return False
 
     try:
-        stashed = signing.loads(cookie_value, max_age=7200)  # 2 hours max
+        stashed = signing.loads(cookie_value, max_age=OAUTH_STASH_TTL_SECONDS)
     except (signing.BadSignature, signing.SignatureExpired):
         logger.debug("Invalid or expired OAuth cookie: %s", cookie_name)
         return False
 
+    if cookie_name == OAUTH_CHARTER_COOKIE:
+        resolved_stashed = _resolve_oauth_charter_cookie_payload(stashed)
+        if resolved_stashed is None:
+            logger.debug("Invalid or expired server-side OAuth charter stash")
+            return False
+    elif isinstance(stashed, dict):
+        resolved_stashed = stashed
+    else:
+        return False
+
     restored_any = False
     for key in keys:
-        if key not in stashed:
+        if key not in resolved_stashed:
             continue
         if not overwrite_existing and key in request.session:
             continue
-        request.session[key] = stashed[key]
+        request.session[key] = resolved_stashed[key]
         restored_any = True
 
     if restored_any:

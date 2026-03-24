@@ -1,6 +1,7 @@
 import logging
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db.utils import DatabaseError, OperationalError, ProgrammingError
 
 from constants.plans import PlanNames
@@ -17,6 +18,12 @@ logger = logging.getLogger(__name__)
 PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE = (
     "Start a free trial to use personal agents or personal API keys."
 )
+
+
+class TrialRequiredValidationError(ValidationError):
+    """Signal that personal agent/API access requires starting a trial."""
+
+
 PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH = "personal_free_trial_enforcement"
 # Chat-only recovery path: include incomplete so users with an unfinished checkout
 # can get back into chat long enough to resolve billing, without reopening broader

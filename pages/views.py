@@ -27,6 +27,7 @@ from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_SESSION_KEYS,
     OAUTH_CHARTER_COOKIE,
     OAUTH_CHARTER_SESSION_KEYS,
+    serialize_oauth_charter_cookie_payload,
 )
 from config.stripe_config import get_stripe_settings
 
@@ -255,13 +256,18 @@ def _build_oauth_charter_cookie_payload(
     request,
     *,
     charter: str,
-    template_code: str,
-) -> dict[str, str | bool]:
-    payload: dict[str, str | bool] = {
+    charter_source: str,
+    template_code: str | None = None,
+    charter_override: str | None = None,
+) -> dict[str, str | bool | list[str]]:
+    payload: dict[str, str | bool | list[str]] = {
         "agent_charter": charter,
-        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template_code,
-        "agent_charter_source": "template",
+        "agent_charter_source": charter_source,
     }
+    if template_code:
+        payload[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template_code
+    if charter_override:
+        payload["agent_charter_override"] = charter_override
     for key in OAUTH_CHARTER_SESSION_KEYS:
         if key in payload:
             continue
@@ -278,18 +284,32 @@ def _build_oauth_attribution_cookie_payload(request) -> dict[str, str | dict]:
     return payload
 
 
-def _set_oauth_stash_cookies(response, request, *, charter_data: dict, attribution_data: dict) -> None:
+def _set_oauth_stash_cookies(
+    response,
+    request,
+    *,
+    charter_data: dict,
+    attribution_data: dict,
+    server_side_charter: bool = False,
+) -> None:
     cookie_common = {
         "max_age": 7200,  # 2 hours
         "httponly": True,
         "samesite": "Lax",
         "secure": request.is_secure(),
     }
-    response.set_cookie(
-        OAUTH_CHARTER_COOKIE,
-        signing.dumps(charter_data, compress=True),
-        **cookie_common,
+    charter_cookie_value = serialize_oauth_charter_cookie_payload(
+        charter_data,
+        server_side=server_side_charter,
     )
+    if charter_cookie_value:
+        response.set_cookie(
+            OAUTH_CHARTER_COOKIE,
+            charter_cookie_value,
+            **cookie_common,
+        )
+    else:
+        response.delete_cookie(OAUTH_CHARTER_COOKIE)
     if attribution_data:
         response.set_cookie(
             OAUTH_ATTRIBUTION_COOKIE,
@@ -781,10 +801,25 @@ class HomeAgentSpawnView(TemplateView):
                 f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
                 app_redirect_params,
             )
-            return redirect_to_login(
+            response = redirect_to_login(
                 next=app_next_url,
                 login_url=_login_url_with_utms(request),
             )
+            charter_data = _build_oauth_charter_cookie_payload(
+                request,
+                charter=request.session.get("agent_charter") or "",
+                charter_source=str(request.session.get("agent_charter_source") or "user"),
+                charter_override=request.session.get("agent_charter_override"),
+            )
+            attribution_data = _build_oauth_attribution_cookie_payload(request)
+            _set_oauth_stash_cookies(
+                response,
+                request,
+                charter_data=charter_data,
+                attribution_data=attribution_data,
+                server_side_charter=True,
+            )
+            return response
         
         # If form is invalid, re-render home page with errors
         context = self.get_context_data(**kwargs)
@@ -963,6 +998,7 @@ class PretrainedWorkerHireView(View):
         charter_data = _build_oauth_charter_cookie_payload(
             request,
             charter=template.charter,
+            charter_source="template",
             template_code=template.code,
         )
         attribution_data = _build_oauth_attribution_cookie_payload(request)
@@ -1120,6 +1156,7 @@ class PublicTemplateHireView(View):
         charter_data = _build_oauth_charter_cookie_payload(
             request,
             charter=template.charter,
+            charter_source="template",
             template_code=template.code,
         )
         attribution_data = _build_oauth_attribution_cookie_payload(request)
