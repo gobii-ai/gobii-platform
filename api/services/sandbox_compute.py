@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import json
 import logging
@@ -22,6 +23,11 @@ from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MC
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
+from api.services.sandbox_internal_paths import (
+    CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+    CUSTOM_TOOL_SQLITE_WORKSPACE_PATH,
+    is_sandbox_internal_path,
+)
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from config.redis_client import get_redis_client
@@ -43,6 +49,7 @@ _NO_PROXY_ENV_KEYS = (
     "NO_PROXY",
     "no_proxy",
 )
+_CUSTOM_TOOL_SQLITE_MIME_TYPE = "application/vnd.sqlite3"
 
 
 def sandbox_compute_enabled() -> bool:
@@ -787,6 +794,35 @@ def _build_filespace_export_response(agent, export_path: str) -> Dict[str, Any]:
     }
 
 
+def _decode_sync_change_content(change: Dict[str, Any]) -> Optional[bytes]:
+    if "content_b64" in change and isinstance(change.get("content_b64"), str):
+        try:
+            return base64.b64decode(change["content_b64"], validate=True)
+        except (TypeError, ValueError):
+            return None
+    content = change.get("content")
+    if isinstance(content, bytes):
+        return content
+    if isinstance(content, str):
+        return content.encode("utf-8")
+    return None
+
+
+def _write_sqlite_file(db_path: str, content: bytes) -> None:
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    tmp_path = f"{db_path}.sandbox-sync"
+    try:
+        with open(tmp_path, "wb") as handle:
+            handle.write(content)
+        os.replace(tmp_path, db_path)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 def _select_proxy_for_session(agent, session: AgentComputeSession) -> Optional[Any]:
     if not getattr(settings, "ENABLE_PROXY_ROUTING", True):
         return None
@@ -1163,6 +1199,151 @@ class SandboxComputeService:
         if isinstance(result, dict) and result.get("status") != "error":
             if _sync_on_run_command():
                 self._enqueue_post_sync_after_call(agent, source="run_command")
+        return result
+
+    def _sync_custom_tool_sqlite_pull(
+        self,
+        agent,
+        session: AgentComputeSession,
+        local_sqlite_db_path: str,
+    ) -> Dict[str, Any]:
+        if isinstance(self._backend, LocalSandboxBackend):
+            return {"status": "skipped", "message": "Local backend does not require SQLite sync."}
+
+        entry: Dict[str, Any] = {
+            "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+        }
+        if os.path.exists(local_sqlite_db_path):
+            with open(local_sqlite_db_path, "rb") as handle:
+                content = handle.read()
+            entry.update(
+                {
+                    "content_b64": base64.b64encode(content).decode("ascii"),
+                    "mime_type": _CUSTOM_TOOL_SQLITE_MIME_TYPE,
+                    "size_bytes": len(content),
+                    "checksum_sha256": hashlib.sha256(content).hexdigest(),
+                }
+            )
+        else:
+            entry["is_deleted"] = True
+
+        return self._backend.sync_filespace(agent, session, direction="pull", payload={"files": [entry]})
+
+    def _sync_custom_tool_sqlite_push(
+        self,
+        agent,
+        session: AgentComputeSession,
+        local_sqlite_db_path: str,
+        *,
+        since: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        if isinstance(self._backend, LocalSandboxBackend):
+            return {"status": "skipped", "message": "Local backend does not require SQLite sync."}
+
+        payload: Dict[str, Any] = {}
+        if since:
+            payload["since"] = since
+        response = self._backend.sync_filespace(agent, session, direction="push", payload=payload)
+        if not isinstance(response, dict):
+            return {"status": "error", "message": "Sandbox SQLite sync returned an invalid response."}
+        if response.get("status") != "ok":
+            return response
+
+        sqlite_change = None
+        for change in response.get("changes") or []:
+            if not isinstance(change, dict):
+                continue
+            if not is_sandbox_internal_path(change.get("path")):
+                continue
+            sqlite_change = change
+
+        if sqlite_change is None:
+            return {"status": "ok", "sqlite_synced": False}
+
+        if bool(sqlite_change.get("is_deleted")):
+            try:
+                os.remove(local_sqlite_db_path)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                return {"status": "error", "message": f"Failed to remove synced SQLite DB: {exc}"}
+            return {"status": "ok", "sqlite_synced": True, "deleted": True}
+
+        content = _decode_sync_change_content(sqlite_change)
+        if content is None:
+            return {"status": "error", "message": "Sandbox SQLite sync returned invalid file content."}
+
+        try:
+            _write_sqlite_file(local_sqlite_db_path, content)
+        except OSError as exc:
+            return {"status": "error", "message": f"Failed to write synced SQLite DB: {exc}"}
+
+        return {
+            "status": "ok",
+            "sqlite_synced": True,
+            "deleted": False,
+            "size_bytes": len(content),
+        }
+
+    def run_custom_tool_command(
+        self,
+        agent,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[Dict[str, str]] = None,
+        timeout: Optional[int] = None,
+        interactive: bool = False,
+        local_sqlite_db_path: Optional[str] = None,
+        sqlite_env_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        session = self._ensure_session(agent, source="custom_tool_run_command")
+
+        runtime_env = dict(env or {})
+        if sqlite_env_key and local_sqlite_db_path:
+            runtime_env[sqlite_env_key] = (
+                local_sqlite_db_path
+                if isinstance(self._backend, LocalSandboxBackend)
+                else CUSTOM_TOOL_SQLITE_WORKSPACE_PATH
+            )
+
+        merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, runtime_env)
+        backend_env = merged_env if merged_env else None
+
+        sqlite_push_since: Optional[str] = None
+        if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
+            pull_result = self._sync_custom_tool_sqlite_pull(agent, session, local_sqlite_db_path)
+            if not isinstance(pull_result, dict):
+                return {"status": "error", "message": "Custom tool SQLite pull sync returned an invalid response."}
+            if pull_result.get("status") != "ok":
+                return pull_result
+            sqlite_push_since = (timezone.now() - timedelta(seconds=1)).isoformat()
+
+        result = self._backend.run_command(
+            agent,
+            session,
+            command,
+            cwd=cwd,
+            env=backend_env,
+            trusted_env_keys=trusted_secret_keys or None,
+            timeout=timeout,
+            interactive=interactive,
+        )
+
+        if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
+            push_result = self._sync_custom_tool_sqlite_push(
+                agent,
+                session,
+                local_sqlite_db_path,
+                since=sqlite_push_since,
+            )
+            if push_result.get("status") != "ok":
+                if isinstance(result, dict) and result.get("status") == "error":
+                    result = dict(result)
+                    result["sqlite_sync_error"] = push_result.get("message")
+                    return result
+                return push_result
+
         return result
 
     def mcp_request(

@@ -121,6 +121,7 @@ from ..tools.sqlite_skills import apply_sqlite_skill_updates, seed_sqlite_skills
 from console.agent_chat.signals import broadcast_kanban_changes
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.file_str_replace import execute_file_str_replace
+from ..tools.runtime_execution_context import tool_execution_context
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -1421,14 +1422,16 @@ def _execute_prepared_tool_call(
     close_old_connections()
     tool_started_at = time.monotonic()
     try:
-        result, updated_tools = _execute_tool_call_runtime(
-            agent,
-            tool_name=prepared.tool_name,
-            exec_params=prepared.exec_params,
-            budget_ctx=budget_ctx,
-            eval_run_id=eval_run_id,
-            parallel_safe=parallel_safe,
-        )
+        context_step_id = str(prepared.pending_step.id) if prepared.pending_step is not None else None
+        with tool_execution_context(step_id=context_step_id):
+            result, updated_tools = _execute_tool_call_runtime(
+                agent,
+                tool_name=prepared.tool_name,
+                exec_params=prepared.exec_params,
+                budget_ctx=budget_ctx,
+                eval_run_id=eval_run_id,
+                parallel_safe=parallel_safe,
+            )
     except Exception as exc:
         logger.exception(
             "Agent %s: tool %s failed (call_id=%s)",

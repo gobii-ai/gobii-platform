@@ -7,8 +7,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from api.agent.tools.custom_tools import load_custom_tool_bridge_payload
-from api.agent.tools.tool_runtime import execute_runtime_tool_call
-from api.models import PersistentAgent, PersistentAgentCustomTool
+from api.agent.tools.tracked_runtime import execute_tracked_runtime_tool_call
+from api.models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentStep
 
 logger = logging.getLogger(__name__)
 
@@ -70,9 +70,18 @@ def custom_tool_bridge_execute(request):
             }
         )
 
-    result, _updated_tools = execute_runtime_tool_call(
+    parent_step = None
+    parent_step_id = payload.get("parent_step_id")
+    if isinstance(parent_step_id, str) and parent_step_id.strip():
+        parent_step = PersistentAgentStep.objects.filter(
+            id=parent_step_id.strip(),
+            agent=agent,
+        ).select_related("completion", "eval_run").first()
+
+    result, _updated_tools = execute_tracked_runtime_tool_call(
         agent,
         tool_name=tool_name,
         exec_params=params,
+        parent_step=parent_step,
     )
     return JsonResponse(_json_safe(result), safe=isinstance(result, dict))

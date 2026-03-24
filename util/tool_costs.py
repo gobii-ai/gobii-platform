@@ -18,6 +18,7 @@ _CHANNEL_TOOL_NAMES: Dict[str, str] = {
     "web": "send_chat_message",
 }
 
+
 def clear_tool_credit_cost_cache() -> None:
     """Evict the cached tool credit cost mapping."""
     cache.delete(_TOOL_COST_CACHE_KEY)

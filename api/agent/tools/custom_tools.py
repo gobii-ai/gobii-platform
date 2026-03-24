@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import json
 import logging
 import posixpath
@@ -20,6 +21,8 @@ from api.models import (
     PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
 )
+from api.agent.tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
+from api.agent.tools.runtime_execution_context import get_tool_execution_context
 from api.services.sandbox_compute import (
     SandboxComputeService,
     SandboxComputeUnavailable,
@@ -45,6 +48,7 @@ _BRIDGE_URL_ENV_KEY = "SANDBOX_CUSTOM_TOOL_BRIDGE_URL"
 _TOKEN_ENV_KEY = "SANDBOX_CUSTOM_TOOL_TOKEN"
 _TOOL_NAME_ENV_KEY = "SANDBOX_CUSTOM_TOOL_NAME"
 _SOURCE_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SOURCE_PATH"
+_SQLITE_DB_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"
 
 CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
     f"""
@@ -53,6 +57,7 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
     import inspect
     import json
     import os
+    import sqlite3
     import sys
     import traceback
     import urllib.error
@@ -81,6 +86,7 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
             self.source_path = os.environ.get({_SOURCE_PATH_ENV_KEY!r}, "")
             self.bridge_url = os.environ.get({_BRIDGE_URL_ENV_KEY!r}, "")
             self.token = os.environ.get({_TOKEN_ENV_KEY!r}, "")
+            self.sqlite_db_path = os.environ.get({_SQLITE_DB_PATH_ENV_KEY!r}, "")
 
         def call_tool(self, tool_name, params=None, **kwargs):
             payload = {{
@@ -116,6 +122,20 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
 
     def _json_safe(value):
         return json.loads(json.dumps(value, default=str))
+
+
+    def _checkpoint_sqlite(sqlite_db_path):
+        if not sqlite_db_path or not os.path.exists(sqlite_db_path):
+            return
+        try:
+            conn = sqlite3.connect(sqlite_db_path)
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as exc:
+            print(f"SQLite checkpoint failed: {{exc}}", file=sys.stderr)
 
 
     def _invoke(entry, params, ctx):
@@ -158,7 +178,10 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
             raise RuntimeError(f"Custom tool entrypoint '{{entrypoint_name}}' is not callable")
 
         ctx = ToolContext()
+        if ctx.sqlite_db_path:
+            os.makedirs(os.path.dirname(ctx.sqlite_db_path), exist_ok=True)
         result = _invoke(entry, params, ctx)
+        _checkpoint_sqlite(ctx.sqlite_db_path)
         print(RESULT_MARKER + json.dumps({{"result": _json_safe(result)}}, default=str))
 
 
@@ -351,13 +374,21 @@ def _resolve_bridge_base_url() -> str:
     return f"{scheme}://{domain}"
 
 
-def build_custom_tool_bridge_token(agent: PersistentAgent, tool: PersistentAgentCustomTool) -> str:
+def build_custom_tool_bridge_token(
+    agent: PersistentAgent,
+    tool: PersistentAgentCustomTool,
+    *,
+    parent_step_id: Optional[str] = None,
+) -> str:
+    payload = {
+        "agent_id": str(agent.id),
+        "tool_id": str(tool.id),
+        "tool_name": tool.tool_name,
+    }
+    if parent_step_id:
+        payload["parent_step_id"] = str(parent_step_id)
     return signing.dumps(
-        {
-            "agent_id": str(agent.id),
-            "tool_id": str(tool.id),
-            "tool_name": tool.tool_name,
-        },
+        payload,
         salt=CUSTOM_TOOL_BRIDGE_SALT,
         compress=True,
     )
@@ -377,6 +408,17 @@ def load_custom_tool_bridge_payload(token: str) -> Optional[Dict[str, Any]]:
     return payload
 
 
+@contextlib.contextmanager
+def _custom_tool_sqlite_db(agent: PersistentAgent):
+    existing_db_path = get_sqlite_db_path()
+    if existing_db_path:
+        yield existing_db_path
+        return
+
+    with agent_sqlite_db(str(agent.id)) as db_path:
+        yield db_path
+
+
 def get_create_custom_tool_tool() -> Dict[str, Any]:
     return {
         "type": "function",
@@ -384,9 +426,19 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
             "name": "create_custom_tool",
             "description": (
                 "Create or update a sandboxed Python custom tool for this agent. "
+                "Use custom tools for bulk data processing, repetitive deterministic work, "
+                "or reusable multi-step tool orchestration. "
                 "The source file must be self-contained and define `run(params, ctx)` "
                 "(or `run(ctx, params)`) returning JSON-serializable data. "
-                "Inside the tool, use `ctx.call_tool(name, params)` to invoke other agent tools, including MCP tools. "
+                "Inside the tool, use `ctx.call_tool(name, params)` to invoke other agent tools, "
+                "including MCP tools and other `custom_*` tools. "
+                "`ctx.sqlite_db_path` points at the agent's embedded SQLite file for direct `sqlite3` reads/writes. "
+                "Agent filespace contents are synced into the sandbox before execution. "
+                "For file-heavy work, shell out with Python subprocess using sandbox tools like "
+                "`rg`, `fd`, `jq`, `sqlite3`, `sed`, `awk`, `file`, `tar`, `unzip`, `fzf`, `yq`, and `git` "
+                "instead of iterating through `read_file`. "
+                "Example flow: `fd`/`rg --files` to shortlist files -> `rg -n` or `sed -n` to inspect exact regions -> "
+                "`jq`/`awk`/`sqlite3` to normalize and persist results. "
                 "Provide `source_code` to write the file now, or point at an existing filespace `.py` file. "
                 "The saved tool gets a canonical id like `custom_my_tool` and is enabled by default."
             ),
@@ -594,13 +646,15 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
     if not base_url:
         return {"status": "error", "message": "PUBLIC_SITE_URL or Site domain is required to run custom tools."}
 
+    execution_context = get_tool_execution_context()
+    parent_step_id = execution_context.step_id if execution_context is not None else None
     bridge_url = f"{base_url}{reverse('api:custom-tool-bridge-execute')}"
     env = {
         _SOURCE_ENV_KEY: _encode_env_text(source_text),
         _PARAMS_ENV_KEY: _encode_env_json(params or {}),
         _ENTRYPOINT_ENV_KEY: tool.entrypoint,
         _BRIDGE_URL_ENV_KEY: bridge_url,
-        _TOKEN_ENV_KEY: build_custom_tool_bridge_token(agent, tool),
+        _TOKEN_ENV_KEY: build_custom_tool_bridge_token(agent, tool, parent_step_id=parent_step_id),
         _TOOL_NAME_ENV_KEY: tool.tool_name,
         _SOURCE_PATH_ENV_KEY: tool.source_path,
     }
@@ -610,13 +664,16 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
     except SandboxComputeUnavailable as exc:
         return {"status": "error", "message": str(exc)}
 
-    result = service.run_command(
-        agent,
-        CUSTOM_TOOL_BOOTSTRAP_COMMAND,
-        env=env,
-        timeout=tool.timeout_seconds,
-        interactive=False,
-    )
+    with _custom_tool_sqlite_db(agent) as sqlite_db_path:
+        result = service.run_custom_tool_command(
+            agent,
+            CUSTOM_TOOL_BOOTSTRAP_COMMAND,
+            env=env,
+            timeout=tool.timeout_seconds,
+            interactive=False,
+            local_sqlite_db_path=sqlite_db_path,
+            sqlite_env_key=_SQLITE_DB_PATH_ENV_KEY,
+        )
     if not isinstance(result, dict):
         return {"status": "error", "message": "Custom tool execution returned an invalid sandbox response."}
     if result.get("status") == "error":
@@ -673,13 +730,23 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
     summary = (
         f"Custom tools: {total} saved, {enabled} enabled. "
         "Discoverable via search_tools; share the enabled-tool limit. "
-        "Use custom tools when you need programmatic logic (loops, conditionals, error handling, data transforms) "
-        "around tool calls, or to compose multiple tools into one reusable operation. "
+        "Use custom tools when you need programmatic logic (loops, conditionals, error handling, data transforms), "
+        "direct embedded SQLite access, bulk data processing, repetitive deterministic work, "
+        "or reusable orchestration around tool calls. "
         "For simple sequential tool use, call tools directly instead. "
         "Dev loop: create_custom_tool(source_code=...) -> invoke the custom_* tool -> inspect result/error -> "
         "file_str_replace to patch source -> re-invoke. "
         "Source must define run(params, ctx) returning JSON-serializable data. "
-        "ctx.call_tool(name, params) calls any agent tool including MCP and returns the result dict. "
+        "ctx.call_tool(name, params) can call any available agent tool, including MCP, builtins, and other custom_* tools, "
+        "and returns the result dict. "
+        "ctx.sqlite_db_path points at the embedded SQLite DB for direct sqlite3 reads/writes. "
+        "Agent filespace contents are synced into the sandbox before each run. "
+        "The sandbox includes rg, fd, jq, sqlite3, sed, awk, file, tar, unzip, fzf, yq, and git; "
+        "use them directly via subprocess for file-heavy work instead of repeated read_file calls. "
+        "Micro trajectory 1: fd/rg --files to inventory candidate files -> rg -n or sed -n to inspect exact matches -> "
+        "return a compact summary or write a derived artifact. "
+        "Micro trajectory 2: rg -l or fd to collect many JSON/CSV/log files -> jq/awk to normalize rows -> "
+        "load them into sqlite3 or write an export under /exports/. "
         "Example: result = ctx.call_tool('http_request', {'method': 'GET', 'url': url}). "
         "Once stable, save the workflow as a skill referencing the canonical custom_* tool id."
     )
