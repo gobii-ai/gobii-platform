@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Cpu } from 'lucide-react'
+import { ChevronDown, ChevronUp, Cpu } from 'lucide-react'
 
 import type { AuditCompletionEvent, PromptArchive } from '../../types/agentAudit'
 import { EventHeader } from './EventHeader'
@@ -20,6 +20,38 @@ type CompletionCardProps = {
   onLoadPrompt: (archiveId: string) => void
   collapsed?: boolean
   onToggle?: () => void
+}
+
+function PromptSection({ label, text, onCopy }: { label: string; text: string; onCopy: (text: string) => void }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-white/90">
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left text-xs font-semibold text-slate-700"
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+        >
+          {expanded ? <ChevronUp className="h-4 w-4 text-slate-500" aria-hidden /> : <ChevronDown className="h-4 w-4 text-slate-500" aria-hidden />}
+          <span>{label}</span>
+        </button>
+        <button
+          type="button"
+          className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+          onClick={() => onCopy(text)}
+        >
+          Copy
+        </button>
+      </div>
+      {expanded ? (
+        <pre className="whitespace-pre-wrap break-words border-t border-slate-200/80 px-3 py-3 text-[12px] text-slate-800">
+          {text}
+        </pre>
+      ) : null}
+    </div>
+  )
 }
 
 export function CompletionCard({
@@ -136,38 +168,10 @@ export function CompletionCard({
               {expanded && promptPayload ? (
                 <div className="mt-2 space-y-2">
                   {systemPrompt ? (
-                    <div>
-                      <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
-                        <span>System Prompt</span>
-                        <button
-                          type="button"
-                          className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-                          onClick={() => copyText(systemPrompt)}
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
-                        {systemPrompt}
-                      </pre>
-                    </div>
+                    <PromptSection label="System Prompt" text={systemPrompt} onCopy={copyText} />
                   ) : null}
                   {userPrompt ? (
-                    <div>
-                      <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
-                        <span>User Prompt</span>
-                        <button
-                          type="button"
-                          className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-                          onClick={() => copyText(userPrompt)}
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
-                        {userPrompt}
-                      </pre>
-                    </div>
+                    <PromptSection label="User Prompt" text={userPrompt} onCopy={copyText} />
                   ) : null}
                 </div>
               ) : null}

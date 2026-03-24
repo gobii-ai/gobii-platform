@@ -2,15 +2,14 @@ import { useMemo, useState } from 'react'
 import { MessageCircle, StepForward, Wrench } from 'lucide-react'
 
 import type { AuditMessageEvent, AuditStepEvent, AuditToolCallEvent } from '../../types/agentAudit'
-import { StructuredDataTable } from '../common/StructuredDataTable'
 import { MessageContent } from '../agentChat/MessageContent'
-import { normalizeStructuredValue } from '../agentChat/toolDetails'
 import { EventHeader } from './EventHeader'
-import { IconCircle, renderHtmlOrText } from './eventPrimitives'
+import { AuditJsonValue } from './AuditJsonValue'
+import { IconCircle } from './eventPrimitives'
 
 export function ToolCallRow({
   tool,
-  collapsed = false,
+  collapsed,
   onToggle,
 }: {
   tool: AuditToolCallEvent
@@ -37,43 +36,10 @@ export function ToolCallRow({
     return `${(tool.execution_duration_ms / 1000).toFixed(2)}s`
   }, [tool.execution_duration_ms])
 
-  const parsedParameters = useMemo(() => {
-    if (tool.parameters === null || tool.parameters === undefined) return null
-    try {
-      return normalizeStructuredValue(tool.parameters, { depth: 0, maxDepth: 6, seen: new WeakSet<object>() })
-    } catch {
-      return tool.parameters
-    }
-  }, [tool.parameters])
-
   const parsedResult = useMemo(() => {
     if (tool.result === null || tool.result === undefined) return null
-    let value: unknown = tool.result
-    if (typeof value === 'string') {
-      try {
-        const maybeJson = JSON.parse(value)
-        value = maybeJson
-      } catch {
-        // leave as string
-      }
-    }
-    try {
-      return normalizeStructuredValue(value, { depth: 0, maxDepth: 6, seen: new WeakSet<object>() })
-    } catch {
-      return value
-    }
+    return tool.result
   }, [tool.result])
-
-  const renderValue = (value: unknown) => {
-    if (value === null || value === undefined) return null
-    if (typeof value === 'string') {
-      return renderHtmlOrText(value, {
-        htmlClassName: 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
-        textClassName: 'rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800',
-      })
-    }
-    return <StructuredDataTable value={value} />
-  }
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
@@ -105,16 +71,16 @@ export function ToolCallRow({
       {!isExpanded && resultPreview ? (
         <div className="mt-2 text-sm text-slate-700">{resultPreview}</div>
       ) : null}
-      {isExpanded && parsedParameters ? (
+      {isExpanded && tool.parameters !== null && tool.parameters !== undefined ? (
         <div className="mt-2 space-y-1">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Parameters</div>
-          {renderValue(parsedParameters)}
+          <AuditJsonValue value={tool.parameters} />
         </div>
       ) : null}
       {isExpanded && parsedResult ? (
         <div className="mt-2 space-y-1">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Result</div>
-          {renderValue(parsedResult)}
+          <AuditJsonValue value={parsedResult} />
         </div>
       ) : null}
     </div>
