@@ -36,11 +36,6 @@ export function ToolCallRow({
     return `${(tool.execution_duration_ms / 1000).toFixed(2)}s`
   }, [tool.execution_duration_ms])
 
-  const parsedResult = useMemo(() => {
-    if (tool.result === null || tool.result === undefined) return null
-    return tool.result
-  }, [tool.result])
-
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
       <EventHeader
@@ -77,10 +72,10 @@ export function ToolCallRow({
           <AuditJsonValue value={tool.parameters} />
         </div>
       ) : null}
-      {isExpanded && parsedResult ? (
+      {isExpanded && tool.result !== null && tool.result !== undefined ? (
         <div className="mt-2 space-y-1">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Result</div>
-          <AuditJsonValue value={parsedResult} />
+          <AuditJsonValue value={tool.result} />
         </div>
       ) : null}
     </div>

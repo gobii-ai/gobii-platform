@@ -1,4 +1,5 @@
 import ReactJsonView from '@microlink/react-json-view'
+import { useMemo } from 'react'
 
 import { createNormalizeContext, normalizeStructuredValue, tryParseJson } from '../agentChat/toolDetails/normalize'
 import { isRecord } from '../../util/objectUtils'
@@ -29,7 +30,7 @@ function canUseJsonViewer(value: unknown): value is Record<string, unknown> | un
 }
 
 export function AuditJsonValue({ value }: AuditJsonValueProps) {
-  const normalized = normalizeJsonLikeValue(value)
+  const normalized = useMemo(() => normalizeJsonLikeValue(value), [value])
 
   if (normalized === null || normalized === undefined) {
     return null
