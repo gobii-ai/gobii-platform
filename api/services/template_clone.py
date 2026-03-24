@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.text import slugify
 
+from api.agent.tools.custom_tools import CUSTOM_TOOL_PREFIX
 from api.agent.core.llm_config import get_llm_config_with_failover, get_required_temperature_for_model
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.schedule_parser import ScheduleParser
@@ -135,6 +136,7 @@ class TemplateCloneService:
             PersistentAgentEnabledTool.objects.filter(agent=agent)
             .values_list("tool_full_name", flat=True)
         )
+        enabled_tools = [tool_name for tool_name in enabled_tools if not tool_name.startswith(CUSTOM_TOOL_PREFIX)]
         schedule_snapshot = agent.schedule_snapshot or agent.schedule or ""
         preferred_channel = "email"
         preferred_endpoint = getattr(agent, "preferred_contact_endpoint", None)

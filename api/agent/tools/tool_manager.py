@@ -1,8 +1,9 @@
 """
 Generic tool enable/disable management for persistent agents.
 
-MCP currently provides the only dynamic tool source, but these helpers live outside
-the MCP manager so additional providers can plug into the same persistence logic later.
+Dynamic tools can come from MCP, built-ins, or agent-authored custom tools.
+These helpers live outside the MCP manager so multiple providers can share the
+same persistence logic.
 """
 
 import logging
@@ -14,7 +15,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 from django.conf import settings
 from django.db.models import F
 
-from ...models import PersistentAgent, PersistentAgentEnabledTool
+from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool
 from ...services.sandbox_compute import (
     SandboxComputeService,
     SandboxComputeUnavailable,
@@ -35,6 +36,7 @@ from .create_image import (
     execute_create_image,
     is_image_generation_available_for_agent,
 )
+from .custom_tools import execute_custom_tool, is_custom_tools_available_for_agent
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .autotool_heuristics import find_matching_tools
@@ -281,6 +283,27 @@ class ToolCatalogEntry:
     server_config_id: Optional[str] = None
 
 
+def get_available_custom_tool_entries(
+    agent: Optional[PersistentAgent],
+) -> Dict[str, ToolCatalogEntry]:
+    """Return custom tool catalog entries available to the provided agent."""
+    if not is_custom_tools_available_for_agent(agent):
+        return {}
+
+    catalog: Dict[str, ToolCatalogEntry] = {}
+    for tool in PersistentAgentCustomTool.objects.filter(agent=agent).order_by("tool_name"):
+        catalog[tool.tool_name] = ToolCatalogEntry(
+            provider="custom",
+            full_name=tool.tool_name,
+            description=tool.description,
+            parameters=tool.parameters_schema or {"type": "object", "properties": {}},
+            tool_server="custom",
+            tool_name=tool.tool_name,
+            server_config_id=None,
+        )
+    return catalog
+
+
 def _get_manager() -> MCPToolManager:
     """Ensure the global MCP manager is ready before use."""
     manager = get_mcp_manager()
@@ -340,6 +363,7 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
         )
 
     catalog.update(get_available_builtin_tool_entries(agent))
+    catalog.update(get_available_custom_tool_entries(agent))
 
     return catalog
 
@@ -810,9 +834,13 @@ def ensure_default_tools_enabled(
 
 
 def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]:
-    """Return tool definitions for all enabled tools (MCP + built-ins)."""
+    """Return tool definitions for all enabled tools (MCP, built-ins, custom)."""
     manager = _get_manager()
     definitions = manager.get_enabled_tools_definitions(agent)
+    enabled_names = list(
+        PersistentAgentEnabledTool.objects.filter(agent=agent)
+        .values_list("tool_full_name", flat=True)
+    )
 
     enabled_builtin_rows = PersistentAgentEnabledTool.objects.filter(
         agent=agent,
@@ -823,6 +851,26 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         for entry in definitions
         if isinstance(entry, dict)
     }
+
+    if is_custom_tools_available_for_agent(agent):
+        enabled_custom_tools = PersistentAgentCustomTool.objects.filter(
+            agent=agent,
+            tool_name__in=enabled_names,
+        ).order_by("tool_name")
+        for tool in enabled_custom_tools:
+            if tool.tool_name in existing_names:
+                continue
+            definitions.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.tool_name,
+                        "description": tool.description,
+                        "parameters": tool.parameters_schema or {"type": "object", "properties": {}},
+                    },
+                }
+            )
+            existing_names.add(tool.tool_name)
 
     for row in enabled_builtin_rows:
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
@@ -1101,6 +1149,39 @@ def execute_enabled_tool(
 
         if executor:
             return executor(agent, params)
+
+    if entry.provider == "custom":
+        try:
+            row = PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name=resolved_name,
+            ).first()
+        except Exception:
+            row = None
+            logger.exception("Failed to load enabled entry for custom tool %s", resolved_name)
+
+        if row:
+            try:
+                row.last_used_at = datetime.now(UTC)
+                row.usage_count = (row.usage_count or 0) + 1
+                update_fields = ["last_used_at", "usage_count"]
+                metadata_updates = _apply_tool_metadata(row, entry)
+                if metadata_updates:
+                    update_fields.extend(metadata_updates)
+                row.save(update_fields=list(dict.fromkeys(update_fields)))
+            except Exception:
+                logger.exception("Failed to record usage for custom tool %s", resolved_name)
+
+        custom_tool = PersistentAgentCustomTool.objects.filter(
+            agent=agent,
+            tool_name=resolved_name,
+        ).first()
+        if not custom_tool:
+            return {
+                "status": "error",
+                "message": f"Custom tool '{resolved_name}' is not available for this agent.",
+            }
+        return execute_custom_tool(agent, custom_tool, params)
 
     return {"status": "error", "message": f"Tool '{resolved_name}' has no execution handler"}
 
