@@ -14,19 +14,19 @@ from api.services.sandbox_compute import (
     SandboxComputeBackend,
     SandboxComputeUnavailable,
     SandboxSessionUpdate,
-    _proxy_env_values,
     _requires_agent_pod_discovery,
 )
 from api.services.system_settings import (
     get_sandbox_compute_pod_image,
-    get_sandbox_compute_require_proxy,
     get_sandbox_egress_proxy_pod_image,
+    get_sandbox_transparent_proxy_pod_image,
 )
 
 logger = logging.getLogger(__name__)
 
 _SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 _SANDBOX_SERVICE_PORT = 8080
+_TRANSPARENT_PROXY_UID = 1501
 
 
 class KubernetesApiError(RuntimeError):
@@ -97,6 +97,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._pod_configmap = getattr(settings, "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME", "gobii-sandbox-common-env")
         self._pod_secret = getattr(settings, "SANDBOX_COMPUTE_POD_SECRET_NAME", "gobii-sandbox-env")
         self._egress_proxy_image = get_sandbox_egress_proxy_pod_image()
+        self._transparent_proxy_image = get_sandbox_transparent_proxy_pod_image()
+        self._transparent_proxy_port = int(getattr(settings, "SANDBOX_TRANSPARENT_PROXY_PORT", 15001))
         self._egress_proxy_port = int(getattr(settings, "SANDBOX_EGRESS_PROXY_POD_PORT", 3128))
         self._egress_proxy_service_port = int(
             getattr(settings, "SANDBOX_EGRESS_PROXY_SERVICE_PORT", self._egress_proxy_port)
@@ -105,7 +107,6 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._egress_proxy_service_account = (
             getattr(settings, "SANDBOX_EGRESS_PROXY_POD_SERVICE_ACCOUNT", "") or ""
         )
-        self._no_proxy = getattr(settings, "SANDBOX_COMPUTE_NO_PROXY", "") or ""
         self._pod_ready_timeout = int(getattr(settings, "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS", 60))
         self._pvc_size = getattr(settings, "SANDBOX_COMPUTE_PVC_SIZE", "1Gi")
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
@@ -126,22 +127,17 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pod_name = _pod_name(agent.id)
         sandbox_service_name = _sandbox_service_name(agent.id)
         pvc_name = _pvc_name(agent.id)
-        proxy_url = None
-        no_proxy = None
+        egress_proxy_service_name = None
         if session.proxy_server:
             if not self._egress_proxy_image:
                 raise SandboxComputeUnavailable(
                     "SANDBOX_EGRESS_PROXY_POD_IMAGE is required to use proxy-backed sandbox pods."
                 )
-            egress_service_name = self._ensure_egress_proxy(agent, session.proxy_server)
-            proxy_url = f"http://{egress_service_name}:{self._egress_proxy_service_port}"
-            no_proxy = _merge_no_proxy_values(
-                self._no_proxy,
-                "localhost",
-                "127.0.0.1",
-                ".svc",
-                ".cluster.local",
-            )
+            if not self._transparent_proxy_image:
+                raise SandboxComputeUnavailable(
+                    "SANDBOX_TRANSPARENT_PROXY_POD_IMAGE is required to transparently route sandbox egress."
+                )
+            egress_proxy_service_name = self._ensure_egress_proxy(agent, session.proxy_server)
 
         snapshot_name = session.workspace_snapshot.k8s_snapshot_name if session.workspace_snapshot else None
         if snapshot_name and not _resource_exists(self._client, _snapshot_path(self._namespace, snapshot_name)):
@@ -159,8 +155,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                     pod_name,
                     pvc_name,
                     agent_id=str(agent.id),
-                    proxy_url=proxy_url,
-                    no_proxy=no_proxy,
+                    egress_proxy_service_name=egress_proxy_service_name,
                 )
             else:
                 phase = (pod.get("status") or {}).get("phase")
@@ -170,8 +165,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                         pod_name,
                         pvc_name,
                         agent_id=str(agent.id),
-                        proxy_url=proxy_url,
-                        no_proxy=no_proxy,
+                        egress_proxy_service_name=egress_proxy_service_name,
                     )
         except KubernetesApiError as exc:
             raise SandboxComputeUnavailable(f"Kubernetes scheduler failed: {exc}") from exc
@@ -452,6 +446,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         service_name = _egress_proxy_service_name(agent.id)
 
         try:
+            self._create_agent_network_policies(agent_id=str(agent.id))
             service = self._get_service(service_name)
             if not service:
                 self._create_egress_proxy_service(service_name, agent_id=str(agent.id))
@@ -483,8 +478,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pvc_name: str,
         *,
         agent_id: str,
-        proxy_url: Optional[str],
-        no_proxy: Optional[str],
+        egress_proxy_service_name: Optional[str],
     ) -> None:
         body = _build_pod_manifest(
             pod_name=pod_name,
@@ -496,8 +490,10 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             configmap_name=self._pod_configmap,
             secret_name=self._pod_secret,
             agent_id=agent_id,
-            proxy_url=proxy_url,
-            no_proxy=no_proxy,
+            transparent_proxy_image=self._transparent_proxy_image if egress_proxy_service_name else None,
+            transparent_proxy_port=self._transparent_proxy_port if egress_proxy_service_name else None,
+            egress_proxy_service_name=egress_proxy_service_name,
+            egress_proxy_service_port=self._egress_proxy_service_port if egress_proxy_service_name else None,
         )
         try:
             self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
@@ -550,6 +546,30 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             if exc.status_code != 409:
                 raise
 
+    def _create_agent_network_policies(self, *, agent_id: str) -> None:
+        manifests = (
+            _build_agent_compute_network_policy_manifest(
+                namespace=self._namespace,
+                agent_id=agent_id,
+                egress_proxy_port=self._egress_proxy_port,
+            ),
+            _build_agent_proxy_network_policy_manifest(
+                namespace=self._namespace,
+                agent_id=agent_id,
+                egress_proxy_port=self._egress_proxy_port,
+            ),
+        )
+        for body in manifests:
+            try:
+                self._client.request_json(
+                    "POST",
+                    _network_policy_collection_path(self._namespace),
+                    json_body=body,
+                )
+            except KubernetesApiError as exc:
+                if exc.status_code != 409:
+                    raise
+
     def _delete_pod(self, pod_name: str) -> None:
         try:
             self._client.request_json("DELETE", _pod_path(self._namespace, pod_name), allow_404=True)
@@ -586,10 +606,25 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pod_name = _egress_proxy_pod_name(agent.id)
         service_name = _egress_proxy_service_name(agent.id)
         self._delete_pod(pod_name)
+        self._delete_agent_network_policies(agent_id=str(agent.id))
         try:
             self._client.request_json("DELETE", _service_path(self._namespace, service_name), allow_404=True)
         except KubernetesApiError as exc:
             logger.warning("Failed to delete egress proxy service %s: %s", service_name, exc)
+
+    def _delete_agent_network_policies(self, *, agent_id: str) -> None:
+        for policy_name in (
+            _agent_compute_network_policy_name(agent_id),
+            _agent_proxy_network_policy_name(agent_id),
+        ):
+            try:
+                self._client.request_json(
+                    "DELETE",
+                    _network_policy_path(self._namespace, policy_name),
+                    allow_404=True,
+                )
+            except KubernetesApiError as exc:
+                logger.warning("Failed to delete network policy %s: %s", policy_name, exc)
 
     def _wait_for_pod_ready(self, pod_name: str) -> bool:
         started_at = time.monotonic()
@@ -766,6 +801,14 @@ def _sandbox_service_url(namespace: str, service_name: str, path: str) -> str:
     return f"http://{service_name}.{namespace}.svc.cluster.local:{_SANDBOX_SERVICE_PORT}{suffix}"
 
 
+def _network_policy_collection_path(namespace: str) -> str:
+    return f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies"
+
+
+def _network_policy_path(namespace: str, policy_name: str) -> str:
+    return f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies/{policy_name}"
+
+
 def _snapshot_collection_path(namespace: str) -> str:
     return f"/apis/snapshot.storage.k8s.io/v1/namespaces/{namespace}/volumesnapshots"
 
@@ -819,11 +862,12 @@ def _build_pod_manifest(
     configmap_name: str,
     secret_name: str,
     agent_id: str,
-    proxy_url: Optional[str],
-    no_proxy: Optional[str],
+    transparent_proxy_image: Optional[str],
+    transparent_proxy_port: Optional[int],
+    egress_proxy_service_name: Optional[str],
+    egress_proxy_service_port: Optional[int],
 ) -> Dict[str, Any]:
     env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
-    env.extend(_build_proxy_env(proxy_url=proxy_url, no_proxy=no_proxy))
 
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
@@ -865,6 +909,9 @@ def _build_pod_manifest(
                 "component": "sandbox-agent",
                 "agent_id": agent_id,
             },
+            "annotations": {
+                "sidecar.istio.io/inject": "false",
+            },
         },
         "spec": {
             "automountServiceAccountToken": False,
@@ -885,13 +932,88 @@ def _build_pod_manifest(
             ],
         },
     }
+    if transparent_proxy_image and transparent_proxy_port and egress_proxy_service_name and egress_proxy_service_port:
+        manifest["spec"]["initContainers"] = [
+            _build_transparent_proxy_init_container(
+                image=transparent_proxy_image,
+                transparent_proxy_port=transparent_proxy_port,
+            )
+        ]
+        manifest["spec"]["containers"].append(
+            _build_transparent_proxy_sidecar_container(
+                image=transparent_proxy_image,
+                transparent_proxy_port=transparent_proxy_port,
+                upstream_proxy_host=egress_proxy_service_name,
+                upstream_proxy_port=egress_proxy_service_port,
+            )
+        )
     if service_account:
         manifest["spec"]["serviceAccountName"] = service_account
     return manifest
 
 
-def _build_proxy_env(*, proxy_url: Optional[str], no_proxy: Optional[str]) -> list[Dict[str, str]]:
-    return [{"name": key, "value": value} for key, value in _proxy_env_values(proxy_url, no_proxy).items()]
+def _build_transparent_proxy_init_container(
+    *,
+    image: str,
+    transparent_proxy_port: int,
+) -> Dict[str, Any]:
+    return {
+        "name": "sandbox-traffic-init",
+        "image": image,
+        "imagePullPolicy": "IfNotPresent",
+        "command": ["/configure-iptables.sh"],
+        "env": [
+            {"name": "TRANSPARENT_PROXY_PORT", "value": str(transparent_proxy_port)},
+            {"name": "TRANSPARENT_PROXY_UID", "value": str(_TRANSPARENT_PROXY_UID)},
+        ],
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "runAsUser": 0,
+            "runAsGroup": 0,
+            "capabilities": {"drop": ["ALL"], "add": ["NET_ADMIN"]},
+        },
+    }
+
+
+def _build_transparent_proxy_sidecar_container(
+    *,
+    image: str,
+    transparent_proxy_port: int,
+    upstream_proxy_host: str,
+    upstream_proxy_port: int,
+) -> Dict[str, Any]:
+    return {
+        "name": "sandbox-traffic-proxy",
+        "image": image,
+        "imagePullPolicy": "IfNotPresent",
+        "command": ["/entrypoint.sh"],
+        "ports": [{"containerPort": transparent_proxy_port}],
+        "env": [
+            {"name": "TRANSPARENT_PROXY_PORT", "value": str(transparent_proxy_port)},
+            {"name": "TRANSPARENT_PROXY_UID", "value": str(_TRANSPARENT_PROXY_UID)},
+            {"name": "UPSTREAM_PROXY_HOST", "value": upstream_proxy_host},
+            {"name": "UPSTREAM_PROXY_PORT", "value": str(upstream_proxy_port)},
+        ],
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "runAsNonRoot": True,
+            "runAsUser": _TRANSPARENT_PROXY_UID,
+            "runAsGroup": _TRANSPARENT_PROXY_UID,
+            "capabilities": {"drop": ["ALL"]},
+        },
+        "readinessProbe": {
+            "tcpSocket": {"port": transparent_proxy_port},
+            "initialDelaySeconds": 3,
+            "periodSeconds": 5,
+            "failureThreshold": 3,
+        },
+        "livenessProbe": {
+            "tcpSocket": {"port": transparent_proxy_port},
+            "initialDelaySeconds": 5,
+            "periodSeconds": 10,
+            "failureThreshold": 3,
+        },
+    }
 
 
 def _build_egress_proxy_pod_manifest(
@@ -978,6 +1100,9 @@ def _build_egress_proxy_pod_manifest(
             "name": pod_name,
             "namespace": namespace,
             "labels": labels,
+            "annotations": {
+                "sidecar.istio.io/inject": "false",
+            },
         },
         "spec": spec,
     }
@@ -1066,14 +1191,171 @@ def _build_sandbox_service_manifest(
     }
 
 
-def _merge_no_proxy_values(*values: str) -> str:
-    parts: list[str] = []
-    for value in values:
-        if not value:
-            continue
-        for item in value.split(","):
-            cleaned = item.strip()
-            if not cleaned or cleaned in parts:
-                continue
-            parts.append(cleaned)
-    return ",".join(parts)
+def _agent_compute_network_policy_name(agent_id: str) -> str:
+    return _slugify(f"sandbox-agent-egress-{agent_id}")
+
+
+def _agent_proxy_network_policy_name(agent_id: str) -> str:
+    return _slugify(f"sandbox-egress-access-{agent_id}")
+
+
+def _build_agent_compute_network_policy_manifest(
+    *,
+    namespace: str,
+    agent_id: str,
+    egress_proxy_port: int,
+) -> Dict[str, Any]:
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": _agent_compute_network_policy_name(agent_id),
+            "namespace": namespace,
+            "labels": {
+                "app": "sandbox-compute",
+                "component": "sandbox-agent",
+                "agent_id": agent_id,
+            },
+        },
+        "spec": {
+            "podSelector": {
+                "matchLabels": {
+                    "app": "sandbox-compute",
+                    "component": "sandbox-agent",
+                    "agent_id": agent_id,
+                }
+            },
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "podSelector": {
+                                "matchLabels": {
+                                    "app": "sandbox-egress-proxy",
+                                    "agent_id": agent_id,
+                                }
+                            }
+                        }
+                    ],
+                    "ports": [
+                        {
+                            "protocol": "TCP",
+                            "port": egress_proxy_port,
+                        }
+                    ],
+                },
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {
+                                    "kubernetes.io/metadata.name": "kube-system",
+                                }
+                            },
+                            "podSelector": {
+                                "matchExpressions": [
+                                    {
+                                        "key": "k8s-app",
+                                        "operator": "In",
+                                        "values": ["kube-dns", "coredns"],
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                    "ports": [
+                        {"protocol": "UDP", "port": 53},
+                        {"protocol": "TCP", "port": 53},
+                    ],
+                },
+            ],
+        },
+    }
+
+
+def _build_agent_proxy_network_policy_manifest(
+    *,
+    namespace: str,
+    agent_id: str,
+    egress_proxy_port: int,
+) -> Dict[str, Any]:
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": _agent_proxy_network_policy_name(agent_id),
+            "namespace": namespace,
+            "labels": {
+                "app": "sandbox-egress-proxy",
+                "component": "sandbox-egress",
+                "agent_id": agent_id,
+            },
+        },
+        "spec": {
+            "podSelector": {
+                "matchLabels": {
+                    "app": "sandbox-egress-proxy",
+                    "agent_id": agent_id,
+                }
+            },
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
+                {
+                    "from": [
+                        {
+                            "podSelector": {
+                                "matchLabels": {
+                                    "app": "sandbox-compute",
+                                    "component": "sandbox-agent",
+                                    "agent_id": agent_id,
+                                }
+                            }
+                        }
+                    ],
+                    "ports": [
+                        {
+                            "protocol": "TCP",
+                            "port": egress_proxy_port,
+                        }
+                    ],
+                }
+            ],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {
+                                "matchLabels": {
+                                    "kubernetes.io/metadata.name": "kube-system",
+                                }
+                            },
+                            "podSelector": {
+                                "matchExpressions": [
+                                    {
+                                        "key": "k8s-app",
+                                        "operator": "In",
+                                        "values": ["kube-dns", "coredns"],
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                    "ports": [
+                        {"protocol": "UDP", "port": 53},
+                        {"protocol": "TCP", "port": 53},
+                    ],
+                },
+                {
+                    "to": [
+                        {
+                            "ipBlock": {
+                                "cidr": "0.0.0.0/0",
+                            }
+                        }
+                    ]
+                },
+            ],
+        },
+    }

@@ -507,9 +507,6 @@ class HttpSandboxBackend(SandboxComputeBackend):
 
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         payload = {"agent_id": str(agent.id)}
-        proxy_env = _proxy_env_for_session(session)
-        if proxy_env:
-            payload["proxy_env"] = proxy_env
         response = self._post("sandbox/compute/deploy_or_resume", payload)
         return _session_update_from_response(response)
 
@@ -536,9 +533,6 @@ class HttpSandboxBackend(SandboxComputeBackend):
         }
         if trusted_env_keys:
             payload["trusted_env_keys"] = [str(key) for key in trusted_env_keys if str(key)]
-        proxy_env = _proxy_env_for_session(session)
-        if proxy_env:
-            payload["proxy_env"] = proxy_env
         request_timeout = max(_http_timeout_seconds(), timeout_value + 10)
         return self._post("sandbox/compute/run_command", payload, timeout=request_timeout)
 
@@ -561,9 +555,6 @@ class HttpSandboxBackend(SandboxComputeBackend):
         }
         if server_payload:
             payload["server"] = server_payload
-        proxy_env = _proxy_env_for_session(session)
-        if proxy_env:
-            payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/mcp_request", payload, timeout=_mcp_request_timeout_seconds())
 
     def tool_request(
@@ -590,9 +581,6 @@ class HttpSandboxBackend(SandboxComputeBackend):
             "tool_name": tool_name,
             "params": params_payload,
         }
-        proxy_env = _proxy_env_for_session(session)
-        if proxy_env:
-            payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/tool_request", payload, timeout=request_timeout)
 
     def sync_filespace(
@@ -605,9 +593,6 @@ class HttpSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         payload = payload or {}
         payload.update({"agent_id": str(agent.id), "direction": direction})
-        proxy_env = _proxy_env_for_session(session)
-        if proxy_env:
-            payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/sync_filespace", payload)
 
     def terminate(
@@ -619,9 +604,6 @@ class HttpSandboxBackend(SandboxComputeBackend):
         delete_workspace: bool = False,
     ) -> SandboxSessionUpdate:
         payload = {"agent_id": str(agent.id), "reason": reason, "delete_workspace": delete_workspace}
-        proxy_env = _proxy_env_for_session(session)
-        if proxy_env:
-            payload["proxy_env"] = proxy_env
         response = self._post("sandbox/compute/terminate", payload)
         return _session_update_from_response(response)
 
@@ -637,10 +619,6 @@ class HttpSandboxBackend(SandboxComputeBackend):
         payload = {"server_id": server_config_id, "reason": reason}
         if agent is not None:
             payload["agent_id"] = str(agent.id)
-        if session is not None:
-            proxy_env = _proxy_env_for_session(session)
-            if proxy_env:
-                payload["proxy_env"] = proxy_env
         if server_payload:
             payload["server"] = server_payload
         return self._post("sandbox/compute/discover_mcp_tools", payload, timeout=_discovery_timeout_seconds())
@@ -837,7 +815,6 @@ def _proxy_env_values(proxy_url: Optional[str], no_proxy: Optional[str]) -> Dict
         for key in _NO_PROXY_ENV_KEYS:
             env[key] = no_proxy_value
     return env
-
 
 def _build_mcp_server_payload(
     config_id: str,

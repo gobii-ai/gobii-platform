@@ -143,6 +143,15 @@ SYSTEM_SETTING_DEFINITIONS = (
         category="Sandbox",
     ),
     SystemSettingDefinition(
+        key="SANDBOX_TRANSPARENT_PROXY_POD_IMAGE",
+        label="Sandbox transparent proxy image",
+        description="Container image used for in-pod transparent egress capture.",
+        value_type=VALUE_TYPE_STRING,
+        env_var="SANDBOX_TRANSPARENT_PROXY_POD_IMAGE",
+        default_getter=lambda: settings.SANDBOX_TRANSPARENT_PROXY_POD_IMAGE,
+        category="Sandbox",
+    ),
+    SystemSettingDefinition(
         key="SANDBOX_COMPUTE_REQUIRE_PROXY",
         label="Require sandbox proxy",
         description="Require a configured proxy for sandbox compute sessions.",
@@ -495,6 +504,10 @@ def get_sandbox_compute_pod_image() -> str:
 
 def get_sandbox_egress_proxy_pod_image() -> str:
     return str(get_setting_value("SANDBOX_EGRESS_PROXY_POD_IMAGE"))
+
+
+def get_sandbox_transparent_proxy_pod_image() -> str:
+    return str(get_setting_value("SANDBOX_TRANSPARENT_PROXY_POD_IMAGE"))
 
 
 def get_sandbox_compute_require_proxy() -> bool:

@@ -6,8 +6,11 @@ from django.test import SimpleTestCase, tag
 from api.services.sandbox_kubernetes import (
     _build_sandbox_service_manifest,
     KubernetesSandboxBackend,
+    _agent_compute_network_policy_name,
+    _agent_proxy_network_policy_name,
+    _build_agent_compute_network_policy_manifest,
+    _build_agent_proxy_network_policy_manifest,
     _build_egress_proxy_pod_manifest,
-    _build_proxy_env,
     _build_pod_manifest,
     _pod_name,
 )
@@ -18,7 +21,6 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
     def _backend(self) -> KubernetesSandboxBackend:
         backend = object.__new__(KubernetesSandboxBackend)
         backend._client = Mock()
-        backend._no_proxy = ""
         backend._namespace = "default"
         backend._compute_api_token = "supervisor-token"
         backend._pod_image = "ghcr.io/example/sandbox:latest"
@@ -27,6 +29,10 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._pod_configmap = "sandbox-config"
         backend._pod_secret = "sandbox-secret"
         backend._proxy_timeout = 30
+        backend._egress_proxy_port = 3128
+        backend._egress_proxy_service_port = 3128
+        backend._transparent_proxy_image = "ghcr.io/example/traffic-proxy:latest"
+        backend._transparent_proxy_port = 15001
         return backend
 
     def test_stdio_discovery_requires_agent_session(self):
@@ -205,7 +211,6 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
     def test_deploy_or_resume_keeps_sandbox_service_separate_from_egress_service(self):
         backend = self._backend()
         backend._egress_proxy_image = "ghcr.io/example/egress:latest"
-        backend._egress_proxy_service_port = 3128
         agent = SimpleNamespace(id="agent-proxy")
         session = SimpleNamespace(
             proxy_server=SimpleNamespace(id="proxy-1"),
@@ -228,8 +233,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             "sandbox-agent-agent-proxy",
             "sandbox-workspace-agent-proxy",
             agent_id="agent-proxy",
-            proxy_url="http://sandbox-egress-agent-proxy:3128",
-            no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
+            egress_proxy_service_name="sandbox-egress-agent-proxy",
         )
 
 
@@ -260,12 +264,15 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             configmap_name="sandbox-config",
             secret_name="sandbox-secret",
             agent_id="agent-1",
-            proxy_url=None,
-            no_proxy=None,
+            transparent_proxy_image=None,
+            transparent_proxy_port=None,
+            egress_proxy_service_name=None,
+            egress_proxy_service_port=None,
         )
 
         self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
         self.assertNotIn("serviceAccountName", manifest["spec"])
+        self.assertEqual(manifest["metadata"]["annotations"]["sidecar.istio.io/inject"], "false")
 
     def test_agent_pod_manifest_keeps_explicit_service_account_opt_in(self):
         manifest = _build_pod_manifest(
@@ -278,12 +285,45 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             configmap_name="sandbox-config",
             secret_name="sandbox-secret",
             agent_id="agent-2",
-            proxy_url=None,
-            no_proxy=None,
+            transparent_proxy_image=None,
+            transparent_proxy_port=None,
+            egress_proxy_service_name=None,
+            egress_proxy_service_port=None,
         )
 
         self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
         self.assertEqual(manifest["spec"]["serviceAccountName"], "sandbox-sa")
+
+    def test_agent_pod_manifest_adds_transparent_proxy_sidecar_without_proxy_env(self):
+        manifest = _build_pod_manifest(
+            pod_name="sandbox-agent-agent-3",
+            pvc_name="sandbox-workspace-agent-3",
+            namespace="default",
+            image="ghcr.io/example/sandbox:latest",
+            runtime_class="gvisor",
+            service_account="sandbox-sa",
+            configmap_name="sandbox-config",
+            secret_name="sandbox-secret",
+            agent_id="agent-3",
+            transparent_proxy_image="ghcr.io/example/sandbox-traffic-proxy:latest",
+            transparent_proxy_port=15001,
+            egress_proxy_service_name="sandbox-egress-agent-3",
+            egress_proxy_service_port=3128,
+        )
+
+        container_names = [container["name"] for container in manifest["spec"]["containers"]]
+        self.assertEqual(container_names, ["sandbox-supervisor", "sandbox-traffic-proxy"])
+        self.assertNotIn("HTTP_PROXY", {env["name"] for env in manifest["spec"]["containers"][0]["env"]})
+        self.assertIn("initContainers", manifest["spec"])
+        self.assertEqual(manifest["spec"]["initContainers"][0]["name"], "sandbox-traffic-init")
+        self.assertEqual(
+            manifest["spec"]["initContainers"][0]["securityContext"]["capabilities"]["add"],
+            ["NET_ADMIN"],
+        )
+        self.assertEqual(
+            manifest["spec"]["containers"][1]["securityContext"]["runAsUser"],
+            1501,
+        )
 
     def test_egress_proxy_pod_manifest_disables_service_account_token_automount(self):
         manifest = _build_egress_proxy_pod_manifest(
@@ -306,24 +346,7 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
 
         self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
         self.assertNotIn("serviceAccountName", manifest["spec"])
-
-    def test_build_proxy_env_includes_uppercase_lowercase_and_no_proxy(self):
-        env = _build_proxy_env(
-            proxy_url="http://sandbox-egress-agent-1:3128",
-            no_proxy="localhost,127.0.0.1",
-        )
-
-        values = {entry["name"]: entry["value"] for entry in env}
-        self.assertEqual(values["HTTP_PROXY"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["HTTPS_PROXY"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["FTP_PROXY"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["ALL_PROXY"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["http_proxy"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["https_proxy"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["ftp_proxy"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["all_proxy"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["NO_PROXY"], "localhost,127.0.0.1")
-        self.assertEqual(values["no_proxy"], "localhost,127.0.0.1")
+        self.assertEqual(manifest["metadata"]["annotations"]["sidecar.istio.io/inject"], "false")
 
     def test_egress_proxy_pod_manifest_includes_upstream_proxy_scheme(self):
         manifest = _build_egress_proxy_pod_manifest(
@@ -349,3 +372,42 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             for entry in manifest["spec"]["containers"][0]["env"]
         }
         self.assertEqual(env["UPSTREAM_PROXY_SCHEME"], "socks5")
+
+
+@tag("batch_agent_lifecycle")
+class KubernetesSandboxNetworkPolicyManifestTests(SimpleTestCase):
+    def test_compute_network_policy_only_allows_same_agent_proxy_and_dns(self):
+        manifest = _build_agent_compute_network_policy_manifest(
+            namespace="default",
+            agent_id="agent-1",
+            egress_proxy_port=3128,
+        )
+
+        self.assertEqual(manifest["metadata"]["name"], _agent_compute_network_policy_name("agent-1"))
+        egress_rules = manifest["spec"]["egress"]
+        proxy_rule = egress_rules[0]
+        dns_rule = egress_rules[1]
+        self.assertEqual(
+            proxy_rule["to"][0]["podSelector"]["matchLabels"],
+            {"app": "sandbox-egress-proxy", "agent_id": "agent-1"},
+        )
+        self.assertEqual(proxy_rule["ports"], [{"protocol": "TCP", "port": 3128}])
+        self.assertEqual(
+            dns_rule["ports"],
+            [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}],
+        )
+
+    def test_proxy_network_policy_only_allows_same_agent_ingress(self):
+        manifest = _build_agent_proxy_network_policy_manifest(
+            namespace="default",
+            agent_id="agent-2",
+            egress_proxy_port=3128,
+        )
+
+        self.assertEqual(manifest["metadata"]["name"], _agent_proxy_network_policy_name("agent-2"))
+        ingress_rule = manifest["spec"]["ingress"][0]
+        self.assertEqual(
+            ingress_rule["from"][0]["podSelector"]["matchLabels"],
+            {"app": "sandbox-compute", "component": "sandbox-agent", "agent_id": "agent-2"},
+        )
+        self.assertEqual(ingress_rule["ports"], [{"protocol": "TCP", "port": 3128}])
