@@ -125,7 +125,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         pod_name = _pod_name(agent.id)
-        service_name = _sandbox_service_name(agent.id)
+        sandbox_service_name = _sandbox_service_name(agent.id)
         pvc_name = _pvc_name(agent.id)
         proxy_url = None
         no_proxy = None
@@ -134,8 +134,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 raise SandboxComputeUnavailable(
                     "SANDBOX_EGRESS_PROXY_POD_IMAGE is required to use proxy-backed sandbox pods."
                 )
-            service_name = self._ensure_egress_proxy(agent, session.proxy_server)
-            proxy_url = f"http://{service_name}:{self._egress_proxy_service_port}"
+            egress_service_name = self._ensure_egress_proxy(agent, session.proxy_server)
+            proxy_url = f"http://{egress_service_name}:{self._egress_proxy_service_port}"
             no_proxy = _merge_no_proxy_values(
                 self._no_proxy,
                 "localhost",
@@ -151,8 +151,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         try:
             if not _resource_exists(self._client, _pvc_path(self._namespace, pvc_name)):
                 self._create_pvc(pvc_name, snapshot_name=snapshot_name)
-            if not _resource_exists(self._client, _service_path(self._namespace, service_name)):
-                self._create_service(service_name, agent_id=str(agent.id))
+            if not _resource_exists(self._client, _service_path(self._namespace, sandbox_service_name)):
+                self._create_service(sandbox_service_name, agent_id=str(agent.id))
 
             pod = self._get_pod(pod_name)
             if not pod:

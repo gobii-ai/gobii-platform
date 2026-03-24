@@ -202,6 +202,36 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._create_service.assert_called_once_with("sandbox-agent-agent-svc", agent_id="agent-svc")
         backend._create_pod.assert_called_once()
 
+    def test_deploy_or_resume_keeps_sandbox_service_separate_from_egress_service(self):
+        backend = self._backend()
+        backend._egress_proxy_image = "ghcr.io/example/egress:latest"
+        backend._egress_proxy_service_port = 3128
+        agent = SimpleNamespace(id="agent-proxy")
+        session = SimpleNamespace(
+            proxy_server=SimpleNamespace(id="proxy-1"),
+            workspace_snapshot=None,
+        )
+        backend._ensure_egress_proxy = Mock(return_value="sandbox-egress-agent-proxy")
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(return_value=None)
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[False, False]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._ensure_egress_proxy.assert_called_once_with(agent, session.proxy_server)
+        backend._create_service.assert_called_once_with("sandbox-agent-agent-proxy", agent_id="agent-proxy")
+        backend._create_pod.assert_called_once_with(
+            "sandbox-agent-agent-proxy",
+            "sandbox-workspace-agent-proxy",
+            agent_id="agent-proxy",
+            proxy_url="http://sandbox-egress-agent-proxy:3128",
+            no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
+        )
+
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):
