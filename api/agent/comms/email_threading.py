@@ -103,10 +103,3 @@ def build_reply_headers(parent_message: PersistentAgentMessage | None) -> dict[s
     if references:
         headers["References"] = " ".join(references)
     return headers
-
-
-def message_supports_explicit_email_reply(message: PersistentAgentMessage) -> bool:
-    return (
-        get_message_channel(message) == CommsChannel.EMAIL
-        and bool(get_message_rfc_message_id(message))
-    )
