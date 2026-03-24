@@ -332,3 +332,23 @@ class HttpRequestJsonParsingTests(TestCase):
         self.assertIsInstance(result["content"], str)
         self.assertIn("plain text", result["content"])
         self.assertNotIn("Binary content omitted", result["content"])
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_socks5_proxy_is_forwarded_to_requests(self, mock_request, mock_proxy):
+        mock_proxy.return_value = type("ProxyServer", (), {"proxy_url": "socks5://proxy.internal:1080"})()
+        mock_request.return_value = _make_mock_response(
+            content=b"ok",
+            content_type="text/plain",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://example.com/data"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(
+            mock_request.call_args.kwargs["proxies"],
+            {
+                "http": "socks5://proxy.internal:1080",
+                "https": "socks5://proxy.internal:1080",
+            },
+        )

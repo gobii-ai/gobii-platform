@@ -11,6 +11,8 @@
 - SANDBOX_EGRESS_PROXY_POD_IMAGE: per-agent egress proxy image.
 - SANDBOX_EGRESS_PROXY_POD_PORT / SANDBOX_EGRESS_PROXY_SERVICE_PORT: listen + service ports for the proxy.
 - SANDBOX_EGRESS_PROXY_POD_RUNTIME_CLASS / SANDBOX_EGRESS_PROXY_POD_SERVICE_ACCOUNT: optional proxy pod settings.
+- Egress proxy pods must support `UPSTREAM_PROXY_SCHEME` values `http`, `https`, and `socks5`.
+- Sandbox pods inject uppercase and lowercase `HTTP_PROXY` / `HTTPS_PROXY` / `FTP_PROXY` / `ALL_PROXY` plus `NO_PROXY` / `no_proxy`.
 
 ## RBAC requirements
 The control-plane service account must be able to:

@@ -32,6 +32,17 @@ logger = logging.getLogger(__name__)
 
 SANDBOX_COMPUTE_WAFFLE_FLAG = "sandbox_compute"
 _POST_SYNC_QUEUE_KEY_PREFIX = "sandbox-compute:post-sync:queued"
+_PROXY_URL_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "FTP_PROXY",
+    "ALL_PROXY",
+)
+_PROXY_URL_ENV_KEYS_LOWER = tuple(key.lower() for key in _PROXY_URL_ENV_KEYS)
+_NO_PROXY_ENV_KEYS = (
+    "NO_PROXY",
+    "no_proxy",
+)
 
 
 def sandbox_compute_enabled() -> bool:
@@ -141,9 +152,9 @@ def _allowed_env_keys() -> set[str]:
         "LC_CTYPE",
         "TMPDIR",
         "TERM",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
+        *_PROXY_URL_ENV_KEYS,
+        *_PROXY_URL_ENV_KEYS_LOWER,
+        *_NO_PROXY_ENV_KEYS,
         "SSL_CERT_FILE",
         "SSL_CERT_DIR",
         "PYTHONUNBUFFERED",
@@ -811,14 +822,20 @@ def _proxy_env_for_session(session: AgentComputeSession) -> Optional[Dict[str, s
     proxy = session.proxy_server
     if not proxy:
         return None
-    proxy_url = proxy.proxy_url
-    env = {
-        "HTTP_PROXY": proxy_url,
-        "HTTPS_PROXY": proxy_url,
-    }
-    no_proxy = _no_proxy_value()
-    if no_proxy:
-        env["NO_PROXY"] = no_proxy
+    return _proxy_env_values(proxy.proxy_url, _no_proxy_value())
+
+
+def _proxy_env_values(proxy_url: Optional[str], no_proxy: Optional[str]) -> Dict[str, str]:
+    env: Dict[str, str] = {}
+    if proxy_url:
+        for key in _PROXY_URL_ENV_KEYS:
+            env[key] = proxy_url
+        for key in _PROXY_URL_ENV_KEYS_LOWER:
+            env[key] = proxy_url
+    no_proxy_value = str(no_proxy or "").strip()
+    if no_proxy_value:
+        for key in _NO_PROXY_ENV_KEYS:
+            env[key] = no_proxy_value
     return env
 
 

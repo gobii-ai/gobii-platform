@@ -50,6 +50,7 @@ class DecodoSyncTaskTests(TestCase):
             credential=self.credential,
             block_size=2,
             endpoint="test.decodo.com",
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             start_port=10001
         )
         
@@ -89,11 +90,19 @@ class DecodoSyncTaskTests(TestCase):
                 username="test_user",
                 password="test_pass",
                 endpoint="test.decodo.com",
-                port=10001
+                port=10001,
+                proxy_scheme="socks5",
             )
             
             self.assertEqual(result, mock_response_data)
             mock_get.assert_called_once()
+            self.assertEqual(
+                mock_get.call_args.kwargs["proxies"],
+                {
+                    "http": "socks5://test_user:test_pass@test.decodo.com:10001",
+                    "https": "socks5://test_user:test_pass@test.decodo.com:10001",
+                },
+            )
             
     def test_fetch_decodo_ip_data_failure(self):
         """Test API call failure."""
@@ -104,7 +113,8 @@ class DecodoSyncTaskTests(TestCase):
                 username="test_user",
                 password="test_pass", 
                 endpoint="test.decodo.com",
-                port=10001
+                port=10001,
+                proxy_scheme="socks5",
             )
             
             self.assertIsNone(result)
@@ -147,6 +157,7 @@ class DecodoSyncTaskTests(TestCase):
         self.assertEqual(ip_record.country_code, "US")
         proxy = ProxyServer.objects.get(decodo_ip=ip_record)
         self.assertTrue(proxy.is_dedicated)
+        self.assertEqual(proxy.proxy_type, ProxyServer.ProxyType.SOCKS5)
         
         # Test updating the same record
         ip_data["isp"]["isp"] = "Updated ISP"
@@ -175,9 +186,9 @@ class DecodoSyncTaskTests(TestCase):
         # Check the calls were made with correct ports
         expected_calls = [
             ((), {'username': 'test_user', 'password': 'test_pass', 
-                  'endpoint': 'test.decodo.com', 'port': 10001}),
+                  'endpoint': 'test.decodo.com', 'port': 10001, 'proxy_scheme': 'socks5'}),
             ((), {'username': 'test_user', 'password': 'test_pass',
-                  'endpoint': 'test.decodo.com', 'port': 10002})
+                  'endpoint': 'test.decodo.com', 'port': 10002, 'proxy_scheme': 'socks5'})
         ]
         actual_calls = [call for call in mock_fetch_data.call_args_list]
         
@@ -191,7 +202,7 @@ class DecodoSyncTaskTests(TestCase):
         self.ip_block.save(update_fields=["block_size"])
         ProxyServer.objects.create(
             name="Deactivated Decodo Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTPS,
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             host=self.ip_block.endpoint,
             port=self.ip_block.start_port,
             username=self.credential.username,
@@ -216,7 +227,7 @@ class DecodoSyncTaskTests(TestCase):
         )
         proxy = ProxyServer.objects.create(
             name="Decodo Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTPS,
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             host=self.ip_block.endpoint,
             port=decodo_ip.port,
             username=self.credential.username,
@@ -248,7 +259,7 @@ class DecodoSyncTaskTests(TestCase):
         )
         proxy = ProxyServer.objects.create(
             name="Assigned Decodo Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTPS,
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             host=self.ip_block.endpoint,
             port=decodo_ip.port,
             username=self.credential.username,
@@ -288,7 +299,7 @@ class DecodoSyncTaskTests(TestCase):
         )
         ProxyServer.objects.create(
             name="Active Decodo Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTPS,
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             host=self.ip_block.endpoint,
             port=decodo_ip.port,
             username=self.credential.username,
@@ -305,7 +316,7 @@ class DecodoSyncTaskTests(TestCase):
         )
         dedicated_proxy = ProxyServer.objects.create(
             name="Dedicated Decodo Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTPS,
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             host=self.ip_block.endpoint,
             port=dedicated_ip.port,
             username=self.credential.username,
@@ -351,7 +362,7 @@ class DecodoSyncTaskTests(TestCase):
         )
         ProxyServer.objects.create(
             name="Active Decodo Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTPS,
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             host=self.ip_block.endpoint,
             port=decodo_ip.port,
             username=self.credential.username,
@@ -376,7 +387,7 @@ class DecodoSyncTaskTests(TestCase):
         )
         proxy = ProxyServer.objects.create(
             name="Existing Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTPS,
+            proxy_type=ProxyServer.ProxyType.HTTP,
             host=self.ip_block.endpoint,
             port=decodo_ip.port,
             username="old_user",
@@ -391,6 +402,7 @@ class DecodoSyncTaskTests(TestCase):
         proxy.refresh_from_db()
         self.assertEqual(proxy.decodo_ip_id, decodo_ip.id)
         self.assertTrue(proxy.is_dedicated)
+        self.assertEqual(proxy.proxy_type, ProxyServer.ProxyType.SOCKS5)
 
     @override_settings(GOBII_RELEASE_ENV="staging")
     @patch("api.tasks.proxy_tasks.maybe_send_decodo_low_inventory_alert")
@@ -428,7 +440,8 @@ class DecodoAdminTests(TestCase):
         self.ip_block = DecodoIPBlock.objects.create(
             credential=self.credential,
             block_size=2,
-            endpoint="test.decodo.com", 
+            endpoint="test.decodo.com",
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
             start_port=10001
         )
         

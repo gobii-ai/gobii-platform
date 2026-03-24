@@ -1991,7 +1991,7 @@ class CustomUserAdmin(UserAdmin):
 class DecodoIPBlockInline(admin.TabularInline):
     model = DecodoIPBlock
     extra = 0
-    fields = ('endpoint', 'start_port', 'block_size', 'created_at', 'view_ip_block_link')
+    fields = ('endpoint', 'proxy_type', 'start_port', 'block_size', 'created_at', 'view_ip_block_link')
     readonly_fields = ('created_at', 'view_ip_block_link')
 
     def view_ip_block_link(self, obj):
@@ -2030,8 +2030,8 @@ class DecodoIPInline(admin.TabularInline):
 
 @admin.register(DecodoIPBlock)
 class DecodoIPBlockAdmin(admin.ModelAdmin):
-    list_display = ('endpoint', 'start_port', 'block_size', 'credential_username', 'ip_count', 'sync_now', 'created_at')
-    list_filter = ('endpoint', 'credential')
+    list_display = ('endpoint', 'proxy_type', 'start_port', 'block_size', 'credential_username', 'ip_count', 'sync_now', 'created_at')
+    list_filter = ('endpoint', 'proxy_type', 'credential')
     search_fields = ('endpoint', 'credential__username')
     readonly_fields = ('id', 'created_at', 'updated_at')
     raw_id_fields = ('credential',)
