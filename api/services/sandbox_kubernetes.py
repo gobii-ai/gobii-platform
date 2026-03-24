@@ -27,6 +27,7 @@ from api.services.system_settings import (
 logger = logging.getLogger(__name__)
 
 _SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+_SANDBOX_SERVICE_PORT = 8080
 
 
 class KubernetesApiError(RuntimeError):
@@ -124,6 +125,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         pod_name = _pod_name(agent.id)
+        service_name = _sandbox_service_name(agent.id)
         pvc_name = _pvc_name(agent.id)
         proxy_url = None
         no_proxy = None
@@ -149,6 +151,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         try:
             if not _resource_exists(self._client, _pvc_path(self._namespace, pvc_name)):
                 self._create_pvc(pvc_name, snapshot_name=snapshot_name)
+            if not _resource_exists(self._client, _service_path(self._namespace, service_name)):
+                self._create_service(service_name, agent_id=str(agent.id))
 
             pod = self._get_pod(pod_name)
             if not pod:
@@ -207,7 +211,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         }
         if trusted_env_keys:
             payload["trusted_env_keys"] = [str(key) for key in trusted_env_keys if str(key)]
-        return self._proxy_post(session.pod_name, "/sandbox/compute/run_command", payload, timeout=request_timeout)
+        return self._proxy_post(_sandbox_service_name(agent.id), "/sandbox/compute/run_command", payload, timeout=request_timeout)
 
     def mcp_request(
         self,
@@ -236,7 +240,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             getattr(self, "_proxy_timeout", int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))),
         )
         return self._proxy_post(
-            session.pod_name,
+            _sandbox_service_name(agent.id),
             "/sandbox/compute/mcp_request",
             payload,
             timeout=timeout_value,
@@ -271,7 +275,12 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             "tool_name": tool_name,
             "params": params_payload,
         }
-        return self._proxy_post(session.pod_name, "/sandbox/compute/tool_request", payload, timeout=request_timeout)
+        return self._proxy_post(
+            _sandbox_service_name(agent.id),
+            "/sandbox/compute/tool_request",
+            payload,
+            timeout=request_timeout,
+        )
 
     def sync_filespace(
         self,
@@ -285,7 +294,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             return {"status": "error", "message": "Sandbox pod not available."}
         body = payload or {}
         body.update({"agent_id": str(agent.id), "direction": direction})
-        return self._proxy_post(session.pod_name, "/sandbox/compute/sync_filespace", body)
+        return self._proxy_post(_sandbox_service_name(agent.id), "/sandbox/compute/sync_filespace", body)
 
     def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
         pvc_name = _pvc_name(agent.id)
@@ -333,6 +342,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     ) -> SandboxSessionUpdate:
         pod_name = session.pod_name or _pod_name(agent.id)
         self._delete_pod(pod_name)
+        self._delete_service(_sandbox_service_name(agent.id))
         self._delete_egress_proxy(agent)
         if delete_workspace:
             pvc_name = _pvc_name(agent.id)
@@ -364,7 +374,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         if agent is None or session is None:
             return {"status": "error", "message": "Sandboxed stdio discovery requires an agent session."}
 
-        pod_name = session.pod_name or _pod_name(agent.id)
+        service_name = _sandbox_service_name(agent.id)
         payload = {
             "agent_id": str(agent.id),
             "server_id": server_config_id,
@@ -376,7 +386,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             payload["proxy_env"] = proxy_env
 
         return self._proxy_post(
-            pod_name,
+            service_name,
             "/sandbox/compute/discover_mcp_tools",
             payload,
             timeout=getattr(
@@ -392,26 +402,30 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
     def _proxy_post(
         self,
-        pod_name: str,
+        service_name: str,
         path: str,
         payload: Dict[str, Any],
         *,
         timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
-        proxy_path = _pod_proxy_path(self._namespace, pod_name, path)
         try:
-            response = self._client.request_json(
-                "POST",
-                proxy_path,
-                json_body=payload,
-                timeout=timeout or self._proxy_timeout,
-                extra_headers={"X-Sandbox-Compute-Token": self._compute_api_token},
-            )
-        except KubernetesApiError as exc:
+            with requests.Session() as session:
+                session.trust_env = False
+                response = session.post(
+                    _sandbox_service_url(self._namespace, service_name, path),
+                    json=payload,
+                    timeout=timeout or self._proxy_timeout,
+                    headers={"X-Sandbox-Compute-Token": self._compute_api_token},
+                )
+                response.raise_for_status()
+        except requests.RequestException as exc:
             return {"status": "error", "message": f"Sandbox proxy request failed: {exc}"}
-        if response is None:
+        if not response.text:
             return {"status": "error", "message": "Sandbox proxy returned empty response."}
-        return response
+        try:
+            return response.json()
+        except ValueError:
+            return {"status": "error", "message": "Sandbox proxy returned invalid JSON."}
 
     def _get_pod(self, pod_name: str) -> Optional[Dict[str, Any]]:
         try:
@@ -526,6 +540,20 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             if exc.status_code != 409:
                 raise
 
+    def _create_service(self, service_name: str, *, agent_id: str) -> None:
+        body = _build_sandbox_service_manifest(
+            service_name=service_name,
+            namespace=self._namespace,
+            agent_id=agent_id,
+            port=_SANDBOX_SERVICE_PORT,
+            target_port=_SANDBOX_SERVICE_PORT,
+        )
+        try:
+            self._client.request_json("POST", _service_collection_path(self._namespace), json_body=body)
+        except KubernetesApiError as exc:
+            if exc.status_code != 409:
+                raise
+
     def _delete_pod(self, pod_name: str) -> None:
         try:
             self._client.request_json("DELETE", _pod_path(self._namespace, pod_name), allow_404=True)
@@ -551,6 +579,12 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             self._client.request_json("DELETE", _pvc_path(self._namespace, pvc_name), allow_404=True)
         except KubernetesApiError as exc:
             logger.warning("Failed to delete PVC %s: %s", pvc_name, exc)
+
+    def _delete_service(self, service_name: str) -> None:
+        try:
+            self._client.request_json("DELETE", _service_path(self._namespace, service_name), allow_404=True)
+        except KubernetesApiError as exc:
+            logger.warning("Failed to delete service %s: %s", service_name, exc)
 
     def _delete_egress_proxy(self, agent) -> None:
         pod_name = _egress_proxy_pod_name(agent.id)
@@ -681,6 +715,10 @@ def _pod_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-agent-{agent_id}")
 
 
+def _sandbox_service_name(agent_id: Any) -> str:
+    return _pod_name(agent_id)
+
+
 def _pvc_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-workspace-{agent_id}")
 
@@ -725,6 +763,11 @@ def _service_collection_path(namespace: str) -> str:
 
 def _service_path(namespace: str, service_name: str) -> str:
     return f"/api/v1/namespaces/{namespace}/services/{service_name}"
+
+
+def _sandbox_service_url(namespace: str, service_name: str, path: str) -> str:
+    suffix = path if path.startswith("/") else f"/{path}"
+    return f"http://{service_name}.{namespace}.svc.cluster.local:{_SANDBOX_SERVICE_PORT}{suffix}"
 
 
 def _snapshot_collection_path(namespace: str) -> str:
@@ -975,6 +1018,44 @@ def _build_egress_proxy_service_manifest(
             "type": "ClusterIP",
             "selector": {
                 "app": "sandbox-egress-proxy",
+                "agent_id": agent_id,
+            },
+            "ports": [
+                {
+                    "name": "http",
+                    "port": port,
+                    "targetPort": target_port,
+                    "protocol": "TCP",
+                }
+            ],
+        },
+    }
+
+
+def _build_sandbox_service_manifest(
+    *,
+    service_name: str,
+    namespace: str,
+    agent_id: str,
+    port: int,
+    target_port: int,
+) -> Dict[str, Any]:
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": service_name,
+            "namespace": namespace,
+            "labels": {
+                "app": "sandbox-compute",
+                "component": "sandbox-agent",
+                "agent_id": agent_id,
+            },
+        },
+        "spec": {
+            "type": "ClusterIP",
+            "selector": {
+                "app": "sandbox-compute",
                 "agent_id": agent_id,
             },
             "ports": [
