@@ -157,6 +157,7 @@ from ...models import (
     build_web_user_address,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
+from api.services.system_settings import get_max_parallel_tool_calls
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_MESSAGE,
     EXECUTION_PAUSE_NOTE,
@@ -189,9 +190,6 @@ MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation sig
 MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS = 60
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
-# Keep v1 fan-out modest: safe batches are usually network-bound and short, and
-# a cap of 6 improves overlap without spiking MCP startup churn and DB connection pressure too aggressively.
-MAX_PARALLEL_SAFE_TOOL_WORKERS = 6
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
@@ -1724,7 +1722,7 @@ def _execute_prepared_tool_batch(
             len(prepared_batch.prepared_calls),
         )
         base_variables = get_all_variables()
-        max_workers = min(len(prepared_batch.prepared_calls), MAX_PARALLEL_SAFE_TOOL_WORKERS)
+        max_workers = min(len(prepared_batch.prepared_calls), max(1, get_max_parallel_tool_calls()))
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             for prepared in prepared_batch.prepared_calls:
