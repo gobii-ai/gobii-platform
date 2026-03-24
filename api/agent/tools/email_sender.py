@@ -21,7 +21,6 @@ from django.conf import settings
 from ..comms.email_threading import (
     get_message_channel,
     get_message_contact_address,
-    get_message_rfc_message_id,
     normalize_email_address,
 )
 from ..comms.outbound_delivery import deliver_agent_email
@@ -146,12 +145,6 @@ def _resolve_reply_target(
         return None, {
             "status": "error",
             "message": "reply_to_message_id must reference an email message.",
-        }
-
-    if not get_message_rfc_message_id(target_message):
-        return None, {
-            "status": "error",
-            "message": "reply_to_message_id must reference an email message with a stored RFC Message-ID.",
         }
 
     target_address = get_message_contact_address(target_message)

@@ -463,21 +463,26 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertEqual(result.get("status"), "error")
         self.assertIn("must reference an email message", result.get("message", ""))
 
-    def test_execute_send_email_reply_rejects_missing_rfc_message_id(self):
+    def test_execute_send_email_reply_allows_missing_rfc_message_id(self):
         inbound = self._create_inbound_email_message(raw_payload={"subject": "Missing id"})
 
-        result = execute_send_email(
-            self.agent,
-            {
-                "to_address": self.user.email,
-                "subject": "Missing RFC id",
-                "mobile_first_html": "<p>Nope</p>",
-                "reply_to_message_id": str(inbound.id),
-            },
-        )
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(
+                self.agent,
+                {
+                    "to_address": self.user.email,
+                    "subject": "Missing RFC id",
+                    "mobile_first_html": "<p>Nope</p>",
+                    "reply_to_message_id": str(inbound.id),
+                },
+            )
 
-        self.assertEqual(result.get("status"), "error")
-        self.assertIn("stored RFC Message-ID", result.get("message", ""))
+        self.assertEqual(result.get("status"), "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(message.parent_id, inbound.id)
 
     def test_execute_send_email_reply_rejects_recipient_mismatch(self):
         from api.models import CommsAllowlistEntry

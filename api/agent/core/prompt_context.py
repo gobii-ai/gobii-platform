@@ -82,7 +82,6 @@ from .llm_config import (
 from .promptree import Prompt, hmt
 from .step_compaction import llm_summarise_steps
 
-from ..comms.email_threading import message_supports_explicit_email_reply
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
 from ..tools.spawn_web_task import get_browser_daily_task_limit
@@ -345,6 +344,7 @@ do not invent columns; only use those listed above
 
 # __messages (special table)
 __messages.columns = {message_id, seq, timestamp, channel, is_outbound, direction, from_address, to_address, conversation_id, conversation_address, is_peer_dm, peer_agent_id, subject, body, body_bytes, body_is_truncated, body_truncated_bytes, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, is_hidden_in_chat}
+message_id → internal Gobii message id; pass this exact value to send_email.reply_to_message_id
 attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json)
 rejected_attachments_json → JSON array of inbound attachments that were attempted but rejected before storage
 freshness_check → do NOT query __messages for "anything new"; new inbound messages are already injected into this run's unified history
@@ -2209,6 +2209,7 @@ def build_prompt_context(
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs and "
         "__messages stores a newest-first communication snapshot (full bodies up to ~5MB total). "
+        "__messages.message_id is the internal Gobii message id accepted by send_email.reply_to_message_id. "
         f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
         "All are per-cycle snapshots dropped before persistence. "
         "Query __tool_results and __files with sqlite_batch (not read_file). "
@@ -2700,8 +2701,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
                 details = []
                 if subject:
                     details.append(f"recent subj: {subject[:80]}")
-                if message_supports_explicit_email_reply(msg):
-                    details.append(f"message_id: {msg.id}")
+                details.append(f"reply_to_message_id: {msg.id}")
                 if details:
                     meta_str = f" ({'; '.join(details)})"
             else:
@@ -5291,8 +5291,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             # Handle email messages with structured components
             if channel == CommsChannel.EMAIL:
-                if message_supports_explicit_email_reply(m):
-                    components["message_id"] = str(m.id)
+                components["reply_to_message_id"] = str(m.id)
                 if subject:
                     components["subject"] = subject
 
@@ -5379,7 +5378,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
-            "message_id": 2,  # Medium priority - needed for explicit email threading
+            "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading
             "subject": 2,     # Medium priority - email subject
             "body": 1,        # Low priority - email body (can be long and shrunk)
         }

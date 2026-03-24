@@ -23,6 +23,7 @@ def get_message_rfc_message_id(message: PersistentAgentMessage) -> str:
     headers = raw_payload.get("headers")
     if isinstance(headers, dict):
         candidate_values.extend([
+            headers.get("MessageID"),
             headers.get("Message-ID"),
             headers.get("Message-Id"),
             headers.get("message-id"),
