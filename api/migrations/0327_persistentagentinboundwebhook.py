@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0324_add_user_trial_eligibility_enforcement_flag'),
+        ('api', '0326_decodoipblock_proxy_type'),
     ]
 
     operations = [
