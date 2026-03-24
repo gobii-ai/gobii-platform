@@ -3732,6 +3732,12 @@ class DecodoIPBlock(models.Model):
     )
     block_size = models.PositiveIntegerField(help_text="Number of IPs in this block (e.g. 50)")
     endpoint = models.CharField(max_length=256, help_text="Proxy endpoint (e.g. 'isp.decodo.com')")
+    proxy_type = models.CharField(
+        max_length=8,
+        choices=ProxyServer.ProxyType.choices,
+        default=ProxyServer.ProxyType.SOCKS5,
+        help_text="Proxy protocol used by this Decodo block.",
+    )
     start_port = models.PositiveIntegerField(help_text="Starting port number (e.g. 10001)")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -3744,7 +3750,10 @@ class DecodoIPBlock(models.Model):
         ]
 
     def __str__(self):
-        return f"DecodoIPBlock: {self.endpoint}:{self.start_port} (size: {self.block_size})"
+        return (
+            f"DecodoIPBlock: {self.proxy_type.lower()}://{self.endpoint}:{self.start_port} "
+            f"(size: {self.block_size})"
+        )
 
 
 class DecodoIP(models.Model):

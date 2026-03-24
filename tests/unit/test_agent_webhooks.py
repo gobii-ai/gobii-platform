@@ -150,6 +150,31 @@ class AgentWebhookToolTests(TestCase):
         self.assertIn("Payload must be a JSON object", result.get("message", ""))
 
     @tag("batch_agent_webhooks")
+    def test_execute_send_webhook_event_supports_socks5_proxy(self):
+        socks_proxy = ProxyServer.objects.create(
+            name="Webhook SOCKS Proxy",
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
+            host="proxy.example.com",
+            port=1080,
+        )
+        with patch(
+            "api.agent.tools.webhook_sender.select_proxy_for_persistent_agent",
+            return_value=socks_proxy,
+        ), patch("api.agent.tools.webhook_sender.requests.post") as mock_post:
+            mock_post.return_value = MagicMock(status_code=204, text="")
+
+            result = execute_send_webhook_event(
+                self.agent,
+                {"webhook_id": str(self.webhook.id), "payload": {"status": "ok"}},
+            )
+
+        self.assertEqual(result.get("status"), "success")
+        self.assertEqual(
+            mock_post.call_args.kwargs["proxies"],
+            {"http": socks_proxy.proxy_url, "https": socks_proxy.proxy_url},
+        )
+
+    @tag("batch_agent_webhooks")
     def test_execute_send_webhook_event_unknown_webhook(self):
         result = execute_send_webhook_event(
             self.agent,

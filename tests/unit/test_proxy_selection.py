@@ -234,6 +234,19 @@ class ProxySelectionTests(TestCase):
         )
         self.assertEqual(result, self.healthy_proxy)
 
+    def test_proxy_url_uses_socks5_scheme(self):
+        proxy = ProxyServer.objects.create(
+            name="SOCKS Proxy",
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
+            host="socks.proxy.com",
+            port=1080,
+            username="user",
+            password="pass",
+            is_active=True,
+        )
+
+        self.assertEqual(proxy.proxy_url, "socks5://user:pass@socks.proxy.com:1080")
+
 
 @tag("batch_proxy_selection")
 class PersistentAgentProxySelectionTests(TestCase):

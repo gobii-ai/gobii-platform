@@ -1,11 +1,12 @@
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, tag
 
 from api.services.sandbox_kubernetes import (
     KubernetesSandboxBackend,
     _build_egress_proxy_pod_manifest,
+    _build_proxy_env,
     _build_pod_manifest,
     _pod_name,
 )
@@ -149,6 +150,27 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             {"X-Sandbox-Compute-Token": "supervisor-token"},
         )
 
+    def test_ensure_egress_proxy_allows_socks5_upstream(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-socks")
+        proxy_server = SimpleNamespace(
+            id="proxy-1",
+            host="proxy.example",
+            port=1080,
+            proxy_type="SOCKS5",
+            username="",
+            password="",
+        )
+        backend._get_service = Mock(return_value={"metadata": {"name": "sandbox-egress-agent-socks"}})
+        backend._get_pod = Mock(return_value=None)
+        backend._create_egress_proxy_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        service_name = backend._ensure_egress_proxy(agent, proxy_server)
+
+        self.assertEqual(service_name, "sandbox-egress-agent-socks")
+        backend._create_egress_proxy_pod.assert_called_once()
+
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):
@@ -196,9 +218,59 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             runtime_class="gvisor",
             service_account="",
             agent_id="agent-1",
-            proxy_server=SimpleNamespace(host="proxy.example", port=8080, username="", password="", id="proxy-1"),
+            proxy_server=SimpleNamespace(
+                host="proxy.example",
+                port=8080,
+                username="",
+                password="",
+                id="proxy-1",
+                proxy_type="HTTP",
+            ),
             listen_port=3128,
         )
 
         self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
         self.assertNotIn("serviceAccountName", manifest["spec"])
+
+    def test_build_proxy_env_includes_uppercase_lowercase_and_no_proxy(self):
+        env = _build_proxy_env(
+            proxy_url="http://sandbox-egress-agent-1:3128",
+            no_proxy="localhost,127.0.0.1",
+        )
+
+        values = {entry["name"]: entry["value"] for entry in env}
+        self.assertEqual(values["HTTP_PROXY"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["HTTPS_PROXY"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["FTP_PROXY"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["ALL_PROXY"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["http_proxy"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["https_proxy"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["ftp_proxy"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["all_proxy"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["NO_PROXY"], "localhost,127.0.0.1")
+        self.assertEqual(values["no_proxy"], "localhost,127.0.0.1")
+
+    def test_egress_proxy_pod_manifest_includes_upstream_proxy_scheme(self):
+        manifest = _build_egress_proxy_pod_manifest(
+            pod_name="sandbox-egress-agent-2",
+            namespace="default",
+            image="ghcr.io/example/egress-proxy:latest",
+            runtime_class="gvisor",
+            service_account="",
+            agent_id="agent-2",
+            proxy_server=SimpleNamespace(
+                host="proxy.example",
+                port=1080,
+                username="",
+                password="",
+                id="proxy-2",
+                proxy_type="SOCKS5",
+            ),
+            listen_port=3128,
+        )
+
+        env = {
+            entry["name"]: entry["value"]
+            for entry in manifest["spec"]["containers"][0]["env"]
+        }
+        self.assertEqual(env["UPSTREAM_PROXY_SCHEME"], "socks5")

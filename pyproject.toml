@@ -43,6 +43,7 @@ dependencies = [
   "ulid-py~=1.1.0",
   "redis~=6.2.0",
   "requests~=2.32.4",
+  "PySocks>=1.7.1",
   "segment-analytics-python~=2.3.4",
   "whitenoise[brotli]~=6.9.0",
   "dj-stripe~=2.9.1",
@@ -137,6 +138,7 @@ dependencies = [
   # Chart generation for PDFs and messages
   "matplotlib>=3.8.0",
   "sqlglot>=28.5.0",
+  "socksio>=1.0.0",
   "clevercsv>=0.8.4",
 ]
 

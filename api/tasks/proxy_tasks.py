@@ -29,6 +29,17 @@ def _should_skip_decodo_port(ip_block: DecodoIPBlock, port: int) -> bool:
     ).exists()
 
 
+def _decodo_proxy_scheme(ip_block: DecodoIPBlock) -> str:
+    proxy_type = str(ip_block.proxy_type or ProxyServer.ProxyType.SOCKS5).strip().lower()
+    if proxy_type in {
+        ProxyServer.ProxyType.HTTP.lower(),
+        ProxyServer.ProxyType.HTTPS.lower(),
+        ProxyServer.ProxyType.SOCKS5.lower(),
+    }:
+        return proxy_type
+    raise ValueError(f"Unsupported Decodo proxy type: {ip_block.proxy_type}")
+
+
 @shared_task(bind=True, ignore_result=True)
 def sync_ip_block(self, block_id: str) -> None:
     """
@@ -77,7 +88,8 @@ def sync_ip_block(self, block_id: str) -> None:
                             username=username,
                             password=password,
                             endpoint=ip_block.endpoint,
-                            port=port
+                            port=port,
+                            proxy_scheme=_decodo_proxy_scheme(ip_block),
                         )
 
                         if ip_data:
@@ -106,7 +118,14 @@ def sync_ip_block(self, block_id: str) -> None:
             logger.exception("Error syncing IP block %s: %s", block_id, str(e))
 
 
-def _fetch_decodo_ip_data(username: str, password: str, endpoint: str, port: int) -> dict | None:
+def _fetch_decodo_ip_data(
+    username: str,
+    password: str,
+    endpoint: str,
+    port: int,
+    *,
+    proxy_scheme: str = ProxyServer.ProxyType.SOCKS5.lower(),
+) -> dict | None:
     """
     Fetch IP data from Decodo API for a specific proxy endpoint and port.
 
@@ -122,7 +141,7 @@ def _fetch_decodo_ip_data(username: str, password: str, endpoint: str, port: int
     with traced("PROXY Fetch Decodo IP Data", endpoint=endpoint, port=port):
         try:
             # Configure proxy and authentication
-            proxy_url = f"http://{username}:{password}@{endpoint}:{port}"
+            proxy_url = f"{proxy_scheme}://{username}:{password}@{endpoint}:{port}"
             proxies = {
                 "http": proxy_url,
                 "https": proxy_url
@@ -280,7 +299,7 @@ def _update_or_create_proxy_record(decodo_ip: DecodoIP, ip_block: DecodoIPBlock)
 
             defaults_dict = {
                 "name": proxy_name,
-                "proxy_type": ProxyServer.ProxyType.HTTPS,
+                "proxy_type": ip_block.proxy_type,
                 "host": ip_block.endpoint,
                 "port": port,
                 "username": ip_block.credential.username,

@@ -15,6 +15,7 @@ from api.services.sandbox_compute import (
     SandboxComputeUnavailable,
     SandboxSessionUpdate,
     _proxy_env_for_session,
+    _proxy_env_values,
     _requires_agent_pod_discovery,
 )
 from api.services.system_settings import (
@@ -431,14 +432,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             return None
 
     def _ensure_egress_proxy(self, agent, proxy_server) -> str:
-        proxy_type = str(getattr(proxy_server, "proxy_type", "") or "").upper()
-        if proxy_type in {"SOCKS4", "SOCKS5"}:
-            raise SandboxComputeUnavailable("SOCKS proxies are not supported for sandbox egress.")
-
         host = str(getattr(proxy_server, "host", "") or "").strip()
         port = getattr(proxy_server, "port", None)
         if not host or not port:
             raise SandboxComputeUnavailable("Proxy server is missing host/port metadata.")
+        _upstream_proxy_scheme(proxy_server)
 
         pod_name = _egress_proxy_pod_name(agent.id)
         service_name = _egress_proxy_service_name(agent.id)
@@ -854,13 +852,7 @@ def _build_pod_manifest(
 
 
 def _build_proxy_env(*, proxy_url: Optional[str], no_proxy: Optional[str]) -> list[Dict[str, str]]:
-    env: list[Dict[str, str]] = []
-    if proxy_url:
-        env.append({"name": "HTTP_PROXY", "value": proxy_url})
-        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
-    if no_proxy:
-        env.append({"name": "NO_PROXY", "value": no_proxy})
-    return env
+    return [{"name": key, "value": value} for key, value in _proxy_env_values(proxy_url, no_proxy).items()]
 
 
 def _build_egress_proxy_pod_manifest(
@@ -879,8 +871,10 @@ def _build_egress_proxy_pod_manifest(
     username = str(getattr(proxy_server, "username", "") or "").strip()
     password = str(getattr(proxy_server, "password", "") or "").strip()
     proxy_id = str(getattr(proxy_server, "id", "") or "").strip()
+    upstream_proxy_scheme = _upstream_proxy_scheme(proxy_server)
 
     env = [
+        {"name": "UPSTREAM_PROXY_SCHEME", "value": upstream_proxy_scheme},
         {"name": "UPSTREAM_HOST", "value": host},
         {"name": "UPSTREAM_PORT", "value": port},
         {"name": "PROXY_LISTEN_PORT", "value": str(listen_port)},
@@ -948,6 +942,13 @@ def _build_egress_proxy_pod_manifest(
         },
         "spec": spec,
     }
+
+
+def _upstream_proxy_scheme(proxy_server: Any) -> str:
+    proxy_type = str(getattr(proxy_server, "proxy_type", "") or "").strip().upper()
+    if proxy_type in {"HTTP", "HTTPS", "SOCKS5"}:
+        return proxy_type.lower()
+    raise SandboxComputeUnavailable(f"Unsupported proxy type for sandbox egress: {proxy_type or 'unknown'}")
 
 
 def _build_egress_proxy_service_manifest(

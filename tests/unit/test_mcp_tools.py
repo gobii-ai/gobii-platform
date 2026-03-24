@@ -319,6 +319,42 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(proxy_url, proxy.proxy_url)
         self.assertIsNone(error)
 
+    def test_select_agent_proxy_url_supports_socks5_proxy(self):
+        user = get_user_model().objects.create_user(username="socks-agent@example.com")
+        browser_agent = create_test_browser_agent(user)
+        proxy = ProxyServer.objects.create(
+            name="SOCKS Dedicated",
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
+            host="dedicated.proxy",
+            port=1080,
+            is_active=True,
+        )
+        browser_agent.preferred_proxy = proxy
+        browser_agent.save(update_fields=["preferred_proxy"])
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="socks-agent",
+            charter="Proxy",
+            browser_use_agent=browser_agent,
+        )
+
+        with patch("api.agent.tools.mcp_manager.select_proxy_for_persistent_agent", return_value=proxy):
+            proxy_url, error = self.manager._select_agent_proxy_url(agent)
+
+        self.assertEqual(proxy_url, proxy.proxy_url)
+        self.assertIsNone(error)
+
+    def test_httpx_client_factory_forwards_socks5_proxy(self):
+        factory = self.manager._build_httpx_client_factory()
+
+        with patch("api.agent.tools.mcp_manager.httpx.AsyncClient") as mock_async_client:
+            from api.agent.tools.mcp_manager import _use_mcp_proxy
+
+            with _use_mcp_proxy("socks5://proxy.internal:1080"):
+                factory()
+
+        self.assertEqual(mock_async_client.call_args.kwargs["proxy"], "socks5://proxy.internal:1080")
+
     def test_register_http_server_includes_oauth_header(self):
         runtime = MCPServerRuntime(
             config_id=str(uuid.uuid4()),
