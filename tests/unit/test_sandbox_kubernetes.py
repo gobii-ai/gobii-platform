@@ -7,6 +7,7 @@ from api.services.sandbox_kubernetes import (
     _build_sandbox_service_manifest,
     KubernetesSandboxBackend,
     _build_egress_proxy_pod_manifest,
+    _build_egress_proxy_service_manifest,
     _build_proxy_env,
     _build_pod_manifest,
     _pod_name,
@@ -26,6 +27,10 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._pod_service_account = "sandbox-sa"
         backend._pod_configmap = "sandbox-config"
         backend._pod_secret = "sandbox-secret"
+        backend._egress_proxy_port = 3128
+        backend._egress_proxy_service_port = 3128
+        backend._egress_proxy_socks_port = 1080
+        backend._egress_proxy_socks_service_port = 1080
         backend._proxy_timeout = 30
         return backend
 
@@ -185,6 +190,54 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(service_name, "sandbox-egress-agent-socks")
         backend._create_egress_proxy_pod.assert_called_once()
 
+    def test_ensure_egress_proxy_recreates_stale_protocol_config(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-stale")
+        proxy_server = SimpleNamespace(
+            id="proxy-2",
+            host="proxy.example",
+            port=1080,
+            proxy_type="SOCKS5",
+            username="user",
+            password="secret",
+        )
+        backend._get_service = Mock(return_value={"metadata": {"name": "sandbox-egress-agent-stale"}})
+        backend._get_pod = Mock(
+            return_value={
+                "metadata": {"labels": {"proxy_id": "proxy-2"}},
+                "status": {"phase": "Running"},
+                "spec": {
+                    "containers": [
+                        {
+                            "env": [
+                                {"name": "UPSTREAM_PROTOCOL", "value": "http"},
+                                {"name": "UPSTREAM_PROXY_SCHEME", "value": "https"},
+                                {"name": "UPSTREAM_HOST", "value": "proxy.example"},
+                                {"name": "UPSTREAM_PORT", "value": "1080"},
+                                {"name": "HTTP_LISTEN_PORT", "value": "3128"},
+                                {"name": "SOCKS_LISTEN_PORT", "value": "1080"},
+                                {"name": "UPSTREAM_USERNAME", "value": "user"},
+                                {"name": "UPSTREAM_PASSWORD", "value": "secret"},
+                            ]
+                        }
+                    ]
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_egress_proxy_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        service_name = backend._ensure_egress_proxy(agent, proxy_server)
+
+        self.assertEqual(service_name, "sandbox-egress-agent-stale")
+        backend._delete_pod.assert_called_once_with("sandbox-egress-agent-stale")
+        backend._create_egress_proxy_pod.assert_called_once_with(
+            "sandbox-egress-agent-stale",
+            agent_id="agent-stale",
+            proxy_server=proxy_server,
+        )
+
     def test_deploy_or_resume_creates_agent_service_when_missing(self):
         backend = self._backend()
         agent = SimpleNamespace(id="agent-svc")
@@ -228,7 +281,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             "sandbox-agent-agent-proxy",
             "sandbox-workspace-agent-proxy",
             agent_id="agent-proxy",
-            proxy_url="http://sandbox-egress-agent-proxy:3128",
+            egress_service_name="sandbox-egress-agent-proxy",
             no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
         )
 
@@ -260,7 +313,9 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             configmap_name="sandbox-config",
             secret_name="sandbox-secret",
             agent_id="agent-1",
-            proxy_url=None,
+            egress_service_name=None,
+            http_proxy_port=3128,
+            socks_proxy_port=1080,
             no_proxy=None,
         )
 
@@ -278,7 +333,9 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             configmap_name="sandbox-config",
             secret_name="sandbox-secret",
             agent_id="agent-2",
-            proxy_url=None,
+            egress_service_name=None,
+            http_proxy_port=3128,
+            socks_proxy_port=1080,
             no_proxy=None,
         )
 
@@ -301,7 +358,8 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
                 id="proxy-1",
                 proxy_type="HTTP",
             ),
-            listen_port=3128,
+            http_listen_port=3128,
+            socks_listen_port=1080,
         )
 
         self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
@@ -309,7 +367,9 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
 
     def test_build_proxy_env_includes_uppercase_lowercase_and_no_proxy(self):
         env = _build_proxy_env(
-            proxy_url="http://sandbox-egress-agent-1:3128",
+            egress_service_name="sandbox-egress-agent-1",
+            http_proxy_port=3128,
+            socks_proxy_port=1080,
             no_proxy="localhost,127.0.0.1",
         )
 
@@ -317,11 +377,11 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
         self.assertEqual(values["HTTP_PROXY"], "http://sandbox-egress-agent-1:3128")
         self.assertEqual(values["HTTPS_PROXY"], "http://sandbox-egress-agent-1:3128")
         self.assertEqual(values["FTP_PROXY"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["ALL_PROXY"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["ALL_PROXY"], "socks5://sandbox-egress-agent-1:1080")
         self.assertEqual(values["http_proxy"], "http://sandbox-egress-agent-1:3128")
         self.assertEqual(values["https_proxy"], "http://sandbox-egress-agent-1:3128")
         self.assertEqual(values["ftp_proxy"], "http://sandbox-egress-agent-1:3128")
-        self.assertEqual(values["all_proxy"], "http://sandbox-egress-agent-1:3128")
+        self.assertEqual(values["all_proxy"], "socks5://sandbox-egress-agent-1:1080")
         self.assertEqual(values["NO_PROXY"], "localhost,127.0.0.1")
         self.assertEqual(values["no_proxy"], "localhost,127.0.0.1")
 
@@ -341,11 +401,60 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
                 id="proxy-2",
                 proxy_type="SOCKS5",
             ),
-            listen_port=3128,
+            http_listen_port=3128,
+            socks_listen_port=1080,
         )
 
         env = {
             entry["name"]: entry["value"]
             for entry in manifest["spec"]["containers"][0]["env"]
         }
+        self.assertEqual(env["UPSTREAM_PROTOCOL"], "socks5")
         self.assertEqual(env["UPSTREAM_PROXY_SCHEME"], "socks5")
+        ports = manifest["spec"]["containers"][0]["ports"]
+        self.assertEqual(ports[0]["containerPort"], 3128)
+        self.assertEqual(ports[1]["containerPort"], 1080)
+
+    def test_egress_proxy_pod_manifest_normalizes_https_to_http_protocol(self):
+        manifest = _build_egress_proxy_pod_manifest(
+            pod_name="sandbox-egress-agent-https",
+            namespace="default",
+            image="ghcr.io/example/egress-proxy:latest",
+            runtime_class="gvisor",
+            service_account="",
+            agent_id="agent-https",
+            proxy_server=SimpleNamespace(
+                host="proxy.example",
+                port=443,
+                username="",
+                password="",
+                id="proxy-https",
+                proxy_type="HTTPS",
+            ),
+            http_listen_port=3128,
+            socks_listen_port=1080,
+        )
+
+        env = {
+            entry["name"]: entry["value"]
+            for entry in manifest["spec"]["containers"][0]["env"]
+        }
+        self.assertEqual(env["UPSTREAM_PROTOCOL"], "http")
+        self.assertEqual(env["UPSTREAM_PROXY_SCHEME"], "https")
+
+    def test_egress_proxy_service_manifest_exposes_http_and_socks_ports(self):
+        manifest = _build_egress_proxy_service_manifest(
+            service_name="sandbox-egress-agent-3",
+            namespace="default",
+            agent_id="agent-3",
+            http_port=3128,
+            http_target_port=3128,
+            socks_port=1080,
+            socks_target_port=1080,
+        )
+
+        ports = manifest["spec"]["ports"]
+        self.assertEqual(ports[0]["name"], "http")
+        self.assertEqual(ports[0]["port"], 3128)
+        self.assertEqual(ports[1]["name"], "socks5")
+        self.assertEqual(ports[1]["port"], 1080)
