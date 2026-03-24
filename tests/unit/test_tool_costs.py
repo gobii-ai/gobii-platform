@@ -36,6 +36,9 @@ class ToolCostTests(TestCase):
 
         self.assertEqual(get_tool_credit_cost("HTTP_REQUEST"), Decimal("0.20"))
 
+    def test_custom_tools_default_to_standard_cost(self):
+        self.assertEqual(get_tool_credit_cost("custom_greeter"), Decimal("0.50"))
+
     def test_default_cost_updates_after_config_change(self):
         # Warm cache with original value
         self.assertEqual(get_default_task_credit_cost(), Decimal("0.50"))

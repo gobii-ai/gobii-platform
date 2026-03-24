@@ -83,8 +83,13 @@ def format_agent_filesystem_prompt(
             f"Most recent files in agent filespace (up to {max_rows}; "
             "use read_file for contents; attach files only via a send tool's attachments param with the exact $[/path]):"
         )
-    lines: List[str] = [header]
+    lines: List[str] = [
+        header,
+        "For bulk analysis/transforms of these synced files, prefer a custom tool in the sandbox using rg/fd/jq/sqlite3/sed/awk/file/tar/unzip instead of repeated read_file calls.",
+        "Typical flow: fd/rg --files to shortlist -> rg -n or sed -n to inspect -> jq/awk/sqlite3 to aggregate or export results.",
+    ]
     total_bytes = len(header.encode("utf-8"))
+    total_bytes += sum(len(line.encode("utf-8")) + 1 for line in lines[1:])
     max_bytes = 30000
 
     for node in list(file_nodes)[:max_rows]:

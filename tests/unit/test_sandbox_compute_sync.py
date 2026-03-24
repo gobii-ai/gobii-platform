@@ -1,3 +1,5 @@
+import os
+import tempfile
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -22,7 +24,8 @@ from api.services.sandbox_compute import (
     _build_nonzero_exit_error_payload,
     _post_sync_queue_key,
 )
-from api.services.sandbox_filespace_sync import build_filespace_pull_manifest
+from api.services.sandbox_internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH, CUSTOM_TOOL_SQLITE_WORKSPACE_PATH
+from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.tasks.sandbox_compute import sync_filespace_after_call
 
 
@@ -201,6 +204,56 @@ class SandboxComputeSyncTests(TestCase):
         session = AgentComputeSession.objects.get(agent=self.agent)
         self.assertEqual(session.last_filespace_pull_at, cursor_two)
 
+    def test_pull_manifest_excludes_internal_custom_tool_sqlite_path(self):
+        internal = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"sqlite-state",
+            extension="",
+            mime_type="application/vnd.sqlite3",
+            path=CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+            overwrite=True,
+        )
+        visible = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"user-file",
+            extension="",
+            mime_type="text/plain",
+            path="/visible.txt",
+            overwrite=True,
+        )
+
+        self.assertEqual(internal.get("status"), "ok")
+        self.assertEqual(visible.get("status"), "ok")
+
+        manifest = build_filespace_pull_manifest(self.agent)
+
+        self.assertEqual(manifest.get("status"), "ok")
+        paths = [entry.get("path") for entry in manifest.get("files") or []]
+        self.assertIn("/visible.txt", paths)
+        self.assertNotIn(CUSTOM_TOOL_SQLITE_FILESPACE_PATH, paths)
+
+    def test_apply_filespace_push_ignores_internal_custom_tool_sqlite_path(self):
+        result = apply_filespace_push(
+            self.agent,
+            [
+                {
+                    "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                    "content_b64": "c3FsaXRlLXN0YXRl",
+                    "mime_type": "application/vnd.sqlite3",
+                },
+                {
+                    "path": "/visible.txt",
+                    "content_b64": "dmlzaWJsZQ==",
+                    "mime_type": "text/plain",
+                },
+            ],
+        )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("skipped"), 1)
+        self.assertFalse(AgentFsNode.objects.filter(path=CUSTOM_TOOL_SQLITE_FILESPACE_PATH).exists())
+        self.assertTrue(AgentFsNode.objects.filter(path="/visible.txt").exists())
+
     def test_nonzero_exit_error_uses_last_stderr_line_as_message(self):
         stderr = (
             '  File "/workspace/exports/hello_country.py", line 30\n'
@@ -314,6 +367,77 @@ class SandboxComputeSyncTests(TestCase):
         mock_enqueue.assert_called_once_with(self.agent, source="run_command")
         mock_sync.assert_not_called()
 
+    def test_run_custom_tool_command_syncs_sqlite_for_remote_backend(self):
+        backend = _DummyBackend()
+        synced_bytes = b"updated sqlite bytes"
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            if direction == "push":
+                return {
+                    "status": "ok",
+                    "changes": [
+                        {
+                            "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                            "content_b64": "dXBkYXRlZCBzcWxpdGUgYnl0ZXM=",
+                            "mime_type": "application/vnd.sqlite3",
+                        }
+                    ],
+                }
+            return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            with open(db_path, "wb") as handle:
+                handle.write(b"initial sqlite bytes")
+
+            service = SandboxComputeService(backend=backend)
+            result = service.run_custom_tool_command(
+                self.agent,
+                "echo hello",
+                env={"EXTRA": "1"},
+                timeout=15,
+                local_sqlite_db_path=db_path,
+                sqlite_env_key="SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH",
+            )
+
+            self.assertEqual(result.get("status"), "ok")
+            with open(db_path, "rb") as handle:
+                self.assertEqual(handle.read(), synced_bytes)
+
+        internal_pull = next(
+            call
+            for call in backend.sync_calls
+            if call["direction"] == "pull"
+            and any(
+                entry.get("path") == CUSTOM_TOOL_SQLITE_FILESPACE_PATH
+                for entry in call["payload"].get("files", [])
+            )
+        )
+        internal_entry = internal_pull["payload"]["files"][0]
+        self.assertEqual(internal_entry["path"], CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
+        self.assertIn("content_b64", internal_entry)
+        self.assertEqual(backend.run_command_calls[0]["env"]["SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"], CUSTOM_TOOL_SQLITE_WORKSPACE_PATH)
+        push_call = next(call for call in backend.sync_calls if call["direction"] == "push")
+        self.assertTrue(push_call["payload"]["since"])
+
     def test_run_command_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()
         self._create_env_var_secret("SANDBOX_TOKEN", "from-secret")
@@ -344,6 +468,40 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(merged_env["SANDBOX_TOKEN"], "from-secret")
         self.assertEqual(merged_env["EXTRA"], "caller-value")
         self.assertEqual(backend.run_command_calls[0]["trusted_env_keys"], ["SANDBOX_TOKEN"])
+
+    def test_run_custom_tool_command_merges_env_var_secrets_with_precedence(self):
+        backend = _DummyBackend()
+        self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
+
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            sqlite_path = handle.name
+        self.addCleanup(lambda: os.path.exists(sqlite_path) and os.remove(sqlite_path))
+
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            service = SandboxComputeService(backend=backend)
+            result = service.run_custom_tool_command(
+                self.agent,
+                "python -c 'print(1)'",
+                env={"OPENAI_API_KEY": "from-caller", "KEEP_ME": "yes"},
+                local_sqlite_db_path=sqlite_path,
+                sqlite_env_key="SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH",
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(len(backend.run_command_calls), 1)
+        merged_env = backend.run_command_calls[0]["env"]
+        self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")
+        self.assertEqual(merged_env["KEEP_ME"], "yes")
+        self.assertEqual(backend.run_command_calls[0]["trusted_env_keys"], ["OPENAI_API_KEY"])
 
     def test_python_exec_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()

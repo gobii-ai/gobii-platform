@@ -1,25 +1,37 @@
+import json
+import sqlite3
+from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
+from django.urls import reverse
+from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.custom_tools import (
     CUSTOM_TOOL_RESULT_MARKER,
+    build_custom_tool_bridge_token,
     execute_create_custom_tool,
     execute_custom_tool,
+    get_create_custom_tool_tool,
     get_custom_tools_prompt_summary,
 )
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
-from api.agent.tools.tool_manager import get_available_tool_ids, get_enabled_tool_definitions
+from api.agent.tools.sqlite_state import agent_sqlite_db
+from api.agent.tools.tool_manager import enable_tools, get_available_tool_ids, get_enabled_tool_definitions
 from api.models import (
     AgentFsNode,
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
+    PersistentAgentSecret,
+    PersistentAgentStep,
+    TaskCredit,
     UserQuota,
 )
 
@@ -45,6 +57,19 @@ class CustomToolsTests(TestCase):
             charter="Build sandbox tools",
             browser_use_agent=cls.browser_agent,
         )
+
+    def _create_env_var_secret(self, key: str, value: str) -> PersistentAgentSecret:
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name=key,
+            key=key,
+            requested=False,
+        )
+        secret.set_value(value)
+        secret.save()
+        return secret
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
@@ -156,6 +181,74 @@ class CustomToolsTests(TestCase):
         tool_names = [definition["function"]["name"] for definition in definitions]
         self.assertIn("custom_greeter", tool_names)
 
+    def test_create_custom_tool_definition_mentions_direct_tool_and_sqlite_access(self):
+        definition = get_create_custom_tool_tool()
+        description = definition["function"]["description"]
+
+        self.assertIn("bulk data processing", description)
+        self.assertIn("ctx.call_tool", description)
+        self.assertIn("custom_*", description)
+        self.assertIn("ctx.sqlite_db_path", description)
+        self.assertIn("os.environ", description)
+        self.assertIn("env_var secrets", description)
+        self.assertIn("HTTP_PROXY", description)
+        self.assertIn("HTTPS_PROXY", description)
+        self.assertIn("ALL_PROXY", description)
+        self.assertIn("NO_PROXY", description)
+        self.assertIn("SOCKS5", description)
+        self.assertIn("filespace contents are synced into the sandbox", description)
+        self.assertIn("subprocess", description)
+        self.assertIn("fd", description)
+        self.assertIn("jq", description)
+        self.assertIn("sqlite3", description)
+        self.assertIn("authenticated API sync into SQLite", description)
+        self.assertIn("DB-to-SQLite reconciliation", description)
+        self.assertIn("checkpointed multi-tool workers", description)
+        self.assertIn("dry-run/sample-first validation loops", description)
+        self.assertIn("sed", description)
+        self.assertIn("rg", description)
+        self.assertIn("fzf", description)
+
+    @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2)
+    @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_enable_tools_enforces_lru_for_custom_tools(
+        self,
+        mock_get_manager,
+        _mock_custom_available,
+        _mock_limit,
+    ):
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+
+        for name in ("alpha", "beta", "gamma"):
+            PersistentAgentCustomTool.objects.create(
+                agent=self.agent,
+                name=name.title(),
+                tool_name=f"custom_{name}",
+                description=f"{name.title()} tool",
+                source_path=f"/tools/{name}.py",
+                parameters_schema={"type": "object", "properties": {}},
+            )
+
+        older = PersistentAgentEnabledTool.objects.create(agent=self.agent, tool_full_name="custom_alpha")
+        newer = PersistentAgentEnabledTool.objects.create(agent=self.agent, tool_full_name="custom_beta")
+        older.last_used_at = timezone.now() - timedelta(minutes=10)
+        older.save(update_fields=["last_used_at"])
+        newer.last_used_at = timezone.now()
+        newer.save(update_fields=["last_used_at"])
+
+        result = enable_tools(self.agent, ["custom_gamma"])
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["enabled"], ["custom_gamma"])
+        self.assertEqual(result["evicted"], ["custom_alpha"])
+        self.assertEqual(
+            set(PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list("tool_full_name", flat=True)),
+            {"custom_beta", "custom_gamma"},
+        )
+
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
     @patch("api.agent.tools.custom_tools.SandboxComputeService")
@@ -186,7 +279,7 @@ class CustomToolsTests(TestCase):
         )
 
         mock_service = MagicMock()
-        mock_service.run_command.return_value = {
+        mock_service.run_custom_tool_command.return_value = {
             "status": "ok",
             "stdout": f"debug line\n{CUSTOM_TOOL_RESULT_MARKER}{{\"result\": {{\"value\": 2}}}}\n",
             "stderr": "",
@@ -198,11 +291,226 @@ class CustomToolsTests(TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["result"], {"value": 2})
         self.assertEqual(result["stdout"], "debug line")
-        mock_service.run_command.assert_called_once()
-        call = mock_service.run_command.call_args
+        mock_service.run_custom_tool_command.assert_called_once()
+        call = mock_service.run_custom_tool_command.call_args
         self.assertEqual(call.kwargs["timeout"], 123)
         self.assertIn("SANDBOX_CUSTOM_TOOL_SOURCE_B64", call.kwargs["env"])
         self.assertEqual(call.kwargs["env"]["SANDBOX_CUSTOM_TOOL_SOURCE_PATH"], "/tools/increment.py")
+        self.assertEqual(call.kwargs["sqlite_env_key"], "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH")
+        self.assertTrue(call.kwargs["local_sqlite_db_path"])
+
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    def test_execute_custom_tool_can_write_directly_to_agent_sqlite(
+        self,
+        _mock_select_proxy,
+        _mock_service_tool_enabled,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+        _mock_bridge_url,
+    ):
+        source = (
+            "import sqlite3\n\n"
+            "def run(params, ctx):\n"
+            "    conn = sqlite3.connect(ctx.sqlite_db_path)\n"
+            "    try:\n"
+            "        conn.execute('CREATE TABLE IF NOT EXISTS custom_tool_rows (value TEXT NOT NULL)')\n"
+            "        conn.execute('INSERT INTO custom_tool_rows(value) VALUES (?)', (params['value'],))\n"
+            "        conn.commit()\n"
+            "    finally:\n"
+            "        conn.close()\n"
+            "    return {'stored': params['value']}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/store_value.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Store Value",
+            tool_name="custom_store_value",
+            description="Store a value in SQLite.",
+            source_path="/tools/store_value.py",
+            parameters_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+            timeout_seconds=30,
+        )
+
+        result = execute_custom_tool(self.agent, tool, {"value": "hello"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"], {"stored": "hello"})
+
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute("SELECT value FROM custom_tool_rows ORDER BY rowid").fetchall()
+            finally:
+                conn.close()
+        self.assertEqual(rows, [("hello",)])
+
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    def test_execute_custom_tool_can_read_env_var_secret_from_os_environ(
+        self,
+        _mock_select_proxy,
+        _mock_service_tool_enabled,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+        _mock_bridge_url,
+    ):
+        self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
+        source = (
+            "import os\n\n"
+            "def run(params, ctx):\n"
+            "    return {'value': os.environ.get(params['key'])}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/read_env.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Read Env",
+            tool_name="custom_read_env",
+            description="Read a sandbox env var.",
+            source_path="/tools/read_env.py",
+            parameters_schema={"type": "object", "properties": {"key": {"type": "string"}}},
+            timeout_seconds=30,
+        )
+
+        result = execute_custom_tool(self.agent, tool, {"key": "OPENAI_API_KEY"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"], {"value": "from-secret"})
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool")
+    def test_custom_tool_bridge_tracks_nested_tool_calls_like_normal_tools(self, mock_ensure_credit):
+        now = timezone.now()
+        credit = TaskCredit.objects.create(
+            user=self.user,
+            credits=Decimal("5.000"),
+            credits_used=Decimal("0.000"),
+            granted_date=now - timedelta(days=1),
+            expiration_date=now + timedelta(days=1),
+            additional_task=True,
+        )
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        parent_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=completion,
+            description="Outer custom tool step",
+            credits_cost=Decimal("0.000"),
+            task_credit=credit,
+        )
+        custom_tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Wrapper",
+            tool_name="custom_wrapper",
+            description="Calls nested tools.",
+            source_path="/tools/wrapper.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        mock_ensure_credit.return_value = {
+            "cost": Decimal("0.040"),
+            "credit": credit,
+        }
+
+        token = build_custom_tool_bridge_token(
+            self.agent,
+            custom_tool,
+            parent_step_id=str(parent_step.id),
+        )
+
+        response = self.client.post(
+            reverse("api:custom-tool-bridge-execute"),
+            data=json.dumps(
+                {
+                    "tool_name": "update_charter",
+                    "params": {
+                        "new_charter": "Tracked nested charter",
+                        "will_continue_work": False,
+                    },
+                }
+            ),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+
+        nested_steps = (
+            PersistentAgentStep.objects.filter(agent=self.agent)
+            .exclude(id=parent_step.id)
+            .select_related("tool_call", "completion", "task_credit")
+        )
+        self.assertEqual(nested_steps.count(), 1)
+        nested_step = nested_steps.get()
+        self.assertEqual(nested_step.completion_id, completion.id)
+        self.assertEqual(nested_step.credits_cost, Decimal("0.040"))
+        self.assertEqual(nested_step.task_credit_id, credit.id)
+        self.assertEqual(nested_step.tool_call.tool_name, "update_charter")
+        self.assertEqual(nested_step.tool_call.status, "complete")
+        self.assertIn("Charter updated successfully.", nested_step.tool_call.result)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Tracked nested charter")
+
+    @patch("api.custom_tool_bridge.execute_tracked_runtime_tool_call")
+    def test_custom_tool_bridge_allows_other_custom_tools(self, mock_execute_tracked_runtime):
+        custom_tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Wrapper",
+            tool_name="custom_wrapper",
+            description="Calls nested tools.",
+            source_path="/tools/wrapper.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Target",
+            tool_name="custom_target",
+            description="Nested target tool.",
+            source_path="/tools/target.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        mock_execute_tracked_runtime.return_value = ({"status": "ok", "result": {"ok": True}}, None)
+
+        token = build_custom_tool_bridge_token(self.agent, custom_tool)
+        response = self.client.post(
+            reverse("api:custom-tool-bridge-execute"),
+            data=json.dumps({"tool_name": "custom_target", "params": {"value": 1}}),
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {token}",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        mock_execute_tracked_runtime.assert_called_once_with(
+            self.agent,
+            tool_name="custom_target",
+            exec_params={"value": 1},
+            parent_step=None,
+        )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_prompt_summary_reports_saved_and_enabled_custom_tools(self, _mock_sandbox):
@@ -229,6 +537,35 @@ class CustomToolsTests(TestCase):
         self.assertIn("Custom tools: 2 saved, 1 enabled.", summary)
         self.assertIn("Dev loop:", summary)
         self.assertIn("file_str_replace", summary)
+        self.assertIn("ctx.sqlite_db_path", summary)
+        self.assertIn("os.environ", summary)
+        self.assertIn("env_var secrets", summary)
+        self.assertIn("HTTP_PROXY", summary)
+        self.assertIn("HTTPS_PROXY", summary)
+        self.assertIn("ALL_PROXY", summary)
+        self.assertIn("NO_PROXY", summary)
+        self.assertIn("SOCKS5", summary)
+        self.assertIn("bulk data processing", summary)
+        self.assertIn("repetitive deterministic work", summary)
+        self.assertIn("other custom_* tools", summary)
+        self.assertIn("filespace contents are synced into the sandbox", summary)
+        self.assertIn("fd", summary)
+        self.assertIn("jq", summary)
+        self.assertIn("sqlite3", summary)
+        self.assertIn("sed", summary)
+        self.assertIn("Micro trajectories:", summary)
+        self.assertIn("Filespace indexing:", summary)
+        self.assertIn("Bulk export normalization:", summary)
+        self.assertIn("Authenticated API sync:", summary)
+        self.assertIn("DB reconciliation:", summary)
+        self.assertIn("Checkpointed orchestration:", summary)
+        self.assertIn("Safe development loop:", summary)
+        self.assertIn("Safe mutation testing:", summary)
+        self.assertIn("Proxy-aware integration testing:", summary)
+        self.assertIn("fetch paginated records", summary)
+        self.assertIn("pull remote rows in batches", summary)
+        self.assertIn("dry_run flag", summary)
+        self.assertIn("managed HTTP(S)/SOCKS5 proxy", summary)
         self.assertIn("custom_alpha", summary)
         self.assertIn("custom_beta", summary)
 

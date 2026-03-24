@@ -600,7 +600,7 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
             already_enabled.append(resolved_name)
 
     if enabled or already_enabled:
-        evicted = _evict_surplus_tools(agent, limit=limit)
+        evicted = _evict_surplus_tools(agent, exclude=list(resolved_seen), limit=limit)
 
     parts: List[str] = []
     if enabled:

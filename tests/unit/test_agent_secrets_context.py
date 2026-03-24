@@ -300,6 +300,8 @@ class SecureCredentialsRequestToolTests(TestCase):
 
         self.assertEqual(tool_def["type"], "function")
         self.assertEqual(tool_def["function"]["name"], "secure_credentials_request")
+        self.assertIn("custom tool script", tool_def["function"]["description"])
+        self.assertIn("os.environ", tool_def["function"]["description"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["properties"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["required"])
         item_properties = (
@@ -307,6 +309,8 @@ class SecureCredentialsRequestToolTests(TestCase):
         )
         self.assertIn("secret_type", item_properties)
         self.assertEqual(item_properties["secret_type"]["enum"], ["credential", "env_var"])
+        self.assertIn("custom tool scripts", item_properties["secret_type"]["description"])
+        self.assertIn("os.environ", item_properties["secret_type"]["description"])
 
     def test_create_new_credential_requests(self):
         """Test creating new credential requests."""

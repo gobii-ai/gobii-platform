@@ -9,6 +9,7 @@ from django.db import DatabaseError
 from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.files.filespace_service import get_or_create_default_filespace, write_bytes_to_dir
 from api.models import AgentFsNode, PersistentAgent
+from api.services.sandbox_internal_paths import is_sandbox_internal_path
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,9 @@ def apply_filespace_push(
             continue
         path = change.get("path")
         if not isinstance(path, str) or not path.strip():
+            skipped += 1
+            continue
+        if is_sandbox_internal_path(path):
             skipped += 1
             continue
 
@@ -161,6 +165,8 @@ def build_filespace_pull_manifest(
     max_updated_at: Optional[datetime] = None
     for node in queryset.iterator():
         if node.node_type != AgentFsNode.NodeType.FILE:
+            continue
+        if is_sandbox_internal_path(node.path):
             continue
         if node.updated_at and (max_updated_at is None or node.updated_at > max_updated_at):
             max_updated_at = node.updated_at
