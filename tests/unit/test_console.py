@@ -1108,7 +1108,11 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 302)
         parsed = urlparse(response["Location"])
-        self.assertTrue(parsed.path.startswith("/app/agents/"), response["Location"])
+        response_messages = [message.message for message in get_messages(response.wsgi_request)]
+        self.assertTrue(
+            parsed.path.startswith("/app/agents/"),
+            f"location={response['Location']}, messages={response_messages}",
+        )
 
         agent_id = parsed.path.rstrip("/").rsplit("/", 1)[-1]
         created_agent = PersistentAgent.objects.get(id=agent_id)
