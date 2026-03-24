@@ -198,6 +198,62 @@ class EmailAdapter:
         """Return a :class:`ParsedMessage` extracted from ``request``."""
         raise NotImplementedError
 
+
+def _coerce_email_headers_map(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        return {str(k): str(v) for k, v in value.items() if k and v is not None}
+
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return _coerce_email_headers_map(parsed)
+
+    if isinstance(value, (list, tuple)):
+        headers: dict[str, str] = {}
+        for item in value:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                key = str(item[0]).strip()
+                header_value = str(item[1]).strip()
+                if key and header_value:
+                    headers[key] = header_value
+            elif isinstance(item, dict):
+                key = str(item.get("Name") or item.get("name") or "").strip()
+                header_value = str(item.get("Value") or item.get("value") or "").strip()
+                if key and header_value:
+                    headers[key] = header_value
+        return headers
+
+    return {}
+
+
+def _normalize_inbound_email_raw_payload(raw_payload: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
+    payload = dict(raw_payload)
+
+    headers = _coerce_email_headers_map(
+        payload.get("headers")
+        or payload.get("Headers")
+        or payload.get("message-headers")
+    )
+    if headers:
+        payload["headers"] = headers
+
+    message_id = (
+        payload.get("message_id")
+        or payload.get("MessageID")
+        or payload.get("Message-Id")
+        or payload.get("Message-ID")
+        or headers.get("MessageID")
+        or headers.get("Message-Id")
+        or headers.get("Message-ID")
+        or headers.get("message-id")
+    )
+    if message_id:
+        payload["message_id"] = str(message_id).strip()
+
+    return payload
+
 class TwilioSmsAdapter(SmsAdapter):
     """Adapter that normalizes Twilio SMS webhook payloads."""
 
@@ -329,13 +385,15 @@ class PostmarkEmailAdapter(EmailAdapter):
 
         span.set_attribute("postmark.body_used", body_used)
 
+        normalized_payload = _normalize_inbound_email_raw_payload(payload_dict)
+
         return ParsedMessage(
             sender=payload_dict.get("From", ""),
             recipient=payload_dict.get("To", ""),
             subject=payload_dict.get("Subject"),
             body=body,
             attachments=attachments,
-            raw_payload=payload_dict,
+            raw_payload=normalized_payload,
             msg_channel=CommsChannel.EMAIL,
         )
 
@@ -471,12 +529,14 @@ class MailgunEmailAdapter(EmailAdapter):
             or ""
         ).strip()
 
+        normalized_payload = _normalize_inbound_email_raw_payload(payload_dict)
+
         return ParsedMessage(
             sender=sender,
             recipient=recipient,
             subject=subject,
             body=body,
             attachments=attachments,
-            raw_payload=payload_dict,
+            raw_payload=normalized_payload,
             msg_channel=CommsChannel.EMAIL,
         )

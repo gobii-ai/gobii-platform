@@ -345,6 +345,7 @@ do not invent columns; only use those listed above
 
 # __messages (special table)
 __messages.columns = {message_id, seq, timestamp, channel, is_outbound, direction, from_address, to_address, conversation_id, conversation_address, is_peer_dm, peer_agent_id, subject, body, body_bytes, body_is_truncated, body_truncated_bytes, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, is_hidden_in_chat}
+message_id → internal Gobii message id; pass this exact value to send_email.reply_to_message_id
 attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json)
 rejected_attachments_json → JSON array of inbound attachments that were attempted but rejected before storage
 freshness_check → do NOT query __messages for "anything new"; new inbound messages are already injected into this run's unified history
@@ -2218,6 +2219,7 @@ def build_prompt_context(
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs and "
         "__messages stores a newest-first communication snapshot (full bodies up to ~5MB total). "
+        "__messages.message_id is the internal Gobii message id accepted by send_email.reply_to_message_id. "
         f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
         "All are per-cycle snapshots dropped before persistence. "
         "Query __tool_results and __files with sqlite_batch (not read_file). "
@@ -2679,14 +2681,23 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
     recent_web_endpoints: dict[UUID, PersistentAgentCommsEndpoint] = {}
     for msg in recent_messages:
         endpoint = None
+        endpoint_channel = ""
+        endpoint_address = ""
         if msg.is_outbound and msg.to_endpoint:
             endpoint = msg.to_endpoint
+            endpoint_channel = endpoint.channel
+            endpoint_address = endpoint.address
+        elif msg.is_outbound and msg.conversation:
+            endpoint_channel = msg.conversation.channel
+            endpoint_address = msg.conversation.address
         elif not msg.is_outbound:
             endpoint = msg.from_endpoint
-        if not endpoint:
+            endpoint_channel = endpoint.channel
+            endpoint_address = endpoint.address
+        if not endpoint_address:
             continue
-        key = (endpoint.channel, endpoint.address)
-        if endpoint.channel == CommsChannel.WEB:
+        key = (endpoint_channel, endpoint_address)
+        if endpoint is not None and endpoint.channel == CommsChannel.WEB:
             recent_web_endpoints[endpoint.id] = endpoint
 
         # Prefer earlier (more recent in loop) context only if not already stored
@@ -2696,8 +2707,12 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
                 subject = ""
                 if isinstance(msg.raw_payload, dict):
                     subject = msg.raw_payload.get("subject") or ""
+                details = []
                 if subject:
-                    meta_str = f" (recent subj: {subject[:80]})"
+                    details.append(f"recent subj: {subject[:80]}")
+                details.append(f"reply_to_message_id: {msg.id}")
+                if details:
+                    meta_str = f" ({'; '.join(details)})"
             else:
                 # For SMS or other channels, include a short body preview
                 body_preview = (msg.body or "")[:60].replace("\n", " ")
@@ -5269,6 +5284,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 from_addr = _format_web_party(from_addr, m.from_endpoint_id)
             if m.is_outbound:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
+                if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:
+                    to_addr = m.conversation.address
                 if channel == CommsChannel.WEB and m.to_endpoint_id:
                     to_addr = _format_web_party(to_addr, m.to_endpoint_id)
                 header = (
@@ -5283,6 +5300,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             # Handle email messages with structured components
             if channel == CommsChannel.EMAIL:
+                components["reply_to_message_id"] = str(m.id)
                 if subject:
                     components["subject"] = subject
 
@@ -5369,6 +5387,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
+            "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading
             "subject": 2,     # Medium priority - email subject
             "body": 1,        # Low priority - email body (can be long and shrunk)
         }

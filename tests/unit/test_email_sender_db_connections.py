@@ -10,6 +10,7 @@ from api.models import (
     PersistentAgent,
     BrowserUseAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentMessage,
     CommsChannel,
     DeliveryStatus,
@@ -64,14 +65,48 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         message.latest_error_message = ""
         message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
 
+    def _create_email_conversation(self, address=None):
+        return PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=address or self.user.email,
+        )
+
+    def _create_inbound_email_message(
+        self,
+        *,
+        address=None,
+        raw_payload=None,
+        body="Inbound body",
+    ):
+        conversation = self._create_email_conversation(address=address)
+        sender_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=address or self.user.email,
+        )
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=sender_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body=body,
+            raw_payload=raw_payload or {
+                "subject": "Inbound subject",
+                "message_id": "<inbound-message@example.com>",
+            },
+        )
+
     def test_send_email_tool_requires_html_tables(self):
-        description = get_send_email_tool()["function"]["description"]
+        tool = get_send_email_tool()
+        description = tool["function"]["description"]
+        properties = tool["function"]["parameters"]["properties"]
 
         self.assertIn("<table>", description)
         self.assertIn("<tr>", description)
         self.assertIn("<th>", description)
         self.assertIn("<td>", description)
         self.assertIn("do NOT use Markdown pipe tables", description)
+        self.assertIn("reply_to_message_id", properties)
 
     def test_execute_send_email_retries_on_operational_error(self):
         """
@@ -152,11 +187,16 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertNotIn("\u0019", message.body)
         self.assertIn("It's", message.body)
         self.assertEqual(message.raw_payload.get("subject", ""), params["subject"])
-        self.assertEqual(message.to_endpoint.address, params["to_address"])
+        self.assertIsNone(message.to_endpoint_id)
+        self.assertEqual(message.conversation.address, params["to_address"])
+        self.assertIsNone(message.parent_id)
         self.assertListEqual(
             list(message.cc_endpoints.values_list("address", flat=True)),
             params["cc_addresses"],
         )
+        participant_addresses = list(message.conversation.participants.values_list("endpoint__address", flat=True))
+        self.assertIn(self.from_ep.address, participant_addresses)
+        self.assertIn(params["to_address"], participant_addresses)
 
     def test_execute_send_email_self_send_uses_default_alias_sender(self):
         self.from_ep.is_primary = False
@@ -183,7 +223,8 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertEqual(result.get("status"), "ok")
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertEqual(message.from_endpoint_id, self.from_ep.id)
-        self.assertEqual(message.to_endpoint_id, custom_primary.id)
+        self.assertIsNone(message.to_endpoint_id)
+        self.assertEqual(message.conversation.address, custom_primary.address)
 
     def test_execute_send_email_self_send_with_cc_keeps_custom_sender(self):
         self.from_ep.is_primary = False
@@ -253,6 +294,37 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         self.assertEqual(result.get("status"), "ok")
         self.assertTrue(result.get("message_id"))
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertIsNone(message.parent_id)
+        self.assertEqual(message.conversation.address, self.user.email)
+
+    def test_execute_send_email_duplicate_guard_matches_legacy_outbound_email(self):
+        legacy_to_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_ep,
+            to_endpoint=legacy_to_endpoint,
+            is_outbound=True,
+            body="<p>The report is ready for review.</p>",
+            raw_payload={"subject": "Quick update"},
+            latest_status=DeliveryStatus.DELIVERED,
+        )
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": self.user.email,
+                "subject": "Quick update",
+                "mobile_first_html": "<p>The report is ready for review.</p>",
+            },
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertTrue(result.get("duplicate_detected"))
+        self.assertEqual(result.get("duplicate_reason"), "exact")
 
     def test_execute_send_email_ignores_attachment_claim_in_quoted_thread(self):
         params = {
@@ -297,3 +369,140 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
 
         self.assertEqual(result.get("status"), "ok")
         create_message_attachments_mock.assert_called_once()
+
+    def test_execute_send_email_reply_uses_parent_message(self):
+        inbound = self._create_inbound_email_message(
+            raw_payload={
+                "subject": "Inbound thread",
+                "message_id": "<thread-root@example.com>",
+                "references": "<older@example.com>",
+            },
+            body="Can you reply here?",
+        )
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(
+                self.agent,
+                {
+                    "to_address": self.user.email,
+                    "subject": "Re: Inbound thread",
+                    "mobile_first_html": "<p>Replying in thread.</p>",
+                    "reply_to_message_id": str(inbound.id),
+                },
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(message.parent_id, inbound.id)
+        self.assertEqual(message.conversation_id, inbound.conversation_id)
+
+    def test_execute_send_email_reply_accepts_prior_outbound_message_id(self):
+        conversation = self._create_email_conversation()
+        prior = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_ep,
+            conversation=conversation,
+            is_outbound=True,
+            body="<p>First send</p>",
+            raw_payload={
+                "subject": "Prior outbound",
+                "message_id": "<prior-outbound@example.com>",
+            },
+        )
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(
+                self.agent,
+                {
+                    "to_address": self.user.email,
+                    "subject": "Re: Prior outbound",
+                    "mobile_first_html": "<p>Replying to prior outbound.</p>",
+                    "reply_to_message_id": str(prior.id),
+                },
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(message.parent_id, prior.id)
+
+    def test_execute_send_email_reply_rejects_non_email_message_id(self):
+        sms_sender = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15550001111",
+        )
+        sms_recipient = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15550002222",
+        )
+        sms_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=sms_sender,
+            to_endpoint=sms_recipient,
+            is_outbound=True,
+            body="SMS body",
+            raw_payload={},
+        )
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": self.user.email,
+                "subject": "Wrong channel",
+                "mobile_first_html": "<p>Nope</p>",
+                "reply_to_message_id": str(sms_message.id),
+            },
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("must reference an email message", result.get("message", ""))
+
+    def test_execute_send_email_reply_allows_missing_rfc_message_id(self):
+        inbound = self._create_inbound_email_message(raw_payload={"subject": "Missing id"})
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_delivered,
+        ):
+            result = execute_send_email(
+                self.agent,
+                {
+                    "to_address": self.user.email,
+                    "subject": "Missing RFC id",
+                    "mobile_first_html": "<p>Nope</p>",
+                    "reply_to_message_id": str(inbound.id),
+                },
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(message.parent_id, inbound.id)
+
+    def test_execute_send_email_reply_rejects_recipient_mismatch(self):
+        from api.models import CommsAllowlistEntry
+
+        inbound = self._create_inbound_email_message()
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="other@example.com",
+        )
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": "other@example.com",
+                "subject": "Mismatch",
+                "mobile_first_html": "<p>Nope</p>",
+                "reply_to_message_id": str(inbound.id),
+            },
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("does not match to_address", result.get("message", ""))

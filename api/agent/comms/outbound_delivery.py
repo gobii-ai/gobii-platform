@@ -2,7 +2,7 @@ import logging
 import os
 import re
 from email.message import MIMEPart
-from email.utils import formataddr
+from email.utils import formataddr, make_msgid
 from urllib.parse import unquote
 
 from django.core.mail import get_connection
@@ -36,6 +36,7 @@ from util.text_sanitizer import decode_unicode_escapes, normalize_llm_output
 from .cid_references import CID_SRC_REFERENCE_RE
 from .email_content import convert_body_to_html_and_plaintext
 from .email_footer_service import append_footer_if_needed
+from .email_threading import build_reply_headers, get_message_raw_payload, get_message_rfc_message_id
 from .smtp_transport import SmtpTransport
 
 
@@ -317,6 +318,37 @@ def _normalized_email_subject(message: PersistentAgentMessage) -> str:
     if raw_subject is None:
         return ""
     return decode_unicode_escapes(str(raw_subject))
+
+
+def _get_email_primary_recipient(message: PersistentAgentMessage) -> str:
+    if message.to_endpoint and message.to_endpoint.address:
+        return message.to_endpoint.address
+    if message.conversation and message.conversation.address:
+        return message.conversation.address
+    return ""
+
+
+def _persist_outbound_email_threading_metadata(message: PersistentAgentMessage) -> tuple[str, dict[str, str]]:
+    raw_payload = get_message_raw_payload(message)
+    next_payload = dict(raw_payload)
+    message_rfc_id = get_message_rfc_message_id(message)
+    if not message_rfc_id:
+        message_rfc_id = make_msgid()
+        next_payload["message_id"] = message_rfc_id
+
+    reply_headers = build_reply_headers(getattr(message, "parent", None))
+    in_reply_to = reply_headers.get("In-Reply-To", "").strip()
+    references = reply_headers.get("References", "").strip()
+    if in_reply_to:
+        next_payload["in_reply_to"] = in_reply_to
+    if references:
+        next_payload["references"] = references
+
+    if next_payload != raw_payload:
+        message.raw_payload = next_payload
+        message.save(update_fields=["raw_payload"])
+
+    return message_rfc_id, reply_headers
 
 
 def _extract_cid_references(html_body: str) -> list[dict[str, int | str]]:
@@ -633,6 +665,8 @@ def deliver_agent_email(message: PersistentAgentMessage):
         )
         return
     subject = _normalized_email_subject(message)
+    to_address = _get_email_primary_recipient(message)
+    message_rfc_id, reply_headers = _persist_outbound_email_threading_metadata(message)
 
     # First: per-endpoint SMTP override
     acct = None
@@ -664,7 +698,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
         try:
             from_address = message.from_endpoint.address
-            to_address = message.to_endpoint.address if message.to_endpoint else ""
             body_raw = message.body
 
             # content conversion
@@ -696,6 +729,9 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     plaintext_body=plaintext_body,
                     html_body=html_body,
                     attempt_id=str(attempt.id),
+                    message_id=message_rfc_id,
+                    in_reply_to=reply_headers.get("In-Reply-To"),
+                    references=reply_headers.get("References"),
                 )
 
             now = timezone.now()
@@ -743,7 +779,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 "SMTP error sending message %s from %r to %r",
                 message.id,
                 getattr(message.from_endpoint, 'address', None),
-                getattr(message.to_endpoint, 'address', None),
+                to_address,
             )
             error_str = str(e)
             attempt.status = DeliveryStatus.FAILED
@@ -785,7 +821,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         logger.info(
             "--- SIMULATED EMAIL ---\nFrom: %s\nTo: %s\nSubject: %s\n\n=== ORIGINAL RAW BODY ===\n%s\n\n=== CONVERTED HTML VERSION ===\n%s\n\n=== CONVERTED PLAINTEXT VERSION ===\n%s\n-----------------------",
             _build_from_header(message),
-            message.to_endpoint.address,
+            to_address,
             subject,
             message.body,
             html_snippet,
@@ -811,7 +847,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             span.add_event('Email - Simulated Delivery (flag)', {
                 'message_id': str(message.id),
                 'from_address': message.from_endpoint.address,
-                'to_address': message.to_endpoint.address,
+                'to_address': to_address,
             })
         return
 
@@ -829,7 +865,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "from=%r, to=%r, subject=%r, body_length=%d",
             message.id,
             message.from_endpoint.address,
-            message.to_endpoint.address,
+            to_address,
             subject,
             len(body_raw)
         )
@@ -854,7 +890,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "=== CONVERTED PLAINTEXT VERSION ===\n%s\n"
             "-----------------------",
             _build_from_header(message),
-            message.to_endpoint.address,
+            to_address,
             subject,
             message.body,
             html_snippet,
@@ -881,7 +917,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             span.add_event('Email - Simulated Delivery', {
                 'message_id': str(message.id),
                 'from_address': message.from_endpoint.address,
-                'to_address': message.to_endpoint.address,
+                'to_address': to_address,
             })
 
         return
@@ -899,7 +935,6 @@ def deliver_agent_email(message: PersistentAgentMessage):
     try:
         from_address = message.from_endpoint.address
         from_header = _build_from_header(message)
-        to_address = message.to_endpoint.address
         body_raw = message.body
         
         # Log the raw message received from the agent
@@ -993,6 +1028,10 @@ def deliver_agent_email(message: PersistentAgentMessage):
             cc=cc_addresses if cc_addresses else None,
             connection=_get_postmark_connection(),
             tags=["persistent-agent"],
+            headers={
+                "Message-ID": message_rfc_id,
+                **reply_headers,
+            },
             metadata={
                 "agent_id": str(message.owner_agent_id),
                 "message_id": str(message.id),
@@ -1069,7 +1108,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "Postmark API error sending message %s. Message details: from=%r, to=%r, subject=%r",
             message.id,
             message.from_endpoint.address,
-            message.to_endpoint.address,
+            to_address,
             subject,
         )
         error_str = str(e)
@@ -1092,7 +1131,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "Unexpected error sending message %s. Message details: from=%r, to=%r, subject=%r",
             message.id,
             message.from_endpoint.address,
-            message.to_endpoint.address,
+            to_address,
             subject,
         )
         error_str = f"An unexpected error occurred: {str(e)}"

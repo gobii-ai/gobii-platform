@@ -89,6 +89,30 @@ class PostmarkEmailWebhookTest(TestCase):
 
     @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")
+    def test_postmark_inbound_normalizes_rfc_message_id(self, mock_ingest):
+        request = self._create_postmark_request(
+            from_email=self.owner.email,
+            to_email=self.agent_endpoint.address,
+        )
+        request._body = json.dumps({
+            "From": self.owner.email,
+            "To": self.agent_endpoint.address,
+            "ToFull": [{"Email": self.agent_endpoint.address, "Name": "", "MailboxHash": ""}],
+            "CcFull": [],
+            "BccFull": [],
+            "Subject": "Test Subject",
+            "TextBody": "Test Body",
+            "MessageID": "<postmark-inbound@example.com>",
+        }).encode("utf-8")
+
+        response: HttpResponse = email_webhook_postmark(request)
+
+        self.assertEqual(response.status_code, 200)
+        parsed = mock_ingest.call_args[0][1]
+        self.assertEqual(parsed.raw_payload.get("message_id"), "<postmark-inbound@example.com>")
+
+    @tag("batch_email")
+    @patch("api.webhooks.ingest_inbound_message")
     @patch("api.webhooks.logger.info")
     def test_email_from_non_owner_is_discarded(self, mock_logger, mock_ingest):
         """Verify that an email from a non-owner is discarded and logged."""
@@ -227,6 +251,26 @@ class MailgunEmailWebhookTest(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_ingest.assert_called_once()
         self.assertEqual(mock_ingest.call_args[0][0], CommsChannel.EMAIL)
+
+    @tag("batch_email")
+    @patch("api.webhooks.ingest_inbound_message")
+    def test_mailgun_inbound_normalizes_rfc_message_id_from_headers(self, mock_ingest):
+        request = self._create_mailgun_request(
+            from_email=self.owner.email,
+            to_email=self.agent_endpoint.address,
+        )
+        request.POST = request.POST.copy()
+        request.POST["message-headers"] = json.dumps([
+            ["Message-Id", "<mailgun-inbound@example.com>"],
+            ["X-Other", "value"],
+        ])
+
+        response: HttpResponse = email_webhook_mailgun(request)
+
+        self.assertEqual(response.status_code, 200)
+        parsed = mock_ingest.call_args[0][1]
+        self.assertEqual(parsed.raw_payload.get("message_id"), "<mailgun-inbound@example.com>")
+        self.assertEqual(parsed.raw_payload.get("headers", {}).get("Message-Id"), "<mailgun-inbound@example.com>")
 
     @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")

@@ -15,6 +15,7 @@ from django.core.files.base import ContentFile
 from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     OutboundMessageAttempt,
@@ -350,6 +351,134 @@ class EmailDeliveryTests(TestCase):
         call_kwargs = mock_anymail.call_args[1]
         self.assertEqual(call_kwargs["subject"], "Re: 🚨 Breaking update")
         mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch("api.agent.comms.outbound_delivery._prepare_email_content", return_value=("<p>Hello</p>", "Hello"))
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_production_email_delivery_sets_reply_headers(self, mock_anymail, _mock_prepare):
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "test-message-id"
+
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.to_endpoint.address,
+        )
+        parent = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.to_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body="Original inbound",
+            raw_payload={
+                "subject": "Original",
+                "message_id": "<parent@example.com>",
+                "references": "<older@example.com>",
+            },
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            conversation=conversation,
+            parent=parent,
+            is_outbound=True,
+            body="<p>Hello</p>",
+            raw_payload={"subject": "Re: Original"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+
+        with patch("api.agent.comms.outbound_delivery.render_to_string", return_value="<html><body>Hello</body></html>"):
+            deliver_agent_email(message)
+
+        call_kwargs = mock_anymail.call_args[1]
+        self.assertEqual(call_kwargs["to"], [self.to_endpoint.address])
+        self.assertEqual(call_kwargs["headers"]["In-Reply-To"], "<parent@example.com>")
+        self.assertEqual(
+            call_kwargs["headers"]["References"],
+            "<older@example.com> <parent@example.com>",
+        )
+        self.assertTrue(call_kwargs["headers"]["Message-ID"].startswith("<"))
+        message.refresh_from_db()
+        self.assertEqual(message.raw_payload["message_id"], call_kwargs["headers"]["Message-ID"])
+        self.assertEqual(message.raw_payload["references"], call_kwargs["headers"]["References"])
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p>Hello</p>", "Hello"),
+    )
+    @patch("api.agent.comms.outbound_delivery.render_to_string", return_value="<html><body>Hello</body></html>")
+    @patch("api.agent.comms.outbound_delivery._get_postmark_connection", return_value=MagicMock())
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_follow_up_reply_preserves_full_references_chain(
+        self,
+        mock_anymail,
+        _mock_connection,
+        _mock_render,
+        _mock_prepare,
+    ):
+        first_send = MagicMock()
+        first_send.anymail_status.message_id = "test-message-id-1"
+        second_send = MagicMock()
+        second_send.anymail_status.message_id = "test-message-id-2"
+        mock_anymail.side_effect = [first_send, second_send]
+
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.to_endpoint.address,
+        )
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.to_endpoint,
+            conversation=conversation,
+            is_outbound=False,
+            body="Original inbound",
+            raw_payload={
+                "subject": "Original",
+                "message_id": "<parent@example.com>",
+                "references": "<older@example.com>",
+            },
+        )
+        first_reply = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            conversation=conversation,
+            parent=inbound,
+            is_outbound=True,
+            body="<p>First reply</p>",
+            raw_payload={"subject": "Re: Original"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        second_reply = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            conversation=conversation,
+            parent=first_reply,
+            is_outbound=True,
+            body="<p>Second reply</p>",
+            raw_payload={"subject": "Re: Original"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+
+        deliver_agent_email(first_reply)
+        deliver_agent_email(second_reply)
+
+        first_headers = mock_anymail.call_args_list[0][1]["headers"]
+        second_headers = mock_anymail.call_args_list[1][1]["headers"]
+        self.assertEqual(
+            first_headers["References"],
+            "<older@example.com> <parent@example.com>",
+        )
+        self.assertEqual(
+            second_headers["References"],
+            f"<older@example.com> <parent@example.com> {first_headers['Message-ID']}",
+        )
+        second_reply.refresh_from_db()
+        self.assertEqual(second_reply.raw_payload["references"], second_headers["References"])
 
     @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
     @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)

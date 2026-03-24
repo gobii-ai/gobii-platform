@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Sequence
 from uuid import UUID
 
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 
 from ...encryption import SecretsEncryption
 from ...llm.utils import normalize_model_name
@@ -326,10 +326,11 @@ def detect_recent_duplicate_message(
         from_endpoint__channel=channel,
     )
 
-    if conversation_id:
+    if conversation_id and to_address:
+        qs = qs.filter(Q(conversation_id=conversation_id) | Q(to_endpoint__address=to_address))
+    elif conversation_id:
         qs = qs.filter(conversation_id=conversation_id)
-
-    if to_address:
+    elif to_address:
         qs = qs.filter(to_endpoint__address=to_address)
 
     current_body = (body or "").strip()
