@@ -298,6 +298,34 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         self.assertIsNone(message.parent_id)
         self.assertEqual(message.conversation.address, self.user.email)
 
+    def test_execute_send_email_duplicate_guard_matches_legacy_outbound_email(self):
+        legacy_to_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_ep,
+            to_endpoint=legacy_to_endpoint,
+            is_outbound=True,
+            body="<p>The report is ready for review.</p>",
+            raw_payload={"subject": "Quick update"},
+            latest_status=DeliveryStatus.DELIVERED,
+        )
+
+        result = execute_send_email(
+            self.agent,
+            {
+                "to_address": self.user.email,
+                "subject": "Quick update",
+                "mobile_first_html": "<p>The report is ready for review.</p>",
+            },
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertTrue(result.get("duplicate_detected"))
+        self.assertEqual(result.get("duplicate_reason"), "exact")
+
     def test_execute_send_email_ignores_attachment_claim_in_quoted_thread(self):
         params = {
             "to_address": self.user.email,

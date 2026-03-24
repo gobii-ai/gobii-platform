@@ -82,6 +82,7 @@ from .llm_config import (
 from .promptree import Prompt, hmt
 from .step_compaction import llm_summarise_steps
 
+from ..comms.email_threading import message_supports_explicit_email_reply
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
 from ..tools.spawn_web_task import get_browser_daily_task_limit
@@ -2696,11 +2697,13 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
                 subject = ""
                 if isinstance(msg.raw_payload, dict):
                     subject = msg.raw_payload.get("subject") or ""
-                message_id = str(msg.id)
+                details = []
                 if subject:
-                    meta_str = f" (recent subj: {subject[:80]}; message_id: {message_id})"
-                else:
-                    meta_str = f" (message_id: {message_id})"
+                    details.append(f"recent subj: {subject[:80]}")
+                if message_supports_explicit_email_reply(msg):
+                    details.append(f"message_id: {msg.id}")
+                if details:
+                    meta_str = f" ({'; '.join(details)})"
             else:
                 # For SMS or other channels, include a short body preview
                 body_preview = (msg.body or "")[:60].replace("\n", " ")
@@ -5288,7 +5291,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             # Handle email messages with structured components
             if channel == CommsChannel.EMAIL:
-                components["message_id"] = str(m.id)
+                if message_supports_explicit_email_reply(m):
+                    components["message_id"] = str(m.id)
                 if subject:
                     components["subject"] = subject
 

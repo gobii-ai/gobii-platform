@@ -18,6 +18,12 @@ from ...models import (
     DeliveryStatus,
 )
 from django.conf import settings
+from ..comms.email_threading import (
+    get_message_channel,
+    get_message_contact_address,
+    get_message_rfc_message_id,
+    normalize_email_address,
+)
 from ..comms.outbound_delivery import deliver_agent_email
 from ..comms.email_endpoint_routing import resolve_agent_email_sender_endpoint_for_message
 from ..comms.message_service import _ensure_participant, _get_or_create_conversation
@@ -116,47 +122,6 @@ def _email_claims_attachments(html: str) -> bool:
     return any(pattern.search(plain_text) for pattern in _ATTACHMENT_CLAIM_PATTERNS)
 
 
-def _normalize_email_address(address: str) -> str:
-    normalized = PersistentAgentCommsEndpoint.normalize_address(CommsChannel.EMAIL, address or "")
-    return normalized or (address or "").strip()
-
-
-def _message_channel(message: PersistentAgentMessage) -> str:
-    if message.from_endpoint_id and message.from_endpoint:
-        return message.from_endpoint.channel
-    if message.conversation_id and message.conversation:
-        return message.conversation.channel
-    return ""
-
-
-def _message_contact_address(message: PersistentAgentMessage) -> str:
-    if message.conversation_id and message.conversation and message.conversation.address:
-        return _normalize_email_address(message.conversation.address)
-    if message.is_outbound and message.to_endpoint_id and message.to_endpoint:
-        return _normalize_email_address(message.to_endpoint.address)
-    if not message.is_outbound and message.from_endpoint_id and message.from_endpoint:
-        return _normalize_email_address(message.from_endpoint.address)
-    return ""
-
-
-def _get_message_rfc_message_id(message: PersistentAgentMessage) -> str:
-    raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
-    candidate_values = [raw_payload.get("message_id")]
-    headers = raw_payload.get("headers")
-    if isinstance(headers, dict):
-        candidate_values.extend([
-            headers.get("Message-ID"),
-            headers.get("Message-Id"),
-            headers.get("message-id"),
-        ])
-
-    for candidate in candidate_values:
-        value = str(candidate or "").strip()
-        if value:
-            return value
-    return ""
-
-
 def _resolve_reply_target(
     agent: PersistentAgent,
     reply_to_message_id: str,
@@ -177,19 +142,19 @@ def _resolve_reply_target(
             "message": "reply_to_message_id must reference one of this agent's email messages.",
         }
 
-    if _message_channel(target_message) != CommsChannel.EMAIL:
+    if get_message_channel(target_message) != CommsChannel.EMAIL:
         return None, {
             "status": "error",
             "message": "reply_to_message_id must reference an email message.",
         }
 
-    if not _get_message_rfc_message_id(target_message):
+    if not get_message_rfc_message_id(target_message):
         return None, {
             "status": "error",
             "message": "reply_to_message_id must reference an email message with a stored RFC Message-ID.",
         }
 
-    target_address = _message_contact_address(target_message)
+    target_address = get_message_contact_address(target_message)
     if not target_address or target_address != normalized_to_address:
         return None, {
             "status": "error",
@@ -254,14 +219,14 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     except EmailVerificationError as e:
         return e.to_tool_response()
 
-    to_address = _normalize_email_address(params.get("to_address"))
+    to_address = normalize_email_address(params.get("to_address"))
     subject = params.get("subject")
     # Decode escape sequences and strip control chars from HTML body
     mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
     mobile_first_html = strip_control_chars(mobile_first_html)
     # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
-    cc_addresses = [_normalize_email_address(addr) for addr in params.get("cc_addresses", [])]
+    cc_addresses = [normalize_email_address(addr) for addr in params.get("cc_addresses", [])]
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
     reply_to_message_id = str(params.get("reply_to_message_id") or "").strip()
@@ -341,6 +306,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             agent,
             channel=CommsChannel.EMAIL,
             body=mobile_first_html,
+            to_address=to_address,
             conversation_id=conversation.id,
         )
         if duplicate:
