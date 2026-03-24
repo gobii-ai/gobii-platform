@@ -1100,7 +1100,6 @@ class ConsoleViewsTest(TestCase):
         session = self.client.session
         session["agent_charter"] = "Help with tasks"
         session["agent_charter_override"] = "Override charter"
-        session["agent_preferred_llm_tier"] = "premium"
         session[AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack", "notion", "trello"]
         session.save()
 
@@ -1122,7 +1121,6 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(selection.selected_app_slugs, ["notion", "slack"])
         self.assertNotIn("agent_charter", self.client.session)
         self.assertNotIn("agent_charter_override", self.client.session)
-        self.assertNotIn("agent_preferred_llm_tier", self.client.session)
         self.assertNotIn(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, self.client.session)
 
         owner_state = get_owner_apps_state(
