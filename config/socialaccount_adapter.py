@@ -28,6 +28,8 @@ OAUTH_CHARTER_SESSION_KEYS = (
     "agent_charter_override",
     PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
     "agent_charter_source",
+    "agent_preferred_llm_tier",
+    "agent_selected_pipedream_app_slugs",
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,

@@ -110,7 +110,13 @@ from api.services.web_sessions import (
 
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.onboarding import get_trial_onboarding_state
+from util.onboarding import (
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    get_trial_onboarding_state,
+    set_trial_onboarding_intent,
+    set_trial_onboarding_requires_plan_selection,
+)
+from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE
 
 from console.agent_chat.access import (
     agent_queryset_for,
@@ -1995,6 +2001,20 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             error_messages.extend(getattr(exc, "messages", []))
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
+            if any(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE in str(message) for message in error_messages):
+                set_trial_onboarding_intent(
+                    request,
+                    target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                )
+                set_trial_onboarding_requires_plan_selection(request, required=True)
+                return JsonResponse(
+                    {
+                        "error": PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+                        "onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                        "requires_plan_selection": True,
+                    },
+                    status=400,
+                )
             return JsonResponse({"error": error_messages[0]}, status=400)
         except IntegrityError:
             logger.exception("Error creating persistent agent via API")

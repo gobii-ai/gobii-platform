@@ -517,6 +517,44 @@ class HomePageTests(TestCase):
         self.assertEqual(params.get("utm_source"), ["newsletter"])
 
     @tag("batch_pages")
+    def test_home_spawn_redirect_stashes_oauth_fallback_cookie(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_source=newsletter"
+        session.save()
+
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Custom charter",
+                "preferred_llm_tier": "premium",
+                "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+        charter_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        self.assertEqual(charter_payload.get("agent_charter"), "Custom charter")
+        self.assertEqual(charter_payload.get("agent_charter_source"), "user")
+        self.assertEqual(charter_payload.get("agent_preferred_llm_tier"), "premium")
+        self.assertEqual(
+            charter_payload.get(page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "trello"],
+        )
+        self.assertTrue(charter_payload.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            charter_payload.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertFalse(charter_payload.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+
+        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
+        self.assertEqual(attribution_payload.get("utm_querystring"), "utm_source=newsletter")
+
+    @tag("batch_pages")
     def test_home_spawn_trial_onboarding_sets_session_intent(self):
         response = self.client.post(
             reverse("pages:home_agent_spawn"),
@@ -1247,6 +1285,7 @@ class AgentSpawnIntentApiTests(TestCase):
             {
                 "agent_charter": "Cookie charter",
                 "agent_preferred_llm_tier": "premium",
+                page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY: ["slack", "trello"],
                 PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: "sales-pipeline-whisperer",
                 "agent_charter_source": "template",
                 TRIAL_ONBOARDING_PENDING_SESSION_KEY: True,
@@ -1260,6 +1299,8 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload.get("charter"), "Cookie charter")
+        self.assertEqual(payload.get("preferred_llm_tier"), "premium")
+        self.assertEqual(payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
         self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
         self.assertTrue(payload.get("requires_plan_selection"))
 

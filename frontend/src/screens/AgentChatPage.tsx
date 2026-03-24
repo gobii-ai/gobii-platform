@@ -77,6 +77,7 @@ type IntelligenceGateState = {
 }
 
 type SpawnIntentStatus = 'idle' | 'loading' | 'ready' | 'done'
+type TrialOnboardingTarget = Exclude<AgentSpawnIntent['onboarding_target'], null>
 
 type PendingAvatarTracking = Record<string, number>
 
@@ -197,6 +198,8 @@ const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persisten
 type CreateAgentErrorState = {
   message: string
   showUpgradeCta: boolean
+  requiresTrialPlanSelection: boolean
+  trialOnboardingTarget: TrialOnboardingTarget | null
 }
 
 function extractFirstErrorMessage(payload: unknown): string | null {
@@ -245,12 +248,41 @@ function extractFirstErrorMessage(payload: unknown): string | null {
   return null
 }
 
+function extractTrialPlanSelectionError(payload: unknown): {
+  requiresTrialPlanSelection: boolean
+  trialOnboardingTarget: TrialOnboardingTarget | null
+} {
+  if (!payload || typeof payload !== 'object') {
+    return {
+      requiresTrialPlanSelection: false,
+      trialOnboardingTarget: null,
+    }
+  }
+
+  const record = payload as Record<string, unknown>
+  const requiresTrialPlanSelection = record.requires_plan_selection === true
+  const rawTarget = record.onboarding_target
+  const trialOnboardingTarget = rawTarget === 'agent_ui' || rawTarget === 'api_keys'
+    ? rawTarget
+    : null
+
+  return {
+    requiresTrialPlanSelection,
+    trialOnboardingTarget,
+  }
+}
+
 function buildCreateAgentError(err: unknown, isProprietaryMode: boolean): CreateAgentErrorState {
   const fallback = 'Unable to create that agent right now.'
   let message: string | null = null
+  let requiresTrialPlanSelection = false
+  let trialOnboardingTarget: TrialOnboardingTarget | null = null
 
   if (err instanceof HttpError) {
     message = extractFirstErrorMessage(err.body)
+    const trialPlanSelection = extractTrialPlanSelectionError(err.body)
+    requiresTrialPlanSelection = trialPlanSelection.requiresTrialPlanSelection
+    trialOnboardingTarget = trialPlanSelection.trialOnboardingTarget
   } else if (err instanceof Error) {
     const trimmed = err.message.trim()
     message = trimmed || null
@@ -262,16 +294,22 @@ function buildCreateAgentError(err: unknown, isProprietaryMode: boolean): Create
       return {
         message: "You've reached your agent limit for your current plan. Upgrade to create more agents.",
         showUpgradeCta: true,
+        requiresTrialPlanSelection: false,
+        trialOnboardingTarget: null,
       }
     }
     return {
       message: "You've reached your agent limit for this deployment. Adjust deployment settings to allow more agents.",
       showUpgradeCta: false,
+      requiresTrialPlanSelection: false,
+      trialOnboardingTarget: null,
     }
   }
   return {
     message: resolved,
     showUpgradeCta: false,
+    requiresTrialPlanSelection,
+    trialOnboardingTarget,
   }
 }
 
@@ -1852,6 +1890,7 @@ export function AgentChatPage({
   const [intelligenceBusy, setIntelligenceBusy] = useState(false)
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const [createAgentError, setCreateAgentError] = useState<CreateAgentErrorState | null>(null)
+  const [createAgentTrialOnboarding, setCreateAgentTrialOnboarding] = useState<TrialOnboardingTarget | null>(null)
   const [sendMessageError, setSendMessageError] = useState<string | null>(null)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
@@ -1924,6 +1963,7 @@ export function AgentChatPage({
     }
     setIntelligenceError(null)
     setCreateAgentError(null)
+    setCreateAgentTrialOnboarding(null)
     setSendMessageError(null)
   }, [isNewAgent, activeAgentId])
 
@@ -1955,8 +1995,10 @@ export function AgentChatPage({
     const flag = (params.get('spawn') || '').toLowerCase()
     return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on'
   }, [isNewAgent])
-  const onboardingTarget = spawnIntent?.onboarding_target ?? null
-  const requiresTrialPlanSelection = Boolean(spawnIntent?.requires_plan_selection)
+  const onboardingTarget = createAgentTrialOnboarding ?? spawnIntent?.onboarding_target ?? null
+  const requiresTrialPlanSelection = Boolean(
+    createAgentTrialOnboarding || spawnIntent?.requires_plan_selection,
+  )
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow) {
@@ -2390,6 +2432,7 @@ export function AgentChatPage({
       selectedPipedreamAppSlugs?: string[],
     ) => {
       setCreateAgentError(null)
+      setCreateAgentTrialOnboarding(null)
       try {
         const result = await createAgent(
           body,
@@ -2441,11 +2484,23 @@ export function AgentChatPage({
         onAgentCreated?.(result.agent_id)
       } catch (err) {
         const errorState = buildCreateAgentError(err, isProprietaryMode)
+        if (errorState.requiresTrialPlanSelection) {
+          setCreateAgentTrialOnboarding(errorState.trialOnboardingTarget ?? 'agent_ui')
+          openUpgradeModal('trial_onboarding', { dismissible: false })
+        }
         setCreateAgentError(errorState)
         console.error('Failed to create agent:', err)
       }
     },
-    [effectiveContext, isProprietaryMode, onAgentCreated, queryClient, setPendingAgentEmails, trackPendingAvatarRefresh],
+    [
+      effectiveContext,
+      isProprietaryMode,
+      onAgentCreated,
+      openUpgradeModal,
+      queryClient,
+      setPendingAgentEmails,
+      trackPendingAvatarRefresh,
+    ],
   )
 
   const handleIntelligenceChange = useCallback(

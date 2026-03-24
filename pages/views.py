@@ -255,13 +255,18 @@ def _build_oauth_charter_cookie_payload(
     request,
     *,
     charter: str,
-    template_code: str,
-) -> dict[str, str | bool]:
-    payload: dict[str, str | bool] = {
+    charter_source: str,
+    template_code: str | None = None,
+    charter_override: str | None = None,
+) -> dict[str, str | bool | list[str]]:
+    payload: dict[str, str | bool | list[str]] = {
         "agent_charter": charter,
-        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template_code,
-        "agent_charter_source": "template",
+        "agent_charter_source": charter_source,
     }
+    if template_code:
+        payload[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template_code
+    if charter_override:
+        payload["agent_charter_override"] = charter_override
     for key in OAUTH_CHARTER_SESSION_KEYS:
         if key in payload:
             continue
@@ -781,10 +786,24 @@ class HomeAgentSpawnView(TemplateView):
                 f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
                 app_redirect_params,
             )
-            return redirect_to_login(
+            response = redirect_to_login(
                 next=app_next_url,
                 login_url=_login_url_with_utms(request),
             )
+            charter_data = _build_oauth_charter_cookie_payload(
+                request,
+                charter=request.session.get("agent_charter") or "",
+                charter_source=str(request.session.get("agent_charter_source") or "user"),
+                charter_override=request.session.get("agent_charter_override"),
+            )
+            attribution_data = _build_oauth_attribution_cookie_payload(request)
+            _set_oauth_stash_cookies(
+                response,
+                request,
+                charter_data=charter_data,
+                attribution_data=attribution_data,
+            )
+            return response
         
         # If form is invalid, re-render home page with errors
         context = self.get_context_data(**kwargs)
@@ -963,6 +982,7 @@ class PretrainedWorkerHireView(View):
         charter_data = _build_oauth_charter_cookie_payload(
             request,
             charter=template.charter,
+            charter_source="template",
             template_code=template.code,
         )
         attribution_data = _build_oauth_attribution_cookie_payload(request)
@@ -1120,6 +1140,7 @@ class PublicTemplateHireView(View):
         charter_data = _build_oauth_charter_cookie_payload(
             request,
             charter=template.charter,
+            charter_source="template",
             template_code=template.code,
         )
         attribution_data = _build_oauth_attribution_cookie_payload(request)
