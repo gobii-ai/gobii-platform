@@ -310,6 +310,17 @@ def parse_web_user_address(address: str) -> Tuple[Optional[int], Optional[str]]:
         return None, None
     return user_id, match.group("agent_id")
 
+
+def build_inbound_webhook_sender_address(webhook_id: uuid.UUID | str) -> str:
+    """Return canonical sender address for inbound webhook events."""
+    return f"webhook://source/{webhook_id}"
+
+
+def build_inbound_webhook_agent_address(agent_id: uuid.UUID | str) -> str:
+    """Return canonical recipient address for inbound webhook delivery to an agent."""
+    return f"webhook://agent/{agent_id}"
+
+
 def _hash(raw: str) -> str:
     """Return SHA256 hexdigest for given raw string."""
     return hashlib.sha256(raw.encode()).hexdigest()
@@ -7581,6 +7592,101 @@ class PersistentAgentWebhook(models.Model):
         self.save(
             update_fields=["last_triggered_at", "last_response_status", "last_error_message", "updated_at"],
         )
+
+
+class PersistentAgentInboundWebhook(models.Model):
+    """Inbound webhook endpoint configured for a persistent agent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="inbound_webhooks",
+    )
+    name = models.CharField(max_length=128)
+    secret_encrypted = models.BinaryField(blank=True, null=True)
+    is_active = models.BooleanField(default=True)
+    last_triggered_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "name"],
+                name="uniq_agent_inbound_webhook_name",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "created_at"], name="pa_inbound_hook_agent_idx"),
+            models.Index(fields=["agent", "is_active"], name="pa_inbound_hook_active_idx"),
+        ]
+        ordering = ["name"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"{self.name} inbound webhook"
+
+    @staticmethod
+    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: Optional[bytes]) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to decrypt inbound webhook secret")
+            raise
+
+    @property
+    def secret(self) -> str:
+        return self._decrypt_text(self.secret_encrypted)
+
+    @secret.setter
+    def secret(self, value: Optional[str]) -> None:
+        self.secret_encrypted = self._encrypt_text(value)
+
+    @staticmethod
+    def generate_secret() -> str:
+        return secrets.token_urlsafe(32)
+
+    def rotate_secret(self) -> str:
+        next_secret = self.generate_secret()
+        self.secret = next_secret
+        if self.pk:
+            self.save(update_fields=["secret_encrypted", "updated_at"])
+        return next_secret
+
+    def matches_secret(self, candidate: str | None) -> bool:
+        if not candidate:
+            return False
+        current_secret = self.secret
+        if not current_secret:
+            return False
+        return secrets.compare_digest(current_secret, candidate)
+
+    def mark_triggered(self) -> None:
+        self.last_triggered_at = timezone.now()
+        self.save(update_fields=["last_triggered_at", "updated_at"])
+
+    def clean(self):
+        super().clean()
+        if self.name:
+            self.name = self.name.strip()
+
+    def save(self, *args, **kwargs):
+        if not self.secret_encrypted:
+            self.secret = self.generate_secret()
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
 
 class PersistentAgentCommsEndpoint(models.Model):

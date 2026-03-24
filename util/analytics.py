@@ -154,6 +154,11 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_WEBHOOK_DELETED = 'Persistent Agent Webhook Deleted'
     PERSISTENT_AGENT_WEBHOOK_TESTED = 'Persistent Agent Webhook Tested'
     PERSISTENT_AGENT_WEBHOOK_TRIGGERED = 'Persistent Agent Webhook Triggered'
+    PERSISTENT_AGENT_INBOUND_WEBHOOK_ADDED = 'Persistent Agent Inbound Webhook Added'
+    PERSISTENT_AGENT_INBOUND_WEBHOOK_UPDATED = 'Persistent Agent Inbound Webhook Updated'
+    PERSISTENT_AGENT_INBOUND_WEBHOOK_DELETED = 'Persistent Agent Inbound Webhook Deleted'
+    PERSISTENT_AGENT_INBOUND_WEBHOOK_SECRET_ROTATED = 'Persistent Agent Inbound Webhook Secret Rotated'
+    PERSISTENT_AGENT_INBOUND_WEBHOOK_TRIGGERED = 'Persistent Agent Inbound Webhook Triggered'
 
     # SMS Events
     PERSISTENT_AGENT_SMS_SENT = 'Persistent Agent SMS Sent'

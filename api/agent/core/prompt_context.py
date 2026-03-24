@@ -67,6 +67,7 @@ from ...models import (
     PersistentAgentToolCall,
 )
 from ...services.web_sessions import get_deliverable_web_sessions
+from ..comms.source_metadata import get_message_source_metadata
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
@@ -1884,7 +1885,7 @@ def _build_agent_settings_section(agent: PersistentAgent) -> str:
         f"Contact requests: review pending requests at {contact_requests_url}.",
         "MCP servers to connect the agent to external services.",
         "Peer links to communicate with other agents.",
-        "Outbound webhooks to send data to external services.",
+        "Inbound webhooks to let external systems trigger the agent, and outbound webhooks to send data to external services.",
         "Agent transfer: Transfer this agent to another user or organization.",
         "Agent deletion: delete this agent forever.",
         f"Agent settings page: {agent_config_url}",
@@ -5282,6 +5283,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             from_addr = m.from_endpoint.address
             if channel == CommsChannel.WEB and m.from_endpoint_id:
                 from_addr = _format_web_party(from_addr, m.from_endpoint_id)
+            source_kind, source_label = get_message_source_metadata(m.raw_payload)
+            is_webhook = channel == CommsChannel.OTHER and str(source_kind).strip().lower() == "webhook"
             if m.is_outbound:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
                 if channel == CommsChannel.EMAIL and m.conversation and m.conversation.address:
@@ -5293,10 +5296,32 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                     f"you sent a message to {to_addr}{attachment_status_suffix}:"
                 )
             else:
-                header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you received a message from {from_addr}:"
+                if is_webhook:
+                    label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
+                    header = f'[{m.timestamp.isoformat()}]{recent_minutes_suffix} Inbound webhook "{label}" triggered:'
+                else:
+                    header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you received a message from {from_addr}:"
 
-            event_type = f"{event_prefix}_{channel.lower()}"
+            if is_webhook:
+                event_type = f"{event_prefix}_webhook"
+            else:
+                event_type = f"{event_prefix}_{channel.lower()}"
             components = {"header": header}
+            if is_webhook and isinstance(m.raw_payload, dict):
+                webhook_meta_lines = []
+                content_type = m.raw_payload.get("content_type")
+                method = m.raw_payload.get("method")
+                query_params = m.raw_payload.get("query_params")
+                if isinstance(method, str) and method.strip():
+                    webhook_meta_lines.append(f"Method: {method.strip()}")
+                if isinstance(content_type, str) and content_type.strip():
+                    webhook_meta_lines.append(f"Content-Type: {content_type.strip()}")
+                if isinstance(query_params, dict) and query_params:
+                    webhook_meta_lines.append(
+                        f"Query params: {json.dumps(query_params, sort_keys=True)}"
+                    )
+                if webhook_meta_lines:
+                    components["webhook_meta"] = "\n".join(webhook_meta_lines)
 
             # Handle email messages with structured components
             if channel == CommsChannel.EMAIL:
@@ -5387,6 +5412,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
+            "webhook_meta": 3, # High priority - webhook request metadata
             "reply_to_message_id": 2,  # Medium priority - needed for explicit email threading
             "subject": 2,     # Medium priority - email subject
             "body": 1,        # Low priority - email body (can be long and shrunk)

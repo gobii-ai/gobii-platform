@@ -14,7 +14,11 @@ from .adapters import (
     ParsedMessage,
 )
 from .senders import SmsSender, EmailSender
-from .message_service import ingest_inbound_message, InboundMessageInfo
+from .message_service import (
+    ingest_inbound_message,
+    ingest_inbound_webhook_message,
+    InboundMessageInfo,
+)
 
 __all__ = [
     "ParsedMessage",
@@ -26,5 +30,6 @@ __all__ = [
     "SmsSender",
     "EmailSender",
     "ingest_inbound_message",
+    "ingest_inbound_webhook_message",
     "InboundMessageInfo",
 ]

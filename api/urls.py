@@ -10,6 +10,7 @@ from .views import (
 )
 from .custom_tool_bridge import custom_tool_bridge_execute
 from .webhooks import (
+    inbound_agent_webhook,
     sms_webhook,
     sms_status_webhook,
     email_webhook_postmark,
@@ -77,6 +78,7 @@ urlpatterns = [
 
     #  Webhooks for messages endpoint
     path('webhooks/inbound/sms/', sms_webhook, name='sms_webhook'),
+    path('webhooks/inbound/agents/<uuid:webhook_id>/', inbound_agent_webhook, name='inbound_agent_webhook'),
     path('webhooks/status/sms/', sms_status_webhook, name='sms_status_webhook'),
     path('webhooks/inbound/email/', email_webhook_postmark, name='email_webhook'),
     path('webhooks/inbound/email/mg/', email_webhook_mailgun, name='email_webhook_mailgun'),
