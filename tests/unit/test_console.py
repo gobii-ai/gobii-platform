@@ -1041,8 +1041,7 @@ class ConsoleViewsTest(TestCase):
     @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
     @patch("console.agent_creation.process_agent_events_task.delay")
     @tag("batch_console_agents")
-    def test_trial_required_quick_create_preserves_draft_for_quick_spawn_resume(self, _mock_delay):
-        from api.models import PersistentAgent
+    def test_trial_required_quick_create_persists_draft_for_quick_spawn_resume(self, _mock_delay):
         from agents.services import PretrainedWorkerTemplateService
 
         PipedreamAppSelection.objects.create(
@@ -1084,30 +1083,6 @@ class ConsoleViewsTest(TestCase):
         )
         self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
 
-        with self.settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False):
-            resume_response = self.client.get(reverse("agent_quick_spawn"))
-
-        self.assertEqual(resume_response.status_code, 302)
-        parsed = urlparse(resume_response["Location"])
-        self.assertTrue(
-            parsed.path.startswith("/app/agents/"),
-            resume_response["Location"],
-        )
-
-        agent_id = parsed.path.rstrip("/").rsplit("/", 1)[-1]
-        created_agent = PersistentAgent.objects.get(id=agent_id)
-        self.assertEqual(created_agent.charter, "Override charter")
-
-        selection = PipedreamAppSelection.objects.get(user=self.user)
-        self.assertEqual(selection.selected_app_slugs, ["notion", "slack"])
-
-        owner_state = get_owner_apps_state(
-            MCPServerConfig.Scope.USER,
-            self.user.get_full_name() or self.user.username,
-            owner_user=self.user,
-        )
-        self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
-
     @override_settings(
         PIPEDREAM_PREFETCH_APPS="trello",
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
@@ -1115,6 +1090,8 @@ class ConsoleViewsTest(TestCase):
     @patch("console.agent_creation.process_agent_events_task.delay")
     @tag("batch_console_agents")
     def test_quick_spawn_enables_selected_pipedream_apps_from_session(self, _mock_delay):
+        from api.models import PersistentAgent
+
         PipedreamAppSelection.objects.create(
             user=self.user,
             selected_app_slugs=["notion"],
@@ -1122,14 +1099,26 @@ class ConsoleViewsTest(TestCase):
 
         session = self.client.session
         session["agent_charter"] = "Help with tasks"
+        session["agent_charter_override"] = "Override charter"
+        session["agent_preferred_llm_tier"] = "premium"
         session[AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack", "notion", "trello"]
         session.save()
 
         response = self.client.get(reverse("agent_quick_spawn"))
 
         self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertTrue(parsed.path.startswith("/app/agents/"), response["Location"])
+
+        agent_id = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        created_agent = PersistentAgent.objects.get(id=agent_id)
+        self.assertEqual(created_agent.charter, "Override charter")
+
         selection = PipedreamAppSelection.objects.get(user=self.user)
         self.assertEqual(selection.selected_app_slugs, ["notion", "slack"])
+        self.assertNotIn("agent_charter", self.client.session)
+        self.assertNotIn("agent_charter_override", self.client.session)
+        self.assertNotIn("agent_preferred_llm_tier", self.client.session)
         self.assertNotIn(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, self.client.session)
 
         owner_state = get_owner_apps_state(
