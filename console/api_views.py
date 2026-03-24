@@ -17,7 +17,6 @@ import httpx
 import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
-from django.core import signing
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
@@ -91,7 +90,7 @@ from api.models import (
 )
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, restore_oauth_session_state
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
 from console.agent_audit.export import write_agent_audit_export_json
 from console.agent_audit.timeline import build_audit_timeline
@@ -116,7 +115,10 @@ from util.onboarding import (
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
-from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE
+from util.trial_enforcement import (
+    PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    TrialRequiredValidationError,
+)
 
 from console.agent_chat.access import (
     agent_queryset_for,
@@ -336,17 +338,7 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
 
         restored_cookie = False
         if "agent_charter" not in request.session:
-            cookie_value = request.COOKIES.get(OAUTH_CHARTER_COOKIE)
-            if cookie_value:
-                try:
-                    stashed = signing.loads(cookie_value, max_age=3600)
-                    for key in OAUTH_CHARTER_SESSION_KEYS:
-                        if key in stashed:
-                            request.session[key] = stashed[key]
-                    request.session.modified = True
-                    restored_cookie = True
-                except (signing.BadSignature, signing.SignatureExpired):
-                    logger.debug("Invalid or expired OAuth charter cookie")
+            restored_cookie = restore_oauth_session_state(request, overwrite_existing=False)
 
         pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
@@ -2025,6 +2017,27 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             )
         except PermissionDenied:
             return JsonResponse({"error": "Invalid context override."}, status=403)
+        except TrialRequiredValidationError:
+            _persist_quick_create_draft(
+                request,
+                initial_message=initial_message,
+                preferred_llm_tier_key=preferred_llm_tier_key,
+                charter_override=charter_override,
+                selected_pipedream_app_slugs=selected_pipedream_app_slugs,
+            )
+            set_trial_onboarding_intent(
+                request,
+                target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            )
+            set_trial_onboarding_requires_plan_selection(request, required=True)
+            return JsonResponse(
+                {
+                    "error": PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+                    "onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                    "requires_plan_selection": True,
+                },
+                status=400,
+            )
         except ValidationError as exc:
             error_messages = []
             if hasattr(exc, "message_dict"):
@@ -2033,27 +2046,6 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             error_messages.extend(getattr(exc, "messages", []))
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
-            if any(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE in str(message) for message in error_messages):
-                _persist_quick_create_draft(
-                    request,
-                    initial_message=initial_message,
-                    preferred_llm_tier_key=preferred_llm_tier_key,
-                    charter_override=charter_override,
-                    selected_pipedream_app_slugs=selected_pipedream_app_slugs,
-                )
-                set_trial_onboarding_intent(
-                    request,
-                    target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
-                )
-                set_trial_onboarding_requires_plan_selection(request, required=True)
-                return JsonResponse(
-                    {
-                        "error": PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
-                        "onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
-                        "requires_plan_selection": True,
-                    },
-                    status=400,
-                )
             return JsonResponse({"error": error_messages[0]}, status=400)
         except IntegrityError:
             logger.exception("Error creating persistent agent via API")

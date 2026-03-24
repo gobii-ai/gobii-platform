@@ -27,6 +27,7 @@ from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_SESSION_KEYS,
     OAUTH_CHARTER_COOKIE,
     OAUTH_CHARTER_SESSION_KEYS,
+    serialize_oauth_charter_cookie_payload,
 )
 from config.stripe_config import get_stripe_settings
 
@@ -283,18 +284,32 @@ def _build_oauth_attribution_cookie_payload(request) -> dict[str, str | dict]:
     return payload
 
 
-def _set_oauth_stash_cookies(response, request, *, charter_data: dict, attribution_data: dict) -> None:
+def _set_oauth_stash_cookies(
+    response,
+    request,
+    *,
+    charter_data: dict,
+    attribution_data: dict,
+    server_side_charter: bool = False,
+) -> None:
     cookie_common = {
         "max_age": 7200,  # 2 hours
         "httponly": True,
         "samesite": "Lax",
         "secure": request.is_secure(),
     }
-    response.set_cookie(
-        OAUTH_CHARTER_COOKIE,
-        signing.dumps(charter_data, compress=True),
-        **cookie_common,
+    charter_cookie_value = serialize_oauth_charter_cookie_payload(
+        charter_data,
+        server_side=server_side_charter,
     )
+    if charter_cookie_value:
+        response.set_cookie(
+            OAUTH_CHARTER_COOKIE,
+            charter_cookie_value,
+            **cookie_common,
+        )
+    else:
+        response.delete_cookie(OAUTH_CHARTER_COOKIE)
     if attribution_data:
         response.set_cookie(
             OAUTH_ATTRIBUTION_COOKIE,
@@ -802,6 +817,7 @@ class HomeAgentSpawnView(TemplateView):
                 request,
                 charter_data=charter_data,
                 attribution_data=attribution_data,
+                server_side_charter=True,
             )
             return response
         

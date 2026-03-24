@@ -44,6 +44,7 @@ from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import get_owner_plan
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    TrialRequiredValidationError,
     can_user_use_personal_agents_and_api,
 )
 
@@ -165,7 +166,7 @@ def create_persistent_agent_from_charter(
             raise ValidationError(message_text)
 
     if organization is None and not can_user_use_personal_agents_and_api(request.user):
-        raise ValidationError(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
+        raise TrialRequiredValidationError(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
 
     if email_enabled and not contact_email:
         raise ValidationError("Please provide an email address for agent contact.")

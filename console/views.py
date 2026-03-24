@@ -163,6 +163,7 @@ from util.subscription_helper import (
 )
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
+    TrialRequiredValidationError,
     can_user_access_personal_agent_chat,
     can_user_use_personal_agents_and_api,
 )
@@ -3063,6 +3064,18 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
                 preferred_llm_tier_key=request.session.get("agent_preferred_llm_tier"),
                 charter_override=request.session.get('agent_charter_override'),
             )
+        except TrialRequiredValidationError:
+            set_trial_onboarding_intent(
+                request,
+                target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            )
+            set_trial_onboarding_requires_plan_selection(request, required=True)
+            return redirect(
+                append_query_params(
+                    f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                    {"spawn": "1"},
+                )
+            )
         except ValidationError as exc:
             error_messages = []
             if hasattr(exc, 'message_dict'):
@@ -3071,19 +3084,6 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             error_messages.extend(getattr(exc, 'messages', []))
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
-
-            if any(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE in str(message) for message in error_messages):
-                set_trial_onboarding_intent(
-                    request,
-                    target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
-                )
-                set_trial_onboarding_requires_plan_selection(request, required=True)
-                return redirect(
-                    append_query_params(
-                        f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
-                        {"spawn": "1"},
-                    )
-                )
 
             for message_text in error_messages:
                 messages.error(request, message_text)
