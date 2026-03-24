@@ -236,6 +236,42 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             egress_proxy_service_name="sandbox-egress-agent-proxy",
         )
 
+    def test_deploy_or_resume_recreates_proxy_backed_pod_without_transparent_proxy(self):
+        backend = self._backend()
+        backend._egress_proxy_image = "ghcr.io/example/egress:latest"
+        agent = SimpleNamespace(id="agent-refresh")
+        session = SimpleNamespace(
+            proxy_server=SimpleNamespace(id="proxy-1"),
+            workspace_snapshot=None,
+        )
+        backend._ensure_egress_proxy = Mock(return_value="sandbox-egress-agent-refresh")
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(
+            return_value={
+                "status": {"phase": "Running"},
+                "spec": {
+                    "containers": [{"name": "sandbox-supervisor"}],
+                    "initContainers": [],
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[False, False]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-refresh")
+        backend._create_pod.assert_called_once_with(
+            "sandbox-agent-agent-refresh",
+            "sandbox-workspace-agent-refresh",
+            agent_id="agent-refresh",
+            egress_proxy_service_name="sandbox-egress-agent-refresh",
+        )
+
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):

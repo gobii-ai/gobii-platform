@@ -159,7 +159,10 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 )
             else:
                 phase = (pod.get("status") or {}).get("phase")
-                if phase not in {"Running", "Pending"}:
+                proxy_routing_mismatch = bool(
+                    egress_proxy_service_name and not _pod_has_transparent_proxy_routing(pod)
+                )
+                if phase not in {"Running", "Pending"} or proxy_routing_mismatch:
                     self._delete_pod(pod_name)
                     self._create_pod(
                         pod_name,
@@ -1014,6 +1017,13 @@ def _build_transparent_proxy_sidecar_container(
             "failureThreshold": 3,
         },
     }
+
+
+def _pod_has_transparent_proxy_routing(pod: Dict[str, Any]) -> bool:
+    spec = pod.get("spec") or {}
+    container_names = {container.get("name") for container in spec.get("containers") or []}
+    init_container_names = {container.get("name") for container in spec.get("initContainers") or []}
+    return "sandbox-traffic-proxy" in container_names and "sandbox-traffic-init" in init_container_names
 
 
 def _build_egress_proxy_pod_manifest(
