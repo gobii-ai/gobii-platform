@@ -29,6 +29,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
+    PersistentAgentSecret,
     PersistentAgentStep,
     TaskCredit,
     UserQuota,
@@ -56,6 +57,19 @@ class CustomToolsTests(TestCase):
             charter="Build sandbox tools",
             browser_use_agent=cls.browser_agent,
         )
+
+    def _create_env_var_secret(self, key: str, value: str) -> PersistentAgentSecret:
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name=key,
+            key=key,
+            requested=False,
+        )
+        secret.set_value(value)
+        secret.save()
+        return secret
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
@@ -175,11 +189,22 @@ class CustomToolsTests(TestCase):
         self.assertIn("ctx.call_tool", description)
         self.assertIn("custom_*", description)
         self.assertIn("ctx.sqlite_db_path", description)
+        self.assertIn("os.environ", description)
+        self.assertIn("env_var secrets", description)
+        self.assertIn("HTTP_PROXY", description)
+        self.assertIn("HTTPS_PROXY", description)
+        self.assertIn("ALL_PROXY", description)
+        self.assertIn("NO_PROXY", description)
+        self.assertIn("SOCKS5", description)
         self.assertIn("filespace contents are synced into the sandbox", description)
         self.assertIn("subprocess", description)
         self.assertIn("fd", description)
         self.assertIn("jq", description)
         self.assertIn("sqlite3", description)
+        self.assertIn("authenticated API sync into SQLite", description)
+        self.assertIn("DB-to-SQLite reconciliation", description)
+        self.assertIn("checkpointed multi-tool workers", description)
+        self.assertIn("dry-run/sample-first validation loops", description)
         self.assertIn("sed", description)
         self.assertIn("rg", description)
         self.assertIn("fzf", description)
@@ -277,10 +302,12 @@ class CustomToolsTests(TestCase):
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
     def test_execute_custom_tool_can_write_directly_to_agent_sqlite(
         self,
         _mock_select_proxy,
+        _mock_service_tool_enabled,
         _mock_service_enabled,
         _mock_tool_enabled,
         _mock_bridge_url,
@@ -329,6 +356,50 @@ class CustomToolsTests(TestCase):
             finally:
                 conn.close()
         self.assertEqual(rows, [("hello",)])
+
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    def test_execute_custom_tool_can_read_env_var_secret_from_os_environ(
+        self,
+        _mock_select_proxy,
+        _mock_service_tool_enabled,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+        _mock_bridge_url,
+    ):
+        self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
+        source = (
+            "import os\n\n"
+            "def run(params, ctx):\n"
+            "    return {'value': os.environ.get(params['key'])}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/read_env.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Read Env",
+            tool_name="custom_read_env",
+            description="Read a sandbox env var.",
+            source_path="/tools/read_env.py",
+            parameters_schema={"type": "object", "properties": {"key": {"type": "string"}}},
+            timeout_seconds=30,
+        )
+
+        result = execute_custom_tool(self.agent, tool, {"key": "OPENAI_API_KEY"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"], {"value": "from-secret"})
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.core.event_processing._ensure_credit_for_tool")
@@ -467,6 +538,13 @@ class CustomToolsTests(TestCase):
         self.assertIn("Dev loop:", summary)
         self.assertIn("file_str_replace", summary)
         self.assertIn("ctx.sqlite_db_path", summary)
+        self.assertIn("os.environ", summary)
+        self.assertIn("env_var secrets", summary)
+        self.assertIn("HTTP_PROXY", summary)
+        self.assertIn("HTTPS_PROXY", summary)
+        self.assertIn("ALL_PROXY", summary)
+        self.assertIn("NO_PROXY", summary)
+        self.assertIn("SOCKS5", summary)
         self.assertIn("bulk data processing", summary)
         self.assertIn("repetitive deterministic work", summary)
         self.assertIn("other custom_* tools", summary)
@@ -475,10 +553,19 @@ class CustomToolsTests(TestCase):
         self.assertIn("jq", summary)
         self.assertIn("sqlite3", summary)
         self.assertIn("sed", summary)
-        self.assertIn("Micro trajectory 1", summary)
-        self.assertIn("Micro trajectory 2", summary)
-        self.assertIn("rg -n or sed -n", summary)
-        self.assertIn("load them into sqlite3", summary)
+        self.assertIn("Micro trajectories:", summary)
+        self.assertIn("Filespace indexing:", summary)
+        self.assertIn("Bulk export normalization:", summary)
+        self.assertIn("Authenticated API sync:", summary)
+        self.assertIn("DB reconciliation:", summary)
+        self.assertIn("Checkpointed orchestration:", summary)
+        self.assertIn("Safe development loop:", summary)
+        self.assertIn("Safe mutation testing:", summary)
+        self.assertIn("Proxy-aware integration testing:", summary)
+        self.assertIn("fetch paginated records", summary)
+        self.assertIn("pull remote rows in batches", summary)
+        self.assertIn("dry_run flag", summary)
+        self.assertIn("managed HTTP(S)/SOCKS5 proxy", summary)
         self.assertIn("custom_alpha", summary)
         self.assertIn("custom_beta", summary)
 

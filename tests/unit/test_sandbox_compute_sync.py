@@ -1,3 +1,4 @@
+import os
 import tempfile
 from datetime import timedelta
 from types import SimpleNamespace
@@ -467,6 +468,40 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(merged_env["SANDBOX_TOKEN"], "from-secret")
         self.assertEqual(merged_env["EXTRA"], "caller-value")
         self.assertEqual(backend.run_command_calls[0]["trusted_env_keys"], ["SANDBOX_TOKEN"])
+
+    def test_run_custom_tool_command_merges_env_var_secrets_with_precedence(self):
+        backend = _DummyBackend()
+        self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
+
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            sqlite_path = handle.name
+        self.addCleanup(lambda: os.path.exists(sqlite_path) and os.remove(sqlite_path))
+
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            service = SandboxComputeService(backend=backend)
+            result = service.run_custom_tool_command(
+                self.agent,
+                "python -c 'print(1)'",
+                env={"OPENAI_API_KEY": "from-caller", "KEEP_ME": "yes"},
+                local_sqlite_db_path=sqlite_path,
+                sqlite_env_key="SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH",
+            )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(len(backend.run_command_calls), 1)
+        merged_env = backend.run_command_calls[0]["env"]
+        self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")
+        self.assertEqual(merged_env["KEEP_ME"], "yes")
+        self.assertEqual(backend.run_command_calls[0]["trusted_env_keys"], ["OPENAI_API_KEY"])
 
     def test_python_exec_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()

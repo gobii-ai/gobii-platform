@@ -42,7 +42,9 @@ class FilesystemPromptTests(SimpleTestCase):
 
         lines = text.splitlines()
         self.assertIn("Most recent files in agent filespace", lines[0])
-        self.assertEqual(len(lines), 31)
+        self.assertIn("prefer a custom tool in the sandbox", lines[1])
+        self.assertIn("fd/rg --files", lines[2])
+        self.assertEqual(len(lines), 33)
         self.assertIn("$[/reports/file_0.txt]", text)
         self.assertIn("$[/reports/file_29.txt]", text)
         self.assertNotIn("$[/reports/file_30.txt]", text)
