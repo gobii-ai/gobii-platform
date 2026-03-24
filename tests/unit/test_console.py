@@ -1036,6 +1036,73 @@ class ConsoleViewsTest(TestCase):
         )
         self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
+    @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @tag("batch_console_agents")
+    def test_trial_required_quick_create_preserves_draft_for_quick_spawn_resume(self, _mock_delay):
+        from api.models import PersistentAgent
+        from agents.services import PretrainedWorkerTemplateService
+
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["notion"],
+        )
+
+        session = self.client.session
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = "sales-pipeline-whisperer"
+        session.save()
+
+        with self.settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps(
+                    {
+                        "message": "Draft from immersive app",
+                        "preferred_llm_tier": "premium",
+                        "charter_override": "Override charter",
+                        "selected_pipedream_app_slugs": ["slack", "notion", "trello"],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
+        self.assertTrue(payload.get("requires_plan_selection"))
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), "Draft from immersive app")
+        self.assertEqual(session.get("agent_charter_source"), "user")
+        self.assertEqual(session.get("agent_preferred_llm_tier"), "premium")
+        self.assertEqual(session.get("agent_charter_override"), "Override charter")
+        self.assertEqual(
+            session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "notion", "trello"],
+        )
+        self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+
+        with self.settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False):
+            resume_response = self.client.get(reverse("agent_quick_spawn"))
+
+        self.assertEqual(resume_response.status_code, 302)
+        parsed = urlparse(resume_response["Location"])
+        self.assertTrue(parsed.path.startswith("/app/agents/"))
+
+        agent_id = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        created_agent = PersistentAgent.objects.get(id=agent_id)
+        self.assertEqual(created_agent.charter, "Override charter")
+
+        selection = PipedreamAppSelection.objects.get(user=self.user)
+        self.assertEqual(selection.selected_app_slugs, ["notion", "slack"])
+
+        owner_state = get_owner_apps_state(
+            MCPServerConfig.Scope.USER,
+            self.user.get_full_name() or self.user.username,
+            owner_user=self.user,
+        )
+        self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
+
     @override_settings(
         PIPEDREAM_PREFETCH_APPS="trello",
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,

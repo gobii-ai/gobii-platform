@@ -372,6 +372,38 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
         return response
 
 
+def _persist_quick_create_draft(
+    request: HttpRequest,
+    *,
+    initial_message: str,
+    preferred_llm_tier_key: str | None,
+    charter_override: str | None,
+    selected_pipedream_app_slugs: list[str],
+) -> None:
+    request.session["agent_charter"] = initial_message
+    request.session["agent_charter_source"] = "user"
+
+    if preferred_llm_tier_key:
+        request.session["agent_preferred_llm_tier"] = preferred_llm_tier_key
+    else:
+        request.session.pop("agent_preferred_llm_tier", None)
+
+    if charter_override:
+        request.session["agent_charter_override"] = charter_override
+    else:
+        request.session.pop("agent_charter_override", None)
+
+    if selected_pipedream_app_slugs:
+        request.session[AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = selected_pipedream_app_slugs
+    else:
+        request.session.pop(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, None)
+
+    # Treat immersive quick-create as a fresh custom draft, not a continuation
+    # of a previously selected template.
+    request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+    request.session.modified = True
+
+
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:
     if not path:
         return None, None
@@ -2002,6 +2034,13 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
             if any(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE in str(message) for message in error_messages):
+                _persist_quick_create_draft(
+                    request,
+                    initial_message=initial_message,
+                    preferred_llm_tier_key=preferred_llm_tier_key,
+                    charter_override=charter_override,
+                    selected_pipedream_app_slugs=selected_pipedream_app_slugs,
+                )
                 set_trial_onboarding_intent(
                     request,
                     target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
