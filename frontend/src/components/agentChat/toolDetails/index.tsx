@@ -24,6 +24,13 @@ import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedul
 import { ChartDetail } from './details/chart'
 import { ImageDetail } from './details/image'
 import { KanbanUpdateDetail } from './details/kanban'
+import {
+  CreateCustomToolDetail,
+  CustomToolRunDetail,
+  FileStringReplaceDetail,
+  PythonExecDetail,
+  RunCommandDetail,
+} from './details/sandbox'
 
 export { normalizeStructuredValue } from './normalize'
 export {
@@ -64,6 +71,11 @@ export {
   ChartDetail,
   ImageDetail,
   KanbanUpdateDetail,
+  RunCommandDetail,
+  PythonExecDetail,
+  FileStringReplaceDetail,
+  CreateCustomToolDetail,
+  CustomToolRunDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS = {
@@ -102,6 +114,11 @@ export const TOOL_DETAIL_COMPONENTS = {
   chart: ChartDetail,
   image: ImageDetail,
   mcpTool: McpToolDetail,
+  runCommand: RunCommandDetail,
+  pythonExec: PythonExecDetail,
+  fileStringReplace: FileStringReplaceDetail,
+  createCustomTool: CreateCustomToolDetail,
+  customToolRun: CustomToolRunDetail,
 } satisfies Record<string, ToolDetailComponent>
 
 export type DetailKind = keyof typeof TOOL_DETAIL_COMPONENTS

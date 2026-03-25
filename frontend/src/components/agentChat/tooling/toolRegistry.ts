@@ -12,6 +12,7 @@ import {
   CHAT_SKIP_TOOL_NAMES,
   buildToolDescriptorMap,
   coerceString,
+  getFriendlyToolInfo,
   truncate,
 } from '../../tooling/toolMetadata'
 import { classifySqliteStatements } from '../../tooling/agentConfigSql'
@@ -129,6 +130,28 @@ function deriveCaptionFallback(parameters: Record<string, unknown> | null): stri
   return null
 }
 
+function deriveCustomToolSummary(entry: ToolCallEntry): Pick<ToolEntryDisplay, 'label' | 'caption' | 'summary' | 'detailComponent' | 'icon' | 'iconBgClass' | 'iconColorClass'> {
+  const friendly = getFriendlyToolInfo(entry.toolName ?? 'custom_tool')
+  const resultObject = parseResultObject(entry.result)
+  const nestedResult =
+    resultObject && isPlainObject(resultObject['result'])
+      ? (resultObject['result'] as Record<string, unknown>)
+      : null
+  const resultMessage = nestedResult ? pickString(nestedResult['message']) : null
+  const topLevelMessage = resultObject ? pickString(resultObject['message']) : null
+  const summary = topLevelMessage ?? resultMessage ?? null
+
+  return {
+    label: friendly.label,
+    caption: 'Custom Tool Call',
+    summary: summary ? truncate(summary, 120) : null,
+    detailComponent: resolveDetailComponent('customToolRun'),
+    icon: friendly.icon,
+    iconBgClass: friendly.iconBgClass,
+    iconColorClass: friendly.iconColorClass,
+  }
+}
+
 function buildToolEntryDisplay(
   clusterCursor: string,
   entry: ToolCallEntry,
@@ -148,23 +171,28 @@ function buildToolEntryDisplay(
     summary: undefined,
   }
   const transform = descriptor.derive?.(entryForDerive, parameters) || {}
+  const customToolTransform =
+    descriptor.name === 'default' && toolName.toLowerCase().startsWith('custom_')
+      ? deriveCustomToolSummary(entry)
+      : null
+  const mergedTransform = customToolTransform ? { ...transform, ...customToolTransform } : transform
 
   // Check if the derive function requested this entry be skipped (e.g., kanban-only SQL)
-  if (transform.skip) {
+  if (mergedTransform.skip) {
     return null
   }
 
   const isDefaultDescriptor = descriptor.name === 'default'
-  const derivedCaption = transform.caption ?? deriveCaptionFallback(parameters)
+  const derivedCaption = mergedTransform.caption ?? deriveCaptionFallback(parameters)
   // Backend captions are often debug-oriented; only use them as a last-resort fallback when
   // we don't recognize the tool (default descriptor) or don't have structured parameters.
   const backendCaption = pickString(entry.caption)
   const caption = derivedCaption ?? ((isDefaultDescriptor || !parameters) ? backendCaption : null)
   const mcpInfo = deriveMcpInfo(toolName, entry.result)
 
-  const baseLabel = transform.label ?? descriptor.label
+  const baseLabel = mergedTransform.label ?? descriptor.label
   const baseCaption = caption ?? descriptor.label
-  const detailComponent = transform.detailComponent ?? descriptor.detailComponent
+  const detailComponent = mergedTransform.detailComponent ?? descriptor.detailComponent
   const shouldUseGenericMcpDisplay = Boolean(mcpInfo && isDefaultDescriptor)
 
   const finalLabel = shouldUseGenericMcpDisplay ? 'MCP Tool' : baseLabel
@@ -184,21 +212,21 @@ function buildToolEntryDisplay(
     caption: finalCaption,
     timestamp: entry.timestamp ?? null,
     status: entry.status ?? null,
-    icon: finalIcon,
-    iconBgClass: transform.iconBgClass ?? descriptor.iconBgClass,
-    iconColorClass: transform.iconColorClass ?? descriptor.iconColorClass,
+    icon: shouldUseGenericMcpDisplay ? finalIcon : mergedTransform.icon ?? finalIcon,
+    iconBgClass: mergedTransform.iconBgClass ?? descriptor.iconBgClass,
+    iconColorClass: mergedTransform.iconColorClass ?? descriptor.iconColorClass,
     parameters,
     rawParameters: entry.parameters,
     result: entry.result,
-    summary: transform.summary ?? entry.summary ?? null,
-    charterText: transform.charterText ?? entry.charterText ?? null,
-    sqlStatements: transform.sqlStatements ?? entry.sqlStatements,
+    summary: mergedTransform.summary ?? entry.summary ?? null,
+    charterText: mergedTransform.charterText ?? entry.charterText ?? null,
+    sqlStatements: mergedTransform.sqlStatements ?? entry.sqlStatements,
     detailComponent: finalDetailComponent,
     meta: entry.meta,
     sourceEntry: entry,
     mcpInfo: mcpInfo ?? undefined,
-    separateFromPreview: transform.separateFromPreview ?? false,
-    sqliteInfo: transform.sqliteInfo,
+    separateFromPreview: mergedTransform.separateFromPreview ?? false,
+    sqliteInfo: mergedTransform.sqliteInfo,
   }
 }
 

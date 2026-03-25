@@ -4664,6 +4664,18 @@
   margin: 0;
 }
 
+.json-view-panel .icon-container {
+  display: none !important;
+}
+
+.json-view-panel .brace-row {
+  gap: 0;
+}
+
+.json-view-panel .object-key {
+  font-weight: 600;
+}
+
 .tool-cluster-timeline-item[data-kind="thinking"] .tool-cluster-timeline-preview {
   font-style: italic;
   color: #1f2937;
