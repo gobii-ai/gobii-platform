@@ -416,6 +416,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             return None
 
     def _ensure_transparent_egress(self, agent, proxy_server) -> str:
+        if not proxy_server:
+            raise SandboxComputeUnavailable("A proxy server is required for sandbox egress.")
         secret_name = _transparent_egress_secret_name(agent.id)
         network_policy_name = _transparent_egress_network_policy_name(agent.id)
         spec = _transparent_proxy_spec(proxy_server)

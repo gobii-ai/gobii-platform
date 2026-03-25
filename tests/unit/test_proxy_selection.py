@@ -94,6 +94,22 @@ class ProxySelectionTests(TestCase):
             checked_at=timezone.now() - timedelta(hours=1)
         )
 
+        self.socks5_proxy = ProxyServer.objects.create(
+            name="SOCKS5 Proxy",
+            proxy_type=ProxyServer.ProxyType.SOCKS5,
+            host="socks.proxy.com",
+            port=1080,
+            username="user3",
+            password="pass3",
+            is_active=True,
+        )
+        ProxyHealthCheckResult.objects.create(
+            proxy_server=self.socks5_proxy,
+            health_check_spec=self.health_check_spec,
+            status=ProxyHealthCheckResult.Status.PASSED,
+            checked_at=timezone.now() - timedelta(days=1),
+        )
+
     @tag("batch_proxy_selection")
     def test_proxy_has_recent_health_pass_default_days(self):
         """Test proxy health check with default 45-day window."""
@@ -235,17 +251,20 @@ class ProxySelectionTests(TestCase):
         self.assertEqual(result, self.healthy_proxy)
 
     def test_proxy_url_uses_socks5_scheme(self):
-        proxy = ProxyServer.objects.create(
-            name="SOCKS Proxy",
-            proxy_type=ProxyServer.ProxyType.SOCKS5,
-            host="socks.proxy.com",
-            port=1080,
-            username="user",
-            password="pass",
-            is_active=True,
+        self.assertEqual(self.socks5_proxy.proxy_url, "socks5://user3:pass3@socks.proxy.com:1080")
+
+    def test_select_proxy_filters_random_selection_by_allowed_proxy_types(self):
+        result = select_proxy(allowed_proxy_types={"SOCKS5"})
+
+        self.assertEqual(result, self.socks5_proxy)
+
+    def test_select_proxy_ignores_disallowed_preferred_proxy_type(self):
+        result = select_proxy(
+            preferred_proxy=self.healthy_proxy,
+            allowed_proxy_types={"SOCKS5"},
         )
 
-        self.assertEqual(proxy.proxy_url, "socks5://user:pass@socks.proxy.com:1080")
+        self.assertEqual(result, self.socks5_proxy)
 
 
 @tag("batch_proxy_selection")

@@ -8,12 +8,74 @@ and fallback strategies.
 
 import logging
 from datetime import timedelta
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from django.conf import settings
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_allowed_proxy_types(allowed_proxy_types: Optional[Iterable[str]]) -> Optional[set[str]]:
+    if allowed_proxy_types is None:
+        return None
+    normalized = {
+        str(proxy_type).strip().upper()
+        for proxy_type in allowed_proxy_types
+        if str(proxy_type).strip()
+    }
+    return normalized or None
+
+
+def _proxy_type_allowed(proxy_server: Any, allowed_proxy_types: Optional[set[str]]) -> bool:
+    if proxy_server is None or allowed_proxy_types is None:
+        return True
+    proxy_type = str(getattr(proxy_server, "proxy_type", "") or "").strip().upper()
+    return proxy_type in allowed_proxy_types
+
+
+def _select_random_proxy_from_shared_pool(
+    *,
+    health_check_days: int,
+    allowed_proxy_types: Optional[set[str]],
+):
+    from .models import BrowserUseAgent
+
+    recent_cutoff = timezone.now() - timedelta(days=health_check_days)
+    available_proxies = BrowserUseAgent._shared_proxy_queryset()
+    if allowed_proxy_types is not None:
+        available_proxies = available_proxies.filter(proxy_type__in=sorted(allowed_proxy_types))
+
+    healthy_static_proxy = (
+        available_proxies.filter(
+            static_ip__isnull=False,
+            health_check_results__status="PASSED",
+            health_check_results__checked_at__gte=recent_cutoff,
+        )
+        .distinct()
+        .order_by("?")
+        .first()
+    )
+    if healthy_static_proxy:
+        return healthy_static_proxy
+
+    healthy_proxy = (
+        available_proxies.filter(
+            health_check_results__status="PASSED",
+            health_check_results__checked_at__gte=recent_cutoff,
+        )
+        .distinct()
+        .order_by("?")
+        .first()
+    )
+    if healthy_proxy:
+        return healthy_proxy
+
+    static_ip_proxy = available_proxies.filter(static_ip__isnull=False).exclude(static_ip="").order_by("?").first()
+    if static_ip_proxy:
+        return static_ip_proxy
+
+    return available_proxies.order_by("?").first()
 
 
 def proxy_has_recent_health_pass(proxy_server, health_check_days: int = 45) -> bool:
@@ -38,7 +100,8 @@ def select_proxy(
     override_proxy: Optional = None,
     allow_no_proxy_in_debug: bool = False,
     health_check_days: int = 45,
-    context_id: Optional[str] = None
+    context_id: Optional[str] = None,
+    allowed_proxy_types: Optional[Iterable[str]] = None,
 ) -> Optional:
     """
     Select appropriate proxy based on preferences and health checks.
@@ -59,15 +122,29 @@ def select_proxy(
     from .models import BrowserUseAgent, ProxyServer
     
     context_desc = f" for {context_id}" if context_id else ""
+    normalized_allowed_proxy_types = _normalize_allowed_proxy_types(allowed_proxy_types)
     
     # Priority 1: Override proxy (for testing/specific needs)
     if override_proxy:
-        logger.info("Using override proxy%s: %s", context_desc, override_proxy)
-        return override_proxy
+        if _proxy_type_allowed(override_proxy, normalized_allowed_proxy_types):
+            logger.info("Using override proxy%s: %s", context_desc, override_proxy)
+            return override_proxy
+        logger.warning(
+            "Ignoring override proxy with disallowed type%s: %s",
+            context_desc,
+            override_proxy,
+        )
     
     # Priority 2: Preferred proxy (if healthy)
     if preferred_proxy:
-        if proxy_has_recent_health_pass(preferred_proxy, health_check_days):
+        if not _proxy_type_allowed(preferred_proxy, normalized_allowed_proxy_types):
+            logger.info(
+                "Preferred proxy has disallowed type%s, selecting alternative: %s",
+                context_desc,
+                preferred_proxy,
+            )
+            preferred_proxy = None
+        elif proxy_has_recent_health_pass(preferred_proxy, health_check_days):
             logger.info(
                 "Using preferred proxy (recently healthy)%s: %s",
                 context_desc,
@@ -82,7 +159,13 @@ def select_proxy(
             )
             
             # Try to find a healthy alternative
-            alternative_proxy = BrowserUseAgent.select_random_proxy()
+            if normalized_allowed_proxy_types is None:
+                alternative_proxy = BrowserUseAgent.select_random_proxy()
+            else:
+                alternative_proxy = _select_random_proxy_from_shared_pool(
+                    health_check_days=health_check_days,
+                    allowed_proxy_types=normalized_allowed_proxy_types,
+                )
             if alternative_proxy:
                 logger.info(
                     "Using healthy alternative proxy%s: %s",
@@ -99,7 +182,13 @@ def select_proxy(
                 return preferred_proxy
     
     # Priority 3: Health-aware random selection
-    proxy_server = BrowserUseAgent.select_random_proxy()
+    if normalized_allowed_proxy_types is None:
+        proxy_server = BrowserUseAgent.select_random_proxy()
+    else:
+        proxy_server = _select_random_proxy_from_shared_pool(
+            health_check_days=health_check_days,
+            allowed_proxy_types=normalized_allowed_proxy_types,
+        )
     if proxy_server:
         logger.info("Using health-aware selected proxy%s: %s", context_desc, proxy_server)
         return proxy_server

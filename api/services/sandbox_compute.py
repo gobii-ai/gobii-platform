@@ -826,6 +826,9 @@ def _write_sqlite_file(db_path: str, content: bytes) -> None:
 def _select_proxy_for_session(agent, session: AgentComputeSession) -> Optional[Any]:
     if not getattr(settings, "ENABLE_PROXY_ROUTING", True):
         return None
+    allowed_proxy_types = None
+    if _kubernetes_backend_requires_socks5_proxy():
+        allowed_proxy_types = {"SOCKS5"}
     preferred_proxy = session.proxy_server if session.proxy_server and session.proxy_server.is_active else None
     try:
         if preferred_proxy:
@@ -833,11 +836,13 @@ def _select_proxy_for_session(agent, session: AgentComputeSession) -> Optional[A
                 preferred_proxy=preferred_proxy,
                 allow_no_proxy_in_debug=not _proxy_required(),
                 context_id=f"sandbox_agent_{agent.id}",
+                allowed_proxy_types=allowed_proxy_types,
             )
         else:
             proxy = select_proxy_for_persistent_agent(
                 agent,
                 allow_no_proxy_in_debug=not _proxy_required(),
+                allowed_proxy_types=allowed_proxy_types,
             )
     except RuntimeError as exc:
         if _proxy_required():
@@ -859,6 +864,11 @@ def _proxy_env_for_session(session: AgentComputeSession) -> Optional[Dict[str, s
     if not proxy:
         return None
     return _proxy_env_values(proxy.proxy_url, _no_proxy_value())
+
+
+def _kubernetes_backend_requires_socks5_proxy() -> bool:
+    backend_name = str(getattr(settings, "SANDBOX_COMPUTE_BACKEND", "") or "").lower()
+    return backend_name in {"kubernetes", "k8s"}
 
 
 def _proxy_env_values(proxy_url: Optional[str], no_proxy: Optional[str]) -> Dict[str, str]:
