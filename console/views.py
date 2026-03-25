@@ -5871,7 +5871,11 @@ class SharedAgentAccessMixin(AgentOwnerContextOverrideMixin):
             allow_shared=True,
             allow_delinquent_personal_chat=self.allow_delinquent_personal_chat,
         )
-        self._can_manage_agent = user_can_manage_agent(self.request.user, agent)
+        self._can_manage_agent = user_can_manage_agent(
+            self.request.user,
+            agent,
+            allow_delinquent_personal_chat=self.allow_delinquent_personal_chat,
+        )
         self._is_collaborator = user_is_collaborator(self.request.user, agent)
         self._can_manage_collaborators = False
         if agent.user_id == self.request.user.id:

@@ -60,11 +60,20 @@ def shared_agent_queryset_for(user) -> QuerySet:
         .filter(collaborators__user=user)
     )
 
-def user_can_manage_agent(user, agent: PersistentAgent) -> bool:
+def user_can_manage_agent(
+    user,
+    agent: PersistentAgent,
+    *,
+    allow_delinquent_personal_chat: bool = False,
+) -> bool:
     if user.is_staff:
         return True
     if agent.user_id == user.id:
-        if _is_blocked_personal_owner(user, agent):
+        if _is_blocked_personal_owner(
+            user,
+            agent,
+            allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+        ):
             return False
         return True
     if agent.organization_id:
@@ -133,7 +142,11 @@ def resolve_agent(
                 allow_delinquent_personal_chat=allow_delinquent_personal_chat,
             ):
                 raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE) from exc
-            if user_can_manage_agent(user, agent):
+            if user_can_manage_agent(
+                user,
+                agent,
+                allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+            ):
                 return agent
             if allow_shared and user_is_collaborator(user, agent):
                 return agent

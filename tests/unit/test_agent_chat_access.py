@@ -174,6 +174,25 @@ class AgentChatAccessTests(TestCase):
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     @patch("util.trial_enforcement.get_active_subscription", return_value=None)
+    def test_resolve_agent_allows_personal_owner_with_past_due_subscription_outside_current_context(
+        self,
+        _mock_get_active_subscription,
+    ):
+        self._set_org_context()
+        customer = self._fake_customer_with_subscription_status("past_due")
+
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+            agent = resolve_agent(
+                self.user,
+                self.client.session,
+                str(self.personal_agent.id),
+                allow_delinquent_personal_chat=True,
+            )
+
+        self.assertEqual(agent.id, self.personal_agent.id)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("util.trial_enforcement.get_active_subscription", return_value=None)
     def test_roster_includes_personal_agent_with_past_due_subscription(self, _mock_get_active_subscription):
         customer = self._fake_customer_with_subscription_status("past_due")
         with patch("util.trial_enforcement.get_stripe_customer", return_value=customer), \
