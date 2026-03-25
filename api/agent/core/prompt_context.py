@@ -1848,6 +1848,11 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
 
     lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
     if is_proprietary:
+        lines.append("Task credits replenish each billing month; unused task credits do not carry over to the next month.")
+        lines.append("If the user runs out of task credits, they can purchase task add-ons from the billing page.")
+        lines.append(
+            "The daily task credit target is a budgeting control, not a fixed entitlement; the user can adjust or remove it as needed."
+        )
         lines.append(f"Billing page: {billing_url}.")
 
     return {
