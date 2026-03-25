@@ -134,15 +134,6 @@ SYSTEM_SETTING_DEFINITIONS = (
         category="Sandbox",
     ),
     SystemSettingDefinition(
-        key="SANDBOX_EGRESS_PROXY_POD_IMAGE",
-        label="Sandbox egress proxy image",
-        description="Container image used for per-agent sandbox egress proxy pods.",
-        value_type=VALUE_TYPE_STRING,
-        env_var="SANDBOX_EGRESS_PROXY_POD_IMAGE",
-        default_getter=lambda: settings.SANDBOX_EGRESS_PROXY_POD_IMAGE,
-        category="Sandbox",
-    ),
-    SystemSettingDefinition(
         key="SANDBOX_COMPUTE_REQUIRE_PROXY",
         label="Require sandbox proxy",
         description="Require a configured proxy for sandbox compute sessions.",
@@ -491,10 +482,6 @@ def get_sandbox_compute_enabled() -> bool:
 
 def get_sandbox_compute_pod_image() -> str:
     return str(get_setting_value("SANDBOX_COMPUTE_POD_IMAGE"))
-
-
-def get_sandbox_egress_proxy_pod_image() -> str:
-    return str(get_setting_value("SANDBOX_EGRESS_PROXY_POD_IMAGE"))
 
 
 def get_sandbox_compute_require_proxy() -> bool:

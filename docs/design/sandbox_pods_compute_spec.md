@@ -33,17 +33,12 @@ Owner: Platform
 - Compute API service used by Gobii agents and tools.
 - Metadata store for session state and snapshots.
 - Scheduler that creates, resumes, or stops per-agent pods.
-- Egress proxy controller that creates per-agent egress proxy pods and services.
+- Transparent egress controller that creates per-agent SOCKS5 config Secrets and egress NetworkPolicies.
 
 ### Compute Pods (in GKE)
 - GKE sandbox pods using gVisor (RuntimeClass: gvisor).
 - One pod per agent, running a sandbox tool supervisor.
 - Interactive session via exec/PTY proxy.
-
-### Egress Proxy Pods (in GKE)
-- One proxy pod per agent, configured with the selected Decodo upstream (host/port/creds/protocol).
-- Exposes a per-agent ClusterIP service (e.g., `sandbox-egress-<agent_id>`).
-- Sandbox pods send all outbound HTTP/S traffic to the per-agent proxy service.
 
 ### Storage
 - Per-agent PVC for workspace (1 GB cap).
@@ -51,12 +46,10 @@ Owner: Platform
 - Snapshot metadata stored in the control-plane DB.
 
 ### Networking
-- NetworkPolicy enforces egress only to proxy endpoints.
-- Pod environment provides proxy settings for all tools.
-- Control plane selects a healthy Decodo proxy from the DB and wires the per-agent proxy pod.
-- Sandbox pod `HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, `ALL_PROXY`, and lowercase variants point at the per-agent proxy service.
-- Sandbox pod `NO_PROXY` and `no_proxy` carry the cluster bypass list.
-- The proxy pod connects upstream using `UPSTREAM_PROXY_SCHEME` (`http`, `https`, or `socks5`) plus host/port/auth env.
+- NetworkPolicy enforces ingress only from the platform and egress only to DNS plus the selected SOCKS5 upstream.
+- Control plane selects a healthy SOCKS5 proxy from the DB, resolves its current A records, and writes a per-agent policy.
+- Sandbox pods do not receive `HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, `ALL_PROXY`, `NO_PROXY`, or lowercase variants.
+- A node-level transparent interceptor on the gVisor node pool redirects outbound sandbox TCP to the selected SOCKS5 upstream.
 
 ## Kubernetes Primitives
 
@@ -72,12 +65,12 @@ Owner: Platform
 - Volumes:
   - workspace PVC mounted at /workspace
 
-### Pod (per-agent egress proxy)
-- Labels: agent_id, compute_session_id, app=sandbox-egress-proxy
-- Container:
-  - egress-proxy (connects to Decodo upstream defined by `UPSTREAM_PROXY_SCHEME`, host, port, and auth env)
-- Service:
-  - ClusterIP per agent (e.g., `sandbox-egress-<agent_id>`)
+### Secret (per agent)
+- Stores the selected SOCKS5 upstream host, port, and optional auth for the node-level interceptor.
+
+### NetworkPolicy (per agent)
+- Allows ingress from `gobii-platform` to the sandbox supervisor on `8080`.
+- Allows egress only to kube-dns/coredns and the resolved SOCKS5 upstream IPs/port.
 
 ### PVC
 - Size: 1Gi

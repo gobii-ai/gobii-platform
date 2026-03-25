@@ -8,25 +8,27 @@
 - SANDBOX_COMPUTE_PVC_STORAGE_CLASS / SANDBOX_COMPUTE_SNAPSHOT_CLASS: storage/snapshot class names.
 - SANDBOX_COMPUTE_POD_CONFIGMAP_NAME / SANDBOX_COMPUTE_POD_SECRET_NAME: env sources for pods.
 - SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS / SANDBOX_COMPUTE_SNAPSHOT_TIMEOUT_SECONDS: readiness timeouts.
-- SANDBOX_EGRESS_PROXY_POD_IMAGE: per-agent egress proxy image.
-- SANDBOX_EGRESS_PROXY_POD_PORT / SANDBOX_EGRESS_PROXY_SERVICE_PORT: listen + service ports for the proxy.
-- SANDBOX_EGRESS_PROXY_POD_RUNTIME_CLASS / SANDBOX_EGRESS_PROXY_POD_SERVICE_ACCOUNT: optional proxy pod settings.
-- Egress proxy pods must support `UPSTREAM_PROXY_SCHEME` values `http`, `https`, and `socks5`.
-- Sandbox pods inject uppercase and lowercase `HTTP_PROXY` / `HTTPS_PROXY` / `FTP_PROXY` / `ALL_PROXY` plus `NO_PROXY` / `no_proxy`.
+- Kubernetes sandboxes require a selected SOCKS5 proxy.
+- Node-level transparent egress interception handles outbound TCP on gVisor nodes.
+- Kubernetes sandbox pods do not inject `HTTP_PROXY`, `HTTPS_PROXY`, `FTP_PROXY`, `ALL_PROXY`, or lowercase variants.
 
 ## RBAC requirements
 The control-plane service account must be able to:
 - pods: get/list/watch/create/delete
-- pods/proxy: create
+- services: get/list/watch/create/delete
+- secrets: get/list/watch/create/update/delete
 - persistentvolumeclaims: get/list/watch/create/delete
+- networkpolicies.networking.k8s.io: get/list/watch/create/update/delete
 - volumesnapshots.snapshot.storage.k8s.io: get/list/watch/create/delete
 
 ## Resource naming
 - Pods: sandbox-agent-<agent_uuid>
 - PVCs: sandbox-workspace-<agent_uuid>
 - Snapshots: sandbox-snap-<agent_prefix>-<timestamp>
-- Egress proxy pods/services: sandbox-egress-<agent_uuid>
+- Transparent egress Secrets: sandbox-egress-config-<agent_uuid>
+- Transparent egress NetworkPolicies: sandbox-egress-policy-<agent_uuid>
 
 ## Lifecycle
-- Idle sweeper syncs workspace, snapshots PVC, deletes pod, and deletes PVC on success.
+- Deploy or resume creates the sandbox pod, sandbox service, transparent egress Secret, and per-agent egress NetworkPolicy.
+- Idle sweeper syncs workspace, snapshots PVC, deletes the pod, deletes the per-agent Secret and NetworkPolicy, and deletes the PVC on success.
 - Resume creates PVC from snapshot (when present) and recreates the pod.

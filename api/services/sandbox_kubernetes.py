@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import socket
 import time
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -16,18 +17,13 @@ from api.services.sandbox_compute import (
     SandboxSessionUpdate,
     _requires_agent_pod_discovery,
 )
-from api.services.system_settings import (
-    get_sandbox_compute_pod_image,
-    get_sandbox_compute_require_proxy,
-    get_sandbox_egress_proxy_pod_image,
-)
+from api.services.system_settings import get_sandbox_compute_pod_image
 
 logger = logging.getLogger(__name__)
 
 _SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 _SANDBOX_SERVICE_PORT = 8080
-_DEFAULT_EGRESS_PROXY_HTTP_PORT = 3128
-_DEFAULT_EGRESS_PROXY_SOCKS_PORT = 1080
+_TRANSPARENT_EGRESS_PORT = 15001
 
 
 class KubernetesApiError(RuntimeError):
@@ -97,24 +93,6 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._pod_runtime_class = getattr(settings, "SANDBOX_COMPUTE_POD_RUNTIME_CLASS", "gvisor")
         self._pod_configmap = getattr(settings, "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME", "gobii-sandbox-common-env")
         self._pod_secret = getattr(settings, "SANDBOX_COMPUTE_POD_SECRET_NAME", "gobii-sandbox-env")
-        self._egress_proxy_image = get_sandbox_egress_proxy_pod_image()
-        self._egress_proxy_port = int(
-            getattr(settings, "SANDBOX_EGRESS_PROXY_POD_PORT", _DEFAULT_EGRESS_PROXY_HTTP_PORT)
-        )
-        self._egress_proxy_service_port = int(
-            getattr(settings, "SANDBOX_EGRESS_PROXY_SERVICE_PORT", self._egress_proxy_port)
-        )
-        self._egress_proxy_socks_port = int(
-            getattr(settings, "SANDBOX_EGRESS_PROXY_SOCKS_POD_PORT", _DEFAULT_EGRESS_PROXY_SOCKS_PORT)
-        )
-        self._egress_proxy_socks_service_port = int(
-            getattr(settings, "SANDBOX_EGRESS_PROXY_SOCKS_SERVICE_PORT", self._egress_proxy_socks_port)
-        )
-        self._egress_proxy_runtime_class = getattr(settings, "SANDBOX_EGRESS_PROXY_POD_RUNTIME_CLASS", "") or ""
-        self._egress_proxy_service_account = (
-            getattr(settings, "SANDBOX_EGRESS_PROXY_POD_SERVICE_ACCOUNT", "") or ""
-        )
-        self._no_proxy = getattr(settings, "SANDBOX_COMPUTE_NO_PROXY", "") or ""
         self._pod_ready_timeout = int(getattr(settings, "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS", 60))
         self._pvc_size = getattr(settings, "SANDBOX_COMPUTE_PVC_SIZE", "1Gi")
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
@@ -135,21 +113,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pod_name = _pod_name(agent.id)
         sandbox_service_name = _sandbox_service_name(agent.id)
         pvc_name = _pvc_name(agent.id)
-        egress_service_name = None
-        no_proxy = None
-        if session.proxy_server:
-            if not self._egress_proxy_image:
-                raise SandboxComputeUnavailable(
-                    "SANDBOX_EGRESS_PROXY_POD_IMAGE is required to use proxy-backed sandbox pods."
-                )
-            egress_service_name = self._ensure_egress_proxy(agent, session.proxy_server)
-            no_proxy = _merge_no_proxy_values(
-                self._no_proxy,
-                "localhost",
-                "127.0.0.1",
-                ".svc",
-                ".cluster.local",
-            )
+        secret_name = self._ensure_transparent_egress(agent, session.proxy_server)
 
         snapshot_name = session.workspace_snapshot.k8s_snapshot_name if session.workspace_snapshot else None
         if snapshot_name and not _resource_exists(self._client, _snapshot_path(self._namespace, snapshot_name)):
@@ -163,23 +127,24 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
             pod = self._get_pod(pod_name)
             if not pod:
-                self._create_pod(
-                    pod_name,
-                    pvc_name,
-                    agent_id=str(agent.id),
-                    egress_service_name=egress_service_name,
-                    no_proxy=no_proxy,
-                )
+                    self._create_pod(
+                        pod_name,
+                        pvc_name,
+                        agent_id=str(agent.id),
+                        transparent_egress_secret_name=secret_name,
+                    )
             else:
                 phase = (pod.get("status") or {}).get("phase")
-                if phase not in {"Running", "Pending"}:
+                if (
+                    phase not in {"Running", "Pending"}
+                    or not _sandbox_pod_matches_transparent_egress(pod, transparent_egress_secret_name=secret_name)
+                ):
                     self._delete_pod(pod_name)
                     self._create_pod(
                         pod_name,
                         pvc_name,
                         agent_id=str(agent.id),
-                        egress_service_name=egress_service_name,
-                        no_proxy=no_proxy,
+                        transparent_egress_secret_name=secret_name,
                     )
         except KubernetesApiError as exc:
             raise SandboxComputeUnavailable(f"Kubernetes scheduler failed: {exc}") from exc
@@ -350,7 +315,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pod_name = session.pod_name or _pod_name(agent.id)
         self._delete_pod(pod_name)
         self._delete_service(_sandbox_service_name(agent.id))
-        self._delete_egress_proxy(agent)
+        self._delete_secret(_transparent_egress_secret_name(agent.id))
+        self._delete_network_policy(_transparent_egress_network_policy_name(agent.id))
         if delete_workspace:
             pvc_name = _pvc_name(agent.id)
             self._delete_pvc(pvc_name)
@@ -449,44 +415,40 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             logger.warning("Failed to fetch service %s: %s", service_name, exc)
             return None
 
-    def _ensure_egress_proxy(self, agent, proxy_server) -> str:
-        host = str(getattr(proxy_server, "host", "") or "").strip()
-        port = getattr(proxy_server, "port", None)
-        if not host or not port:
-            raise SandboxComputeUnavailable("Proxy server is missing host/port metadata.")
-        _upstream_proxy_scheme(proxy_server)
-
-        pod_name = _egress_proxy_pod_name(agent.id)
-        service_name = _egress_proxy_service_name(agent.id)
+    def _ensure_transparent_egress(self, agent, proxy_server) -> str:
+        secret_name = _transparent_egress_secret_name(agent.id)
+        network_policy_name = _transparent_egress_network_policy_name(agent.id)
+        spec = _transparent_proxy_spec(proxy_server)
+        resolved_ips = _resolve_proxy_host_ips(spec["host"])
+        if not resolved_ips:
+            raise SandboxComputeUnavailable(f"Unable to resolve SOCKS5 proxy host for sandbox egress: {spec['host']}")
 
         try:
-            service = self._get_service(service_name)
-            if not service:
-                self._create_egress_proxy_service(service_name, agent_id=str(agent.id))
-
-            pod = self._get_pod(pod_name)
-            if not pod:
-                self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
-            else:
-                phase = (pod.get("status") or {}).get("phase")
-                if not _egress_proxy_pod_matches(
-                    pod,
+            self._upsert_secret(
+                _secret_collection_path(self._namespace),
+                _secret_path(self._namespace, secret_name),
+                _build_transparent_egress_secret_manifest(
+                    secret_name=secret_name,
+                    namespace=self._namespace,
+                    agent_id=str(agent.id),
                     proxy_server=proxy_server,
-                    http_listen_port=self._egress_proxy_port,
-                    socks_listen_port=self._egress_proxy_socks_port,
-                ):
-                    self._delete_pod(pod_name)
-                    self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
-                elif phase not in {"Running", "Pending"}:
-                    self._delete_pod(pod_name)
-                    self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
+                ),
+            )
+            self._upsert_network_policy(
+                _network_policy_collection_path(self._namespace),
+                _network_policy_path(self._namespace, network_policy_name),
+                _build_transparent_egress_network_policy_manifest(
+                    policy_name=network_policy_name,
+                    namespace=self._namespace,
+                    agent_id=str(agent.id),
+                    upstream_ips=resolved_ips,
+                    upstream_port=spec["port"],
+                ),
+            )
         except KubernetesApiError as exc:
-            raise SandboxComputeUnavailable(f"Egress proxy provisioning failed: {exc}") from exc
+            raise SandboxComputeUnavailable(f"Transparent egress provisioning failed: {exc}") from exc
 
-        if not self._wait_for_pod_ready(pod_name):
-            raise SandboxComputeUnavailable("Egress proxy pod did not become ready in time.")
-
-        return service_name
+        return secret_name
 
     def _create_pod(
         self,
@@ -494,8 +456,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pvc_name: str,
         *,
         agent_id: str,
-        egress_service_name: Optional[str],
-        no_proxy: Optional[str],
+        transparent_egress_secret_name: str,
     ) -> None:
         body = _build_pod_manifest(
             pod_name=pod_name,
@@ -507,47 +468,10 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             configmap_name=self._pod_configmap,
             secret_name=self._pod_secret,
             agent_id=agent_id,
-            egress_service_name=egress_service_name,
-            http_proxy_port=self._egress_proxy_service_port,
-            socks_proxy_port=self._egress_proxy_socks_service_port,
-            no_proxy=no_proxy,
+            transparent_egress_secret_name=transparent_egress_secret_name,
         )
         try:
             self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
-        except KubernetesApiError as exc:
-            if exc.status_code != 409:
-                raise
-
-    def _create_egress_proxy_pod(self, pod_name: str, *, agent_id: str, proxy_server) -> None:
-        body = _build_egress_proxy_pod_manifest(
-            pod_name=pod_name,
-            namespace=self._namespace,
-            image=self._egress_proxy_image,
-            runtime_class=self._egress_proxy_runtime_class or None,
-            service_account=self._egress_proxy_service_account or None,
-            agent_id=agent_id,
-            proxy_server=proxy_server,
-            http_listen_port=self._egress_proxy_port,
-            socks_listen_port=self._egress_proxy_socks_port,
-        )
-        try:
-            self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
-        except KubernetesApiError as exc:
-            if exc.status_code != 409:
-                raise
-
-    def _create_egress_proxy_service(self, service_name: str, *, agent_id: str) -> None:
-        body = _build_egress_proxy_service_manifest(
-            service_name=service_name,
-            namespace=self._namespace,
-            agent_id=agent_id,
-            http_port=self._egress_proxy_service_port,
-            http_target_port=self._egress_proxy_port,
-            socks_port=self._egress_proxy_socks_service_port,
-            socks_target_port=self._egress_proxy_socks_port,
-        )
-        try:
-            self._client.request_json("POST", _service_collection_path(self._namespace), json_body=body)
         except KubernetesApiError as exc:
             if exc.status_code != 409:
                 raise
@@ -598,14 +522,40 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         except KubernetesApiError as exc:
             logger.warning("Failed to delete service %s: %s", service_name, exc)
 
-    def _delete_egress_proxy(self, agent) -> None:
-        pod_name = _egress_proxy_pod_name(agent.id)
-        service_name = _egress_proxy_service_name(agent.id)
-        self._delete_pod(pod_name)
+    def _delete_secret(self, secret_name: str) -> None:
         try:
-            self._client.request_json("DELETE", _service_path(self._namespace, service_name), allow_404=True)
+            self._client.request_json("DELETE", _secret_path(self._namespace, secret_name), allow_404=True)
         except KubernetesApiError as exc:
-            logger.warning("Failed to delete egress proxy service %s: %s", service_name, exc)
+            logger.warning("Failed to delete secret %s: %s", secret_name, exc)
+
+    def _delete_network_policy(self, policy_name: str) -> None:
+        try:
+            self._client.request_json(
+                "DELETE",
+                _network_policy_path(self._namespace, policy_name),
+                allow_404=True,
+            )
+        except KubernetesApiError as exc:
+            logger.warning("Failed to delete network policy %s: %s", policy_name, exc)
+
+    def _upsert_secret(self, collection_path: str, resource_path: str, body: Dict[str, Any]) -> None:
+        self._upsert_named_resource(collection_path, resource_path, body)
+
+    def _upsert_network_policy(self, collection_path: str, resource_path: str, body: Dict[str, Any]) -> None:
+        self._upsert_named_resource(collection_path, resource_path, body)
+
+    def _upsert_named_resource(self, collection_path: str, resource_path: str, body: Dict[str, Any]) -> None:
+        existing = self._client.request_json("GET", resource_path, allow_404=True)
+        if existing:
+            metadata = dict(body.get("metadata") or {})
+            resource_version = str((existing.get("metadata") or {}).get("resourceVersion") or "").strip()
+            if resource_version:
+                metadata["resourceVersion"] = resource_version
+            updated_body = dict(body)
+            updated_body["metadata"] = metadata
+            self._client.request_json("PUT", resource_path, json_body=updated_body)
+            return
+        self._client.request_json("POST", collection_path, json_body=body)
 
     def _wait_for_pod_ready(self, pod_name: str) -> bool:
         started_at = time.monotonic()
@@ -735,12 +685,12 @@ def _pvc_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-workspace-{agent_id}")
 
 
-def _egress_proxy_pod_name(agent_id: Any) -> str:
-    return _slugify(f"sandbox-egress-{agent_id}")
+def _transparent_egress_secret_name(agent_id: Any) -> str:
+    return _slugify(f"sandbox-egress-config-{agent_id}")
 
 
-def _egress_proxy_service_name(agent_id: Any) -> str:
-    return _slugify(f"sandbox-egress-{agent_id}")
+def _transparent_egress_network_policy_name(agent_id: Any) -> str:
+    return _slugify(f"sandbox-egress-policy-{agent_id}")
 
 
 def _snapshot_name(agent_id: Any) -> str:
@@ -775,6 +725,22 @@ def _service_collection_path(namespace: str) -> str:
 
 def _service_path(namespace: str, service_name: str) -> str:
     return f"/api/v1/namespaces/{namespace}/services/{service_name}"
+
+
+def _secret_collection_path(namespace: str) -> str:
+    return f"/api/v1/namespaces/{namespace}/secrets"
+
+
+def _secret_path(namespace: str, secret_name: str) -> str:
+    return f"/api/v1/namespaces/{namespace}/secrets/{secret_name}"
+
+
+def _network_policy_collection_path(namespace: str) -> str:
+    return f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies"
+
+
+def _network_policy_path(namespace: str, policy_name: str) -> str:
+    return f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies/{policy_name}"
 
 
 def _sandbox_service_url(namespace: str, service_name: str, path: str) -> str:
@@ -835,20 +801,9 @@ def _build_pod_manifest(
     configmap_name: str,
     secret_name: str,
     agent_id: str,
-    egress_service_name: Optional[str],
-    http_proxy_port: int,
-    socks_proxy_port: int,
-    no_proxy: Optional[str],
+    transparent_egress_secret_name: str,
 ) -> Dict[str, Any]:
     env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
-    env.extend(
-        _build_proxy_env(
-            egress_service_name=egress_service_name,
-            http_proxy_port=http_proxy_port,
-            socks_proxy_port=socks_proxy_port,
-            no_proxy=no_proxy,
-        )
-    )
 
     container: Dict[str, Any] = {
         "name": "sandbox-supervisor",
@@ -890,6 +845,11 @@ def _build_pod_manifest(
                 "component": "sandbox-agent",
                 "agent_id": agent_id,
             },
+            "annotations": {
+                "gobii.ai/transparent-egress-mode": "socks5",
+                "gobii.ai/transparent-egress-port": str(_TRANSPARENT_EGRESS_PORT),
+                "gobii.ai/transparent-egress-secret": transparent_egress_secret_name,
+            },
         },
         "spec": {
             "automountServiceAccountToken": False,
@@ -915,241 +875,174 @@ def _build_pod_manifest(
     return manifest
 
 
-def _build_proxy_env(
-    *,
-    egress_service_name: Optional[str],
-    http_proxy_port: int,
-    socks_proxy_port: int,
-    no_proxy: Optional[str],
-) -> list[Dict[str, str]]:
-    return [
-        {"name": key, "value": value}
-        for key, value in _sandbox_sidecar_proxy_env_values(
-            egress_service_name=egress_service_name,
-            http_proxy_port=http_proxy_port,
-            socks_proxy_port=socks_proxy_port,
-            no_proxy=no_proxy,
-        ).items()
-    ]
-
-
-def _sandbox_sidecar_proxy_env_values(
-    *,
-    egress_service_name: Optional[str],
-    http_proxy_port: int,
-    socks_proxy_port: int,
-    no_proxy: Optional[str],
-) -> Dict[str, str]:
-    http_proxy_url = None
-    socks_proxy_url = None
-    if egress_service_name:
-        http_proxy_url = f"http://{egress_service_name}:{http_proxy_port}"
-        socks_proxy_url = f"socks5://{egress_service_name}:{socks_proxy_port}"
-    env: Dict[str, str] = {}
-    if http_proxy_url:
-        for key in ("HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "http_proxy", "https_proxy", "ftp_proxy"):
-            env[key] = http_proxy_url
-    if socks_proxy_url:
-        for key in ("ALL_PROXY", "all_proxy"):
-            env[key] = socks_proxy_url
-    no_proxy_value = str(no_proxy or "").strip()
-    if no_proxy_value:
-        env["NO_PROXY"] = no_proxy_value
-        env["no_proxy"] = no_proxy_value
-    return env
-
-
-def _build_egress_proxy_pod_manifest(
-    *,
-    pod_name: str,
-    namespace: str,
-    image: str,
-    runtime_class: Optional[str],
-    service_account: Optional[str],
-    agent_id: str,
-    proxy_server: Any,
-    http_listen_port: int,
-    socks_listen_port: int,
-) -> Dict[str, Any]:
-    host = str(getattr(proxy_server, "host", "") or "").strip()
-    port = str(getattr(proxy_server, "port", "") or "").strip()
-    username = str(getattr(proxy_server, "username", "") or "").strip()
-    password = str(getattr(proxy_server, "password", "") or "").strip()
-    proxy_id = str(getattr(proxy_server, "id", "") or "").strip()
-    upstream_protocol = _upstream_proxy_protocol(proxy_server)
-    upstream_proxy_scheme = _upstream_proxy_scheme(proxy_server)
-
-    env = [
-        {"name": "UPSTREAM_PROTOCOL", "value": upstream_protocol},
-        {"name": "UPSTREAM_PROXY_SCHEME", "value": upstream_proxy_scheme},
-        {"name": "UPSTREAM_HOST", "value": host},
-        {"name": "UPSTREAM_PORT", "value": port},
-        {"name": "HTTP_LISTEN_PORT", "value": str(http_listen_port)},
-        {"name": "SOCKS_LISTEN_PORT", "value": str(socks_listen_port)},
-    ]
-    if username:
-        env.append({"name": "UPSTREAM_USERNAME", "value": username})
-    if password:
-        env.append({"name": "UPSTREAM_PASSWORD", "value": password})
-
-    labels = {
-        "app": "sandbox-egress-proxy",
-        "component": "sandbox-egress",
-        "agent_id": agent_id,
-    }
-    if proxy_id:
-        labels["proxy_id"] = proxy_id
-
-    spec: Dict[str, Any] = {
-        "automountServiceAccountToken": False,
-        "terminationGracePeriodSeconds": 30,
-        "securityContext": {
-            "seccompProfile": {"type": "RuntimeDefault"},
-        },
-        "containers": [
-            {
-                "name": "egress-proxy",
-                "image": image,
-                "imagePullPolicy": "IfNotPresent",
-                "ports": [
-                    {"name": "http", "containerPort": http_listen_port},
-                    {"name": "socks5", "containerPort": socks_listen_port},
-                ],
-                "env": env,
-                "securityContext": {
-                    "allowPrivilegeEscalation": False,
-                    "runAsNonRoot": True,
-                    "runAsUser": 1000,
-                    "runAsGroup": 1000,
-                    "capabilities": {"drop": ["ALL"]},
-                },
-                "readinessProbe": {
-                    "tcpSocket": {"port": http_listen_port},
-                    "initialDelaySeconds": 3,
-                    "periodSeconds": 5,
-                    "failureThreshold": 3,
-                },
-                "livenessProbe": {
-                    "tcpSocket": {"port": http_listen_port},
-                    "initialDelaySeconds": 5,
-                    "periodSeconds": 10,
-                    "failureThreshold": 3,
-                },
-            }
-        ],
-    }
-    if runtime_class:
-        spec["runtimeClassName"] = runtime_class
-    if service_account:
-        spec["serviceAccountName"] = service_account
-
-    return {
-        "apiVersion": "v1",
-        "kind": "Pod",
-        "metadata": {
-            "name": pod_name,
-            "namespace": namespace,
-            "labels": labels,
-        },
-        "spec": spec,
-    }
-
-
-def _upstream_proxy_scheme(proxy_server: Any) -> str:
-    proxy_type = str(getattr(proxy_server, "proxy_type", "") or "").strip().upper()
-    if proxy_type in {"HTTP", "HTTPS", "SOCKS5"}:
-        return proxy_type.lower()
-    raise SandboxComputeUnavailable(f"Unsupported proxy type for sandbox egress: {proxy_type or 'unknown'}")
-
-
-def _upstream_proxy_protocol(proxy_server: Any) -> str:
-    proxy_type = str(getattr(proxy_server, "proxy_type", "") or "").strip().upper()
-    if proxy_type == "SOCKS5":
-        return "socks5"
-    if proxy_type in {"HTTP", "HTTPS"}:
-        return "http"
-    raise SandboxComputeUnavailable(f"Unsupported proxy type for sandbox egress: {proxy_type or 'unknown'}")
-
-
-def _egress_proxy_pod_matches(
+def _sandbox_pod_matches_transparent_egress(
     pod: Dict[str, Any],
     *,
-    proxy_server: Any,
-    http_listen_port: int,
-    socks_listen_port: int,
+    transparent_egress_secret_name: str,
 ) -> bool:
     metadata = (pod.get("metadata") or {}) if isinstance(pod, dict) else {}
-    labels = (metadata.get("labels") or {}) if isinstance(metadata, dict) else {}
-    desired_proxy_id = str(getattr(proxy_server, "id", "") or "")
-    if desired_proxy_id and labels.get("proxy_id") != desired_proxy_id:
+    annotations = (metadata.get("annotations") or {}) if isinstance(metadata, dict) else {}
+    if annotations.get("gobii.ai/transparent-egress-mode") != "socks5":
+        return False
+    if annotations.get("gobii.ai/transparent-egress-secret") != transparent_egress_secret_name:
         return False
 
     spec = (pod.get("spec") or {}) if isinstance(pod, dict) else {}
     containers = spec.get("containers") or []
     if not containers:
         return False
-    container = containers[0] or {}
-    env_entries = container.get("env") or []
-    env = {
-        str(entry.get("name")): str(entry.get("value", ""))
+    env_entries = (containers[0] or {}).get("env") or []
+    env_names = {
+        str(entry.get("name"))
         for entry in env_entries
         if isinstance(entry, dict) and entry.get("name")
     }
-
-    expected = {
-        "UPSTREAM_PROTOCOL": _upstream_proxy_protocol(proxy_server),
-        "UPSTREAM_PROXY_SCHEME": _upstream_proxy_scheme(proxy_server),
-        "UPSTREAM_HOST": str(getattr(proxy_server, "host", "") or "").strip(),
-        "UPSTREAM_PORT": str(getattr(proxy_server, "port", "") or "").strip(),
-        "HTTP_LISTEN_PORT": str(http_listen_port),
-        "SOCKS_LISTEN_PORT": str(socks_listen_port),
-        "UPSTREAM_USERNAME": str(getattr(proxy_server, "username", "") or "").strip(),
-        "UPSTREAM_PASSWORD": str(getattr(proxy_server, "password", "") or "").strip(),
+    forbidden = {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "FTP_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "ftp_proxy",
+        "all_proxy",
+        "NO_PROXY",
+        "no_proxy",
     }
-    return all(env.get(key, "") == value for key, value in expected.items())
+    return env_names.isdisjoint(forbidden)
 
 
-def _build_egress_proxy_service_manifest(
+def _transparent_proxy_spec(proxy_server: Any) -> Dict[str, Any]:
+    proxy_type = str(getattr(proxy_server, "proxy_type", "") or "").strip().upper()
+    if proxy_type != "SOCKS5":
+        raise SandboxComputeUnavailable("Kubernetes sandbox backend requires a SOCKS5 proxy.")
+
+    host = str(getattr(proxy_server, "host", "") or "").strip()
+    raw_port = getattr(proxy_server, "port", None)
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError) as exc:
+        raise SandboxComputeUnavailable("SOCKS5 proxy is missing a valid port.") from exc
+    if not host or port <= 0:
+        raise SandboxComputeUnavailable("SOCKS5 proxy is missing host/port metadata.")
+
+    return {
+        "host": host,
+        "port": port,
+        "username": str(getattr(proxy_server, "username", "") or "").strip(),
+        "password": str(getattr(proxy_server, "password", "") or "").strip(),
+        "proxy_type": "socks5",
+    }
+
+
+def _resolve_proxy_host_ips(host: str) -> list[str]:
+    try:
+        addresses = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise SandboxComputeUnavailable(f"Failed resolving SOCKS5 proxy host {host}: {exc}") from exc
+
+    resolved = []
+    for entry in addresses:
+        sockaddr = entry[4] if len(entry) > 4 else None
+        if not sockaddr:
+            continue
+        ip = str(sockaddr[0]).strip()
+        if not ip or ":" in ip or ip in resolved:
+            continue
+        resolved.append(ip)
+    if not resolved:
+        raise SandboxComputeUnavailable(f"Failed resolving IPv4 addresses for SOCKS5 proxy host {host}.")
+    return resolved
+
+
+def _build_transparent_egress_secret_manifest(
     *,
-    service_name: str,
+    secret_name: str,
     namespace: str,
     agent_id: str,
-    http_port: int,
-    http_target_port: int,
-    socks_port: int,
-    socks_target_port: int,
+    proxy_server: Any,
 ) -> Dict[str, Any]:
+    spec = _transparent_proxy_spec(proxy_server)
     return {
         "apiVersion": "v1",
-        "kind": "Service",
+        "kind": "Secret",
         "metadata": {
-            "name": service_name,
+            "name": secret_name,
             "namespace": namespace,
             "labels": {
-                "app": "sandbox-egress-proxy",
-                "component": "sandbox-egress",
+                "app": "sandbox-transparent-egress",
+                "component": "sandbox-transparent-egress-config",
+                "agent_id": agent_id,
+            },
+        },
+        "type": "Opaque",
+        "stringData": {
+            "UPSTREAM_HOST": spec["host"],
+            "UPSTREAM_PORT": str(spec["port"]),
+            "UPSTREAM_USERNAME": spec["username"],
+            "UPSTREAM_PASSWORD": spec["password"],
+            "UPSTREAM_PROXY_TYPE": spec["proxy_type"],
+        },
+    }
+
+
+def _build_transparent_egress_network_policy_manifest(
+    *,
+    policy_name: str,
+    namespace: str,
+    agent_id: str,
+    upstream_ips: list[str],
+    upstream_port: int,
+) -> Dict[str, Any]:
+    return {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "NetworkPolicy",
+        "metadata": {
+            "name": policy_name,
+            "namespace": namespace,
+            "labels": {
+                "app": "sandbox-compute",
+                "component": "sandbox-agent-egress-policy",
                 "agent_id": agent_id,
             },
         },
         "spec": {
-            "type": "ClusterIP",
-            "selector": {
-                "app": "sandbox-egress-proxy",
-                "agent_id": agent_id,
+            "podSelector": {
+                "matchLabels": {
+                    "app": "sandbox-compute",
+                    "component": "sandbox-agent",
+                    "agent_id": agent_id,
+                }
             },
-            "ports": [
+            "policyTypes": ["Ingress", "Egress"],
+            "ingress": [
                 {
-                    "name": "http",
-                    "port": http_port,
-                    "targetPort": http_target_port,
-                    "protocol": "TCP",
+                    "from": [{"podSelector": {"matchLabels": {"app": "gobii-platform"}}}],
+                    "ports": [{"protocol": "TCP", "port": 8080}],
+                }
+            ],
+            "egress": [
+                {
+                    "to": [
+                        {
+                            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                            "podSelector": {
+                                "matchExpressions": [
+                                    {
+                                        "key": "k8s-app",
+                                        "operator": "In",
+                                        "values": ["kube-dns", "coredns"],
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                    "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}],
                 },
                 {
-                    "name": "socks5",
-                    "port": socks_port,
-                    "targetPort": socks_target_port,
-                    "protocol": "TCP",
-                }
+                    "to": [{"ipBlock": {"cidr": f"{ip}/32"}} for ip in upstream_ips],
+                    "ports": [{"protocol": "TCP", "port": upstream_port}],
+                },
             ],
         },
     }
@@ -1191,16 +1084,3 @@ def _build_sandbox_service_manifest(
             ],
         },
     }
-
-
-def _merge_no_proxy_values(*values: str) -> str:
-    parts: list[str] = []
-    for value in values:
-        if not value:
-            continue
-        for item in value.split(","):
-            cleaned = item.strip()
-            if not cleaned or cleaned in parts:
-                continue
-            parts.append(cleaned)
-    return ",".join(parts)

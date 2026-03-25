@@ -75,7 +75,6 @@ class SandboxSystemSettingsTests(SimpleTestCase):
         expected = {
             "SANDBOX_COMPUTE_ENABLED": "bool",
             "SANDBOX_COMPUTE_POD_IMAGE": "string",
-            "SANDBOX_EGRESS_PROXY_POD_IMAGE": "string",
             "SANDBOX_COMPUTE_REQUIRE_PROXY": "bool",
         }
 
@@ -125,7 +124,6 @@ class SandboxSystemSettingsTests(SimpleTestCase):
                 "SANDBOX_COMPUTE_ENABLED": "false",
                 "SANDBOX_COMPUTE_REQUIRE_PROXY": "true",
                 "SANDBOX_COMPUTE_POD_IMAGE": "ghcr.io/gobii-ai/gobii-sandbox-compute:0.2.0",
-                "SANDBOX_EGRESS_PROXY_POD_IMAGE": "ghcr.io/gobii-ai/gobii-sandbox-egress-proxy:main",
             },
         ):
             self.assertFalse(system_settings.get_sandbox_compute_enabled())
@@ -133,10 +131,6 @@ class SandboxSystemSettingsTests(SimpleTestCase):
             self.assertEqual(
                 system_settings.get_sandbox_compute_pod_image(),
                 "ghcr.io/gobii-ai/gobii-sandbox-compute:0.2.0",
-            )
-            self.assertEqual(
-                system_settings.get_sandbox_egress_proxy_pod_image(),
-                "ghcr.io/gobii-ai/gobii-sandbox-egress-proxy:main",
             )
 
 
