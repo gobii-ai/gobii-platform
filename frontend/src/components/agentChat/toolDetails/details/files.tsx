@@ -3,15 +3,57 @@ import { parseResultObject } from '../../../../util/objectUtils'
 import { CodeBlock, KeyValueList, Section } from '../shared'
 import { isNonEmptyString, stringify } from '../utils'
 
+function detectLanguageFromFile({
+  filePath,
+  mimeType,
+}: {
+  filePath?: string | null
+  mimeType?: string | null
+}): string {
+  const extension = (() => {
+    if (!filePath) return null
+    const match = filePath.match(/\.([a-z0-9]+)$/i)
+    return match ? match[1].toLowerCase() : null
+  })()
+
+  if (extension === 'py') return 'python'
+  if (extension === 'json') return 'json'
+  if (extension === 'html' || extension === 'htm') return 'html'
+  if (extension === 'md' || extension === 'markdown') return 'markdown'
+  if (extension === 'xml') return 'xml'
+  if (extension === 'yaml' || extension === 'yml') return 'yaml'
+  if (extension === 'js' || extension === 'mjs' || extension === 'cjs') return 'javascript'
+  if (extension === 'ts' || extension === 'tsx') return 'typescript'
+  if (extension === 'jsx') return 'jsx'
+  if (extension === 'css') return 'css'
+  if (extension === 'sh' || extension === 'bash') return 'bash'
+  if (extension === 'sql') return 'sql'
+  if (extension === 'csv') return 'text'
+
+  if (mimeType?.includes('python')) return 'python'
+  if (mimeType?.includes('json')) return 'json'
+  if (mimeType?.includes('html')) return 'html'
+  return 'text'
+}
+
 export function FileReadDetail({ entry }: ToolDetailProps) {
+  const result = parseResultObject(entry.result)
   const params = entry.parameters || {}
-  const path = (params.path as string) || (params.file_path as string) || (params.filename as string) || null
+  const contents =
+    (isNonEmptyString(result?.text) ? result.text : null) ||
+    (isNonEmptyString(result?.markdown) ? result.markdown : null) ||
+    (typeof entry.result === 'string' ? entry.result : null)
+  const filePath =
+    (isNonEmptyString((params as Record<string, unknown>).path) ? (params as Record<string, unknown>).path as string : null) ||
+    (isNonEmptyString((params as Record<string, unknown>).file_path) ? (params as Record<string, unknown>).file_path as string : null) ||
+    (isNonEmptyString((params as Record<string, unknown>).filename) ? (params as Record<string, unknown>).filename as string : null)
+  const language = detectLanguageFromFile({ filePath })
+
   return (
     <div className="space-y-3 text-sm text-slate-600">
-      <KeyValueList items={[path ? { label: 'Path', value: path } : null]} />
-      {entry.result ? (
+      {contents ? (
         <Section title="Contents">
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-900/95 p-3 text-xs text-slate-100 shadow-inner">{stringify(entry.result)}</pre>
+          <CodeBlock code={contents} language={language} />
         </Section>
       ) : null}
     </div>
@@ -52,23 +94,10 @@ export function FileExportDetail({ entry }: ToolDetailProps) {
     (isNonEmptyString(params.csv_text) ? params.csv_text : null) ||
     (isNonEmptyString(params.html) ? params.html : null)
 
-  const extension = (() => {
-    if (!filePath) return null
-    const match = filePath.match(/\.([a-z0-9]+)$/i)
-    return match ? match[1].toLowerCase() : null
-  })()
-
-  const language = (() => {
-    if (extension === 'json') return 'json'
-    if (extension === 'html' || extension === 'htm') return 'html'
-    if (extension === 'md' || extension === 'markdown') return 'markdown'
-    if (extension === 'xml') return 'xml'
-    if (extension === 'yaml' || extension === 'yml') return 'yaml'
-    if (extension === 'csv') return 'text'
-    if (isNonEmptyString(params.mime_type) && params.mime_type.includes('json')) return 'json'
-    if (isNonEmptyString(params.mime_type) && params.mime_type.includes('html')) return 'html'
-    return 'text'
-  })()
+  const language = detectLanguageFromFile({
+    filePath,
+    mimeType: isNonEmptyString(params.mime_type) ? params.mime_type : null,
+  })
 
   return (
     <div className="space-y-3 text-sm text-slate-600">

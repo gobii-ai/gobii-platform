@@ -155,13 +155,12 @@ function deriveFileExport(
 ): ToolDescriptorTransform {
   const resultObject = parseResultObject(entry.result)
   const status = coerceString(resultObject?.['status'])
-  const message = coerceString(resultObject?.['message'])
   const paramPath = coerceString(parameters?.['file_path']) || coerceString(parameters?.['path'])
   const filename = coerceString(resultObject?.['filename']) || paramPath || coerceString(parameters?.['filename'])
   const path = coerceString(resultObject?.['path']) || paramPath
   const isError = status?.toLowerCase() === 'error'
 
-  const caption = message ? truncate(message, 56) : filename ? truncate(filename, 56) : path ? truncate(path, 56) : null
+  const caption = path ? truncate(path, 56) : filename ? truncate(filename, 56) : null
   const summaryParts: string[] = []
   if (path) {
     summaryParts.push(path)
