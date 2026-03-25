@@ -26,6 +26,7 @@ export function ChartDetail({ entry }: ToolDetailProps) {
   const description = toText(parameters?.description) || toText(resultRecord?.description)
   const chartId = toText(resultRecord?.chart_id) || toText(resultRecord?.id)
   const imageUrl =
+    entry.sourceEntry?.chartImageUrl ||
     toText(resultRecord?.chart_url) ||
     toText(resultRecord?.image_url) ||
     toText(resultRecord?.url) ||
@@ -36,8 +37,7 @@ export function ChartDetail({ entry }: ToolDetailProps) {
   const dataArray = parameterData.length ? parameterData : resultData
 
   const infoItems = [
-    title ? { label: 'Title', value: title } : null,
-    chartType ? { label: 'Type', value: chartType } : null,
+    !imageUrl && chartType ? { label: 'Type', value: chartType } : null,
     dataArray.length ? { label: 'Data points', value: dataArray.length.toString() } : null,
     chartId ? { label: 'Chart ID', value: chartId } : null,
   ]

@@ -71,7 +71,7 @@ export function OutputBlock({
 
 export function JsonBlock({ value }: { value: Record<string, unknown> | unknown[] }) {
   return (
-    <div className="json-view-panel overflow-hidden rounded-2xl border border-sky-200/80 bg-[linear-gradient(180deg,rgba(239,246,255,0.96),rgba(236,254,255,0.82))] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+    <div className="json-view-panel max-h-80 overflow-auto rounded-2xl border border-sky-200/80 bg-[linear-gradient(180deg,rgba(239,246,255,0.96),rgba(236,254,255,0.82))] px-3 py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
       <ReactJsonView
         src={value}
         name={false}
