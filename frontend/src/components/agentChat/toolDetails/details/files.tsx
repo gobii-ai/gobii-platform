@@ -1,6 +1,6 @@
 import type { ToolDetailProps } from '../../tooling/types'
 import { parseResultObject } from '../../../../util/objectUtils'
-import { KeyValueList, Section } from '../shared'
+import { CodeBlock, KeyValueList, Section } from '../shared'
 import { isNonEmptyString, stringify } from '../utils'
 
 export function FileReadDetail({ entry }: ToolDetailProps) {
@@ -44,27 +44,44 @@ export function FileExportDetail({ entry }: ToolDetailProps) {
   const result = parseResultObject(entry.result)
   const status = isNonEmptyString(result?.status) ? result?.status : null
   const message = isNonEmptyString(result?.message) ? result?.message : null
-  const filename =
-    (isNonEmptyString(result?.filename) ? result?.filename : null) ||
-    (isNonEmptyString(params.filename) ? params.filename : null)
-  const path = isNonEmptyString(result?.path) ? result?.path : null
-  const nodeId = isNonEmptyString(result?.node_id) ? result?.node_id : null
-  const statusLabel = status ? status.toUpperCase() : null
+  const filePath =
+    (isNonEmptyString(params.file_path) ? params.file_path : null) ||
+    (isNonEmptyString(params.path) ? params.path : null)
+  const content =
+    (isNonEmptyString(params.content) ? params.content : null) ||
+    (isNonEmptyString(params.csv_text) ? params.csv_text : null) ||
+    (isNonEmptyString(params.html) ? params.html : null)
+
+  const extension = (() => {
+    if (!filePath) return null
+    const match = filePath.match(/\.([a-z0-9]+)$/i)
+    return match ? match[1].toLowerCase() : null
+  })()
+
+  const language = (() => {
+    if (extension === 'json') return 'json'
+    if (extension === 'html' || extension === 'htm') return 'html'
+    if (extension === 'md' || extension === 'markdown') return 'markdown'
+    if (extension === 'xml') return 'xml'
+    if (extension === 'yaml' || extension === 'yml') return 'yaml'
+    if (extension === 'csv') return 'text'
+    if (isNonEmptyString(params.mime_type) && params.mime_type.includes('json')) return 'json'
+    if (isNonEmptyString(params.mime_type) && params.mime_type.includes('html')) return 'html'
+    return 'text'
+  })()
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
-      <KeyValueList
-        items={[
-          statusLabel ? { label: 'Status', value: statusLabel } : null,
-          filename ? { label: 'File', value: filename } : null,
-          path ? { label: 'Path', value: path } : null,
-          nodeId ? { label: 'Node', value: nodeId } : null,
-        ]}
-      />
-      {message ? (
-        <Section title={status?.toLowerCase() === 'error' ? 'Error' : 'Message'}>
+      {status?.toLowerCase() === 'error' && message ? (
+        <Section title="Error">
           <p className="text-slate-700">{message}</p>
         </Section>
+      ) : content ? (
+        <Section title="Contents">
+          <CodeBlock code={content} language={language} />
+        </Section>
+      ) : filePath ? (
+        <KeyValueList items={[{ label: 'Path', value: filePath }]} />
       ) : null}
     </div>
   )
