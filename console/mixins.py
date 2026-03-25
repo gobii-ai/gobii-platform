@@ -1,4 +1,5 @@
 import logging
+from functools import cached_property
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
@@ -6,6 +7,7 @@ from django.http import Http404
 
 from api.models import OrganizationMembership
 
+from .agent_context import resolve_context_override_for_agent
 from .context_helpers import build_console_context, resolve_console_context
 from config import settings
 from util.integrations import stripe_status
@@ -13,6 +15,25 @@ from util.subscription_helper import reconcile_user_plan_from_stripe
 from constants.plans import PlanNames
 
 logger = logging.getLogger(__name__)
+
+
+class AgentOwnerContextOverrideMixin:
+    agent_context_pk_kwarg = "pk"
+
+    @cached_property
+    def _agent_owner_context_override(self):
+        request = getattr(self, "request", None)
+        user = getattr(request, "user", None)
+        if request is None or user is None or not getattr(user, "is_authenticated", False):
+            return None
+        agent_id = self.kwargs.get(self.agent_context_pk_kwarg)
+        if not agent_id:
+            return None
+        override, _ = resolve_context_override_for_agent(user, str(agent_id))
+        return override
+
+    def get_console_context_override(self):
+        return self._agent_owner_context_override
 
 
 class ConsoleContextMixin:

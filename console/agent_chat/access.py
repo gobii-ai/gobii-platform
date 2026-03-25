@@ -4,6 +4,7 @@ from django.db.models import QuerySet
 from api.models import OrganizationMembership, PersistentAgent, AgentCollaborator
 from console.context_helpers import ConsoleContext, resolve_console_context
 from console.context_overrides import get_context_override
+from console.role_constants import MEMBER_MANAGE_ROLES
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     can_user_access_personal_agent_chat,
@@ -74,6 +75,21 @@ def user_can_manage_agent(user, agent: PersistentAgent) -> bool:
         ).exists()
     return False
 
+
+def user_can_manage_agent_settings(user, agent: PersistentAgent) -> bool:
+    if user.is_staff:
+        return True
+    if agent.user_id == user.id:
+        return not _is_blocked_personal_owner(user, agent)
+    if agent.organization_id:
+        return OrganizationMembership.objects.filter(
+            user=user,
+            org_id=agent.organization_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+            role__in=MEMBER_MANAGE_ROLES,
+        ).exists()
+    return False
+
 def user_is_collaborator(user, agent: PersistentAgent) -> bool:
     return AgentCollaborator.objects.filter(agent=agent, user=user).exists()
 
@@ -139,5 +155,42 @@ def resolve_agent_for_request(
         agent_id,
         context_override=context_override,
         allow_shared=allow_shared,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+    )
+
+
+def resolve_manageable_agent(
+    user,
+    session,
+    agent_id: str,
+    context_override: dict | None = None,
+    *,
+    allow_delinquent_personal_chat: bool = False,
+) -> PersistentAgent:
+    agent = resolve_agent(
+        user,
+        session,
+        agent_id,
+        context_override=context_override,
+        allow_shared=False,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+    )
+    if not user_can_manage_agent_settings(user, agent):
+        raise PermissionDenied("Not permitted to manage this agent.")
+    return agent
+
+
+def resolve_manageable_agent_for_request(
+    request,
+    agent_id: str,
+    *,
+    allow_delinquent_personal_chat: bool = False,
+) -> PersistentAgent:
+    context_override = get_context_override(request)
+    return resolve_manageable_agent(
+        request.user,
+        request.session,
+        agent_id,
+        context_override=context_override,
         allow_delinquent_personal_chat=allow_delinquent_personal_chat,
     )

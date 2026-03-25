@@ -331,6 +331,20 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(files_response.context["current_context"]["type"], "organization")
         self.assertEqual(files_response.context["current_context"]["id"], str(self.org.id))
 
+        secrets_response = self.client.get(
+            reverse("agent_secrets", kwargs={"pk": self.org_agent.id}),
+        )
+        self.assertEqual(secrets_response.status_code, 200)
+        self.assertEqual(secrets_response.context["current_context"]["type"], "organization")
+        self.assertEqual(secrets_response.context["current_context"]["id"], str(self.org.id))
+
+        email_response = self.client.get(
+            reverse("agent_email_settings", kwargs={"pk": self.org_agent.id}),
+        )
+        self.assertEqual(email_response.status_code, 200)
+        self.assertEqual(email_response.context["current_context"]["type"], "organization")
+        self.assertEqual(email_response.context["current_context"]["id"], str(self.org.id))
+
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
@@ -356,6 +370,11 @@ class ConsoleContextTests(TestCase):
                     reverse("console_agent_timeline", kwargs={"agent_id": self.org_agent.id}),
                 )
                 self.assertEqual(timeline_response.status_code, 200)
+
+                email_settings_response = self.client.get(
+                    reverse("console_agent_email_settings", kwargs={"agent_id": self.org_agent.id}),
+                )
+                self.assertEqual(email_settings_response.status_code, 200)
 
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")

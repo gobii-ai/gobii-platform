@@ -94,7 +94,7 @@ from console.daily_credit import (
     serialize_daily_credit_payload,
 )
 from console.home_metrics import get_console_home_metrics
-from console.role_constants import BILLING_MANAGE_ROLES
+from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
 from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
 from api.models import (
     ApiKey,
@@ -125,7 +125,7 @@ from api.models import (
     AgentCollaboratorInvite,
     get_agent_contact_counts,
 )
-from console.mixins import ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
+from console.mixins import AgentOwnerContextOverrideMixin, ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from observability import traced
 from pages.mixins import PhoneNumberMixin
 from pages.account_info_cache import invalidate_account_info_cache
@@ -175,7 +175,12 @@ from util.urls import (
     build_immersive_chat_url,
     load_daily_limit_action_payload,
 )
-from console.agent_chat.access import resolve_agent_for_request, user_can_manage_agent, user_is_collaborator
+from console.agent_chat.access import (
+    resolve_agent_for_request,
+    resolve_manageable_agent_for_request,
+    user_can_manage_agent,
+    user_is_collaborator,
+)
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED, get_plan_config
@@ -651,12 +656,6 @@ def _is_cta_no_charge_during_trial_enabled(request: HttpRequest | None) -> bool:
 # verified phone number on their account. Toggle this to force showing the
 # phone screen even when a verified number exists.
 SKIP_VERIFIED_SMS_SCREEN = True
-
-MEMBER_MANAGE_ROLES = {
-    OrganizationMembership.OrgRole.OWNER,
-    OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-}
 
 OWNER_EQUIVALENT_ROLES = (
     OrganizationMembership.OrgRole.OWNER,
@@ -3270,25 +3269,6 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
             )
 
         return redirect(redirect_url)
-
-class AgentOwnerContextOverrideMixin:
-    agent_context_pk_kwarg = "pk"
-
-    @cached_property
-    def _agent_owner_context_override(self):
-        request = getattr(self, "request", None)
-        user = getattr(request, "user", None)
-        if request is None or user is None or not getattr(user, "is_authenticated", False):
-            return None
-        agent_id = self.kwargs.get(self.agent_context_pk_kwarg)
-        if not agent_id:
-            return None
-        override, _ = resolve_context_override_for_agent(user, str(agent_id))
-        return override
-
-    def get_console_context_override(self):
-        return self._agent_owner_context_override
-
 
 class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
     """Configuration page for a single agent.
@@ -5922,6 +5902,25 @@ class SharedAgentAccessMixin(AgentOwnerContextOverrideMixin):
         return bool(getattr(self, "_can_manage_collaborators", False))
 
 
+class ManagedAgentAccessMixin(AgentOwnerContextOverrideMixin):
+    allow_delinquent_personal_chat = False
+
+    def get_object(self):
+        cached = getattr(self, "_agent_cache", None)
+        if cached is not None:
+            return cached
+        agent_id = self.kwargs.get(getattr(self, "pk_url_kwarg", "pk"))
+        if not agent_id:
+            raise Http404
+        agent = resolve_manageable_agent_for_request(
+            self.request,
+            str(agent_id),
+            allow_delinquent_personal_chat=self.allow_delinquent_personal_chat,
+        )
+        self._agent_cache = agent
+        return agent
+
+
 class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     model = PersistentAgent
     context_object_name = "agent"
@@ -6184,23 +6183,13 @@ class AgentDeleteView(LoginRequiredMixin, View):
         except PermissionDenied:
             raise
 
-class AgentSecretsView(LoginRequiredMixin, TemplateView):
+class AgentSecretsView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
     """Secrets management page for a single agent."""
     template_name = "console/agent_secrets.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets View - get_object")
     def get_object(self):
-        """Get the agent or raise 404."""
-        cached = getattr(self, "_agent_cache", None)
-        if cached is not None:
-            return cached
-        agent = get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
-        self._agent_cache = agent
-        return agent
+        return super().get_object()
 
     def get(self, request, *args, **kwargs):
         agent = self.get_object()
@@ -6269,17 +6258,12 @@ class AgentSecretsView(LoginRequiredMixin, TemplateView):
         return context
 
 
-class AgentSecretsAddView(LoginRequiredMixin, View):
+class AgentSecretsAddView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
     """Add a new secret to an agent."""
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Add")
     def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        return super().get_object()
 
     def post(self, request, *args, **kwargs):
         """Handle adding a new secret."""
@@ -6347,18 +6331,13 @@ class AgentSecretsAddView(LoginRequiredMixin, View):
         return redirect('agent_secrets', pk=agent.pk)
 
 
-class AgentSecretsEditView(LoginRequiredMixin, TemplateView):
+class AgentSecretsEditView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
     """Edit view for existing secret value (GET render + POST update)."""
     template_name = "console/agent_secret_edit.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Edit - get_object")
     def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        return super().get_object()
 
     def get(self, request, *args, **kwargs):
         """Load secret by ID for edit form."""
@@ -6470,17 +6449,12 @@ class AgentSecretsEditView(LoginRequiredMixin, TemplateView):
         return self.render_to_response(context)
 
 
-class AgentSecretsDeleteView(LoginRequiredMixin, View):
+class AgentSecretsDeleteView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
     """Delete a secret from an agent."""
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Delete")
     def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        return super().get_object()
 
     def post(self, request, *args, **kwargs):
         """Handle deleting a secret by secret ID."""
@@ -6537,7 +6511,7 @@ class AgentSecretsDeleteView(LoginRequiredMixin, View):
         return redirect('agent_secrets', pk=agent.pk)
 
 
-class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
+class AgentEmailSettingsView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
     """Simple console page to edit an agent-owned email account settings."""
     template_name = "console/agent_email_settings.html"
 
@@ -6622,11 +6596,7 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
             return False, str(exc)
 
     def get_agent(self):
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user,
-        )
+        return self.get_object()
 
     def _get_email_endpoint(self, agent: PersistentAgent):
         ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, owner_agent=agent, is_primary=True).first()
@@ -6973,18 +6943,13 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
         return redirect('agent_email_settings', pk=agent.pk)
 
 
-class AgentSecretsAddFormView(LoginRequiredMixin, TemplateView):
+class AgentSecretsAddFormView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
     """Form view for adding a new secret to an agent."""
     template_name = "console/agent_secret_add.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Add Form View - get_object")
     def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        return super().get_object()
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Add Form View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -7112,18 +7077,13 @@ def grant_credits(request):
         return JsonResponse({'success': False, 'error': f"Failed to grant credits: {str(e)}"}, status=500)
 
 
-class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
+class AgentSecretsRequestView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
     """View for displaying requested secrets that need values."""
     template_name = "console/agent_secrets_request.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request View - get_object")
     def get_object(self):
-        """Get the agent or raise 404."""
-        return get_object_or_404(
-            PersistentAgent,
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        return super().get_object()
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request View - get_context_data")
     def get_context_data(self, **kwargs):
@@ -7244,14 +7204,10 @@ class AgentSecretsRequestView(LoginRequiredMixin, TemplateView):
         return self.render_to_response(context)
 
 
-class AgentSecretRerequestView(LoginRequiredMixin, View):
+class AgentSecretRerequestView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
     """Mark a fulfilled secret as requested again and clear its stored value."""
     def post(self, request, *args, **kwargs):
-        agent = get_object_or_404(
-            PersistentAgent.objects.non_eval().alive(),
-            pk=self.kwargs['pk'],
-            user=request.user,
-        )
+        agent = self.get_object()
         _enforce_personal_agent_access_or_raise(request.user, agent)
         secret_id = self.kwargs.get('secret_id')
         from api.models import PersistentAgentSecret
@@ -7270,18 +7226,13 @@ class AgentSecretRerequestView(LoginRequiredMixin, View):
         return redirect('agent_secrets', pk=agent.pk)
 
 
-class AgentSecretsRequestThanksView(LoginRequiredMixin, TemplateView):
+class AgentSecretsRequestThanksView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
     """Thank you page after providing secret values."""
     template_name = "console/agent_secrets_request_thanks.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request Thanks View - get_object")
     def get_object(self):
-        """Get the agent or raise 404."""
-        agent = get_object_or_404(
-            PersistentAgent.objects.non_eval().alive(),
-            pk=self.kwargs['pk'],
-            user=self.request.user
-        )
+        agent = super().get_object()
         _enforce_personal_agent_access_or_raise(self.request.user, agent)
         return agent
 
