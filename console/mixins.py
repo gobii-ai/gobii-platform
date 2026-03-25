@@ -6,7 +6,7 @@ from django.http import Http404
 
 from api.models import OrganizationMembership
 
-from .context_helpers import build_console_context
+from .context_helpers import build_console_context, resolve_console_context
 from config import settings
 from util.integrations import stripe_status
 from util.subscription_helper import reconcile_user_plan_from_stripe
@@ -17,6 +17,19 @@ logger = logging.getLogger(__name__)
 
 class ConsoleContextMixin:
     """Mixin to add console-specific context data including organization memberships."""
+
+    def get_console_context_override(self):
+        return None
+
+    def resolve_console_context_info(self):
+        override = self.get_console_context_override()
+        if override:
+            return resolve_console_context(
+                self.request.user,
+                self.request.session,
+                override=override,
+            )
+        return build_console_context(self.request)
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -28,7 +41,7 @@ class ConsoleContextMixin:
                 status=OrganizationMembership.OrgStatus.ACTIVE
             ).select_related('org').order_by('org__name')
 
-            resolved = build_console_context(self.request)
+            resolved = self.resolve_console_context_info()
             context['current_context'] = {
                 'type': resolved.current_context.type,
                 'id': resolved.current_context.id,

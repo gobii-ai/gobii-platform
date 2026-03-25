@@ -102,23 +102,27 @@ def resolve_agent(
             raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
         return agent
     except PersistentAgent.DoesNotExist as exc:  # pragma: no cover - defensive guard
-        if allow_shared:
-            agent = shared_agent_queryset_for(user).filter(pk=agent_id).first()
-            if agent:
-                return agent
-        if (
-            not _can_access_personal_agent(
+        agent = (
+            PersistentAgent.objects
+            .non_eval()
+            .alive()
+            .select_related("browser_use_agent")
+            .filter(pk=agent_id)
+            .first()
+        )
+        if agent:
+            if _is_blocked_personal_owner(
                 user,
+                agent,
                 allow_delinquent_personal_chat=allow_delinquent_personal_chat,
-            )
-            and PersistentAgent.objects.non_eval().alive().filter(
-                pk=agent_id,
-                user=user,
-                organization__isnull=True,
-            ).exists()
-        ):
-            raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE) from exc
-        raise PermissionDenied("Agent not found in current context") from exc
+            ):
+                raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE) from exc
+            if user_can_manage_agent(user, agent):
+                return agent
+            if allow_shared and user_is_collaborator(user, agent):
+                return agent
+            raise PermissionDenied("Not permitted to access this agent.") from exc
+        raise PermissionDenied("Agent not found.") from exc
 
 
 def resolve_agent_for_request(

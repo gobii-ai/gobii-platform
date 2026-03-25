@@ -131,7 +131,7 @@ from pages.mixins import PhoneNumberMixin
 from pages.account_info_cache import invalidate_account_info_cache
 
 from .agent_context import resolve_context_override_for_agent
-from .context_helpers import build_console_context, resolve_console_context
+from .context_helpers import build_console_context
 from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
 from billing.addons import AddonEntitlementService
@@ -3271,7 +3271,26 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
 
         return redirect(redirect_url)
 
-class AgentDetailView(ConsoleViewMixin, DetailView):
+class AgentOwnerContextOverrideMixin:
+    agent_context_pk_kwarg = "pk"
+
+    @cached_property
+    def _agent_owner_context_override(self):
+        request = getattr(self, "request", None)
+        user = getattr(request, "user", None)
+        if request is None or user is None or not getattr(user, "is_authenticated", False):
+            return None
+        agent_id = self.kwargs.get(self.agent_context_pk_kwarg)
+        if not agent_id:
+            return None
+        override, _ = resolve_context_override_for_agent(user, str(agent_id))
+        return override
+
+    def get_console_context_override(self):
+        return self._agent_owner_context_override
+
+
+class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
     """Configuration page for a single agent.
 
     Uses ConsoleViewMixin to respect the current console context. When in
@@ -3294,22 +3313,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         """
         qs = super().get_queryset().alive().select_related('user__billing')
 
-        context_override = None
-        agent_id = self.kwargs.get(self.pk_url_kwarg)
-        if agent_id:
-            context_override, _ = resolve_context_override_for_agent(
-                self.request.user,
-                str(agent_id),
-            )
-
-        if context_override is not None:
-            context = resolve_console_context(
-                self.request.user,
-                self.request.session,
-                override=context_override,
-            ).current_context
-        else:
-            context = build_console_context(self.request).current_context
+        context = self.resolve_console_context_info().current_context
 
         if context.type == 'organization':
             return qs.filter(organization_id=context.id)
@@ -5874,7 +5878,7 @@ class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     template_name = "console/agent_email_oauth_callback.html"
 
 
-class SharedAgentAccessMixin:
+class SharedAgentAccessMixin(AgentOwnerContextOverrideMixin):
     allow_delinquent_personal_chat = False
 
     def get_object(self, queryset=None):
@@ -6093,24 +6097,6 @@ class AgentFilesView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     template_name = "console/agent_files.html"
     context_object_name = "agent"
     pk_url_kwarg = "pk"
-
-    def get_queryset(self):
-        qs = super().get_queryset().alive().select_related('organization')
-
-        context_type = self.request.session.get('context_type', 'personal')
-        if context_type == 'organization':
-            org_id = self.request.session.get('context_id')
-            if not OrganizationMembership.objects.filter(
-                user=self.request.user,
-                org_id=org_id,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            ).exists():
-                return qs.none()
-            return qs.filter(organization_id=org_id)
-
-        if not can_user_use_personal_agents_and_api(self.request.user):
-            return qs.none()
-        return qs.filter(user=self.request.user, organization__isnull=True)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)

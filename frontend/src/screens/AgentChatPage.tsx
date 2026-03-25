@@ -1803,7 +1803,8 @@ export function AgentChatPage({
   ])
 
   const rosterContextMismatch = Boolean(
-    effectiveContext
+    !routeAgentId
+      && effectiveContext
       && rosterQuery.data?.context
       && !sameConsoleContext(rosterQuery.data.context, effectiveContext),
   )

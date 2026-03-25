@@ -1,8 +1,10 @@
 import uuid
+import tempfile
 from unittest.mock import patch
 
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 
 from waffle.models import Flag
@@ -286,6 +288,11 @@ class ConsoleContextTests(TestCase):
         # Direct navigation to another context's agent should still render.
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["current_context"]["type"], "organization")
+        self.assertEqual(resp.context["current_context"]["id"], str(self.org.id))
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(self.owner.id))
 
         # Explicit context override query should also render and not mutate session.
         resp_with_override = self.client.get(
@@ -296,6 +303,8 @@ class ConsoleContextTests(TestCase):
             },
         )
         self.assertEqual(resp_with_override.status_code, 200)
+        self.assertEqual(resp_with_override.context["current_context"]["type"], "organization")
+        self.assertEqual(resp_with_override.context["current_context"]["id"], str(self.org.id))
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
@@ -304,6 +313,53 @@ class ConsoleContextTests(TestCase):
         self._set_org_context()
         resp2 = self.client.get(url)
         self.assertEqual(resp2.status_code, 200)
+
+    def test_agent_targeted_views_use_agent_owner_context_without_persisting_session(self):
+        self._set_personal_context()
+
+        chat_response = self.client.get(
+            reverse("agent_chat_shell", kwargs={"pk": self.org_agent.id}),
+        )
+        self.assertEqual(chat_response.status_code, 200)
+        self.assertEqual(chat_response.context["current_context"]["type"], "organization")
+        self.assertEqual(chat_response.context["current_context"]["id"], str(self.org.id))
+
+        files_response = self.client.get(
+            reverse("agent_files", kwargs={"pk": self.org_agent.id}),
+        )
+        self.assertEqual(files_response.status_code, 200)
+        self.assertEqual(files_response.context["current_context"]["type"], "organization")
+        self.assertEqual(files_response.context["current_context"]["id"], str(self.org.id))
+
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(self.owner.id))
+
+    def test_agent_targeted_apis_allow_authorized_user_outside_current_context(self):
+        self._set_personal_context()
+
+        with tempfile.TemporaryDirectory() as tmp_media:
+            with override_settings(MEDIA_ROOT=tmp_media, MEDIA_URL="/media/"):
+                self.org_agent.avatar.save("avatar.png", ContentFile(b"avatar-bytes"), save=True)
+
+                avatar_response = self.client.get(
+                    reverse("agent_avatar", kwargs={"pk": self.org_agent.id}),
+                )
+                self.assertEqual(avatar_response.status_code, 200)
+
+                files_response = self.client.get(
+                    reverse("console_agent_fs_list", kwargs={"agent_id": self.org_agent.id}),
+                )
+                self.assertEqual(files_response.status_code, 200)
+
+                timeline_response = self.client.get(
+                    reverse("console_agent_timeline", kwargs={"agent_id": self.org_agent.id}),
+                )
+                self.assertEqual(timeline_response.status_code, 200)
+
+        session = self.client.session
+        self.assertEqual(session.get("context_type"), "personal")
+        self.assertEqual(session.get("context_id"), str(self.owner.id))
 
     def test_org_detail_sets_console_context(self):
         # Visiting org detail should set session context to organization
