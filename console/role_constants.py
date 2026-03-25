@@ -13,3 +13,8 @@ BILLING_MANAGE_ROLES = {
 if settings.SOLUTIONS_PARTNER_BILLING_ACCESS:
     BILLING_MANAGE_ROLES.add(OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
 
+MEMBER_MANAGE_ROLES = {
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.ADMIN,
+    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+}

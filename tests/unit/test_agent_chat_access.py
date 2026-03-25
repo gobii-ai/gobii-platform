@@ -69,6 +69,13 @@ class AgentChatAccessTests(TestCase):
         session["context_name"] = self.user.get_full_name() or self.user.username
         session.save()
 
+    def _set_org_context(self):
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session.save()
+
     def _fake_subscription(
         self,
         status: str,
@@ -116,6 +123,28 @@ class AgentChatAccessTests(TestCase):
         )
         self.assertEqual(agent.id, self.org_agent.id)
 
+    def test_resolve_agent_allows_org_agent_outside_current_personal_context(self):
+        self._set_personal_context()
+
+        agent = resolve_agent(
+            self.user,
+            self.client.session,
+            str(self.org_agent.id),
+        )
+
+        self.assertEqual(agent.id, self.org_agent.id)
+
+    def test_resolve_agent_allows_personal_agent_outside_current_org_context(self):
+        self._set_org_context()
+
+        agent = resolve_agent(
+            self.user,
+            self.client.session,
+            str(self.personal_agent.id),
+        )
+
+        self.assertEqual(agent.id, self.personal_agent.id)
+
     def test_resolve_agent_denies_org_agent_without_membership(self):
         User = get_user_model()
         stranger = User.objects.create_user(
@@ -142,6 +171,25 @@ class AgentChatAccessTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("util.trial_enforcement.get_active_subscription", return_value=None)
+    def test_resolve_agent_allows_personal_owner_with_past_due_subscription_outside_current_context(
+        self,
+        _mock_get_active_subscription,
+    ):
+        self._set_org_context()
+        customer = self._fake_customer_with_subscription_status("past_due")
+
+        with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
+            agent = resolve_agent(
+                self.user,
+                self.client.session,
+                str(self.personal_agent.id),
+                allow_delinquent_personal_chat=True,
+            )
+
+        self.assertEqual(agent.id, self.personal_agent.id)
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     @patch("util.trial_enforcement.get_active_subscription", return_value=None)
@@ -236,6 +284,30 @@ class AgentChatAccessTests(TestCase):
             allow_shared=True,
         )
         self.assertEqual(agent.id, self.personal_agent.id)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_resolve_agent_denies_shared_personal_agent_without_allow_shared(self):
+        User = get_user_model()
+        collaborator = User.objects.create_user(
+            username="collab-denied@example.com",
+            email="collab-denied@example.com",
+            password="pw",
+        )
+        with patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=0):
+            AgentCollaborator.objects.create(
+                agent=self.personal_agent,
+                user=collaborator,
+                invited_by=self.user,
+            )
+
+        with self.assertRaises(PermissionDenied) as raised:
+            resolve_agent(
+                collaborator,
+                {},
+                str(self.personal_agent.id),
+            )
+
+        self.assertEqual(str(raised.exception), "Not permitted to access this agent.")
 
     def test_roster_uses_org_agents_for_active_org_agent(self):
         expected_last_interaction = timezone.now().replace(microsecond=0)

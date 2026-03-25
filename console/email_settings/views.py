@@ -8,7 +8,6 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.conf import settings
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
-from django.shortcuts import get_object_or_404
 from django.urls import reverse
 from django.utils import timezone
 from django.views import View
@@ -32,6 +31,7 @@ from console.api_views import (
     _coerce_bool,
     _parse_json_body,
 )
+from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.forms import AgentEmailAccountConsoleForm
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -60,10 +60,9 @@ AGENT_EMAIL_ACCOUNT_COPY_FIELDS = tuple(
 
 
 def _resolve_owned_agent_for_email_settings(request: HttpRequest, agent_id: str) -> PersistentAgent:
-    return get_object_or_404(
-        PersistentAgent.objects.non_eval().alive(),
-        pk=agent_id,
-        user=request.user,
+    return resolve_manageable_agent_for_request(
+        request,
+        agent_id,
     )
 
 
