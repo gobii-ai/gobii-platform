@@ -1,9 +1,9 @@
 import { MarkdownViewer } from '../../../common/MarkdownViewer'
-import { StructuredDataTable } from '../../../common/StructuredDataTable'
 import { looksLikeHtml, sanitizeHtml } from '../../../../util/sanitize'
 import type { ToolDetailProps } from '../../tooling/types'
+import { isRecord } from '../../../../util/objectUtils'
 import { createNormalizeContext, normalizeStructuredValue, tryParseJson } from '../normalize'
-import { KeyValueList, Section } from '../shared'
+import { JsonBlock, KeyValueList, Section } from '../shared'
 import { isNonEmptyString } from '../utils'
 
 function useToolData(entry: ToolDetailProps['entry']) {
@@ -68,7 +68,7 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
       />
       {showParameters ? (
         <Section title="Parameters">
-          <StructuredDataTable value={normalizedParameters ?? parameters} />
+          <JsonBlock value={(normalizedParameters ?? parameters) as Record<string, unknown> | unknown[]} />
         </Section>
       ) : null}
       {showStringResult && stringResult ? (
@@ -82,7 +82,9 @@ export function GenericToolDetail({ entry }: ToolDetailProps) {
       ) : null}
       {hasStructuredResult ? (
         <Section title="Result">
-          <StructuredDataTable value={normalizedStructuredResult ?? structuredResult} />
+          {Array.isArray(normalizedStructuredResult ?? structuredResult) || isRecord(normalizedStructuredResult ?? structuredResult) ? (
+            <JsonBlock value={(normalizedStructuredResult ?? structuredResult) as Record<string, unknown> | unknown[]} />
+          ) : null}
         </Section>
       ) : null}
     </div>
@@ -132,7 +134,7 @@ export function McpToolDetail({ entry }: ToolDetailProps) {
       <KeyValueList items={infoItems} />
       {showParameters ? (
         <Section title="Parameters">
-          <StructuredDataTable value={normalizedParameters ?? parameters} />
+          <JsonBlock value={(normalizedParameters ?? parameters) as Record<string, unknown> | unknown[]} />
         </Section>
       ) : null}
       {showStringResult && stringResult ? (
@@ -146,7 +148,9 @@ export function McpToolDetail({ entry }: ToolDetailProps) {
       ) : null}
       {hasStructuredResult ? (
         <Section title="Result">
-          <StructuredDataTable value={normalizedStructuredResult ?? structuredResult} />
+          {Array.isArray(normalizedStructuredResult ?? structuredResult) || isRecord(normalizedStructuredResult ?? structuredResult) ? (
+            <JsonBlock value={(normalizedStructuredResult ?? structuredResult) as Record<string, unknown> | unknown[]} />
+          ) : null}
         </Section>
       ) : null}
     </div>

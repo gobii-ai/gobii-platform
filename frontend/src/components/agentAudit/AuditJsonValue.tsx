@@ -1,7 +1,7 @@
-import ReactJsonView from '@microlink/react-json-view'
 import { useMemo } from 'react'
 
 import { createNormalizeContext, normalizeStructuredValue, tryParseJson } from '../agentChat/toolDetails/normalize'
+import { JsonBlock } from '../agentChat/toolDetails/shared'
 import { isRecord } from '../../util/objectUtils'
 import { renderHtmlOrText } from './eventPrimitives'
 
@@ -37,21 +37,7 @@ export function AuditJsonValue({ value }: AuditJsonValueProps) {
   }
 
   if (canUseJsonViewer(normalized)) {
-    return (
-      <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white/90 p-3">
-        <ReactJsonView
-          src={normalized}
-          name={false}
-          collapsed={1}
-          displayDataTypes={false}
-          displayObjectSize={false}
-          enableClipboard={false}
-          iconStyle="triangle"
-          sortKeys
-          style={{ backgroundColor: 'transparent', fontSize: '0.8125rem', lineHeight: 1.5 }}
-        />
-      </div>
-    )
+    return <JsonBlock value={normalized} />
   }
 
   if (typeof normalized === 'string') {

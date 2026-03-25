@@ -128,6 +128,25 @@ function deriveLinkedInCaption(
   return fallback ?? null
 }
 
+function firstMeaningfulLine(value: string | null | undefined): string | null {
+  if (!value) {
+    return null
+  }
+  const line = value
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .find(Boolean)
+  return line || null
+}
+
+function summarizeCode(value: string | null | undefined, fallback: string, max = 56): string {
+  const firstLine = firstMeaningfulLine(value)
+  if (firstLine) {
+    return truncate(firstLine, max)
+  }
+  return fallback
+}
+
 
 function deriveFileExport(
   entry: ToolCallEntry,
@@ -136,13 +155,12 @@ function deriveFileExport(
 ): ToolDescriptorTransform {
   const resultObject = parseResultObject(entry.result)
   const status = coerceString(resultObject?.['status'])
-  const message = coerceString(resultObject?.['message'])
   const paramPath = coerceString(parameters?.['file_path']) || coerceString(parameters?.['path'])
   const filename = coerceString(resultObject?.['filename']) || paramPath || coerceString(parameters?.['filename'])
   const path = coerceString(resultObject?.['path']) || paramPath
   const isError = status?.toLowerCase() === 'error'
 
-  const caption = message ? truncate(message, 56) : filename ? truncate(filename, 56) : path ? truncate(path, 56) : null
+  const caption = path ? truncate(path, 56) : filename ? truncate(filename, 56) : null
   const summaryParts: string[] = []
   if (path) {
     summaryParts.push(path)
@@ -159,6 +177,97 @@ function deriveFileExport(
 }
 
 export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
+  {
+    name: 'run_command',
+    label: 'Run command',
+    icon: Workflow,
+    iconBgClass: 'bg-slate-100',
+    iconColorClass: 'text-slate-700',
+    detailKind: 'runCommand',
+    derive(entry, parameters) {
+      const command = coerceString(parameters?.command)
+      const cwd = coerceString(parameters?.cwd)
+      const result = parseResultObject(entry.result)
+      const status = coerceString(result?.['status'])
+      const exitCode = result?.['exit_code']
+      const exitLabel =
+        typeof exitCode === 'number' || typeof exitCode === 'string'
+          ? `exit ${String(exitCode)}`
+          : null
+      const summary = [cwd ? `cwd ${cwd}` : null, exitLabel].filter(Boolean).join(' • ') || null
+
+      return {
+        caption: summarizeCode(command, 'Run command'),
+        summary: summary ?? (status && status !== 'ok' ? status : entry.summary ?? null),
+      }
+    },
+  },
+  {
+    name: 'python_exec',
+    label: 'Run Python',
+    icon: BrainCog,
+    iconBgClass: 'bg-amber-100',
+    iconColorClass: 'text-amber-700',
+    detailKind: 'pythonExec',
+    derive(entry, parameters) {
+      const code = coerceString(parameters?.code)
+      const timeout = coerceString(parameters?.timeout_seconds)
+      const result = parseResultObject(entry.result)
+      const exitCode = result?.['exit_code']
+      const summaryParts = [
+        timeout ? `${timeout}s timeout` : null,
+        typeof exitCode === 'number' || typeof exitCode === 'string' ? `exit ${String(exitCode)}` : null,
+      ].filter(Boolean)
+
+      return {
+        caption: summarizeCode(code, 'Run Python'),
+        summary: summaryParts.length ? summaryParts.join(' • ') : entry.summary ?? null,
+      }
+    },
+  },
+  {
+    name: 'file_str_replace',
+    label: 'Replace in file',
+    icon: FilePen,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'fileStringReplace',
+    derive(entry, parameters) {
+      const path = coerceString(parameters?.path)
+      const result = parseResultObject(entry.result)
+      const replacements = result?.['replacements']
+      const replacementLabel =
+        typeof replacements === 'number' || typeof replacements === 'string'
+          ? `${String(replacements)} replacement${String(replacements) === '1' ? '' : 's'}`
+          : null
+
+      return {
+        caption: path ? truncate(path, 56) : 'Replace in file',
+        summary: replacementLabel ?? coerceString(result?.['message']) ?? entry.summary ?? null,
+      }
+    },
+  },
+  {
+    name: 'create_custom_tool',
+    label: 'Create tool',
+    icon: BotMessageSquare,
+    iconBgClass: 'bg-cyan-100',
+    iconColorClass: 'text-cyan-700',
+    detailKind: 'createCustomTool',
+    derive(entry, parameters) {
+      const result = parseResultObject(entry.result)
+      const toolName = coerceString(result?.['tool_name'])
+      const name = coerceString(result?.['name']) || coerceString(parameters?.name)
+      const sourcePath = coerceString(result?.['source_path']) || coerceString(parameters?.source_path)
+      const message = coerceString(result?.['message'])
+      const caption = toolName || name || sourcePath
+
+      return {
+        caption: caption ? truncate(caption, 56) : 'Create tool',
+        summary: message ?? entry.summary ?? null,
+      }
+    },
+  },
   {
     name: 'update_charter',
     label: 'Assignment updated',
@@ -1272,6 +1381,9 @@ export function toFriendlyToolName(rawName: string): string {
   }
 
   let slug = rawName
+  if (slug.startsWith('custom_')) {
+    slug = slug.slice('custom_'.length)
+  }
   if (slug.startsWith('mcp_')) {
     slug = slug.slice(4)
   }
@@ -1298,6 +1410,14 @@ export type FriendlyToolInfo = {
 }
 
 export function getFriendlyToolInfo(rawName: string): FriendlyToolInfo {
+  if (rawName.toLowerCase().startsWith('custom_')) {
+    return {
+      label: toFriendlyToolName(rawName),
+      icon: BotMessageSquare,
+      iconBgClass: 'bg-cyan-100',
+      iconColorClass: 'text-cyan-700',
+    }
+  }
   const config = TOOL_METADATA_MAP.get(rawName.toLowerCase())
   if (config && config !== DEFAULT_TOOL_METADATA) {
     return {

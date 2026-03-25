@@ -1,5 +1,7 @@
+import { isRecord } from '../../../../util/objectUtils'
 import type { ToolDetailProps } from '../../tooling/types'
-import { KeyValueList, Section } from '../shared'
+import { JsonBlock, KeyValueList, Section } from '../shared'
+import { tryParseJson } from '../normalize'
 import { stringify } from '../utils'
 
 export function ApiRequestDetail({ entry }: ToolDetailProps) {
@@ -9,6 +11,13 @@ export function ApiRequestDetail({ entry }: ToolDetailProps) {
   const headers = params.headers
   const body = params.body ?? params.payload
   const response = entry.result
+  const parsedResponse = typeof response === 'string' ? tryParseJson(response) : null
+  const structuredResponse =
+    Array.isArray(parsedResponse) || isRecord(parsedResponse)
+      ? parsedResponse
+      : Array.isArray(response) || isRecord(response)
+        ? response
+        : null
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList
@@ -29,7 +38,11 @@ export function ApiRequestDetail({ entry }: ToolDetailProps) {
       ) : null}
       {response ? (
         <Section title="Response">
-          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">{stringify(response)}</pre>
+          {structuredResponse ? (
+            <JsonBlock value={structuredResponse} />
+          ) : (
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">{stringify(response)}</pre>
+          )}
         </Section>
       ) : null}
     </div>
