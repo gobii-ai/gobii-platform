@@ -3,6 +3,29 @@ import { parseResultObject } from '../../../../util/objectUtils'
 import { CodeBlock, KeyValueList, Section } from '../shared'
 import { isNonEmptyString, stringify } from '../utils'
 
+const EXTENSION_LANGUAGE_MAP: Record<string, string> = {
+  py: 'python',
+  json: 'json',
+  html: 'html',
+  htm: 'html',
+  md: 'markdown',
+  markdown: 'markdown',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  jsx: 'jsx',
+  css: 'css',
+  sh: 'bash',
+  bash: 'bash',
+  sql: 'sql',
+  csv: 'text',
+}
+
 function detectLanguageFromFile({
   filePath,
   mimeType,
@@ -16,19 +39,9 @@ function detectLanguageFromFile({
     return match ? match[1].toLowerCase() : null
   })()
 
-  if (extension === 'py') return 'python'
-  if (extension === 'json') return 'json'
-  if (extension === 'html' || extension === 'htm') return 'html'
-  if (extension === 'md' || extension === 'markdown') return 'markdown'
-  if (extension === 'xml') return 'xml'
-  if (extension === 'yaml' || extension === 'yml') return 'yaml'
-  if (extension === 'js' || extension === 'mjs' || extension === 'cjs') return 'javascript'
-  if (extension === 'ts' || extension === 'tsx') return 'typescript'
-  if (extension === 'jsx') return 'jsx'
-  if (extension === 'css') return 'css'
-  if (extension === 'sh' || extension === 'bash') return 'bash'
-  if (extension === 'sql') return 'sql'
-  if (extension === 'csv') return 'text'
+  if (extension && EXTENSION_LANGUAGE_MAP[extension]) {
+    return EXTENSION_LANGUAGE_MAP[extension]
+  }
 
   if (mimeType?.includes('python')) return 'python'
   if (mimeType?.includes('json')) return 'json'
