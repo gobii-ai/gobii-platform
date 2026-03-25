@@ -36,6 +36,7 @@ from api.services import mcp_servers as mcp_server_service
 from api.services.dedicated_proxy_service import DedicatedProxyService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.prompt_settings import get_prompt_settings
+from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time
 
 from ...models import (
@@ -2095,6 +2096,15 @@ def build_prompt_context(
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
+    sandbox_block = _get_sandbox_prompt_summary(agent)
+    if sandbox_block:
+        important_group.section_text(
+            "sandbox",
+            sandbox_block,
+            weight=2,
+            non_shrinkable=True,
+        )
+
     # Dynamic formatting guidance based on current medium context
     formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
 
@@ -2964,6 +2974,20 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
         "\n".join(lines),
         weight=2,
         shrinker="hmt",
+    )
+
+
+def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
+    if not sandbox_compute_enabled_for_agent(agent):
+        return ""
+
+    return (
+        "Sandbox access is enabled. `python_exec`, `run_command`, and sandboxed custom tools run inside your sandbox workspace. "
+        "Filespace paths like `/reports/foo.txt` map to `/workspace/reports/foo.txt`; in tool arguments, prefer filespace paths and avoid writing `/workspace` explicitly. "
+        "Standard proxy env vars are already injected for sandbox execution: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, plus lowercase variants. "
+        "Global `env_var` secrets are available as environment variables inside sandbox execution contexts. "
+        "For outbound network work, prefer `http_request` or `ctx.call_tool('http_request', ...)` inside custom tools before raw sockets or hand-rolled proxy logic. "
+        "Prefer higher-level HTTP/HTTPS libraries and APIs when possible, and do not spend cycles re-proving basic sandbox connectivity unless you have a concrete failure."
     )
 
 
