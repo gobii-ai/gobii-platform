@@ -454,6 +454,9 @@ from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSo
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import (
+    CTA_CONTINUE_AGENT_BTN,
+    CTA_NO_CHARGE_DURING_TRIAL,
+    CTA_PICK_A_PLAN,
     CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
     CTA_START_FREE_TRIAL,
     ORGANIZATIONS,
@@ -628,6 +631,21 @@ def _is_cta_pricing_cancel_text_under_btn_enabled(request: HttpRequest | None) -
 def _is_cta_start_free_trial_enabled(request: HttpRequest | None) -> bool:
     """Default to disabled until the rollout is explicitly enabled."""
     return is_waffle_flag_active(CTA_START_FREE_TRIAL, request, default=False)
+
+
+def _is_cta_pick_a_plan_enabled(request: HttpRequest | None) -> bool:
+    """Default to disabled until the rollout is explicitly enabled."""
+    return is_waffle_flag_active(CTA_PICK_A_PLAN, request, default=False)
+
+
+def _is_cta_continue_agent_btn_enabled(request: HttpRequest | None) -> bool:
+    """Default to disabled until the rollout is explicitly enabled."""
+    return is_waffle_flag_active(CTA_CONTINUE_AGENT_BTN, request, default=False)
+
+
+def _is_cta_no_charge_during_trial_enabled(request: HttpRequest | None) -> bool:
+    """Default to disabled until the rollout is explicitly enabled."""
+    return is_waffle_flag_active(CTA_NO_CHARGE_DURING_TRIAL, request, default=False)
 
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
@@ -2117,6 +2135,9 @@ def get_user_plan_api(request):
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
     cta_start_free_trial = _is_cta_start_free_trial_enabled(request)
     cta_pricing_cancel_text_under_btn = _is_cta_pricing_cancel_text_under_btn_enabled(request)
+    cta_pick_a_plan = _is_cta_pick_a_plan_enabled(request)
+    cta_continue_agent_btn = _is_cta_continue_agent_btn_enabled(request)
+    cta_no_charge_during_trial = _is_cta_no_charge_during_trial_enabled(request)
 
     try:
         plan = reconcile_user_plan_from_stripe(request.user)
@@ -2136,6 +2157,9 @@ def get_user_plan_api(request):
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
             'cta_start_free_trial': cta_start_free_trial,
+            'cta_pick_a_plan': cta_pick_a_plan,
+            'cta_continue_agent_btn': cta_continue_agent_btn,
+            'cta_no_charge_during_trial': cta_no_charge_during_trial,
         })
     except Exception as e:
         return JsonResponse({
@@ -2147,6 +2171,9 @@ def get_user_plan_api(request):
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'cta_start_free_trial': cta_start_free_trial,
             'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
+            'cta_pick_a_plan': cta_pick_a_plan,
+            'cta_continue_agent_btn': cta_continue_agent_btn,
+            'cta_no_charge_during_trial': cta_no_charge_during_trial,
             'error': str(e),
         })
 
@@ -5912,6 +5939,9 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
         context["cta_pricing_cancel_text_under_btn"] = _is_cta_pricing_cancel_text_under_btn_enabled(self.request)
         context["cta_start_free_trial"] = _is_cta_start_free_trial_enabled(self.request)
+        context["cta_pick_a_plan"] = _is_cta_pick_a_plan_enabled(self.request)
+        context["cta_continue_agent_btn"] = _is_cta_continue_agent_btn_enabled(self.request)
+        context["cta_no_charge_during_trial"] = _is_cta_no_charge_during_trial_enabled(self.request)
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
 
