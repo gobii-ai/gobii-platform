@@ -42,6 +42,7 @@ from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
 from api.agent.tools.mcp_manager import get_mcp_manager
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from api.models import (
     BrowserLLMPolicy,
     BrowserUseAgent,
@@ -2352,6 +2353,17 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"error": "Template URL could not be generated."}, status=500)
 
         template_url = request.build_absolute_uri(f"/{result.public_profile.handle}/{template.slug}/")
+        if result.created:
+            emit_configured_custom_capi_event(
+                user=request.user,
+                event_name=ConfiguredCustomEvent.CLONE_GOBII,
+                properties={
+                    "agent_id": str(agent.id),
+                    "template_id": str(template.id),
+                    "template_code": template.code,
+                },
+                request=request,
+            )
         return JsonResponse({
             "created": result.created,
             "templateUrl": template_url,

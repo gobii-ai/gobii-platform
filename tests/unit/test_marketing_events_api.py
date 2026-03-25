@@ -4,6 +4,7 @@ from unittest.mock import patch
 from django.test import SimpleTestCase, override_settings, tag
 
 from marketing_events.api import capi
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 
 
 @tag("batch_marketing_events")
@@ -55,3 +56,34 @@ class MarketingEventsApiTests(SimpleTestCase):
 
         mock_start_trial_apply_async.assert_not_called()
         mock_enqueue_delay.assert_called_once()
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        CAPI_CUSTOM_EVENT_CURRENCY="USD",
+        CAPI_CUSTOM_EVENT_VALUES={"AgentCreated": 12.5},
+    )
+    @patch("marketing_events.custom_events.capi")
+    def test_emit_configured_custom_capi_event_uses_configured_value_and_ad_targets(
+        self,
+        mock_capi,
+    ):
+        user = SimpleNamespace(id=42, email="test@example.com", phone="+15555550123")
+
+        emit_configured_custom_capi_event(
+            user=user,
+            event_name=ConfiguredCustomEvent.AGENT_CREATED,
+            properties={"agent_id": "agent-1"},
+        )
+
+        mock_capi.assert_called_once_with(
+            user=user,
+            event_name="AgentCreated",
+            properties={
+                "value": 12.5,
+                "currency": "USD",
+                "agent_id": "agent-1",
+            },
+            request=None,
+            context={"consent": True},
+            provider_targets=["meta", "reddit", "tiktok"],
+        )

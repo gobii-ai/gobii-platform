@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.http import HttpResponseRedirect, Http404
 from django.views import View
-from django.db import models
+from django.db import models, transaction
 
 from observability import traced, dict_to_attributes
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -62,6 +62,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.core.schedule_parser import ScheduleParser
 from agents.services import PretrainedWorkerTemplateService
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from pages.account_info_cache import invalidate_account_info_cache
 # Import extend_schema from drf-spectacular with minimal dependencies
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
@@ -742,6 +743,14 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
                 properties=props.copy(),
             )
 
+    def _build_agent_custom_event_properties(self, agent: PersistentAgent) -> dict:
+        props = {"agent_id": str(agent.id)}
+        org = self._request_organization()
+        if org is not None:
+            props["owner_type"] = "organization"
+            props["organization_id"] = str(org.id)
+        return props
+
     def get_queryset(self):
         org = self._request_organization()
         _enforce_personal_api_access_or_raise(self.request.user, organization=org)
@@ -787,6 +796,14 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             agent,
             AnalyticsEvent.PERSISTENT_AGENT_CREATED,
             organization_event=AnalyticsEvent.ORGANIZATION_PERSISTENT_AGENT_CREATED,
+        )
+        transaction.on_commit(
+            lambda: emit_configured_custom_capi_event(
+                user=self.request.user,
+                event_name=ConfiguredCustomEvent.AGENT_CREATED,
+                properties=self._build_agent_custom_event_properties(agent),
+                request=self.request,
+            )
         )
 
     def perform_update(self, serializer):

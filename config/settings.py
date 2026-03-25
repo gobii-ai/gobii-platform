@@ -1105,6 +1105,15 @@ CAPI_LTV_MULTIPLE = env.float("CAPI_LTV_MULTIPLE", default=5.0)
 CAPI_REGISTRATION_VALUE = env.float("CAPI_REGISTRATION_VALUE", default=10.0)
 CAPI_START_TRIAL_CONV_RATE = env.float("CAPI_START_TRIAL_CONV_RATE", default=0.3)
 CAPI_START_TRIAL_DELAY_MINUTES = env.int("CAPI_START_TRIAL_DELAY_MINUTES", default=60)
+CAPI_CUSTOM_EVENT_CURRENCY = env("CAPI_CUSTOM_EVENT_CURRENCY", default="USD")
+CAPI_CUSTOM_EVENT_VALUES = {
+    "AgentCreated": env.float("CAPI_AGENT_CREATED_VALUE", default=0.0),
+    "InboundMessage": env.float("CAPI_INBOUND_MESSAGE_VALUE", default=0.0),
+    "IntegrationAdded": env.float("CAPI_INTEGRATION_ADDED_VALUE", default=0.0),
+    "SecretAdded": env.float("CAPI_SECRET_ADDED_VALUE", default=0.0),
+    "CloneGobii": env.float("CAPI_CLONE_GOBII_VALUE", default=0.0),
+    "TemplateLaunched": env.float("CAPI_TEMPLATE_LAUNCHED_VALUE", default=0.0),
+}
 
 LINKEDIN_SIGNUP_CONVERSION_ID = env(
     "LINKEDIN_SIGNUP_CONVERSION_ID",

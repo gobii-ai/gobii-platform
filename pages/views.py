@@ -67,6 +67,7 @@ from api.services.pipedream_apps import (
     get_owner_selected_app_slugs,
 )
 from api.pipedream_app_utils import normalize_app_slugs
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -1103,6 +1104,16 @@ class PublicTemplateHireView(View):
         }
         if flow:
             analytics_properties["flow"] = flow
+
+        emit_configured_custom_capi_event(
+            user=request.user,
+            event_name=ConfiguredCustomEvent.TEMPLATE_LAUNCHED,
+            properties={
+                "template_id": str(template.id),
+                **analytics_properties,
+            },
+            request=request,
+        )
 
         if request.user.is_authenticated:
             Analytics.track_event(

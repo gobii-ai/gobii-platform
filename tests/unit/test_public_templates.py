@@ -3,6 +3,7 @@ from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
+from unittest.mock import patch
 
 from agents.services import PretrainedWorkerTemplateService
 from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PublicProfile
@@ -146,6 +147,38 @@ class PublicTemplateViewsTests(TestCase):
             session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
             template.code,
         )
+
+    @tag("batch_public_templates")
+    @patch("pages.views.emit_configured_custom_capi_event")
+    def test_public_template_hire_emits_template_launched_custom_event(self, mock_emit_custom_event):
+        user = get_user_model().objects.create_user(username="owner2b", email="owner2b@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="calm-beacon-2")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-hire-capi",
+            public_profile=profile,
+            slug="weekly-digest-capi",
+            display_name="Weekly Digest",
+            tagline="Weekly ops wrap",
+            description="Summarizes weekly ops updates.",
+            charter="Compile weekly ops summary.",
+            base_schedule="@weekly",
+            recommended_contact_channel="email",
+            category="Operations",
+        )
+
+        response = self.client.post(
+            reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+            data={"source_page": "public_template_detail", "flow": "pro"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        mock_emit_custom_event.assert_called_once()
+        call_kwargs = mock_emit_custom_event.call_args.kwargs
+        self.assertEqual(call_kwargs["event_name"], "TemplateLaunched")
+        self.assertEqual(call_kwargs["properties"]["template_id"], str(template.id))
+        self.assertEqual(call_kwargs["properties"]["template_code"], template.code)
+        self.assertEqual(call_kwargs["properties"]["source_page"], "public_template_detail")
+        self.assertEqual(call_kwargs["properties"]["flow"], "pro")
 
     @tag("batch_public_templates")
     def test_public_template_hire_sets_trial_onboarding_for_anonymous_user(self):

@@ -51,6 +51,7 @@ from api.services.owner_execution_pause import (
     get_owner_execution_pause_state,
     resolve_agent_owner,
 )
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
@@ -917,6 +918,34 @@ def ingest_inbound_message(
 
             if agent_obj is None:
                 agent_obj = PersistentAgent.objects.alive().filter(id=owner_id).select_related("user").first()
+
+            if (
+                agent_obj is not None
+                and agent_obj.user_id
+                and channel_val in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}
+            ):
+                # Only owner-authored inbound messages should count as user action signals.
+                is_owner_authored_message = channel_val == CommsChannel.WEB or agent_obj.is_sender_whitelisted(
+                    channel_val,
+                    parsed.sender,
+                )
+                if is_owner_authored_message:
+                    marketing_props = Analytics.with_org_properties(
+                        {
+                            "agent_id": str(agent_obj.id),
+                            "channel": channel_val,
+                            "message_length": len(parsed.body or ""),
+                            "attachments_count": len(parsed.attachments),
+                        },
+                        organization=getattr(agent_obj, "organization", None),
+                    )
+                    transaction.on_commit(
+                        lambda user=agent_obj.user, marketing_props=marketing_props.copy(): emit_configured_custom_capi_event(
+                            user=user,
+                            event_name=ConfiguredCustomEvent.INBOUND_MESSAGE,
+                            properties=marketing_props,
+                        )
+                    )
 
             # Before triggering agent processing, check if the agent owner's
             # account is billing-paused. If so, send a one-off auto-reply to the

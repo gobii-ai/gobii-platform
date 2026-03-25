@@ -1194,6 +1194,26 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(props.get("message_length"), len("Hello agent"))
 
     @tag("batch_agent_chat")
+    @patch("api.agent.comms.message_service.emit_configured_custom_capi_event")
+    def test_message_post_emits_inbound_message_custom_event(self, mock_emit_custom_event):
+        with patch("api.agent.tasks.process_agent_events_task.delay"):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f"/console/api/agents/{self.agent.id}/messages/",
+                    data=json.dumps({"body": "Hello agent"}),
+                    content_type="application/json",
+                )
+
+        self.assertEqual(response.status_code, 201)
+        mock_emit_custom_event.assert_called_once()
+        call_kwargs = mock_emit_custom_event.call_args.kwargs
+        self.assertEqual(call_kwargs["event_name"], "InboundMessage")
+        self.assertEqual(call_kwargs["user"], self.user)
+        self.assertEqual(call_kwargs["properties"]["agent_id"], str(self.agent.id))
+        self.assertEqual(call_kwargs["properties"]["channel"], CommsChannel.WEB)
+        self.assertEqual(call_kwargs["properties"]["message_length"], len("Hello agent"))
+
+    @tag("batch_agent_chat")
     def test_processing_status_endpoint_includes_active_web_tasks(self):
         task = BrowserUseAgentTask.objects.create(
             agent=self.browser_agent,

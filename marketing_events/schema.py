@@ -16,6 +16,12 @@ CANONICAL_EVENT_MAP = {
     "UpgradePlan": "UpgradePlan",
     "Lead": "Lead",
     "FeatureUsed": "FeatureUsed",
+    "AgentCreated": "AgentCreated",
+    "InboundMessage": "InboundMessage",
+    "IntegrationAdded": "IntegrationAdded",
+    "SecretAdded": "SecretAdded",
+    "CloneGobii": "CloneGobii",
+    "TemplateLaunched": "TemplateLaunched",
 }
 
 
