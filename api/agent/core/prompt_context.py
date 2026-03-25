@@ -2989,6 +2989,7 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
     return (
         "Sandbox access is enabled. `python_exec`, `run_command`, and sandboxed custom tools run inside your sandbox workspace. "
         "Filespace paths like `/reports/foo.txt` map to `/workspace/reports/foo.txt`; in tool arguments, prefer filespace paths and avoid writing `/workspace` explicitly. "
+        "For `run_command`, `cwd` is relative to the workspace root; do not pass `/workspace` as the cwd. "
         "Standard proxy env vars are already injected for sandbox execution: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, plus lowercase variants. "
         "Global `env_var` secrets are available as environment variables inside sandbox execution contexts. "
         "For outbound network work, prefer `http_request` or `ctx.call_tool('http_request', ...)` inside custom tools before raw sockets or hand-rolled proxy logic. "
