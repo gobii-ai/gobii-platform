@@ -86,6 +86,7 @@ class PersistentAgentShutdownTriggersTests(TestCase):
             schedule="0 * * * *",
         )
         fake_redis = MagicMock()
+        fake_redis.pipeline = None
 
         with patch("django.db.transaction.on_commit", side_effect=lambda fn: fn()):
             with patch("api.agent.core.processing_flags.get_redis_client", return_value=fake_redis):
@@ -95,4 +96,4 @@ class PersistentAgentShutdownTriggersTests(TestCase):
                         agent.save(update_fields=["is_active"])
 
         fake_redis.delete.assert_any_call(f"agent-event-processing:queued:{agent.id}")
-        fake_redis.srem.assert_called_with("agent-event-processing:pending", str(agent.id))
+        fake_redis.srem.assert_any_call("agent-event-processing:pending", str(agent.id))

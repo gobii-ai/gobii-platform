@@ -1,4 +1,3 @@
-import json
 from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import patch
@@ -9,6 +8,12 @@ from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
+from api.agent.core.processing_flags import (
+    enqueue_pending_agent,
+    mark_processing_lock_active,
+    set_processing_heartbeat,
+    set_processing_queued_flag,
+)
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -85,12 +90,19 @@ class SystemStatusAPITests(TestCase):
         self._create_agent("Other Env Agent", execution_environment="staging")
 
         redis_client = _FakeRedis()
-        heartbeat_payload = json.dumps({"stage": "tool_call", "last_seen": timezone.now().timestamp()})
-        redis_client.set(f"agent-event-processing:heartbeat:{current_agent.id}", heartbeat_payload)
-        redis_client.set(f"agent-event-processing:queued:{current_agent.id}", "1")
-        redis_client.sadd("agent-event-processing:pending", str(current_agent.id))
+        set_processing_heartbeat(
+            current_agent.id,
+            stage="tool_call",
+            started_at=timezone.now().timestamp(),
+            client=redis_client,
+        )
+        set_processing_queued_flag(current_agent.id, client=redis_client)
+        enqueue_pending_agent(current_agent.id, client=redis_client)
+        mark_processing_lock_active(current_agent.id, client=redis_client)
         redis_client.set(f"redlock:agent-event-processing:{current_agent.id}", "1")
-        redis_client.set("agent-event-processing:heartbeat:not-a-uuid", heartbeat_payload)
+        redis_client.sadd("agent-event-processing:index:heartbeat", "not-a-uuid")
+        redis_client.sadd("agent-event-processing:index:queued", "not-a-uuid")
+        redis_client.sadd("agent-event-processing:index:locked", "not-a-uuid")
         mock_get_redis_client.return_value = redis_client
 
         response = self.client.get(self.url)
@@ -178,7 +190,7 @@ class SystemStatusAPITests(TestCase):
             proxy_server=stale_proxy,
             health_check_spec=spec,
             status=ProxyHealthCheckResult.Status.PASSED,
-            checked_at=now - timedelta(days=2),
+            checked_at=now - timedelta(days=4),
             response_time_ms=140,
         )
 
@@ -191,6 +203,31 @@ class SystemStatusAPITests(TestCase):
         self.assertEqual(section["summary"]["degradedCount"], 1)
         self.assertEqual(section["summary"]["staleCount"], 1)
         self.assertEqual(section["summary"]["inactiveCount"], 1)
+        self.assertEqual(section["status"], "warning")
+
+    @patch("console.system_status.get_redis_client")
+    def test_proxy_section_marks_all_active_proxies_degraded_as_critical(self, mock_get_redis_client):
+        mock_get_redis_client.return_value = _FakeRedis()
+        spec = ProxyHealthCheckSpec.objects.create(name="Critical proxy check", prompt="Check")
+        now = timezone.now()
+
+        for name, port in (("Degraded A", 8101), ("Degraded B", 8102)):
+            proxy = ProxyServer.objects.create(name=name, host=f"{name.lower().replace(' ', '-')}.local", port=port, is_active=True)
+            ProxyHealthCheckResult.objects.create(
+                proxy_server=proxy,
+                health_check_spec=spec,
+                status=ProxyHealthCheckResult.Status.FAILED,
+                checked_at=now - timedelta(minutes=5),
+                response_time_ms=600,
+            )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        section = response.json()["sections"]["proxies"]
+        self.assertEqual(section["summary"]["activeCount"], 2)
+        self.assertEqual(section["summary"]["healthyCount"], 0)
+        self.assertEqual(section["summary"]["degradedCount"], 2)
         self.assertEqual(section["status"], "critical")
 
     @patch("console.system_status._collect_proxy_section", side_effect=RuntimeError("proxy collector down"))

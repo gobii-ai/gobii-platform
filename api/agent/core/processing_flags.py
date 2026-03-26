@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Any, Union
 from uuid import UUID
 
+from pottery import Redlock
+
 from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -13,6 +15,9 @@ _QUEUED_KEY_TEMPLATE = "agent-event-processing:queued:{agent_id}"
 _DEFAULT_QUEUE_TTL_SECONDS = 3600
 _HEARTBEAT_KEY_TEMPLATE = "agent-event-processing:heartbeat:{agent_id}"
 _DEFAULT_HEARTBEAT_TTL_SECONDS = 600
+_QUEUED_AGENT_SET_KEY = "agent-event-processing:index:queued"
+_HEARTBEAT_AGENT_SET_KEY = "agent-event-processing:index:heartbeat"
+_LOCKED_AGENT_SET_KEY = "agent-event-processing:index:locked"
 _PENDING_SET_KEY = "agent-event-processing:pending"
 _PENDING_DRAIN_SCHEDULE_KEY = "agent-event-processing:pending:drain:schedule"
 _DEFAULT_PENDING_SET_TTL_SECONDS = 3600
@@ -35,23 +40,95 @@ def _heartbeat_key(agent_id: Union[str, UUID]) -> str:
     return _HEARTBEAT_KEY_TEMPLATE.format(agent_id=agent_id)
 
 
-def set_processing_queued_flag(agent_id: Union[str, UUID], *, ttl: int = _DEFAULT_QUEUE_TTL_SECONDS) -> None:
+def processing_lock_storage_keys(agent_id: Union[str, UUID]) -> tuple[str, str]:
+    normalized_agent_id = str(agent_id)
+    prefix = getattr(Redlock, "_KEY_PREFIX", "redlock")
+    return (
+        f"{prefix}:agent-event-processing:{normalized_agent_id}",
+        f"agent-event-processing:{normalized_agent_id}",
+    )
+
+
+def _smembers_as_strings(redis_client, key: str) -> list[str]:
+    values = getattr(redis_client, "smembers", lambda _key: set())(key)
+    normalized: list[str] = []
+    for value in values:
+        if isinstance(value, (bytes, bytearray)):
+            normalized.append(value.decode("utf-8", "ignore"))
+        else:
+            normalized.append(str(value))
+    return normalized
+
+
+def get_processing_queued_agent_ids(*, client=None) -> list[str]:
+    try:
+        redis_client = client or get_redis_client()
+        return _smembers_as_strings(redis_client, _QUEUED_AGENT_SET_KEY)
+    except Exception:
+        logger.exception("Failed to list queued processing agents")
+        return []
+
+
+def get_processing_heartbeat_agent_ids(*, client=None) -> list[str]:
+    try:
+        redis_client = client or get_redis_client()
+        return _smembers_as_strings(redis_client, _HEARTBEAT_AGENT_SET_KEY)
+    except Exception:
+        logger.exception("Failed to list heartbeat processing agents")
+        return []
+
+
+def get_processing_locked_agent_ids(*, client=None) -> list[str]:
+    try:
+        redis_client = client or get_redis_client()
+        return _smembers_as_strings(redis_client, _LOCKED_AGENT_SET_KEY)
+    except Exception:
+        logger.exception("Failed to list locked processing agents")
+        return []
+
+
+def set_processing_queued_flag(
+    agent_id: Union[str, UUID],
+    *,
+    ttl: int = _DEFAULT_QUEUE_TTL_SECONDS,
+    client=None,
+) -> None:
     """Mark the agent as having queued processing work."""
     try:
-        client = get_redis_client()
+        redis_client = client or get_redis_client()
         key = _queued_key(agent_id)
-        client.set(key, "1")
+        pipeline = getattr(redis_client, "pipeline", None)
+        if callable(pipeline):
+            pipe = pipeline()
+            pipe.set(key, "1")
+            if ttl > 0:
+                pipe.expire(key, ttl)
+            pipe.sadd(_QUEUED_AGENT_SET_KEY, str(agent_id))
+            pipe.execute()
+            return
+
+        redis_client.set(key, "1")
         if ttl > 0:
-            client.expire(key, ttl)
+            redis_client.expire(key, ttl)
+        redis_client.sadd(_QUEUED_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to set processing queued flag for agent %s", agent_id)
 
 
-def clear_processing_queued_flag(agent_id: Union[str, UUID]) -> None:
+def clear_processing_queued_flag(agent_id: Union[str, UUID], *, client=None) -> None:
     """Clear the queued processing flag for the agent."""
     try:
-        client = get_redis_client()
-        client.delete(_queued_key(agent_id))
+        redis_client = client or get_redis_client()
+        pipeline = getattr(redis_client, "pipeline", None)
+        if callable(pipeline):
+            pipe = pipeline()
+            pipe.delete(_queued_key(agent_id))
+            pipe.srem(_QUEUED_AGENT_SET_KEY, str(agent_id))
+            pipe.execute()
+            return
+
+        redis_client.delete(_queued_key(agent_id))
+        redis_client.srem(_QUEUED_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to clear processing queued flag for agent %s", agent_id)
 
@@ -67,12 +144,26 @@ def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None
             return
 
     try:
+        pipeline = getattr(redis_client, "pipeline", None)
+        if callable(pipeline):
+            pipe = pipeline()
+            pipe.delete(_queued_key(agent_id))
+            pipe.srem(_QUEUED_AGENT_SET_KEY, str(agent_id))
+            pipe.srem(_PENDING_SET_KEY, str(agent_id))
+            pipe.srem(_LOCKED_AGENT_SET_KEY, str(agent_id))
+            pipe.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
+            pipe.execute()
+            return
+
         redis_client.delete(_queued_key(agent_id))
+        redis_client.srem(_QUEUED_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to clear queued processing state for agent %s", agent_id)
 
     try:
         redis_client.srem(_PENDING_SET_KEY, str(agent_id))
+        redis_client.srem(_LOCKED_AGENT_SET_KEY, str(agent_id))
+        redis_client.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to clear pending processing state for agent %s", agent_id)
 
@@ -111,7 +202,16 @@ def set_processing_heartbeat(
     }
     try:
         redis_client = client or get_redis_client()
+        pipeline = getattr(redis_client, "pipeline", None)
+        if callable(pipeline):
+            pipe = pipeline()
+            pipe.set(_heartbeat_key(agent_id), json.dumps(payload), ex=ttl)
+            pipe.sadd(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
+            pipe.execute()
+            return
+
         redis_client.set(_heartbeat_key(agent_id), json.dumps(payload), ex=ttl)
+        redis_client.sadd(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to set processing heartbeat for agent %s", agent_id)
 
@@ -120,7 +220,16 @@ def clear_processing_heartbeat(agent_id: Union[str, UUID], client=None) -> None:
     """Clear the processing heartbeat for the agent."""
     try:
         redis_client = client or get_redis_client()
+        pipeline = getattr(redis_client, "pipeline", None)
+        if callable(pipeline):
+            pipe = pipeline()
+            pipe.delete(_heartbeat_key(agent_id))
+            pipe.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
+            pipe.execute()
+            return
+
         redis_client.delete(_heartbeat_key(agent_id))
+        redis_client.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to clear processing heartbeat for agent %s", agent_id)
 
@@ -150,6 +259,22 @@ def pending_set_key() -> str:
 
 def pending_drain_schedule_key() -> str:
     return _PENDING_DRAIN_SCHEDULE_KEY
+
+
+def mark_processing_lock_active(agent_id: Union[str, UUID], *, client=None) -> None:
+    try:
+        redis_client = client or get_redis_client()
+        redis_client.sadd(_LOCKED_AGENT_SET_KEY, str(agent_id))
+    except Exception:
+        logger.exception("Failed to mark processing lock active for agent %s", agent_id)
+
+
+def clear_processing_lock_active(agent_id: Union[str, UUID], *, client=None) -> None:
+    try:
+        redis_client = client or get_redis_client()
+        redis_client.srem(_LOCKED_AGENT_SET_KEY, str(agent_id))
+    except Exception:
+        logger.exception("Failed to clear processing lock active for agent %s", agent_id)
 
 
 def _coerce_positive_int(value: Any, default: int) -> int:

@@ -30,6 +30,7 @@ from ...services.referral_service import ReferralService
 from ..core.processing_flags import (
     claim_pending_drain_slot,
     clear_pending_drain_slot,
+    clear_processing_lock_active,
     clear_processing_queued_flag,
     count_pending_agents,
     get_processing_heartbeat,
@@ -191,6 +192,7 @@ def process_agent_events_task(
                     for storage_key in _lock_storage_keys(lock_key):
                         deleted += int(redis_client.delete(storage_key) or 0)
                     if deleted:
+                        clear_processing_lock_active(persistent_agent_id, client=redis_client)
                         logger.warning(
                             "Cleared stale lock(s) for redelivered agent %s (threshold=%ss)",
                             persistent_agent_id,
