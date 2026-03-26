@@ -5,7 +5,13 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
 from api.agent.core import event_processing as ep
-from api.agent.core.processing_flags import pending_drain_schedule_key, pending_set_key
+from api.agent.core.processing_flags import (
+    get_processing_locked_agent_ids,
+    pending_drain_schedule_key,
+    pending_set_key,
+    processing_lock_storage_keys,
+)
+from api.agent.core import processing_flags as pf
 from api.models import BrowserUseAgent, PersistentAgent
 from config.redis_client import get_redis_client
 
@@ -29,6 +35,21 @@ class _RetryingRedlock:
 
     def release(self):
         return True
+
+
+class _ReleaseFailingRedlock:
+    def __init__(self, *args, **kwargs):
+        self.key = kwargs.get("key")
+        self.auto_release_time = kwargs.get("auto_release_time")
+        self.redis_client = next(iter(kwargs.get("masters", set())))
+
+    def acquire(self, *, blocking=True, timeout=-1):
+        for storage_key in ep._lock_storage_keys(self.key):
+            self.redis_client.set(storage_key, "1")
+        return True
+
+    def release(self):
+        raise RuntimeError("release failed")
 
 
 @tag("batch_event_processing")
@@ -98,3 +119,21 @@ class EventProcessingLockFallbackTests(TestCase):
 
         self.assertTrue(_mock_locked.called)
         self.assertFalse(self.redis.exists(lock_key))
+
+    @patch("api.agent.core.event_processing._process_agent_events_locked", return_value=None)
+    @patch("api.agent.core.event_processing.Redlock", new=_ReleaseFailingRedlock)
+    def test_release_failure_keeps_locked_index_when_lock_key_still_exists(self, _mock_locked):
+        ep.process_agent_events(self.agent.id)
+
+        self.assertIn(str(self.agent.id), get_processing_locked_agent_ids(client=self.redis))
+        self.assertTrue(any(self.redis.exists(key) for key in processing_lock_storage_keys(self.agent.id)))
+
+    def test_processing_lock_storage_keys_uses_redlock_prefix(self):
+        with patch.object(pf.Redlock, "_KEY_PREFIX", "custom-redlock"):
+            self.assertEqual(
+                processing_lock_storage_keys(self.agent.id),
+                (
+                    f"custom-redlock:agent-event-processing:{self.agent.id}",
+                    f"agent-event-processing:{self.agent.id}",
+                ),
+            )

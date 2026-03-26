@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import Any, Union
 from uuid import UUID
 
+from pottery import Redlock
+
 from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -40,8 +42,9 @@ def _heartbeat_key(agent_id: Union[str, UUID]) -> str:
 
 def processing_lock_storage_keys(agent_id: Union[str, UUID]) -> tuple[str, str]:
     normalized_agent_id = str(agent_id)
+    prefix = getattr(Redlock, "_KEY_PREFIX", "redlock")
     return (
-        f"redlock:agent-event-processing:{normalized_agent_id}",
+        f"{prefix}:agent-event-processing:{normalized_agent_id}",
         f"agent-event-processing:{normalized_agent_id}",
     )
 

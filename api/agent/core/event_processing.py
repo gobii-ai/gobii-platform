@@ -755,6 +755,16 @@ def _maybe_clear_stale_lock(
     return False
 
 
+def _lock_storage_keys_exist(*, lock_key: str, redis_client) -> bool:
+    for storage_key in _lock_storage_keys(lock_key):
+        try:
+            if redis_client.exists(storage_key):
+                return True
+        except Exception:
+            logger.debug("Failed to check distributed lock key %s", storage_key, exc_info=True)
+    return False
+
+
 def _normalize_persistent_agent_id(persistent_agent_id: Union[str, UUID]) -> Optional[str]:
     if isinstance(persistent_agent_id, UUID):
         return str(persistent_agent_id)
@@ -3631,14 +3641,19 @@ def process_agent_events(
     finally:
         # Release the lock
         if lock_acquired:
+            lock_released = False
             try:
                 lock.release()
+                lock_released = True
                 logger.info("Released distributed lock for agent %s", persistent_agent_id)
                 span.add_event("Distributed lock released")
             except Exception as e:
                 logger.warning("Failed to release lock for agent %s: %s", persistent_agent_id, str(e))
                 span.add_event("Lock release warning")
-            finally:
+            if lock_released or not _lock_storage_keys_exist(
+                lock_key=lock_key,
+                redis_client=redis_client,
+            ):
                 clear_processing_lock_active(persistent_agent_id, client=redis_client)
         if heartbeat:
             heartbeat.clear()
