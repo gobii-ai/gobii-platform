@@ -2830,7 +2830,12 @@ export function AgentChatPage({
   ])
 
   useEffect(() => {
-    if (!isNewAgent || !createAgentDisabledReason || typeof window === 'undefined') {
+    if (
+      !isNewAgent
+      || !createAgentDisabledReason
+      || requiresTrialPlanSelection
+      || typeof window === 'undefined'
+    ) {
       return
     }
     if (window.location.pathname !== '/app/agents/new') {
@@ -2839,7 +2844,7 @@ export function AgentChatPage({
     const selectionUrl = `/app/agents${window.location.search}${window.location.hash}`
     window.history.replaceState({}, '', selectionUrl)
     window.dispatchEvent(new PopStateEvent('popstate'))
-  }, [createAgentDisabledReason, isNewAgent])
+  }, [createAgentDisabledReason, isNewAgent, requiresTrialPlanSelection])
 
   const closeGate = useCallback(() => {
     pendingCreateRef.current = null
