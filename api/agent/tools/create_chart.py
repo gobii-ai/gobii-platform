@@ -39,6 +39,12 @@ CHART_TYPES = {
     "scatter",
 }
 
+# Thresholds for auto-swapping bar → horizontal_bar.  Horizontal bars handle
+# long category labels better because labels sit on the y-axis where there is
+# ample horizontal room.
+_LONG_LABEL_CHAR_THRESHOLD = 15
+_MANY_CATEGORIES_THRESHOLD = 5
+
 
 def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[List[str]], Optional[str]]:
     """Execute a SQL query and return results as a list of dicts."""
@@ -50,6 +56,35 @@ def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[List[str]]
 def _extract_values(data: List[Dict], key: str) -> List[Any]:
     """Extract values for a given key from list of dicts."""
     return [row.get(key) for row in data]
+
+
+def _max_label_len(labels: list) -> int:
+    """Return the maximum string length among label values."""
+    return max((len(str(v)) for v in labels if v is not None), default=0)
+
+
+def _should_swap_to_horizontal(chart_type: str, x_vals: list) -> bool:
+    """Return True when a bar chart should automatically swap to horizontal_bar.
+
+    Triggers when any label exceeds the character threshold *or* there are more
+    categories than comfortably fit on a vertical x-axis.
+    """
+    if chart_type != "bar":
+        return False
+    has_long_label = _max_label_len(x_vals) > _LONG_LABEL_CHAR_THRESHOLD
+    has_many_categories = len([v for v in x_vals if v is not None]) > _MANY_CATEGORIES_THRESHOLD
+    return has_long_label or has_many_categories
+
+
+def _compute_horizontal_bar_left_margin(labels: list) -> float:
+    """Return a left subplot margin (0–1 fraction of figure width) sized for y-axis labels.
+
+    tight_layout alone can still clip long category labels in some rendering
+    paths; an explicit margin based on the longest label prevents that.
+    """
+    max_len = _max_label_len(labels)
+    # ~0.01 figure-fraction per character, clamped to a safe range.
+    return max(0.15, min(0.45, max_len * 0.01))
 
 
 def _setup_style():
@@ -233,12 +268,21 @@ def _generate_chart(
     fig, ax = plt.subplots(figsize=figsize)
 
     # Extract data based on chart type
+    swapped = False
     if chart_type in ("pie", "donut"):
         val_data = _extract_values(data, values) if values else []
         label_data = _extract_values(data, labels) if labels else []
         _create_pie_chart(ax, val_data, label_data, chart_colors, donut=(chart_type == "donut"))
     else:
         x_vals = _extract_values(data, x) if x else list(range(len(data)))
+
+        # Auto-swap bar → horizontal_bar when category labels are too long or
+        # too numerous.  Swap the explicit axis labels and remember the swap so
+        # we can also correct the *default* axis labels below.
+        swapped = _should_swap_to_horizontal(chart_type, x_vals)
+        if swapped:
+            chart_type = "horizontal_bar"
+            xlabel, ylabel = ylabel, xlabel
 
         # Handle single or multiple y series
         if isinstance(y, list):
@@ -271,20 +315,30 @@ def _generate_chart(
             elif chart_type == "scatter":
                 _create_scatter_chart(ax, x_vals, y_vals, chart_colors)
 
+        # Reserve enough left margin for horizontal bar y-axis labels so they
+        # are not clipped in the final SVG.
+        if chart_type == "horizontal_bar":
+            fig.subplots_adjust(left=_compute_horizontal_bar_left_margin(x_vals))
+
     # Set labels and title
     if title:
         ax.set_title(title, pad=15, fontweight='bold')
 
     if chart_type not in ("pie", "donut"):
+        # When auto-swapped the categories (x) moved to the y-axis and values
+        # (y) moved to the x-axis, so default labels need the same swap.
+        default_xlabel = y if swapped else x
+        default_ylabel = x if swapped else y
+
         if xlabel:
             ax.set_xlabel(xlabel)
-        elif x:
-            ax.set_xlabel(x.replace("_", " ").title())
+        elif default_xlabel and isinstance(default_xlabel, str):
+            ax.set_xlabel(default_xlabel.replace("_", " ").title())
 
         if ylabel:
             ax.set_ylabel(ylabel)
-        elif y and isinstance(y, str):
-            ax.set_ylabel(y.replace("_", " ").title())
+        elif default_ylabel and isinstance(default_ylabel, str):
+            ax.set_ylabel(default_ylabel.replace("_", " ").title())
 
     # Rotate x-axis labels if they're long
     if chart_type not in ("pie", "donut", "horizontal_bar"):
