@@ -117,6 +117,7 @@ export function EnableDatabaseDetail({ entry }: ToolDetailProps) {
 
 export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
   const sqliteInfo = entry.sqliteInfo
+  const isAgentSkillsEntry = sqliteInfo?.kind === 'agentSkills'
   const instructionsText = typeof sqliteInfo?.instructionsText === 'string' && sqliteInfo.instructionsText.trim().length
     ? sqliteInfo.instructionsText
     : null
@@ -133,6 +134,22 @@ export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
       : entry.result
         ? stringify(entry.result)
         : null
+
+  if (isAgentSkillsEntry) {
+    return (
+      <div className="space-y-3 text-sm text-slate-600">
+        {instructionsText ? (
+          <Section title="Instructions">
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+              {instructionsText}
+            </pre>
+          </Section>
+        ) : status ? (
+          <p className="text-slate-700">{status}</p>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
