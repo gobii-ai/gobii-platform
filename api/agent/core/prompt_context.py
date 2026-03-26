@@ -2447,17 +2447,6 @@ def build_prompt_context(
     else:
         span.set_attribute("prompt.archive_key", "")
 
-    # CRITICAL: DO NOT REMOVE OR MODIFY THESE PRINT STATEMENTS WITHOUT EXTREME CARE
-    # Using print() bypasses the 64KB container log truncation limit that affects logger.info()
-    # Container runtimes (Docker/Kubernetes) truncate log messages at 64KB, which cuts off
-    # our prompts mid-stream, losing critical debugging information especially the high-weight
-    # sections at the end (</critical>, </important>). Using separate print() calls ensures
-    # we can see the complete prompt in production logs for debugging agent issues.
-    # The BEGIN/END markers make it easy to extract full prompts with grep/awk.
-    # See: test_log_message_truncation.py and proof_64kb_truncation.py for evidence
-    print(f"__BEGIN_RENDERED_PROMPT_FOR_AGENT_{agent.id}__")
-    print(user_content)
-    print(f"__END_RENDERED_PROMPT_FOR_AGENT_{agent.id}__")
     span.set_attribute("prompt.token_budget", token_budget)
     span.set_attribute("prompt.tokens_before_fitting", tokens_before)
     span.set_attribute("prompt.tokens_after_fitting", tokens_after)
