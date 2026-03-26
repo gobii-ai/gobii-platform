@@ -361,6 +361,7 @@ def _emit_personal_server_events(
                 lambda user=actor_user, marketing_props=marketing_props.copy(): emit_configured_custom_capi_event(
                     user=user,
                     event_name=ConfiguredCustomEvent.INTEGRATION_ADDED,
+                    plan_owner=agent.organization or agent.user,
                     properties=marketing_props,
                 )
             )

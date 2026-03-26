@@ -1,8 +1,12 @@
+import math
 from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 
 from django.conf import settings
 from django.db.models import Q
+from django.utils import timezone
+
+from util.subscription_helper import get_active_subscription
 
 
 try:
@@ -30,7 +34,7 @@ def _coerce_datetime(value: Any) -> datetime | None:
     return None
 
 
-def _get_trial_started_at(user) -> datetime | None:
+def get_trial_started_at(user) -> datetime | None:
     from api.models import TaskCredit
 
     trial_credit = (
@@ -91,7 +95,7 @@ def is_fast_cancel_user(user) -> bool:
     if not DJSTRIPE_AVAILABLE:
         return False
 
-    trial_started_at = _get_trial_started_at(user)
+    trial_started_at = get_trial_started_at(user)
     if trial_started_at is None:
         return False
 
@@ -113,6 +117,34 @@ def is_fast_cancel_user(user) -> bool:
             return True
 
     return False
+
+
+def get_custom_capi_event_delay_seconds(user) -> int:
+    trial_started_at = get_trial_started_at(user)
+    buffer_seconds = settings.CAPI_CUSTOM_EVENT_DELAY_BUFFER_HOURS * 3600
+    if trial_started_at is None:
+        return buffer_seconds
+
+    cutoff_at = trial_started_at + timedelta(hours=settings.TRIAL_FAST_CANCEL_CUTOFF_HOURS)
+    remaining_seconds = max((cutoff_at - timezone.now()).total_seconds(), 0)
+    return int(math.ceil(remaining_seconds + buffer_seconds))
+
+
+def is_user_currently_in_trial(user) -> bool:
+    if user is None or getattr(user, "id", None) is None:
+        return False
+
+    active_subscription = get_active_subscription(user)
+    if active_subscription is None:
+        return False
+
+    stripe_data = getattr(active_subscription, "stripe_data", {}) or {}
+    subscription_status = str(
+        stripe_data.get("status")
+        or getattr(active_subscription, "status", "")
+        or ""
+    ).strip().lower()
+    return subscription_status == "trialing"
 
 
 def count_messages_sent_to_gobii(user) -> int:

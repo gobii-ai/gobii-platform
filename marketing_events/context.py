@@ -90,6 +90,7 @@ def build_marketing_context_from_user(
     fbclid = getattr(attribution, "fbclid", "")
     fbp = getattr(attribution, "fbp", "")
     rdt_cid = getattr(attribution, "rdt_cid_last", "") or getattr(attribution, "rdt_cid_first", "")
+    ttclid = getattr(attribution, "ttclid_last", "") or getattr(attribution, "ttclid_first", "")
 
     if fbc:
         click_ids["fbc"] = fbc
@@ -104,6 +105,8 @@ def build_marketing_context_from_user(
         click_ids["fbp"] = fbp
     if rdt_cid:
         click_ids["rdt_cid"] = rdt_cid
+    if ttclid:
+        click_ids["ttclid"] = ttclid
     if click_ids:
         context["click_ids"] = click_ids
 

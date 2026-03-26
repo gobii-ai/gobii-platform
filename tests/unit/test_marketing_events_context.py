@@ -1,8 +1,10 @@
 from unittest.mock import patch
 
-from django.test import RequestFactory, SimpleTestCase, tag
+from django.contrib.auth import get_user_model
+from django.test import RequestFactory, SimpleTestCase, TestCase, tag
 
-from marketing_events.context import extract_click_context
+from api.models import UserAttribution
+from marketing_events.context import build_marketing_context_from_user, extract_click_context
 
 
 @tag("batch_marketing_events")
@@ -54,3 +56,22 @@ class ExtractClickContextTests(SimpleTestCase):
         context = extract_click_context(request)
 
         self.assertEqual(context["click_ids"]["rdt_cid"], "reddit-cookie-123")
+
+
+@tag("batch_marketing_events")
+class BuildMarketingContextFromUserTests(TestCase):
+    def test_build_marketing_context_from_user_includes_persisted_tiktok_click_id(self):
+        user = get_user_model().objects.create_user(
+            username="marketing-context-user",
+            email="marketing-context@example.com",
+            password="password123",
+        )
+        UserAttribution.objects.create(
+            user=user,
+            ttclid_first="ttclid-first",
+            ttclid_last="ttclid-last",
+        )
+
+        context = build_marketing_context_from_user(user)
+
+        self.assertEqual(context["click_ids"]["ttclid"], "ttclid-last")

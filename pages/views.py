@@ -1108,6 +1108,7 @@ class PublicTemplateHireView(View):
         emit_configured_custom_capi_event(
             user=request.user,
             event_name=ConfiguredCustomEvent.TEMPLATE_LAUNCHED,
+            plan_owner=request.user if request.user.is_authenticated else None,
             properties={
                 "template_id": str(template.id),
                 **analytics_properties,

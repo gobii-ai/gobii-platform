@@ -801,6 +801,7 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             lambda: emit_configured_custom_capi_event(
                 user=self.request.user,
                 event_name=ConfiguredCustomEvent.AGENT_CREATED,
+                plan_owner=self._request_organization() or self.request.user,
                 properties=self._build_agent_custom_event_properties(agent),
                 request=self.request,
             )

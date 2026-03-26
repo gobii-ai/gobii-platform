@@ -1109,15 +1109,36 @@ CAPI_LTV_MULTIPLE = env.float("CAPI_LTV_MULTIPLE", default=5.0)
 CAPI_REGISTRATION_VALUE = env.float("CAPI_REGISTRATION_VALUE", default=10.0)
 CAPI_START_TRIAL_CONV_RATE = env.float("CAPI_START_TRIAL_CONV_RATE", default=0.3)
 CAPI_START_TRIAL_DELAY_MINUTES = env.int("CAPI_START_TRIAL_DELAY_MINUTES", default=60)
+CAPI_CUSTOM_EVENT_DELAY_BUFFER_HOURS = env.int("CAPI_CUSTOM_EVENT_DELAY_BUFFER_HOURS", default=1)
 CAPI_CUSTOM_EVENT_CURRENCY = env("CAPI_CUSTOM_EVENT_CURRENCY", default="USD")
-CAPI_CUSTOM_EVENT_VALUES = {
-    "AgentCreated": env.float("CAPI_AGENT_CREATED_VALUE", default=0.0),
-    "InboundMessage": env.float("CAPI_INBOUND_MESSAGE_VALUE", default=0.0),
-    "IntegrationAdded": env.float("CAPI_INTEGRATION_ADDED_VALUE", default=0.0),
-    "SecretAdded": env.float("CAPI_SECRET_ADDED_VALUE", default=0.0),
-    "CloneGobii": env.float("CAPI_CLONE_GOBII_VALUE", default=0.0),
-    "TemplateLaunched": env.float("CAPI_TEMPLATE_LAUNCHED_VALUE", default=0.0),
+CAPI_CUSTOM_EVENT_VALUES_BY_PLAN = {
+    "pro": {
+        "AgentCreated": env.float("CAPI_AGENT_CREATED_PRO_VALUE", default=3.15),
+        "InboundMessage": {
+            1: env.float("CAPI_INBOUND_MESSAGE_FIRST_PRO_VALUE", default=2.10),
+            5: env.float("CAPI_INBOUND_MESSAGE_FIFTH_PRO_VALUE", default=4.20),
+            20: env.float("CAPI_INBOUND_MESSAGE_TWENTIETH_PRO_VALUE", default=8.40),
+        },
+        "IntegrationAdded": env.float("CAPI_INTEGRATION_ADDED_PRO_VALUE", default=9.45),
+        "SecretAdded": env.float("CAPI_SECRET_ADDED_PRO_VALUE", default=6.30),
+        "CloneGobii": env.float("CAPI_CLONE_GOBII_PRO_VALUE", default=8.40),
+        "TemplateLaunched": env.float("CAPI_TEMPLATE_LAUNCHED_PRO_VALUE", default=5.25),
+    },
+    "scale": {
+        "AgentCreated": env.float("CAPI_AGENT_CREATED_SCALE_VALUE", default=15.75),
+        "InboundMessage": {
+            1: env.float("CAPI_INBOUND_MESSAGE_FIRST_SCALE_VALUE", default=10.50),
+            5: env.float("CAPI_INBOUND_MESSAGE_FIFTH_SCALE_VALUE", default=21.00),
+            20: env.float("CAPI_INBOUND_MESSAGE_TWENTIETH_SCALE_VALUE", default=42.00),
+        },
+        "IntegrationAdded": env.float("CAPI_INTEGRATION_ADDED_SCALE_VALUE", default=47.25),
+        "SecretAdded": env.float("CAPI_SECRET_ADDED_SCALE_VALUE", default=31.50),
+        "CloneGobii": env.float("CAPI_CLONE_GOBII_SCALE_VALUE", default=42.00),
+        "TemplateLaunched": env.float("CAPI_TEMPLATE_LAUNCHED_SCALE_VALUE", default=26.25),
+    },
+    "org_team": None,
 }
+CAPI_CUSTOM_EVENT_VALUES_BY_PLAN["org_team"] = dict(CAPI_CUSTOM_EVENT_VALUES_BY_PLAN["pro"])
 
 LINKEDIN_SIGNUP_CONVERSION_ID = env(
     "LINKEDIN_SIGNUP_CONVERSION_ID",

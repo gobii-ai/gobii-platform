@@ -2357,6 +2357,7 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
             emit_configured_custom_capi_event(
                 user=request.user,
                 event_name=ConfiguredCustomEvent.CLONE_GOBII,
+                plan_owner=agent.organization or request.user,
                 properties={
                     "agent_id": str(agent.id),
                     "template_id": str(template.id),

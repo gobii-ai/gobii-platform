@@ -6334,6 +6334,7 @@ class AgentSecretsAddView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
                         lambda: emit_configured_custom_capi_event(
                             user=request.user,
                             event_name=ConfiguredCustomEvent.SECRET_ADDED,
+                            plan_owner=agent.organization or request.user,
                             properties=marketing_props.copy(),
                             request=request,
                         )

@@ -449,6 +449,7 @@ def create_persistent_agent_from_charter(
             lambda: emit_configured_custom_capi_event(
                 user=request.user,
                 event_name=ConfiguredCustomEvent.AGENT_CREATED,
+                plan_owner=organization or request.user,
                 properties=marketing_props.copy(),
                 request=request,
             )
