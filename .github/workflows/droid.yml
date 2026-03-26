@@ -34,4 +34,4 @@ jobs:
       - name: Run Droid Exec
         uses: Factory-AI/droid-action@v3
         with:
-          factory_api_key: ${{ secrets.FACTORY_API_KEY }}
+          factory_api_key: ${{ secrets.DROID_API_KEY }}
