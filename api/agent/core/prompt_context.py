@@ -2111,7 +2111,11 @@ def build_prompt_context(
         )
 
     # Dynamic formatting guidance based on current medium context
-    formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
+    formatting_guidance = _get_formatting_guidance(
+        agent,
+        implied_send_active,
+        peer_dm_context=peer_dm_context,
+    )
 
 
     # Secrets block
@@ -3474,10 +3478,55 @@ def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
 
     return None
 
+def _get_web_chat_formatting_guidance() -> str:
+    """Return rich Markdown guidance for chat surfaces with full rendering support."""
+
+    return (
+        "Web chat formatting:\n"
+        "Make your output visually stunning and instantly scannable—something they'd screenshot and share.\n\n"
+        "Design principles:\n"
+        "• **Rhythm and variety**—mix formats, don't repeat the same pattern over and over\n"
+        "• **Visual hierarchy**—use headers, whitespace, grouping to create layers\n"
+        "• **Emoji strategically**—visual anchors, not decoration on every line\n"
+        "• **Whitespace is content**—let sections breathe\n"
+        "• **Bold what matters**—make key info pop\n\n"
+        "Here's what great looks like:\n\n"
+        '  "## 🌤️ Frederick, MD\n\n'
+        "  **27°F** · Light snow · Feels like **23°F**\n\n"
+        "  💧 Humidity 100% · 💨 WSW 3 mph · 👁️ 1 mile visibility\n\n"
+        "  ---\n\n"
+        "  ### Today\\'s Forecast\n\n"
+        "  High **32°F** • Low **8°F**\n\n"
+        "  Sunrise 7:12 AM • Sunset 5:36 PM\n\n"
+        "  > 🧥 Bundle up—it\\'s a cold one out there!\n\n"
+        '  Want the weekly outlook?"\n\n'
+        "Notice:\n"
+        "• Opening line gives most important info (temp + conditions) in a natural flow\n"
+        "• Secondary details grouped on one line with emoji\n"
+        "• Not every piece of data gets its own line—variety creates visual interest\n"
+        "• Forecast section formatted differently than current conditions\n"
+        "• Blockquote for personality\n\n"
+        "Another example:\n\n"
+        '  "## 📊 Q4 Results\n\n'
+        "  **$13.1M revenue** • Up 21% YoY\n\n"
+        "  ![](result.inline from create_chart)\n\n"
+        "  | Region | Revenue | Growth |\n"
+        "  |--------|---------|--------|\n"
+        "  | [**Americas**](url) | $5.8M | 🟢 +31% |\n"
+        "  | [**APAC**](url) | $4.2M | 🟢 +23% |\n"
+        "  | [**EMEA**](url) | $3.1M | 🟡 +8% |\n\n"
+        "  > 💡 Americas drove 60% of growth—mainly enterprise deals closing faster than forecasted.\n\n"
+        "  > ⚠️ EMEA pipeline coverage at 1.8x (target: 3x)—need to accelerate prospecting.\n\n"
+        '  Should I break down the enterprise pipeline?"\n\n'
+        "The goal: **Make it feel designed, not templated.** Vary your formatting. Group related info. Use whitespace. Mix inline summaries with tables. Let the content breathe and flow."
+    )
+
 
 def _get_formatting_guidance(
     agent: PersistentAgent,
     implied_send_active: bool,
+    *,
+    peer_dm_context: dict | None = None,
 ) -> str:
     """
     Build formatting guidance based on the agent's current context.
@@ -3487,55 +3536,14 @@ def _get_formatting_guidance(
     2. Preferred contact endpoint → that channel
     3. Fallback → general guidance for all channels
     """
-    # Determine primary medium
-    primary_medium = None
-    if implied_send_active:
-        primary_medium = "WEB"
-    elif agent.preferred_contact_endpoint:
-        primary_medium = agent.preferred_contact_endpoint.channel
+    if implied_send_active or peer_dm_context is not None:
+        return _get_web_chat_formatting_guidance()
 
-    # Build guidance based on primary medium
-    if primary_medium == "WEB":
-        return (
-            "Web chat formatting:\n"
-            "Make your output visually stunning and instantly scannable—something they'd screenshot and share.\n\n"
-            "Design principles:\n"
-            "• **Rhythm and variety**—mix formats, don't repeat the same pattern over and over\n"
-            "• **Visual hierarchy**—use headers, whitespace, grouping to create layers\n"
-            "• **Emoji strategically**—visual anchors, not decoration on every line\n"
-            "• **Whitespace is content**—let sections breathe\n"
-            "• **Bold what matters**—make key info pop\n\n"
-            "Here's what great looks like:\n\n"
-            '  "## 🌤️ Frederick, MD\n\n'
-            "  **27°F** · Light snow · Feels like **23°F**\n\n"
-            "  💧 Humidity 100% · 💨 WSW 3 mph · 👁️ 1 mile visibility\n\n"
-            "  ---\n\n"
-            "  ### Today\\'s Forecast\n\n"
-            "  High **32°F** • Low **8°F**\n\n"
-            "  Sunrise 7:12 AM • Sunset 5:36 PM\n\n"
-            "  > 🧥 Bundle up—it\\'s a cold one out there!\n\n"
-            '  Want the weekly outlook?"\n\n'
-            "Notice:\n"
-            "• Opening line gives most important info (temp + conditions) in a natural flow\n"
-            "• Secondary details grouped on one line with emoji\n"
-            "• Not every piece of data gets its own line—variety creates visual interest\n"
-            "• Forecast section formatted differently than current conditions\n"
-            "• Blockquote for personality\n\n"
-            "Another example:\n\n"
-            '  "## 📊 Q4 Results\n\n'
-            "  **$13.1M revenue** • Up 21% YoY\n\n"
-            "  ![](result.inline from create_chart)\n\n"
-            "  | Region | Revenue | Growth |\n"
-            "  |--------|---------|--------|\n"
-            "  | [**Americas**](url) | $5.8M | 🟢 +31% |\n"
-            "  | [**APAC**](url) | $4.2M | 🟢 +23% |\n"
-            "  | [**EMEA**](url) | $3.1M | 🟡 +8% |\n\n"
-            "  > 💡 Americas drove 60% of growth—mainly enterprise deals closing faster than forecasted.\n\n"
-            "  > ⚠️ EMEA pipeline coverage at 1.8x (target: 3x)—need to accelerate prospecting.\n\n"
-            '  Should I break down the enterprise pipeline?"\n\n'
-            "The goal: **Make it feel designed, not templated.** Vary your formatting. Group related info. Use whitespace. Mix inline summaries with tables. Let the content breathe and flow."
-        )
-    elif primary_medium == "SMS":
+    primary_medium = agent.preferred_contact_endpoint.channel if agent.preferred_contact_endpoint else None
+
+    if primary_medium == CommsChannel.WEB:
+        return _get_web_chat_formatting_guidance()
+    elif primary_medium == CommsChannel.SMS:
         return (
             "SMS formatting (plain text, short):\n"
             "• No markdown, no formatting—plain text only\n"
@@ -3544,48 +3552,7 @@ def _get_formatting_guidance(
             "Example:\n"
             '  "BTC $67k (+2.3%), ETH $3.4k (+1.8%). Looking bullish today!"'
         )
-    elif primary_medium == CommsChannel.OTHER:
-        # Peer DMs use the same rich Markdown rendering as web chat
-        return (
-            "Web chat formatting:\n"
-            "Make your output visually stunning and instantly scannable—something they'd screenshot and share.\n\n"
-            "Design principles:\n"
-            "• **Rhythm and variety**—mix formats, don't repeat the same pattern over and over\n"
-            "• **Visual hierarchy**—use headers, whitespace, grouping to create layers\n"
-            "• **Emoji strategically**—visual anchors, not decoration on every line\n"
-            "• **Whitespace is content**—let sections breathe\n"
-            "• **Bold what matters**—make key info pop\n\n"
-            "Here's what great looks like:\n\n"
-            '  "## 🌤️ Frederick, MD\n\n'
-            "  **27°F** · Light snow · Feels like **23°F**\n\n"
-            "  💧 Humidity 100% · 💨 WSW 3 mph · 👁️ 1 mile visibility\n\n"
-            "  ---\n\n"
-            "  ### Today\\'s Forecast\n\n"
-            "  High **32°F** • Low **8°F**\n\n"
-            "  Sunrise 7:12 AM • Sunset 5:36 PM\n\n"
-            "  > 🧥 Bundle up—it\\'s a cold one out there!\n\n"
-            '  Want the weekly outlook?"\n\n'
-            "Notice:\n"
-            "• Opening line gives most important info (temp + conditions) in a natural flow\n"
-            "• Secondary details grouped on one line with emoji\n"
-            "• Not every piece of data gets its own line—variety creates visual interest\n"
-            "• Forecast section formatted differently than current conditions\n"
-            "• Blockquote for personality\n\n"
-            "Another example:\n\n"
-            '  "## 📊 Q4 Results\n\n'
-            "  **$13.1M revenue** • Up 21% YoY\n\n"
-            "  ![](result.inline from create_chart)\n\n"
-            "  | Region | Revenue | Growth |\n"
-            "  |--------|---------|--------|\n"
-            "  | [**Americas**](url) | $5.8M | 🟢 +31% |\n"
-            "  | [**APAC**](url) | $4.2M | 🟢 +23% |\n"
-            "  | [**EMEA**](url) | $3.1M | 🟡 +8% |\n\n"
-            "  > 💡 Americas drove 60% of growth—mainly enterprise deals closing faster than forecasted.\n\n"
-            "  > ⚠️ EMEA pipeline coverage at 1.8x (target: 3x)—need to accelerate prospecting.\n\n"
-            '  Should I break down the enterprise pipeline?"\n\n'
-            "The goal: **Make it feel designed, not templated.** Vary your formatting. Group related info. Use whitespace. Mix inline summaries with tables. Let the content breathe and flow."
-        )
-    elif primary_medium == "EMAIL":
+    elif primary_medium == CommsChannel.EMAIL:
         return (
             "Email formatting (rich, expressive HTML):\n"
             "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
