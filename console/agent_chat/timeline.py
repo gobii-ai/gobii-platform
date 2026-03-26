@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
+import logging
 import os
 import re
 from urllib.parse import unquote, urlencode
 import uuid
 from typing import Iterable, Literal, Sequence, Mapping
 
+import redis
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.humanize.templatetags.humanize import naturaltime
@@ -87,6 +89,8 @@ EMAIL_ALLOWED_CSS_PROPERTIES = [
     "padding",
     "padding-bottom",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def is_chat_hidden_message(message: PersistentAgentMessage) -> bool:
@@ -1277,8 +1281,12 @@ def build_processing_activity_map(agents: Sequence[PersistentAgent]) -> dict[str
         ):
             if queued_value or heartbeat_value or lock_value:
                 activity_by_agent_id[agent_id] = True
-    except Exception:
-        pass
+    except redis.RedisError:
+        logger.warning(
+            "Failed to read bulk processing activity from Redis for %s agents",
+            len(agent_ids),
+            exc_info=True,
+        )
 
     browser_agent_to_agent_ids: dict[int, list[str]] = {}
     for agent in agents:
