@@ -2114,7 +2114,11 @@ def build_prompt_context(
         )
 
     # Dynamic formatting guidance based on current medium context
-    formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
+    formatting_guidance = _get_formatting_guidance(
+        agent,
+        implied_send_active,
+        peer_dm_context=peer_dm_context,
+    )
 
 
     # Secrets block
@@ -3466,10 +3470,123 @@ def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
 
     return None
 
+def _get_web_chat_formatting_guidance() -> str:
+    """Return rich Markdown guidance for chat surfaces with full rendering support."""
+
+    return (
+        "Web chat and peer DM formatting:\n"
+        "Make your output visually stunning and instantly scannable—something they'd screenshot and share.\n\n"
+        "Design principles:\n"
+        "• **Rhythm and variety**—mix formats, don't repeat the same pattern over and over\n"
+        "• **Visual hierarchy**—use headers, whitespace, grouping to create layers\n"
+        "• **Emoji strategically**—visual anchors, not decoration on every line\n"
+        "• **Whitespace is content**—let sections breathe\n"
+        "• **Bold what matters**—make key info pop\n\n"
+        "Here's what great looks like:\n\n"
+        '  "## 🌤️ Frederick, MD\n\n'
+        "  **27°F** · Light snow · Feels like **23°F**\n\n"
+        "  💧 Humidity 100% · 💨 WSW 3 mph · 👁️ 1 mile visibility\n\n"
+        "  ---\n\n"
+        "  ### Today\\'s Forecast\n\n"
+        "  High **32°F** • Low **8°F**\n\n"
+        "  Sunrise 7:12 AM • Sunset 5:36 PM\n\n"
+        "  > 🧥 Bundle up—it\\'s a cold one out there!\n\n"
+        '  Want the weekly outlook?"\n\n'
+        "Notice:\n"
+        "• Opening line gives most important info (temp + conditions) in a natural flow\n"
+        "• Secondary details grouped on one line with emoji\n"
+        "• Not every piece of data gets its own line—variety creates visual interest\n"
+        "• Forecast section formatted differently than current conditions\n"
+        "• Blockquote for personality\n\n"
+        "Another example:\n\n"
+        '  "## 📊 Q4 Results\n\n'
+        "  **$13.1M revenue** • Up 21% YoY\n\n"
+        "  ![](result.inline from create_chart)\n\n"
+        "  | Region | Revenue | Growth |\n"
+        "  |--------|---------|--------|\n"
+        "  | [**Americas**](url) | $5.8M | 🟢 +31% |\n"
+        "  | [**APAC**](url) | $4.2M | 🟢 +23% |\n"
+        "  | [**EMEA**](url) | $3.1M | 🟡 +8% |\n\n"
+        "  > 💡 Americas drove 60% of growth—mainly enterprise deals closing faster than forecasted.\n\n"
+        "  > ⚠️ EMEA pipeline coverage at 1.8x (target: 3x)—need to accelerate prospecting.\n\n"
+        '  Should I break down the enterprise pipeline?"\n\n'
+        "The goal: **Make it feel designed, not templated.** Vary your formatting. Group related info. Use whitespace. Mix inline summaries with tables. Let the content breathe and flow."
+    )
+
+
+def _get_sms_formatting_guidance() -> str:
+    """Return plain-text guidance for SMS replies."""
+
+    return (
+        "SMS formatting (plain text, short):\n"
+        "• No markdown, no formatting—plain text only\n"
+        "• Aim for ≤160 chars when possible\n"
+        "• Be punchy and direct\n"
+        "Example:\n"
+        '  "BTC $67k (+2.3%), ETH $3.4k (+1.8%). Looking bullish today!"'
+    )
+
+
+def _get_email_formatting_guidance() -> str:
+    """Return HTML formatting guidance for email replies."""
+
+    return (
+        "Email formatting (rich, expressive HTML):\n"
+        "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
+        "• Headers: <h2>, <h3> to create clear sections\n"
+        "• Tables: <table> for data, comparisons, schedules—with headers and clean rows\n"
+        "• Charts: <img src='{path from result.inline}'> for visual data—path from create_chart result only\n"
+        "• Lists: <ul>/<ol> for scannable items\n"
+        "• Emphasis: <strong> for key info, <em> for nuance\n"
+        "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
+        "• Spacing: keep clear separation between blocks. Use table margin-bottom, or add one <br> after </table> when there is no bottom margin\n"
+        "• No markdown—pure HTML\n\n"
+        "Example—a visually rich update with chart:\n"
+        "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
+        "  <img src='$[/charts/crypto-a1b2c3.svg]'>  <!-- path from create_chart result.inline -->\n"
+        "  <p>Here's how your watchlist performed today:</p>\n"
+        "  <table style='border-collapse: collapse; width: 100%; margin: 0 0 16px;'>\n"
+        "    <tr style='background: #f5f5f5;'>\n"
+        "      <th style='padding: 8px; text-align: left;'>Asset</th>\n"
+        "      <th style='padding: 8px;'>Price</th>\n"
+        "      <th style='padding: 8px;'>24h</th>\n"
+        "    </tr>\n"
+        "    <tr><td style='padding: 8px;'>BTC</td><td style='padding: 8px;'><strong>$67,000</strong></td><td style='padding: 8px; color: green;'>+2.3%</td></tr>\n"
+        "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
+        "  </table>\n"
+        "  <br>\n"
+        "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
+        '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
+        "Charts: paste path from create_chart result.inline—never construct the path yourself."
+    )
+
+
+def _get_active_formatting_channel(
+    agent: PersistentAgent,
+    implied_send_active: bool,
+    *,
+    peer_dm_context: dict | None = None,
+) -> str:
+    """Return the primary channel label for the current run."""
+
+    if implied_send_active or peer_dm_context is not None:
+        return "web_chat"
+
+    primary_medium = agent.preferred_contact_endpoint.channel if agent.preferred_contact_endpoint else None
+    if primary_medium == CommsChannel.WEB:
+        return "web_chat"
+    if primary_medium == CommsChannel.EMAIL:
+        return "email"
+    if primary_medium == CommsChannel.SMS:
+        return "sms"
+    return "generic"
+
 
 def _get_formatting_guidance(
     agent: PersistentAgent,
     implied_send_active: bool,
+    *,
+    peer_dm_context: dict | None = None,
 ) -> str:
     """
     Build formatting guidance based on the agent's current context.
@@ -3479,102 +3596,31 @@ def _get_formatting_guidance(
     2. Preferred contact endpoint → that channel
     3. Fallback → general guidance for all channels
     """
-    # Determine primary medium
-    primary_medium = None
-    if implied_send_active:
-        primary_medium = "WEB"
-    elif agent.preferred_contact_endpoint:
-        primary_medium = agent.preferred_contact_endpoint.channel
+    active_channel = _get_active_formatting_channel(
+        agent,
+        implied_send_active,
+        peer_dm_context=peer_dm_context,
+    )
 
-    # Build guidance based on primary medium
-    if primary_medium == "WEB":
-        return (
-            "Web chat formatting:\n"
-            "Make your output visually stunning and instantly scannable—something they'd screenshot and share.\n\n"
-            "Design principles:\n"
-            "• **Rhythm and variety**—mix formats, don't repeat the same pattern over and over\n"
-            "• **Visual hierarchy**—use headers, whitespace, grouping to create layers\n"
-            "• **Emoji strategically**—visual anchors, not decoration on every line\n"
-            "• **Whitespace is content**—let sections breathe\n"
-            "• **Bold what matters**—make key info pop\n\n"
-            "Here's what great looks like:\n\n"
-            '  "## 🌤️ Frederick, MD\n\n'
-            "  **27°F** · Light snow · Feels like **23°F**\n\n"
-            "  💧 Humidity 100% · 💨 WSW 3 mph · 👁️ 1 mile visibility\n\n"
-            "  ---\n\n"
-            "  ### Today\\'s Forecast\n\n"
-            "  High **32°F** • Low **8°F**\n\n"
-            "  Sunrise 7:12 AM • Sunset 5:36 PM\n\n"
-            "  > 🧥 Bundle up—it\\'s a cold one out there!\n\n"
-            '  Want the weekly outlook?"\n\n'
-            "Notice:\n"
-            "• Opening line gives most important info (temp + conditions) in a natural flow\n"
-            "• Secondary details grouped on one line with emoji\n"
-            "• Not every piece of data gets its own line—variety creates visual interest\n"
-            "• Forecast section formatted differently than current conditions\n"
-            "• Blockquote for personality\n\n"
-            "Another example:\n\n"
-            '  "## 📊 Q4 Results\n\n'
-            "  **$13.1M revenue** • Up 21% YoY\n\n"
-            "  ![](result.inline from create_chart)\n\n"
-            "  | Region | Revenue | Growth |\n"
-            "  |--------|---------|--------|\n"
-            "  | [**Americas**](url) | $5.8M | 🟢 +31% |\n"
-            "  | [**APAC**](url) | $4.2M | 🟢 +23% |\n"
-            "  | [**EMEA**](url) | $3.1M | 🟡 +8% |\n\n"
-            "  > 💡 Americas drove 60% of growth—mainly enterprise deals closing faster than forecasted.\n\n"
-            "  > ⚠️ EMEA pipeline coverage at 1.8x (target: 3x)—need to accelerate prospecting.\n\n"
-            '  Should I break down the enterprise pipeline?"\n\n'
-            "The goal: **Make it feel designed, not templated.** Vary your formatting. Group related info. Use whitespace. Mix inline summaries with tables. Let the content breathe and flow."
-        )
-    elif primary_medium == "SMS":
-        return (
-            "SMS formatting (plain text, short):\n"
-            "• No markdown, no formatting—plain text only\n"
-            "• Aim for ≤160 chars when possible\n"
-            "• Be punchy and direct\n"
-            "Example:\n"
-            '  "BTC $67k (+2.3%), ETH $3.4k (+1.8%). Looking bullish today!"'
-        )
-    elif primary_medium == "EMAIL":
-        return (
-            "Email formatting (rich, expressive HTML):\n"
-            "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
-            "• Headers: <h2>, <h3> to create clear sections\n"
-            "• Tables: <table> for data, comparisons, schedules—with headers and clean rows\n"
-            "• Charts: <img src='{path from result.inline}'> for visual data—path from create_chart result only\n"
-            "• Lists: <ul>/<ol> for scannable items\n"
-            "• Emphasis: <strong> for key info, <em> for nuance\n"
-            "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
-            "• Spacing: keep clear separation between blocks. Use table margin-bottom, or add one <br> after </table> when there is no bottom margin\n"
-            "• No markdown—pure HTML\n\n"
-            "Example—a visually rich update with chart:\n"
-            "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
-            "  <img src='$[/charts/crypto-a1b2c3.svg]'>  <!-- path from create_chart result.inline -->\n"
-            "  <p>Here's how your watchlist performed today:</p>\n"
-            "  <table style='border-collapse: collapse; width: 100%; margin: 0 0 16px;'>\n"
-            "    <tr style='background: #f5f5f5;'>\n"
-            "      <th style='padding: 8px; text-align: left;'>Asset</th>\n"
-            "      <th style='padding: 8px;'>Price</th>\n"
-            "      <th style='padding: 8px;'>24h</th>\n"
-            "    </tr>\n"
-            "    <tr><td style='padding: 8px;'>BTC</td><td style='padding: 8px;'><strong>$67,000</strong></td><td style='padding: 8px; color: green;'>+2.3%</td></tr>\n"
-            "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
-            "  </table>\n"
-            "  <br>\n"
-            "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
-            '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
-            "Charts: paste path from create_chart result.inline—never construct the path yourself."
-        )
-    else:
-        # Multiple channels or unknown—give compact reference for all
-        return (
-            "Formatting by channel:\n"
-            "• Web chat: Rich markdown (**bold**, headers, tables, paste result.inline for charts)\n"
-            "• Email: Rich HTML (<table>, <ul>, <strong>, <img src='{result.inline path}'> for charts)—no markdown\n"
-            "• SMS: Plain text only, ≤160 chars ideal\n"
-            "Charts: paste path from create_chart result.inline—never construct the path yourself."
-        )
+    return (
+        "Formatting guidance:\n"
+        "Multiple channels can matter in the same run. Use the section matching the message you are producing, "
+        "and treat <active_channel> as the default when the current turn has one clear primary surface.\n\n"
+        f"<active_channel>{active_channel}</active_channel>\n\n"
+        "<web_chat>\n"
+        f"{_get_web_chat_formatting_guidance()}\n"
+        "</web_chat>\n\n"
+        "<email>\n"
+        f"{_get_email_formatting_guidance()}\n"
+        "</email>\n\n"
+        "<sms>\n"
+        f"{_get_sms_formatting_guidance()}\n"
+        "</sms>\n\n"
+        "<fallback>\n"
+        "If channel context is mixed or unknown, pick rules based on the actual delivery surface: "
+        "web chat uses Markdown, email uses HTML, SMS uses plain text only.\n"
+        "</fallback>"
+    )
 
 
 def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_active: bool) -> str:
