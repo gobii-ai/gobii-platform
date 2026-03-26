@@ -302,6 +302,26 @@ function renderAgentChatPage() {
   )
 }
 
+function buildInitialSubscriptionState() {
+  return {
+    currentPlan: 'free' as const,
+    isLoading: false,
+    isUpgradeModalOpen: false,
+    upgradeModalSource: null,
+    upgradeModalDismissible: true,
+    isProprietaryMode: true,
+    pricingModalAlmostFullScreen: true,
+    ctaPricingCancelTextUnderBtn: false,
+    ctaStartFreeTrial: true,
+    ctaPickAPlan: true,
+    ctaContinueAgentBtn: false,
+    ctaNoChargeDuringTrial: true,
+    trialDaysByPlan: { startup: 14, scale: 14 },
+    trialEligible: true,
+    ensureAuthenticated: ensureAuthenticatedMock,
+  }
+}
+
 describe('AgentChatPage trial onboarding', () => {
   beforeEach(() => {
     window.history.pushState({}, '', '/app/agents/new?spawn=1')
@@ -314,23 +334,7 @@ describe('AgentChatPage trial onboarding', () => {
     updateAgentMock.mockReset()
     fetchAgentSpawnIntentMock.mockReset()
     ensureAuthenticatedMock.mockClear()
-    useSubscriptionStore.setState({
-      currentPlan: 'free',
-      isLoading: false,
-      isUpgradeModalOpen: false,
-      upgradeModalSource: null,
-      upgradeModalDismissible: true,
-      isProprietaryMode: true,
-      pricingModalAlmostFullScreen: true,
-      ctaPricingCancelTextUnderBtn: false,
-      ctaStartFreeTrial: true,
-      ctaPickAPlan: true,
-      ctaContinueAgentBtn: false,
-      ctaNoChargeDuringTrial: true,
-      trialDaysByPlan: { startup: 14, scale: 14 },
-      trialEligible: true,
-      ensureAuthenticated: ensureAuthenticatedMock,
-    })
+    useSubscriptionStore.setState(buildInitialSubscriptionState())
   })
 
   afterEach(() => {
