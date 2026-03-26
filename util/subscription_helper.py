@@ -60,6 +60,18 @@ def _clear_owner_plan_cache(owner) -> None:
         delattr(owner, _OWNER_PLAN_CACHE_ATTR)
 
 
+def _owner_plan_cache_fingerprint(owner) -> tuple[Any, ...]:
+    """Return a lightweight fingerprint for the owner's current in-memory plan state."""
+    billing = getattr(owner, "billing", None)
+    return (
+        getattr(owner, "pk", None),
+        getattr(billing, "pk", None),
+        str(getattr(billing, "subscription", "") or ""),
+        str(getattr(billing, "plan_version_id", "") or ""),
+        str(getattr(owner, "plan", "") or ""),
+    )
+
+
 def _individual_plan_product_ids() -> set[str]:
     """Return product IDs for non-organization plans.
 
@@ -926,9 +938,12 @@ def reconcile_user_plan_from_stripe(user) -> dict[str, int | str]:
 
 def get_owner_plan(owner) -> dict[str, int | str]:
     """Return plan configuration for a user or organization owner."""
-    cached_plan = getattr(owner, _OWNER_PLAN_CACHE_ATTR, _MISSING)
-    if cached_plan is not _MISSING:
-        return dict(cached_plan)
+    fingerprint = _owner_plan_cache_fingerprint(owner)
+    cached_entry = getattr(owner, _OWNER_PLAN_CACHE_ATTR, _MISSING)
+    if cached_entry is not _MISSING:
+        cached_fingerprint, cached_plan = cached_entry
+        if cached_fingerprint == fingerprint:
+            return dict(cached_plan)
 
     owner_type = _resolve_owner_type(owner)
     owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
@@ -938,7 +953,7 @@ def get_owner_plan(owner) -> dict[str, int | str]:
         plan_context = get_owner_plan_context(owner)
         if plan_context:
             resolved_plan = dict(plan_context)
-            setattr(owner, _OWNER_PLAN_CACHE_ATTR, resolved_plan)
+            setattr(owner, _OWNER_PLAN_CACHE_ATTR, (fingerprint, resolved_plan))
             return dict(resolved_plan)
     except Exception:
         logger.warning(
@@ -951,7 +966,7 @@ def get_owner_plan(owner) -> dict[str, int | str]:
     sub_name = getattr(billing_record, "subscription", None) if billing_record else None
     sub_key = str(sub_name).lower() if sub_name else PlanNames.FREE
     resolved_plan = dict(PLAN_CONFIG.get(sub_key, PLAN_CONFIG[PlanNames.FREE]))
-    setattr(owner, _OWNER_PLAN_CACHE_ATTR, resolved_plan)
+    setattr(owner, _OWNER_PLAN_CACHE_ATTR, (_owner_plan_cache_fingerprint(owner), resolved_plan))
     return dict(resolved_plan)
 
 def get_user_plan(user) -> dict[str, int | str]:
