@@ -61,6 +61,7 @@ from .processing_flags import (
     enqueue_pending_agent,
     get_pending_drain_settings,
     is_agent_pending,
+    is_processing_queued,
     set_processing_heartbeat,
 )
 from .llm_utils import (
@@ -691,7 +692,7 @@ def _schedule_agent_follow_up(*, agent_id: Union[str, UUID], delay_seconds: int,
         if span is not None:
             span.add_event(f"{reason} follow-up scheduled")
     except Exception:
-        logger.debug(
+        logger.warning(
             "Failed to schedule %s follow-up for agent %s",
             reason,
             agent_id,
@@ -2163,17 +2164,17 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
     if budget_ctx is None:
         return
 
-    # If pending follow-ups are queued, keep the cycle open so they can run.
+    # If follow-ups are queued, keep the cycle open so they can run.
     try:
         redis_client = get_redis_client()
-        if is_agent_pending(agent.id, client=redis_client):
+        if is_agent_pending(agent.id, client=redis_client) or is_processing_queued(agent.id, client=redis_client):
             logger.info(
-                "Agent %s sleeping with pending work queued; keeping cycle active.",
+                "Agent %s sleeping with queued follow-up work; keeping cycle active.",
                 agent.id,
             )
             return
     except Exception:
-        logger.debug("Pending-flag check failed; proceeding to default close logic", exc_info=True)
+        logger.debug("Follow-up state check failed; proceeding to default close logic", exc_info=True)
 
     try:
         current_depth = (

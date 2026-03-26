@@ -1456,7 +1456,6 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
                     e,
                 )
 
-        _clear_owner_plan_cache(owner)
         return billing_record
 
 
