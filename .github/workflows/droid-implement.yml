@@ -46,7 +46,7 @@ jobs:
 
       - name: Implement with Droid
         env:
-          FACTORY_API_KEY: ${{ secrets.FACTORY_API_KEY }}
+          FACTORY_API_KEY: ${{ secrets.DROID_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           BRANCH="droid/issue-${{ github.event.issue.number }}"
