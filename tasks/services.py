@@ -181,7 +181,6 @@ class TaskCreditService:
         return Decimal(TaskCreditService.get_user_task_credits_used(owner, task_credits))
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Calculate Available Tasks For Owner")
     def calculate_available_tasks_for_owner(owner, task_credits: list | None = None) -> Decimal:
         """Return remaining credits for a User or Organization owner."""
         if TaskCreditService._is_community_unlimited():
@@ -511,7 +510,6 @@ class TaskCreditService:
             return int(credits_to_grant)
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Consume Credit")
     def consume_credit(user, additional_task: bool = False, amount: Decimal | None = None):
         """
         Consumes a task credit for a user. If the user has no available credits, a ValidationError is raised. Note: if
@@ -777,7 +775,6 @@ class TaskCreditService:
             return TaskCreditService.get_current_task_credit(owner)
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Consume Credit For Owner")
     def consume_credit_for_owner(owner, additional_task: bool = False, amount: Decimal | None = None):
         """
         Consume a credit for either a User or an Organization.
@@ -1221,7 +1218,6 @@ class TaskCreditService:
                         break  # stop at the *lowest* new threshold
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Check And Consume Credit")
     def check_and_consume_credit(user, amount: Decimal | None = None) -> dict:
         """
         Atomically attempts to consume a task credit for ``user``.
