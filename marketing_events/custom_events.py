@@ -10,8 +10,8 @@ from util.subscription_helper import get_active_subscription, get_owner_plan
 from util.user_behavior import (
     count_messages_sent_to_gobii,
     get_custom_capi_event_delay_seconds,
-    is_fast_cancel_user,
-    is_user_currently_in_trial,
+    is_fast_cancel_owner,
+    is_owner_currently_in_trial,
 )
 
 
@@ -121,17 +121,18 @@ def _should_enqueue_configured_custom_capi_event(
     plan_owner=None,
     properties: dict | None = None,
 ) -> bool:
+    billed_owner = plan_owner or user
     if user is None or getattr(user, "id", None) is None:
         return False
-    if not is_user_currently_in_trial(user):
+    if not is_owner_currently_in_trial(billed_owner):
         return False
-    if is_fast_cancel_user(user):
+    if is_fast_cancel_owner(billed_owner):
         return False
     if str(event_name) == ConfiguredCustomEvent.INBOUND_MESSAGE:
         message_count = _resolve_inbound_message_count(user, dict(properties or {}))
         return message_count in INBOUND_MESSAGE_CAPI_COUNTS
     if str(event_name) == ConfiguredCustomEvent.AGENT_CREATED:
-        return _is_first_workspace_agent_creation(plan_owner or user)
+        return _is_first_workspace_agent_creation(billed_owner)
     return True
 
 
@@ -164,11 +165,11 @@ def emit_configured_custom_capi_event(
     if request is None:
         resolved_context = build_marketing_context_from_user(user) | (context or {})
 
-    active_subscription = get_active_subscription(user)
+    active_subscription = get_active_subscription(resolved_plan_owner)
     capi_delay_subscription_guarded(
         user=user,
         event_name=str(event_name),
-        countdown_seconds=get_custom_capi_event_delay_seconds(user),
+        countdown_seconds=get_custom_capi_event_delay_seconds(resolved_plan_owner),
         subscription_guard_id=getattr(active_subscription, "id", None),
         properties=resolved_properties,
         request=request,

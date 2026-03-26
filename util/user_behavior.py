@@ -2,11 +2,12 @@ import math
 from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 
+from django.contrib.auth import get_user_model
 from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
-from util.subscription_helper import get_active_subscription
+from util.subscription_helper import get_active_subscription, get_stripe_customer
 
 
 try:
@@ -34,25 +35,38 @@ def _coerce_datetime(value: Any) -> datetime | None:
     return None
 
 
-def get_trial_started_at(user) -> datetime | None:
+def _is_user_owner(owner) -> bool:
+    user_model = get_user_model()
+    return isinstance(owner, user_model)
+
+
+def get_owner_trial_started_at(owner) -> datetime | None:
+    if owner is None or getattr(owner, "id", None) is None:
+        return None
+
     from api.models import TaskCredit
 
-    trial_credit = (
-        TaskCredit.objects.filter(user=user, free_trial_start=True)
-        .order_by("granted_date")
-        .only("granted_date")
-        .first()
-    )
-    if trial_credit is not None:
-        return trial_credit.granted_date
+    if _is_user_owner(owner):
+        trial_credit = (
+            TaskCredit.objects.filter(user=owner, free_trial_start=True)
+            .order_by("granted_date")
+            .only("granted_date")
+            .first()
+        )
+        if trial_credit is not None:
+            return trial_credit.granted_date
 
     if not DJSTRIPE_AVAILABLE:
         return None
 
-    subscriptions = (
-        DjstripeSubscription.objects.filter(customer__subscriber_id=getattr(user, "id", None))
-        .order_by("trial_start", "trial_end", "current_period_start")
-    )
+    try:
+        customer = get_stripe_customer(owner)
+    except TypeError:
+        return None
+    if customer is None:
+        return None
+
+    subscriptions = customer.subscriptions.all().order_by("trial_start", "trial_end", "current_period_start")
     for subscription in subscriptions:
         trial_started_at = _coerce_datetime(getattr(subscription, "trial_start", None))
         if trial_started_at is not None:
@@ -64,6 +78,10 @@ def get_trial_started_at(user) -> datetime | None:
             return trial_started_at
 
     return None
+
+
+def get_trial_started_at(user) -> datetime | None:
+    return get_owner_trial_started_at(user)
 
 
 def _subscription_has_trial_window(subscription) -> bool:
@@ -89,23 +107,28 @@ def _get_cancel_scheduled_at(subscription) -> datetime | None:
     )
 
 
-def is_fast_cancel_user(user) -> bool:
-    if user is None or getattr(user, "id", None) is None:
+def is_fast_cancel_owner(owner) -> bool:
+    if owner is None or getattr(owner, "id", None) is None:
         return False
     if not DJSTRIPE_AVAILABLE:
         return False
 
-    trial_started_at = get_trial_started_at(user)
+    trial_started_at = get_owner_trial_started_at(owner)
     if trial_started_at is None:
         return False
 
+    try:
+        customer = get_stripe_customer(owner)
+    except TypeError:
+        return False
+    if customer is None:
+        return False
+
     cutoff_at = trial_started_at + timedelta(hours=settings.TRIAL_FAST_CANCEL_CUTOFF_HOURS)
-    subscriptions = (
-        DjstripeSubscription.objects.filter(
-            customer__subscriber_id=user.id,
-            cancel_at_period_end=True,
-        )
-        .order_by("djstripe_updated", "djstripe_created", "created")
+    subscriptions = customer.subscriptions.filter(cancel_at_period_end=True).order_by(
+        "djstripe_updated",
+        "djstripe_created",
+        "created",
     )
     for subscription in subscriptions:
         if not _subscription_has_trial_window(subscription):
@@ -119,8 +142,12 @@ def is_fast_cancel_user(user) -> bool:
     return False
 
 
-def get_custom_capi_event_delay_seconds(user) -> int:
-    trial_started_at = get_trial_started_at(user)
+def is_fast_cancel_user(user) -> bool:
+    return is_fast_cancel_owner(user)
+
+
+def get_custom_capi_event_delay_seconds(owner) -> int:
+    trial_started_at = get_owner_trial_started_at(owner)
     buffer_seconds = settings.CAPI_CUSTOM_EVENT_DELAY_BUFFER_HOURS * 3600
     if trial_started_at is None:
         return buffer_seconds
@@ -130,11 +157,14 @@ def get_custom_capi_event_delay_seconds(user) -> int:
     return int(math.ceil(remaining_seconds + buffer_seconds))
 
 
-def is_user_currently_in_trial(user) -> bool:
-    if user is None or getattr(user, "id", None) is None:
+def is_owner_currently_in_trial(owner) -> bool:
+    if owner is None or getattr(owner, "id", None) is None:
         return False
 
-    active_subscription = get_active_subscription(user)
+    try:
+        active_subscription = get_active_subscription(owner)
+    except TypeError:
+        return False
     if active_subscription is None:
         return False
 
@@ -145,6 +175,10 @@ def is_user_currently_in_trial(user) -> bool:
         or ""
     ).strip().lower()
     return subscription_status == "trialing"
+
+
+def is_user_currently_in_trial(user) -> bool:
+    return is_owner_currently_in_trial(user)
 
 
 def count_messages_sent_to_gobii(user) -> int:

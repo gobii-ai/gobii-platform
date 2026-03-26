@@ -102,14 +102,14 @@ class MarketingEventsApiTests(SimpleTestCase):
     @patch("marketing_events.custom_events.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("marketing_events.custom_events.get_custom_capi_event_delay_seconds", return_value=3600)
     @patch("marketing_events.custom_events._is_first_workspace_agent_creation", return_value=True)
-    @patch("marketing_events.custom_events.is_fast_cancel_user", return_value=False)
-    @patch("marketing_events.custom_events.is_user_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
     @patch("marketing_events.custom_events.get_owner_plan", return_value={"id": "startup"})
     def test_emit_configured_custom_capi_event_uses_plan_value_and_ad_targets(
         self,
         _mock_get_owner_plan,
-        _mock_is_user_currently_in_trial,
-        _mock_is_fast_cancel_user,
+        _mock_is_owner_currently_in_trial,
+        _mock_is_fast_cancel_owner,
         _mock_is_first_workspace_agent_creation,
         _mock_get_custom_capi_event_delay_seconds,
         _mock_get_active_subscription,
@@ -152,14 +152,14 @@ class MarketingEventsApiTests(SimpleTestCase):
     @patch("marketing_events.custom_events.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("marketing_events.custom_events.get_custom_capi_event_delay_seconds", return_value=3600)
     @patch("marketing_events.custom_events._is_first_workspace_agent_creation", return_value=True)
-    @patch("marketing_events.custom_events.is_fast_cancel_user", return_value=False)
-    @patch("marketing_events.custom_events.is_user_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
     @patch("marketing_events.custom_events.get_owner_plan", return_value={"id": "free"})
     def test_emit_configured_custom_capi_event_omits_value_for_free_plan(
         self,
         _mock_get_owner_plan,
-        _mock_is_user_currently_in_trial,
-        _mock_is_fast_cancel_user,
+        _mock_is_owner_currently_in_trial,
+        _mock_is_fast_cancel_owner,
         _mock_is_first_workspace_agent_creation,
         _mock_get_custom_capi_event_delay_seconds,
         _mock_get_active_subscription,
@@ -187,10 +187,10 @@ class MarketingEventsApiTests(SimpleTestCase):
 
     @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
     @patch("marketing_events.custom_events._is_first_workspace_agent_creation", return_value=True)
-    @patch("marketing_events.custom_events.is_user_currently_in_trial", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=False)
     def test_emit_configured_custom_capi_event_skips_when_user_not_in_trial(
         self,
-        _mock_is_user_currently_in_trial,
+        _mock_is_owner_currently_in_trial,
         _mock_is_first_workspace_agent_creation,
         mock_capi_delay_subscription_guarded,
     ):
@@ -207,12 +207,12 @@ class MarketingEventsApiTests(SimpleTestCase):
 
     @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
     @patch("marketing_events.custom_events._is_first_workspace_agent_creation", return_value=True)
-    @patch("marketing_events.custom_events.is_fast_cancel_user", return_value=True)
-    @patch("marketing_events.custom_events.is_user_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=True)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
     def test_emit_configured_custom_capi_event_skips_for_fast_cancel_user(
         self,
-        _mock_is_user_currently_in_trial,
-        _mock_is_fast_cancel_user,
+        _mock_is_owner_currently_in_trial,
+        _mock_is_fast_cancel_owner,
         _mock_is_first_workspace_agent_creation,
         mock_capi_delay_subscription_guarded,
     ):
@@ -240,14 +240,14 @@ class MarketingEventsApiTests(SimpleTestCase):
     @patch("marketing_events.custom_events.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("marketing_events.custom_events.get_custom_capi_event_delay_seconds", return_value=3600)
     @patch("marketing_events.custom_events.count_messages_sent_to_gobii", return_value=1)
-    @patch("marketing_events.custom_events.is_fast_cancel_user", return_value=False)
-    @patch("marketing_events.custom_events.is_user_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
     @patch("marketing_events.custom_events.get_owner_plan", return_value={"id": "startup"})
     def test_emit_configured_custom_capi_event_sends_inbound_message_for_first_message(
         self,
         _mock_get_owner_plan,
-        _mock_is_user_currently_in_trial,
-        _mock_is_fast_cancel_user,
+        _mock_is_owner_currently_in_trial,
+        _mock_is_fast_cancel_owner,
         _mock_count_messages_sent_to_gobii,
         _mock_get_custom_capi_event_delay_seconds,
         _mock_get_active_subscription,
@@ -280,12 +280,12 @@ class MarketingEventsApiTests(SimpleTestCase):
 
     @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
     @patch("marketing_events.custom_events.count_messages_sent_to_gobii", return_value=2)
-    @patch("marketing_events.custom_events.is_fast_cancel_user", return_value=False)
-    @patch("marketing_events.custom_events.is_user_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
     def test_emit_configured_custom_capi_event_skips_inbound_message_outside_thresholds(
         self,
-        _mock_is_user_currently_in_trial,
-        _mock_is_fast_cancel_user,
+        _mock_is_owner_currently_in_trial,
+        _mock_is_fast_cancel_owner,
         _mock_count_messages_sent_to_gobii,
         mock_capi_delay_subscription_guarded,
     ):
@@ -302,12 +302,12 @@ class MarketingEventsApiTests(SimpleTestCase):
 
     @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
     @patch("marketing_events.custom_events._is_first_workspace_agent_creation", return_value=False)
-    @patch("marketing_events.custom_events.is_fast_cancel_user", return_value=False)
-    @patch("marketing_events.custom_events.is_user_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
     def test_emit_configured_custom_capi_event_skips_agent_created_after_first_workspace_agent(
         self,
-        _mock_is_user_currently_in_trial,
-        _mock_is_fast_cancel_user,
+        _mock_is_owner_currently_in_trial,
+        _mock_is_fast_cancel_owner,
         _mock_is_first_workspace_agent_creation,
         mock_capi_delay_subscription_guarded,
     ):
@@ -321,3 +321,56 @@ class MarketingEventsApiTests(SimpleTestCase):
         )
 
         mock_capi_delay_subscription_guarded.assert_not_called()
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        CAPI_CUSTOM_EVENT_CURRENCY="USD",
+        CAPI_CUSTOM_EVENT_VALUES_BY_PLAN={
+            "pro": {"IntegrationAdded": 9.45},
+            "scale": {"IntegrationAdded": 47.25},
+            "org_team": {"IntegrationAdded": 9.45},
+        },
+    )
+    @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
+    @patch("marketing_events.custom_events.get_active_subscription", return_value=SimpleNamespace(id="sub_org_123"))
+    @patch("marketing_events.custom_events.get_custom_capi_event_delay_seconds", return_value=7200)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.get_owner_plan", return_value={"id": "org_team"})
+    def test_emit_configured_custom_capi_event_uses_plan_owner_for_trial_gate_delay_and_subscription_guard(
+        self,
+        _mock_get_owner_plan,
+        mock_is_owner_currently_in_trial,
+        mock_is_fast_cancel_owner,
+        mock_get_custom_capi_event_delay_seconds,
+        mock_get_active_subscription,
+        mock_capi_delay_subscription_guarded,
+    ):
+        user = SimpleNamespace(id=42, email="member@example.com", phone="+15555550123")
+        org_owner = SimpleNamespace(id="org-123")
+
+        emit_configured_custom_capi_event(
+            user=user,
+            event_name=ConfiguredCustomEvent.INTEGRATION_ADDED,
+            plan_owner=org_owner,
+            properties={"agent_id": "agent-1"},
+        )
+
+        mock_is_owner_currently_in_trial.assert_called_once_with(org_owner)
+        mock_is_fast_cancel_owner.assert_called_once_with(org_owner)
+        mock_get_custom_capi_event_delay_seconds.assert_called_once_with(org_owner)
+        mock_get_active_subscription.assert_called_once_with(org_owner)
+        mock_capi_delay_subscription_guarded.assert_called_once_with(
+            user=user,
+            event_name="IntegrationAdded",
+            countdown_seconds=7200,
+            subscription_guard_id="sub_org_123",
+            properties={
+                "agent_id": "agent-1",
+                "value": 9.45,
+                "currency": "USD",
+            },
+            request=None,
+            context={"consent": True},
+            provider_targets=["meta", "reddit", "tiktok"],
+        )
