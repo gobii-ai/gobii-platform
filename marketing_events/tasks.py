@@ -126,13 +126,28 @@ def _subscription_state_from_stripe(subscription_id: str) -> tuple[bool | None, 
     return cancel_at_period_end, normalized_status
 
 
-def _should_send_start_trial(payload: dict) -> tuple[bool, str | None]:
+def _subscription_guard_id_from_payload(payload: dict) -> str | None:
+    guard_subscription_id = (payload or {}).get("subscription_guard_id")
+    if guard_subscription_id is not None:
+        normalized_guard_id = str(guard_subscription_id).strip()
+        if normalized_guard_id:
+            return normalized_guard_id
+
     properties = ((payload or {}).get("properties") or {})
     subscription_id = properties.get("subscription_id")
     if not subscription_id:
-        return True, None
+        return None
 
     normalized_subscription_id = str(subscription_id).strip()
+    return normalized_subscription_id or None
+
+
+def _payload_event_name(payload: dict) -> str:
+    return str((payload or {}).get("event_name") or "").strip() or "UnknownEvent"
+
+
+def _should_send_subscription_guarded_event(payload: dict) -> tuple[bool, str | None]:
+    normalized_subscription_id = _subscription_guard_id_from_payload(payload)
     if not normalized_subscription_id:
         return True, None
 
@@ -147,14 +162,16 @@ def _should_send_start_trial(payload: dict) -> tuple[bool, str | None]:
 
     if cancel_at_period_end:
         logger.info(
-            "Skipping StartTrial marketing event because subscription %s is set to cancel at period end.",
+            "Skipping %s marketing event because subscription %s is set to cancel at period end.",
+            _payload_event_name(payload),
             normalized_subscription_id,
         )
         return False, decision_source
 
     if subscription_status == "canceled":
         logger.info(
-            "Skipping StartTrial marketing event because subscription %s is already canceled.",
+            "Skipping %s marketing event because subscription %s is already canceled.",
+            _payload_event_name(payload),
             normalized_subscription_id,
         )
         return False, decision_source
@@ -162,16 +179,17 @@ def _should_send_start_trial(payload: dict) -> tuple[bool, str | None]:
     return True, decision_source
 
 
-def _track_start_trial_skip(payload: dict, *, reason: str, decision_source: str | None = None) -> None:
+def _track_subscription_guarded_skip(payload: dict, *, reason: str, decision_source: str | None = None) -> None:
     user_payload = (payload or {}).get("user") or {}
     analytics_user_id = _analytics_user_id(user_payload.get("id"), None)
     properties_payload = (payload or {}).get("properties") or {}
+    event_name = _payload_event_name(payload)
     skip_properties = {
-        "event_name": "StartTrial",
+        "event_name": event_name,
         "reason": reason,
     }
 
-    subscription_id = properties_payload.get("subscription_id")
+    subscription_id = _subscription_guard_id_from_payload(payload) or properties_payload.get("subscription_id")
     if subscription_id:
         skip_properties["subscription_id"] = str(subscription_id)
     if decision_source:
@@ -298,9 +316,30 @@ def enqueue_marketing_event(self, payload: dict):
 def enqueue_start_trial_marketing_event(self, payload: dict):
     if not settings.GOBII_PROPRIETARY_MODE:
         return
-    should_send, decision_source = _should_send_start_trial(payload)
+    should_send, decision_source = _should_send_subscription_guarded_event(payload)
     if not should_send:
-        _track_start_trial_skip(
+        _track_subscription_guarded_skip(
+            payload,
+            reason="subscription_canceled_or_cancel_at_period_end",
+            decision_source=decision_source,
+        )
+        return
+    _dispatch_marketing_event(payload)
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(TemporaryError,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=6,
+)
+def enqueue_delayed_subscription_guarded_marketing_event(self, payload: dict):
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return
+    should_send, decision_source = _should_send_subscription_guarded_event(payload)
+    if not should_send:
+        _track_subscription_guarded_skip(
             payload,
             reason="subscription_canceled_or_cancel_at_period_end",
             decision_source=decision_source,

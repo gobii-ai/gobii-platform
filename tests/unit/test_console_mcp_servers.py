@@ -21,7 +21,8 @@ from api.models import (
 )
 from console.forms import MCPServerConfigForm
 from api.services.pipedream_apps import PipedreamCatalogError, enable_pipedream_apps_for_agent
-from util.analytics import AnalyticsEvent
+from api.services.mcp_servers import update_agent_personal_servers
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 def _create_console_test_agent(*, user, organization=None, name: str) -> PersistentAgent:
@@ -793,7 +794,6 @@ class MCPServerAssignmentAPITests(TestCase):
         manager.initialize.assert_not_called()
         manager.refresh_server.assert_not_called()
         manager.remove_server.assert_not_called()
-
     @patch("console.api_views.get_mcp_manager")
     def test_update_assignments_org_scope(self, mock_get_mcp_manager):
         org = Organization.objects.create(name="Org Assign", slug="org-assign", created_by=self.user)
@@ -878,6 +878,44 @@ class MCPServerAssignmentAPITests(TestCase):
         manager.initialize.assert_not_called()
         manager.refresh_server.assert_not_called()
         manager.remove_server.assert_not_called()
+
+
+@tag("batch_console_mcp_servers")
+class MCPServerCustomEventTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="assign-custom-user",
+            email="assign-custom@example.com",
+            password="test-pass-123",
+        )
+
+    @patch("api.services.mcp_servers.emit_configured_custom_capi_event")
+    def test_update_agent_personal_servers_emits_integration_added_custom_event(self, mock_emit_custom_event):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="personal-add",
+            display_name="Personal Add",
+            url="https://personal-add.example.com/mcp",
+        )
+        agent = _create_console_test_agent(user=self.user, name="Assignable")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            update_agent_personal_servers(
+                agent,
+                [str(server.id)],
+                actor_user_id=self.user.id,
+                source=AnalyticsSource.WEB,
+            )
+
+        mock_emit_custom_event.assert_called_once()
+        call_kwargs = mock_emit_custom_event.call_args.kwargs
+        self.assertEqual(call_kwargs["event_name"], "IntegrationAdded")
+        self.assertEqual(call_kwargs["user"], self.user)
+        self.assertEqual(call_kwargs["properties"]["agent_id"], str(agent.id))
+        self.assertEqual(call_kwargs["properties"]["integration_type"], "mcp")
+        self.assertEqual(call_kwargs["properties"]["mcp_server_id"], str(server.id))
+        self.assertEqual(call_kwargs["properties"]["mcp_server_scope"], MCPServerConfig.Scope.USER)
 
 
 @tag("batch_console_mcp_servers")

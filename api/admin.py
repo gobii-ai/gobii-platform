@@ -62,6 +62,7 @@ from .models import (
     UserPreference,
     UserIdentitySignal,
     UserTrialEligibility,
+    UserTrialActivation,
     ExecutionPauseReasonChoices,
 )
 from django.contrib.auth import get_user_model
@@ -1821,6 +1822,45 @@ class UserTrialEligibilityAdmin(admin.ModelAdmin):
             obj.reviewed_by = request.user
             obj.reviewed_at = timezone.now()
         super().save_model(request, obj, form, change)
+
+
+@admin.register(UserTrialActivation)
+class UserTrialActivationAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "is_activated",
+        "activated_at",
+        "last_assessed_at",
+        "activation_version",
+    )
+    search_fields = ("user__email", "user__id", "activation_reason")
+    list_filter = ("is_activated", "activation_version")
+    readonly_fields = (
+        "user",
+        "is_activated",
+        "activated_at",
+        "last_assessed_at",
+        "activation_version",
+        "activation_reason",
+        "created_at",
+        "updated_at",
+    )
+    fields = (
+        "user",
+        "is_activated",
+        "activated_at",
+        "last_assessed_at",
+        "activation_version",
+        "activation_reason",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 User = get_user_model()

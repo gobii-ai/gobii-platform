@@ -9,12 +9,19 @@ CANONICAL_EVENT_MAP = {
     "CompleteRegistration": "CompleteRegistration",
     "StartTrial": "StartTrial",
     "Subscribe": "Subscribe",
+    "Activated": "Activated",
     "TrialConversionPaymentFailed": "TrialConversionPaymentFailed",
     "TrialConversionPaymentFailedFinal": "TrialConversionPaymentFailedFinal",
     "SubscriptionPaymentFailed": "SubscriptionPaymentFailed",
     "UpgradePlan": "UpgradePlan",
     "Lead": "Lead",
     "FeatureUsed": "FeatureUsed",
+    "AgentCreated": "AgentCreated",
+    "InboundMessage": "InboundMessage",
+    "IntegrationAdded": "IntegrationAdded",
+    "SecretAdded": "SecretAdded",
+    "CloneGobii": "CloneGobii",
+    "TemplateLaunched": "TemplateLaunched",
 }
 
 

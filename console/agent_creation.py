@@ -37,6 +37,7 @@ from api.services.persistent_agents import (
 from api.pipedream_app_utils import normalize_app_slugs
 from api.services.pipedream_apps import get_owner_selected_app_slugs, set_owner_selected_app_slugs
 from console.context_helpers import build_console_context
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import clear_trial_onboarding_intent
@@ -410,6 +411,14 @@ def create_persistent_agent_from_charter(
             "template_schedule_applied": applied_schedule or "",
         }
         props = Analytics.with_org_properties(base_props, organization=organization)
+        marketing_props = Analytics.with_org_properties(
+            {
+                "agent_id": str(persistent_agent.id),
+                "template_code": selected_template.code if selected_template else "",
+                "template_schedule_applied": applied_schedule or "",
+            },
+            organization=organization,
+        )
         transaction.on_commit(
             lambda: Analytics.track_event(
                 user_id=request.user.id,
@@ -435,6 +444,16 @@ def create_persistent_agent_from_charter(
                     properties=props.copy(),
                 )
             )
+
+        transaction.on_commit(
+            lambda: emit_configured_custom_capi_event(
+                user=request.user,
+                event_name=ConfiguredCustomEvent.AGENT_CREATED,
+                plan_owner=organization or request.user,
+                properties=marketing_props.copy(),
+                request=request,
+            )
+        )
 
         return AgentCreationResult(
             agent=persistent_agent,

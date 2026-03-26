@@ -2,6 +2,7 @@
 
 from typing import Iterable, Iterable as IterableType, List, Dict, Any, Set
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 
 from api.models import (
@@ -10,6 +11,7 @@ from api.models import (
     PersistentAgentMCPServer,
     PersistentAgentEnabledTool,
 )
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 
@@ -321,6 +323,9 @@ def _emit_personal_server_events(
         str(cfg.id): cfg
         for cfg in MCPServerConfig.objects.filter(id__in=list(target_ids)).only('id', 'name', 'display_name', 'scope')
     }
+    actor_user = None
+    if actor_user_id:
+        actor_user = get_user_model().objects.filter(id=actor_user_id).first()
 
     def _track(event_type: AnalyticsEvent, server_id: str) -> None:
         cfg = server_map.get(server_id)
@@ -341,6 +346,25 @@ def _emit_personal_server_events(
             source=source,
             properties=props.copy(),
         )
+        if event_type == AnalyticsEvent.PERSISTENT_AGENT_MCP_LINKED and actor_user is not None:
+            marketing_props = {
+                'agent_id': str(agent.id),
+                'integration_type': 'mcp',
+                'mcp_server_id': server_id,
+            }
+            if cfg:
+                marketing_props['mcp_server_scope'] = cfg.scope
+            if agent.organization_id:
+                marketing_props['owner_type'] = 'organization'
+                marketing_props['organization_id'] = str(agent.organization_id)
+            transaction.on_commit(
+                lambda user=actor_user, marketing_props=marketing_props.copy(): emit_configured_custom_capi_event(
+                    user=user,
+                    event_name=ConfiguredCustomEvent.INTEGRATION_ADDED,
+                    plan_owner=agent.organization or agent.user,
+                    properties=marketing_props,
+                )
+            )
 
     for server_id in sorted(added_ids):
         _track(AnalyticsEvent.PERSISTENT_AGENT_MCP_LINKED, server_id)

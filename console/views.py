@@ -55,6 +55,7 @@ from api.services.dedicated_proxy_service import (
 )
 from api.services.system_settings import get_max_file_size
 from api.services.persistent_agents import maybe_sync_agent_email_display_name
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from api.agent.core.llm_config import (
     AgentLLMTier,
     TIER_ORDER,
@@ -6321,6 +6322,23 @@ class AgentSecretsAddView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
                             'total_secrets': total_secrets,
                         }
                     ))
+                    marketing_props = Analytics.with_org_properties(
+                        {
+                            'agent_id': str(agent.pk),
+                            'secret_type': secret.secret_type,
+                            'total_secrets': total_secrets,
+                        },
+                        organization=agent.organization,
+                    )
+                    transaction.on_commit(
+                        lambda: emit_configured_custom_capi_event(
+                            user=request.user,
+                            event_name=ConfiguredCustomEvent.SECRET_ADDED,
+                            plan_owner=agent.organization or request.user,
+                            properties=marketing_props.copy(),
+                            request=request,
+                        )
+                    )
 
             except Exception as e:
                 logger.error(f"Failed to add secret to agent {agent.id}: {str(e)}")

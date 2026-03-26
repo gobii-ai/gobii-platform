@@ -5,6 +5,7 @@ from django.test import SimpleTestCase, tag, override_settings
 from marketing_events.providers.base import PermanentError
 from marketing_events.tasks import (
     _analytics_user_id,
+    enqueue_delayed_subscription_guarded_marketing_event,
     enqueue_marketing_event,
     enqueue_start_trial_marketing_event,
 )
@@ -202,3 +203,69 @@ class MarketingEventsTaskTests(SimpleTestCase):
             "subscription_canceled_or_cancel_at_period_end",
         )
         self.assertEqual(track_kwargs["properties"]["decision_source"], "stripe")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._subscription_state_from_db", return_value=(None, None))
+    @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(True, "trialing"))
+    def test_enqueue_delayed_subscription_guarded_event_skips_when_cancel_at_period_end(
+        self,
+        _mock_state_from_stripe,
+        _mock_state_from_db,
+        mock_track,
+        mock_dispatch,
+    ):
+        enqueue_delayed_subscription_guarded_marketing_event(
+            {
+                "event_name": "AgentCreated",
+                "properties": {
+                    "event_time": 1_900_000_000,
+                    "event_id": "evt-126",
+                    "agent_id": "agent-1",
+                },
+                "subscription_guard_id": "sub_126",
+                "user": {"id": "42", "email": "test@example.com"},
+                "context": {},
+            }
+        )
+
+        mock_dispatch.assert_not_called()
+        mock_track.assert_called_once()
+        track_kwargs = mock_track.call_args.kwargs
+        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["properties"]["event_name"], "AgentCreated")
+        self.assertEqual(track_kwargs["properties"]["subscription_id"], "sub_126")
+        self.assertEqual(
+            track_kwargs["properties"]["reason"],
+            "subscription_canceled_or_cancel_at_period_end",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._subscription_state_from_db", return_value=(False, "active"))
+    @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(None, None))
+    def test_enqueue_delayed_subscription_guarded_event_dispatches_when_not_canceled(
+        self,
+        _mock_state_from_stripe,
+        _mock_state_from_db,
+        mock_track,
+        mock_dispatch,
+    ):
+        payload = {
+            "event_name": "InboundMessage",
+            "properties": {
+                "event_time": 1_900_000_000,
+                "event_id": "evt-127",
+                "agent_id": "agent-1",
+            },
+            "subscription_guard_id": "sub_127",
+            "user": {"id": "42", "email": "test@example.com"},
+            "context": {},
+        }
+
+        enqueue_delayed_subscription_guarded_marketing_event(payload)
+
+        mock_dispatch.assert_called_once_with(payload)
+        mock_track.assert_not_called()

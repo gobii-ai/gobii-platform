@@ -18,11 +18,13 @@ from django.utils import timezone
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.comms.imap_adapter import ImapEmailAdapter
+from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
 from api.agent.core.prompt_context import build_prompt_context
 from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
+    AgentCollaborator,
     AgentPeerLink,
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -1192,6 +1194,54 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(props.get("agent_id"), str(self.agent.id))
         self.assertIn("message_id", props)
         self.assertEqual(props.get("message_length"), len("Hello agent"))
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.comms.message_service.emit_configured_custom_capi_event")
+    def test_message_post_emits_inbound_message_custom_event(self, mock_emit_custom_event):
+        with patch("api.agent.tasks.process_agent_events_task.delay"):
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f"/console/api/agents/{self.agent.id}/messages/",
+                    data=json.dumps({"body": "Hello agent"}),
+                    content_type="application/json",
+                )
+
+        self.assertEqual(response.status_code, 201)
+        mock_emit_custom_event.assert_called_once()
+        call_kwargs = mock_emit_custom_event.call_args.kwargs
+        self.assertEqual(call_kwargs["event_name"], "InboundMessage")
+        self.assertEqual(call_kwargs["user"], self.user)
+        self.assertEqual(call_kwargs["properties"]["agent_id"], str(self.agent.id))
+        self.assertEqual(call_kwargs["properties"]["channel"], CommsChannel.WEB)
+        self.assertEqual(call_kwargs["properties"]["message_length"], len("Hello agent"))
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.comms.message_service.emit_configured_custom_capi_event")
+    def test_ingest_inbound_message_does_not_emit_inbound_message_custom_event_for_collaborator_web_sender(
+        self,
+        mock_emit_custom_event,
+    ):
+        collaborator = get_user_model().objects.create_user(
+            username="agent-collaborator",
+            email="collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        parsed = ParsedMessage(
+            sender=build_web_user_address(collaborator.id, self.agent.id),
+            recipient=self.agent_address,
+            subject=None,
+            body="Hello from collaborator",
+            attachments=[],
+            raw_payload={},
+            msg_channel=CommsChannel.WEB,
+        )
+
+        with patch("api.agent.tasks.process_agent_events_task.delay"):
+            with self.captureOnCommitCallbacks(execute=True):
+                ingest_inbound_message(CommsChannel.WEB, parsed)
+
+        mock_emit_custom_event.assert_not_called()
 
     @tag("batch_agent_chat")
     def test_processing_status_endpoint_includes_active_web_tasks(self):

@@ -37,10 +37,12 @@ from ...models import (
     PersistentAgentMessageAttachment,
     CommsChannel,
     DeliveryStatus,
+    UserPhoneNumber,
     build_inbound_webhook_agent_address,
     build_inbound_webhook_sender_address,
     build_web_agent_address,
     build_web_user_address,
+    parse_web_user_address,
 )
 from api.services.system_settings import get_max_file_size
 from api.services.billing_pause_notifications import (
@@ -51,6 +53,7 @@ from api.services.owner_execution_pause import (
     get_owner_execution_pause_state,
     resolve_agent_owner,
 )
+from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
@@ -80,6 +83,30 @@ class InboundMessageInfo:
     """Info about the stored message."""
 
     message: PersistentAgentMessage
+
+
+def _is_owner_sender(agent: PersistentAgent, channel: CommsChannel | str, sender: str | None) -> bool:
+    channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
+    normalized_sender = PersistentAgentCommsEndpoint.normalize_address(channel_val, sender)
+    if not normalized_sender:
+        return False
+
+    if channel_val == CommsChannel.WEB:
+        sender_user_id, sender_agent_id = parse_web_user_address(normalized_sender)
+        return sender_user_id == agent.user_id and sender_agent_id == str(agent.id)
+
+    if channel_val == CommsChannel.EMAIL:
+        owner_email = PersistentAgentCommsEndpoint.normalize_address(channel_val, getattr(agent.user, "email", None))
+        return bool(owner_email and normalized_sender == owner_email)
+
+    if channel_val == CommsChannel.SMS:
+        return UserPhoneNumber.objects.filter(
+            user_id=agent.user_id,
+            is_verified=True,
+            phone_number__iexact=normalized_sender,
+        ).exists()
+
+    return False
 
 @tracer.start_as_current_span("_get_or_create_endpoint")
 def _get_or_create_endpoint(channel: str, address: str) -> PersistentAgentCommsEndpoint:
@@ -917,6 +944,32 @@ def ingest_inbound_message(
 
             if agent_obj is None:
                 agent_obj = PersistentAgent.objects.alive().filter(id=owner_id).select_related("user").first()
+
+            if (
+                agent_obj is not None
+                and agent_obj.user_id
+                and channel_val in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}
+            ):
+                # Only owner-authored inbound messages should count as user action signals.
+                is_owner_authored_message = _is_owner_sender(agent_obj, channel_val, parsed.sender)
+                if is_owner_authored_message:
+                    marketing_props = Analytics.with_org_properties(
+                        {
+                            "agent_id": str(agent_obj.id),
+                            "channel": channel_val,
+                            "message_length": len(parsed.body or ""),
+                            "attachments_count": len(parsed.attachments),
+                        },
+                        organization=getattr(agent_obj, "organization", None),
+                    )
+                    transaction.on_commit(
+                        lambda user=agent_obj.user, marketing_props=marketing_props.copy(): emit_configured_custom_capi_event(
+                            user=user,
+                            event_name=ConfiguredCustomEvent.INBOUND_MESSAGE,
+                            plan_owner=getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None),
+                            properties=marketing_props,
+                        )
+                    )
 
             # Before triggering agent processing, check if the agent owner's
             # account is billing-paused. If so, send a one-off auto-reply to the
