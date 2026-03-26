@@ -29,6 +29,7 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
 )
+from console.agent_chat import signals as agent_chat_signals
 
 
 CHANNEL_LAYER_SETTINGS = {
@@ -65,6 +66,7 @@ class AgentChatSignalTests(TestCase):
         )
 
     def setUp(self):
+        agent_chat_signals._LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID.clear()
         self.channel_layer = get_channel_layer()
         self.timeline_channel_name = async_to_sync(self.channel_layer.new_channel)("test.agent.chat.")
         self.owner_profile_channel_name = async_to_sync(self.channel_layer.new_channel)("test.agent.profile.owner.")
@@ -274,6 +276,45 @@ class AgentChatSignalTests(TestCase):
         profile_event = self._receive_with_timeout(self.owner_profile_channel_name)
         self.assertEqual(profile_event.get("type"), "agent_profile_event")
         self.assertTrue(profile_event.get("payload", {}).get("processing_active"))
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.build_processing_snapshot")
+    def test_processing_broadcast_skips_duplicate_profile_event_when_state_is_unchanged(
+        self,
+        mock_build_processing_snapshot,
+    ):
+        mock_build_processing_snapshot.return_value = type(
+            "Snapshot",
+            (),
+            {
+                "active": True,
+                "web_tasks": [],
+                "next_scheduled_at": None,
+            },
+        )()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            BrowserUseAgentTask.objects.create(
+                agent=self.browser_agent,
+                user=self.user,
+                prompt="Monitor the queue",
+                status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+            )
+
+        first_profile_event = self._receive_with_timeout(self.owner_profile_channel_name)
+        self.assertEqual(first_profile_event.get("type"), "agent_profile_event")
+        self.assertTrue(first_profile_event.get("payload", {}).get("processing_active"))
+
+        with self.captureOnCommitCallbacks(execute=True):
+            BrowserUseAgentTask.objects.create(
+                agent=self.browser_agent,
+                user=self.user,
+                prompt="Keep monitoring the queue",
+                status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+            )
+
+        with self.assertRaises(AssertionError):
+            self._receive_with_timeout(self.owner_profile_channel_name, timeout=0.05)
 
     @tag("batch_agent_chat")
     def test_collaborator_profile_group_receives_avatar_update(self):

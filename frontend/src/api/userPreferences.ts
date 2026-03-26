@@ -69,11 +69,5 @@ export function parseBooleanPreference(value: unknown): boolean {
 }
 
 export function parseNullableBooleanPreference(value: unknown): boolean | null {
-  if (value === true) {
-    return true
-  }
-  if (value === false) {
-    return false
-  }
-  return null
+  return typeof value === 'boolean' ? value : null
 }

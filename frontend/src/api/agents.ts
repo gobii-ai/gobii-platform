@@ -90,12 +90,7 @@ export async function fetchAgentRoster(
     favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
       ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')
       : [],
-    insightsPanelExpanded:
-      payload.insights_panel_expanded === true
-        ? true
-        : payload.insights_panel_expanded === false
-          ? false
-          : null,
+    insightsPanelExpanded: payload.insights_panel_expanded ?? null,
     requestedAgentStatus: payload.requested_agent_status ?? null,
     billingStatus: payload.billingStatus ?? null,
     llmIntelligence: payload.llmIntelligence,
