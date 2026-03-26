@@ -1,4 +1,3 @@
-import json
 from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import patch
@@ -9,6 +8,12 @@ from django.test import TestCase, tag
 from django.urls import reverse
 from django.utils import timezone
 
+from api.agent.core.processing_flags import (
+    enqueue_pending_agent,
+    mark_processing_lock_active,
+    set_processing_heartbeat,
+    set_processing_queued_flag,
+)
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -85,12 +90,19 @@ class SystemStatusAPITests(TestCase):
         self._create_agent("Other Env Agent", execution_environment="staging")
 
         redis_client = _FakeRedis()
-        heartbeat_payload = json.dumps({"stage": "tool_call", "last_seen": timezone.now().timestamp()})
-        redis_client.set(f"agent-event-processing:heartbeat:{current_agent.id}", heartbeat_payload)
-        redis_client.set(f"agent-event-processing:queued:{current_agent.id}", "1")
-        redis_client.sadd("agent-event-processing:pending", str(current_agent.id))
+        set_processing_heartbeat(
+            current_agent.id,
+            stage="tool_call",
+            started_at=timezone.now().timestamp(),
+            client=redis_client,
+        )
+        set_processing_queued_flag(current_agent.id, client=redis_client)
+        enqueue_pending_agent(current_agent.id, client=redis_client)
+        mark_processing_lock_active(current_agent.id, client=redis_client)
         redis_client.set(f"redlock:agent-event-processing:{current_agent.id}", "1")
-        redis_client.set("agent-event-processing:heartbeat:not-a-uuid", heartbeat_payload)
+        redis_client.sadd("agent-event-processing:index:heartbeat", "not-a-uuid")
+        redis_client.sadd("agent-event-processing:index:queued", "not-a-uuid")
+        redis_client.sadd("agent-event-processing:index:locked", "not-a-uuid")
         mock_get_redis_client.return_value = redis_client
 
         response = self.client.get(self.url)

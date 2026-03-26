@@ -7,7 +7,18 @@ from django.conf import settings
 from django.db.models import CharField, Count, DateTimeField, IntegerField, OuterRef, Subquery
 from django.utils import timezone
 
-from api.agent.core.processing_flags import pending_set_key
+from api.agent.core.processing_flags import (
+    clear_processing_lock_active,
+    clear_processing_heartbeat,
+    clear_processing_queued_flag,
+    get_processing_heartbeat,
+    get_processing_heartbeat_agent_ids,
+    get_processing_locked_agent_ids,
+    get_processing_queued_agent_ids,
+    is_processing_queued,
+    pending_set_key,
+    processing_lock_storage_keys,
+)
 from api.models import (
     AgentComputeSession,
     BrowserUseAgentTask,
@@ -105,13 +116,16 @@ def _collect_agent_processing_section(*, now):
     redis_client = get_redis_client()
     agent_state_map = {}
 
-    for key in _iter_redis_keys(redis_client, "agent-event-processing:heartbeat:*"):
-        agent_id = _uuid_from_suffix(key)
+    for raw_agent_id in get_processing_heartbeat_agent_ids(client=redis_client):
+        agent_id = _normalize_uuid(raw_agent_id)
         if not agent_id:
+            continue
+        heartbeat_payload = get_processing_heartbeat(agent_id, client=redis_client)
+        if not heartbeat_payload:
+            clear_processing_heartbeat(agent_id, client=redis_client)
             continue
         state = agent_state_map.setdefault(agent_id, _empty_agent_state(agent_id))
         state["heartbeat"] = True
-        heartbeat_payload = _load_redis_json(redis_client.get(key))
         stage = str(heartbeat_payload.get("stage") or "").strip()
         if stage:
             state["stage"] = stage
@@ -119,9 +133,12 @@ def _collect_agent_processing_section(*, now):
         if last_seen is not None:
             state["lastSeenAt"] = last_seen.isoformat()
 
-    for key in _iter_redis_keys(redis_client, "agent-event-processing:queued:*"):
-        agent_id = _uuid_from_suffix(key)
+    for raw_agent_id in get_processing_queued_agent_ids(client=redis_client):
+        agent_id = _normalize_uuid(raw_agent_id)
         if not agent_id:
+            continue
+        if not is_processing_queued(agent_id, client=redis_client):
+            clear_processing_queued_flag(agent_id, client=redis_client)
             continue
         state = agent_state_map.setdefault(agent_id, _empty_agent_state(agent_id))
         state["queued"] = True
@@ -134,17 +151,12 @@ def _collect_agent_processing_section(*, now):
         state = agent_state_map.setdefault(agent_id, _empty_agent_state(agent_id))
         state["pending"] = True
 
-    for key in _iter_redis_keys(redis_client, "redlock:agent-event-processing:*"):
-        agent_id = _uuid_from_suffix(key)
+    for raw_agent_id in get_processing_locked_agent_ids(client=redis_client):
+        agent_id = _normalize_uuid(raw_agent_id)
         if not agent_id:
             continue
-        state = agent_state_map.setdefault(agent_id, _empty_agent_state(agent_id))
-        state["locked"] = True
-
-    for key in _iter_redis_keys(redis_client, "agent-event-processing:*"):
-        suffix = key.replace("agent-event-processing:", "", 1)
-        agent_id = _normalize_uuid(suffix)
-        if not agent_id:
+        if not _processing_lock_exists(redis_client, agent_id):
+            clear_processing_lock_active(agent_id, client=redis_client)
             continue
         state = agent_state_map.setdefault(agent_id, _empty_agent_state(agent_id))
         state["locked"] = True
@@ -542,6 +554,10 @@ def _iter_redis_keys(redis_client, pattern):
         keys = keys_method(pattern)
 
     return [_decode_redis_value(key) for key in keys]
+
+
+def _processing_lock_exists(redis_client, agent_id: str) -> bool:
+    return any(bool(redis_client.exists(key)) for key in processing_lock_storage_keys(agent_id))
 
 
 def _decode_redis_value(value):

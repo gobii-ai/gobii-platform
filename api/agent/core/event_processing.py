@@ -54,6 +54,7 @@ from .burn_control import (
     has_recent_user_message,
 )
 from .processing_flags import (
+    clear_processing_lock_active,
     claim_pending_drain_slot,
     clear_processing_heartbeat,
     clear_processing_queued_flag,
@@ -62,6 +63,8 @@ from .processing_flags import (
     get_pending_drain_settings,
     is_agent_pending,
     is_processing_queued,
+    mark_processing_lock_active,
+    processing_lock_storage_keys,
     set_processing_heartbeat,
 )
 from .llm_utils import (
@@ -712,7 +715,8 @@ def _lock_storage_keys(lock_key: str) -> tuple[str, ...]:
     prefix = f"{getattr(Redlock, '_KEY_PREFIX', 'redlock')}:"
     if lock_key.startswith(prefix):
         return (lock_key,)
-    return (f"{prefix}{lock_key}", lock_key)
+    agent_id = lock_key.rsplit(":", 1)[-1]
+    return processing_lock_storage_keys(agent_id)
 
 
 def _maybe_clear_stale_lock(
@@ -3576,6 +3580,7 @@ def process_agent_events(
                 return
 
         lock_acquired = True
+        mark_processing_lock_active(persistent_agent_id, client=redis_client)
         clear_processing_queued_flag(persistent_agent_id)
         if lock_settings.heartbeat_ttl_seconds > 0:
             if worker_pid is None:
@@ -3633,6 +3638,8 @@ def process_agent_events(
             except Exception as e:
                 logger.warning("Failed to release lock for agent %s: %s", persistent_agent_id, str(e))
                 span.add_event("Lock release warning")
+            finally:
+                clear_processing_lock_active(persistent_agent_id, client=redis_client)
         if heartbeat:
             heartbeat.clear()
 
