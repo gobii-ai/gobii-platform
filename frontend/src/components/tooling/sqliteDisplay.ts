@@ -439,6 +439,7 @@ export function getSqliteInternalTableDisplay(
 } {
   const descriptor = SQLITE_INTERNAL_TABLE_DESCRIPTORS[kind]
   const summaryKind = sqliteOperationSummaryKind(operation)
+  const isToolResultsQuery = kind === 'toolResults' && summaryKind === 'query'
   const targetLabel = extractSqliteTargetLabel(kind, statement, result)
   const statusSummary = extractSqliteResultStatus(result)
   const instructionsText = kind === 'agentSkills' ? extractSqliteInstructionsText(statement, result) : null
@@ -460,12 +461,14 @@ export function getSqliteInternalTableDisplay(
 
   return {
     label: `${descriptor.labelPrefix} ${summaryKind}`,
-    caption: kind === 'toolResults'
-      ? null
+    caption: isToolResultsQuery
+      ? purpose
+      : kind === 'toolResults'
+        ? null
       : kind === 'agentSkills'
         ? (instructionsText ? truncate(instructionsText, 140) : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix))
         : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix),
-    summary: kind === 'agentSkills' ? null : statusSummary,
+    summary: kind === 'agentSkills' || isToolResultsQuery ? null : statusSummary,
     operationLabel: sqliteOperationDisplayLabel(operation),
     purpose,
     instructionsText,
