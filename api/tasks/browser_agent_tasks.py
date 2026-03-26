@@ -12,6 +12,11 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Awaitable, Callable, List, Dict, Tuple, Optional
 import tarfile
 import zstandard as zstd
+
+# browser_use mutates root logging on import unless this env var is disabled first.
+# Guard here too so direct module imports outside normal Django startup stay quiet.
+os.environ.setdefault("BROWSER_USE_SETUP_LOGGING", "false")
+
 from browser_use.browser.profile import ProxySettings
 from django.core.files.storage import default_storage
 from django.core.files import File
@@ -1609,10 +1614,12 @@ def _execute_agent_with_failover(
                 llm_api_key = os.getenv(env_var) if env_var else None
             # Logging provider label
             label = provider_key
+            model_label = browser_model or "<default>"
 
             logger.info(
-                "Attempting provider %s (tier %d) for task %s",
+                "Attempting provider %s with model %s (tier %d) for task %s",
                 label,
+                model_label,
                 tier_idx,
                 task_id,
             )

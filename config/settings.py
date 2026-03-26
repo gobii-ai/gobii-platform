@@ -36,6 +36,11 @@ for env_path in env_paths_to_check:
 # will not be overridden.
 os.environ.setdefault("GOBII_RELEASE_ENV", "local")
 
+# browser_use auto-configures root logging on import and defaults to stderr, which
+# makes routine browser-task logs look like errors in downstream log viewers.
+# Keep Django logging authoritative unless an environment explicitly opts in.
+os.environ.setdefault("BROWSER_USE_SETUP_LOGGING", "false")
+
 # Smart local defaults: make developer experience "just work" on laptops
 # When not running inside Docker/Compose and release env is local, fill in
 # sensible defaults for DB/Redis/Celery and dev keys. Compose and prod provide
@@ -905,6 +910,21 @@ LOGGING = {
         "django.db.backends": {
             "handlers": ["console"],
             "level": "DEBUG" if os.getenv("DJANGO_SQL_DEBUG") else "INFO",
+            "propagate": False,
+        },
+        "browser_use": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "bubus": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "cdp_use": {
+            "handlers": ["console"],
+            "level": "WARNING",
             "propagate": False,
         },
     },
