@@ -2766,8 +2766,7 @@ class EventProcessingRuntimeGuardTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
-    @patch("api.agent.core.event_processing._schedule_pending_drain")
-    @patch("api.agent.core.event_processing.enqueue_pending_agent")
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing._runtime_exceeded", return_value=True)
     @patch("api.agent.core.event_processing.build_prompt_context")
@@ -2780,8 +2779,7 @@ class EventProcessingRuntimeGuardTests(TestCase):
         mock_build_context,
         _mock_runtime,
         mock_get_pending_settings,
-        mock_enqueue_pending,
-        mock_schedule_pending,
+        mock_apply_async,
     ):
         class _FakeRedis:
             def get(self, _key):
@@ -2805,14 +2803,9 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertTrue(
             self.agent.steps.filter(description__icontains="runtime limit").exists()
         )
-        mock_enqueue_pending.assert_called_once_with(
-            self.agent.id,
-            ttl=123,
-        )
-        mock_schedule_pending.assert_called_once_with(
-            delay_seconds=10,
-            schedule_ttl_seconds=60,
-            span=ANY,
+        mock_apply_async.assert_called_once_with(
+            args=[str(self.agent.id)],
+            countdown=10,
         )
         self.assertEqual(usage.get("total_tokens"), 0)
 

@@ -679,6 +679,26 @@ def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, sp
         logger.error("Failed to schedule pending drain task: %s", exc)
 
 
+def _schedule_agent_follow_up(*, agent_id: Union[str, UUID], delay_seconds: int, span=None, reason: str) -> None:
+    """Schedule a direct follow-up for a single agent without going through pending-drain."""
+    try:
+        from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
+
+        process_agent_events_task.apply_async(
+            args=[str(agent_id)],
+            countdown=delay_seconds,
+        )
+        if span is not None:
+            span.add_event(f"{reason} follow-up scheduled")
+    except Exception:
+        logger.debug(
+            "Failed to schedule %s follow-up for agent %s",
+            reason,
+            agent_id,
+            exc_info=True,
+        )
+
+
 def _stale_lock_threshold_seconds(
     lock_timeout_seconds: int,
     pending_set_ttl_seconds: int,
@@ -4076,16 +4096,12 @@ def _run_agent_loop(
                         exc_info=True,
                     )
                 pending_settings = get_pending_drain_settings(settings)
-                enqueue_pending_agent(
-                    agent.id,
-                    ttl=pending_settings.pending_set_ttl_seconds,
-                )
-                _schedule_pending_drain(
+                _schedule_agent_follow_up(
+                    agent_id=agent.id,
                     delay_seconds=pending_settings.pending_drain_delay_seconds,
-                    schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
                     span=span,
+                    reason="Runtime limit",
                 )
-                span.add_event("Runtime limit follow-up queued")
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
             with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
@@ -4749,22 +4765,12 @@ def _run_agent_loop(
                 int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
                 int(pending_settings.pending_drain_delay_seconds),
             )
-            try:
-                from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
-
-                # Avoid globally throttling the pending-drain scheduler when a single agent
-                # hits its iteration cap; resume this agent directly after a cooldown.
-                process_agent_events_task.apply_async(
-                    args=[str(agent.id)],
-                    countdown=delay_seconds,
-                )
-                span.add_event("Max iterations follow-up scheduled")
-            except Exception:
-                logger.debug(
-                    "Failed to schedule max-iterations follow-up for agent %s",
-                    agent.id,
-                    exc_info=True,
-                )
+            _schedule_agent_follow_up(
+                agent_id=agent.id,
+                delay_seconds=delay_seconds,
+                span=span,
+                reason="Max iterations",
+            )
             _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
         return cumulative_token_usage
