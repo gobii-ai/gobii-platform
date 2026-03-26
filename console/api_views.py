@@ -2354,16 +2354,18 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
 
         template_url = request.build_absolute_uri(f"/{result.public_profile.handle}/{template.slug}/")
         if result.created:
-            emit_configured_custom_capi_event(
-                user=request.user,
-                event_name=ConfiguredCustomEvent.CLONE_GOBII,
-                plan_owner=agent.organization or request.user,
-                properties={
-                    "agent_id": str(agent.id),
-                    "template_id": str(template.id),
-                    "template_code": template.code,
-                },
-                request=request,
+            transaction.on_commit(
+                lambda: emit_configured_custom_capi_event(
+                    user=request.user,
+                    event_name=ConfiguredCustomEvent.CLONE_GOBII,
+                    plan_owner=agent.organization or request.user,
+                    properties={
+                        "agent_id": str(agent.id),
+                        "template_id": str(template.id),
+                        "template_code": template.code,
+                    },
+                    request=request,
+                )
             )
         return JsonResponse({
             "created": result.created,

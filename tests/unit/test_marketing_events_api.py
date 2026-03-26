@@ -1,10 +1,16 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings, tag
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, override_settings, tag
 
 from marketing_events.api import capi, capi_delay_subscription_guarded
-from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
+from marketing_events.custom_events import (
+    ConfiguredCustomEvent,
+    _is_first_workspace_agent_creation,
+    emit_configured_custom_capi_event,
+)
+from api.models import BrowserUseAgent, Organization, PersistentAgent
 
 
 @tag("batch_marketing_events")
@@ -278,6 +284,43 @@ class MarketingEventsApiTests(SimpleTestCase):
             provider_targets=["meta", "reddit", "tiktok"],
         )
 
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        CAPI_CUSTOM_EVENT_CURRENCY="USD",
+        CAPI_CUSTOM_EVENT_VALUES_BY_PLAN={
+            "pro": {"InboundMessage": {1: 2.1, 5: 4.2, 20: 8.4}},
+            "scale": {"InboundMessage": {1: 10.5, 5: 21.0, 20: 42.0}},
+            "org_team": {"InboundMessage": {1: 2.1, 5: 4.2, 20: 8.4}},
+        },
+    )
+    @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
+    @patch("marketing_events.custom_events.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
+    @patch("marketing_events.custom_events.get_custom_capi_event_delay_seconds", return_value=3600)
+    @patch("marketing_events.custom_events.count_messages_sent_to_gobii", return_value=1)
+    @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
+    @patch("marketing_events.custom_events.is_owner_currently_in_trial", return_value=True)
+    @patch("marketing_events.custom_events.get_owner_plan", return_value={"id": "startup"})
+    def test_emit_configured_custom_capi_event_resolves_inbound_message_count_once(
+        self,
+        _mock_get_owner_plan,
+        _mock_is_owner_currently_in_trial,
+        _mock_is_fast_cancel_owner,
+        mock_count_messages_sent_to_gobii,
+        _mock_get_custom_capi_event_delay_seconds,
+        _mock_get_active_subscription,
+        _mock_capi_delay_subscription_guarded,
+    ):
+        user = SimpleNamespace(id=42, email="test@example.com", phone="+15555550123")
+
+        emit_configured_custom_capi_event(
+            user=user,
+            event_name=ConfiguredCustomEvent.INBOUND_MESSAGE,
+            plan_owner=user,
+            properties={"agent_id": "agent-1"},
+        )
+
+        mock_count_messages_sent_to_gobii.assert_called_once_with(user)
+
     @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
     @patch("marketing_events.custom_events.count_messages_sent_to_gobii", return_value=2)
     @patch("marketing_events.custom_events.is_fast_cancel_owner", return_value=False)
@@ -373,4 +416,62 @@ class MarketingEventsApiTests(SimpleTestCase):
             request=None,
             context={"consent": True},
             provider_targets=["meta", "reddit", "tiktok"],
+        )
+
+
+@tag("batch_marketing_events")
+class ConfiguredCustomEventHelperTests(TestCase):
+    def _create_agent(self, *, user, name: str, organization=None) -> PersistentAgent:
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            if organization is not None:
+                with patch.object(PersistentAgent, "_validate_org_seats", return_value=None):
+                    browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
+                    return PersistentAgent.objects.create(
+                        user=user,
+                        organization=organization,
+                        name=name,
+                        charter="",
+                        browser_use_agent=browser,
+                    )
+
+            browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
+            return PersistentAgent.objects.create(
+                user=user,
+                organization=None,
+                name=name,
+                charter="",
+                browser_use_agent=browser,
+            )
+
+    def test_is_first_workspace_agent_creation_matches_first_personal_agent_id(self):
+        user = get_user_model().objects.create_user(
+            username="owner",
+            email="owner@example.com",
+            password="password123",
+        )
+        first_agent = self._create_agent(user=user, name="First")
+        second_agent = self._create_agent(user=user, name="Second")
+
+        self.assertTrue(
+            _is_first_workspace_agent_creation(user, {"agent_id": str(first_agent.id)})
+        )
+        self.assertFalse(
+            _is_first_workspace_agent_creation(user, {"agent_id": str(second_agent.id)})
+        )
+
+    def test_is_first_workspace_agent_creation_matches_first_org_agent_id(self):
+        user = get_user_model().objects.create_user(
+            username="org-owner",
+            email="org-owner@example.com",
+            password="password123",
+        )
+        organization = Organization.objects.create(name="Acme", slug="acme", created_by=user)
+        first_agent = self._create_agent(user=user, organization=organization, name="First Org")
+        second_agent = self._create_agent(user=user, organization=organization, name="Second Org")
+
+        self.assertTrue(
+            _is_first_workspace_agent_creation(organization, {"agent_id": str(first_agent.id)})
+        )
+        self.assertFalse(
+            _is_first_workspace_agent_creation(organization, {"agent_id": str(second_agent.id)})
         )
