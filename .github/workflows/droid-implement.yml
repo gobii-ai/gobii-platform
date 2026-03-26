@@ -18,6 +18,17 @@ jobs:
       issues: write
 
     steps:
+      - name: Acknowledge on issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: '🤖 Droid is picking this up. I\'ll open a PR when the implementation is ready.\n\n[View workflow run](https://github.com/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ')'
+            });
+
       - name: Checkout repository
         uses: actions/checkout@v5
         with:
