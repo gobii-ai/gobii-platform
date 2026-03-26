@@ -3482,7 +3482,7 @@ def _get_web_chat_formatting_guidance() -> str:
     """Return rich Markdown guidance for chat surfaces with full rendering support."""
 
     return (
-        "Web chat formatting:\n"
+        "Web chat and peer DM formatting:\n"
         "Make your output visually stunning and instantly scannable—something they'd screenshot and share.\n\n"
         "Design principles:\n"
         "• **Rhythm and variety**—mix formats, don't repeat the same pattern over and over\n"
@@ -3522,6 +3522,74 @@ def _get_web_chat_formatting_guidance() -> str:
     )
 
 
+def _get_sms_formatting_guidance() -> str:
+    """Return plain-text guidance for SMS replies."""
+
+    return (
+        "SMS formatting (plain text, short):\n"
+        "• No markdown, no formatting—plain text only\n"
+        "• Aim for ≤160 chars when possible\n"
+        "• Be punchy and direct\n"
+        "Example:\n"
+        '  "BTC $67k (+2.3%), ETH $3.4k (+1.8%). Looking bullish today!"'
+    )
+
+
+def _get_email_formatting_guidance() -> str:
+    """Return HTML formatting guidance for email replies."""
+
+    return (
+        "Email formatting (rich, expressive HTML):\n"
+        "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
+        "• Headers: <h2>, <h3> to create clear sections\n"
+        "• Tables: <table> for data, comparisons, schedules—with headers and clean rows\n"
+        "• Charts: <img src='{path from result.inline}'> for visual data—path from create_chart result only\n"
+        "• Lists: <ul>/<ol> for scannable items\n"
+        "• Emphasis: <strong> for key info, <em> for nuance\n"
+        "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
+        "• Spacing: keep clear separation between blocks. Use table margin-bottom, or add one <br> after </table> when there is no bottom margin\n"
+        "• No markdown—pure HTML\n\n"
+        "Example—a visually rich update with chart:\n"
+        "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
+        "  <img src='$[/charts/crypto-a1b2c3.svg]'>  <!-- path from create_chart result.inline -->\n"
+        "  <p>Here's how your watchlist performed today:</p>\n"
+        "  <table style='border-collapse: collapse; width: 100%; margin: 0 0 16px;'>\n"
+        "    <tr style='background: #f5f5f5;'>\n"
+        "      <th style='padding: 8px; text-align: left;'>Asset</th>\n"
+        "      <th style='padding: 8px;'>Price</th>\n"
+        "      <th style='padding: 8px;'>24h</th>\n"
+        "    </tr>\n"
+        "    <tr><td style='padding: 8px;'>BTC</td><td style='padding: 8px;'><strong>$67,000</strong></td><td style='padding: 8px; color: green;'>+2.3%</td></tr>\n"
+        "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
+        "  </table>\n"
+        "  <br>\n"
+        "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
+        '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
+        "Charts: paste path from create_chart result.inline—never construct the path yourself."
+    )
+
+
+def _get_active_formatting_channel(
+    agent: PersistentAgent,
+    implied_send_active: bool,
+    *,
+    peer_dm_context: dict | None = None,
+) -> str:
+    """Return the primary channel label for the current run."""
+
+    if implied_send_active or peer_dm_context is not None:
+        return "web_chat"
+
+    primary_medium = agent.preferred_contact_endpoint.channel if agent.preferred_contact_endpoint else None
+    if primary_medium == CommsChannel.WEB:
+        return "web_chat"
+    if primary_medium == CommsChannel.EMAIL:
+        return "email"
+    if primary_medium == CommsChannel.SMS:
+        return "sms"
+    return "generic"
+
+
 def _get_formatting_guidance(
     agent: PersistentAgent,
     implied_send_active: bool,
@@ -3536,61 +3604,31 @@ def _get_formatting_guidance(
     2. Preferred contact endpoint → that channel
     3. Fallback → general guidance for all channels
     """
-    if implied_send_active or peer_dm_context is not None:
-        return _get_web_chat_formatting_guidance()
+    active_channel = _get_active_formatting_channel(
+        agent,
+        implied_send_active,
+        peer_dm_context=peer_dm_context,
+    )
 
-    primary_medium = agent.preferred_contact_endpoint.channel if agent.preferred_contact_endpoint else None
-
-    if primary_medium == CommsChannel.WEB:
-        return _get_web_chat_formatting_guidance()
-    elif primary_medium == CommsChannel.SMS:
-        return (
-            "SMS formatting (plain text, short):\n"
-            "• No markdown, no formatting—plain text only\n"
-            "• Aim for ≤160 chars when possible\n"
-            "• Be punchy and direct\n"
-            "Example:\n"
-            '  "BTC $67k (+2.3%), ETH $3.4k (+1.8%). Looking bullish today!"'
-        )
-    elif primary_medium == CommsChannel.EMAIL:
-        return (
-            "Email formatting (rich, expressive HTML):\n"
-            "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
-            "• Headers: <h2>, <h3> to create clear sections\n"
-            "• Tables: <table> for data, comparisons, schedules—with headers and clean rows\n"
-            "• Charts: <img src='{path from result.inline}'> for visual data—path from create_chart result only\n"
-            "• Lists: <ul>/<ol> for scannable items\n"
-            "• Emphasis: <strong> for key info, <em> for nuance\n"
-            "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
-            "• Spacing: keep clear separation between blocks. Use table margin-bottom, or add one <br> after </table> when there is no bottom margin\n"
-            "• No markdown—pure HTML\n\n"
-            "Example—a visually rich update with chart:\n"
-            "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
-            "  <img src='$[/charts/crypto-a1b2c3.svg]'>  <!-- path from create_chart result.inline -->\n"
-            "  <p>Here's how your watchlist performed today:</p>\n"
-            "  <table style='border-collapse: collapse; width: 100%; margin: 0 0 16px;'>\n"
-            "    <tr style='background: #f5f5f5;'>\n"
-            "      <th style='padding: 8px; text-align: left;'>Asset</th>\n"
-            "      <th style='padding: 8px;'>Price</th>\n"
-            "      <th style='padding: 8px;'>24h</th>\n"
-            "    </tr>\n"
-            "    <tr><td style='padding: 8px;'>BTC</td><td style='padding: 8px;'><strong>$67,000</strong></td><td style='padding: 8px; color: green;'>+2.3%</td></tr>\n"
-            "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
-            "  </table>\n"
-            "  <br>\n"
-            "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
-            '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
-            "Charts: paste path from create_chart result.inline—never construct the path yourself."
-        )
-    else:
-        # Multiple channels or unknown—give compact reference for all
-        return (
-            "Formatting by channel:\n"
-            "• Web chat: Rich markdown (**bold**, headers, tables, paste result.inline for charts)\n"
-            "• Email: Rich HTML (<table>, <ul>, <strong>, <img src='{result.inline path}'> for charts)—no markdown\n"
-            "• SMS: Plain text only, ≤160 chars ideal\n"
-            "Charts: paste path from create_chart result.inline—never construct the path yourself."
-        )
+    return (
+        "Formatting guidance:\n"
+        "Multiple channels can matter in the same run. Use the section matching the message you are producing, "
+        "and treat <active_channel> as the default when the current turn has one clear primary surface.\n\n"
+        f"<active_channel>{active_channel}</active_channel>\n\n"
+        "<web_chat>\n"
+        f"{_get_web_chat_formatting_guidance()}\n"
+        "</web_chat>\n\n"
+        "<email>\n"
+        f"{_get_email_formatting_guidance()}\n"
+        "</email>\n\n"
+        "<sms>\n"
+        f"{_get_sms_formatting_guidance()}\n"
+        "</sms>\n\n"
+        "<fallback>\n"
+        "If channel context is mixed or unknown, pick rules based on the actual delivery surface: "
+        "web chat uses Markdown, email uses HTML, SMS uses plain text only.\n"
+        "</fallback>"
+    )
 
 
 def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_active: bool) -> str:
