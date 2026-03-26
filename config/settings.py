@@ -98,7 +98,7 @@ PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED = env.bool(
 )
 TRIAL_FAST_CANCEL_CUTOFF_HOURS = env.int(
     "TRIAL_FAST_CANCEL_CUTOFF_HOURS",
-    default=72,
+    default=48,
 )
 # Enable insights system (contextual info during agent processing)
 INSIGHTS_ENABLED = env.bool("INSIGHTS_ENABLED", default=True)
