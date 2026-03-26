@@ -1859,7 +1859,7 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
         "agent_capabilities_note": capabilities_note,
         "plan_info": "\n".join(lines),
         "agent_addons": _build_agent_addons_section(),
-        "agent_settings": _build_agent_settings_section(agent),
+        "agent_settings": _build_agent_settings_section(agent, plan_id=plan_id),
         "agent_email_settings": _build_agent_email_settings_section(agent),
     }
 
@@ -1875,7 +1875,7 @@ def _build_agent_addons_section() -> str:
     return "Agent add-ons:\n- " + "\n- ".join(lines)
 
 
-def _build_agent_settings_section(agent: PersistentAgent) -> str:
+def _build_agent_settings_section(agent: PersistentAgent, *, plan_id: str | None = None) -> str:
     """Return a bullet-style list of configurable settings for the agent."""
     agent_config_url = _build_console_url("agent_detail", pk=agent.id)
     contact_requests_url = _build_console_url("agent_contact_requests", pk=agent.id)
@@ -1897,19 +1897,22 @@ def _build_agent_settings_section(agent: PersistentAgent) -> str:
         f"Agent settings page: {agent_config_url}",
     ]
 
-    try:
-        owner = agent.organization or agent.user
-        plan = get_owner_plan(owner) or {}
-        plan_id = str(plan.get("id") or "").lower()
-        if plan_id and plan_id != "free":
-            settings_lines.append(
-                "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
+    resolved_plan_id = (plan_id or "").lower()
+    if not resolved_plan_id:
+        try:
+            owner = agent.organization or agent.user
+            plan = get_owner_plan(owner) or {}
+            resolved_plan_id = str(plan.get("id") or "").lower()
+        except DatabaseError:
+            logger.debug(
+                "Failed to append intelligence setting note for agent %s",
+                getattr(agent, "id", "unknown"),
+                exc_info=True,
             )
-    except DatabaseError:
-        logger.debug(
-            "Failed to append intelligence setting note for agent %s",
-            getattr(agent, "id", "unknown"),
-            exc_info=True,
+
+    if resolved_plan_id and resolved_plan_id != "free":
+        settings_lines.append(
+            "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
         )
 
     return "Agent settings:\n- " + "\n- ".join(settings_lines)

@@ -50,6 +50,14 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 BillingOwnerType = Literal["user", "organization"]
+_OWNER_PLAN_CACHE_ATTR = "_gobii_owner_plan_cache"
+_MISSING = object()
+
+
+def _clear_owner_plan_cache(owner) -> None:
+    """Drop the per-instance owner plan cache after billing state changes."""
+    if hasattr(owner, _OWNER_PLAN_CACHE_ATTR):
+        delattr(owner, _OWNER_PLAN_CACHE_ATTR)
 
 
 def _individual_plan_product_ids() -> set[str]:
@@ -918,26 +926,33 @@ def reconcile_user_plan_from_stripe(user) -> dict[str, int | str]:
 
 def get_owner_plan(owner) -> dict[str, int | str]:
     """Return plan configuration for a user or organization owner."""
-    with traced("SUBSCRIPTION Get Owner Plan"):
-        owner_type = _resolve_owner_type(owner)
-        owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
-        logger.debug("get_owner_plan %s %s", owner_type, owner_id)
+    cached_plan = getattr(owner, _OWNER_PLAN_CACHE_ATTR, _MISSING)
+    if cached_plan is not _MISSING:
+        return dict(cached_plan)
 
-        try:
-            plan_context = get_owner_plan_context(owner)
-            if plan_context:
-                return plan_context
-        except Exception:
-            logger.warning(
-                "get_owner_plan %s: failed to resolve plan context; falling back to legacy config",
-                owner_id,
-                exc_info=True,
-            )
+    owner_type = _resolve_owner_type(owner)
+    owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
+    logger.debug("get_owner_plan %s %s", owner_type, owner_id)
 
-        billing_record = _get_billing_record(owner)
-        sub_name = getattr(billing_record, "subscription", None) if billing_record else None
-        sub_key = str(sub_name).lower() if sub_name else PlanNames.FREE
-        return PLAN_CONFIG.get(sub_key, PLAN_CONFIG[PlanNames.FREE])
+    try:
+        plan_context = get_owner_plan_context(owner)
+        if plan_context:
+            resolved_plan = dict(plan_context)
+            setattr(owner, _OWNER_PLAN_CACHE_ATTR, resolved_plan)
+            return dict(resolved_plan)
+    except Exception:
+        logger.warning(
+            "get_owner_plan %s: failed to resolve plan context; falling back to legacy config",
+            owner_id,
+            exc_info=True,
+        )
+
+    billing_record = _get_billing_record(owner)
+    sub_name = getattr(billing_record, "subscription", None) if billing_record else None
+    sub_key = str(sub_name).lower() if sub_name else PlanNames.FREE
+    resolved_plan = dict(PLAN_CONFIG.get(sub_key, PLAN_CONFIG[PlanNames.FREE]))
+    setattr(owner, _OWNER_PLAN_CACHE_ATTR, resolved_plan)
+    return dict(resolved_plan)
 
 def get_user_plan(user) -> dict[str, int | str]:
     return get_owner_plan(user)
@@ -1343,6 +1358,7 @@ def filter_users_without_active_subscription(users):
 def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = True, plan_version=None):
     """Persist the selected plan on the owner billing record (user or organization)."""
     with traced("SUBSCRIPTION Mark Billing with Plan") as span:
+        _clear_owner_plan_cache(owner)
         owner_type = _resolve_owner_type(owner)
         owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
         span.set_attribute("owner.type", owner_type)
@@ -1425,6 +1441,7 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
                     e,
                 )
 
+        _clear_owner_plan_cache(owner)
         return billing_record
 
 
@@ -1602,14 +1619,13 @@ def get_user_extra_task_limit(user) -> int:
              0 means no extra tasks are allowed.
              -1 means unlimited extra tasks are allowed - USE TASK_UNLIMITED CONSTANT
     """
-    with traced("CREDITS Get User Extra Task Limit"):
-        try:
-            from api.models import UserBilling
-            user_billing = UserBilling.objects.get(user=user)
-            return user_billing.max_extra_tasks
-        except UserBilling.DoesNotExist:
-            logger.warning(f"get_user_extra_task_limit {user.id}: No UserBilling found, defaulting to 0")
-            return 0
+    try:
+        from api.models import UserBilling
+        user_billing = UserBilling.objects.get(user=user)
+        return user_billing.max_extra_tasks
+    except UserBilling.DoesNotExist:
+        logger.warning(f"get_user_extra_task_limit {user.id}: No UserBilling found, defaulting to 0")
+        return 0
 
 def allow_user_extra_tasks(user) -> bool:
     """

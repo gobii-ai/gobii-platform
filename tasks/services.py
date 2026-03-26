@@ -170,7 +170,6 @@ class TaskCreditService:
         return Decimal(TaskCreditService.get_user_task_credits_granted(owner, task_credits))
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get Owner Task Credits Used")
     def get_owner_task_credits_used(owner, task_credits: list | None = None) -> Decimal:
         """Return total credits consumed for either a User or Organization owner."""
         if TaskCreditService._is_organization_owner(owner):
@@ -539,95 +538,91 @@ class TaskCreditService:
         ValidationError
             If the user has no available task credits or if the credit cannot be consumed.
         """
-        with traced("TASKCREDIT consume_credit") as span:
+        span = trace.get_current_span()
+        if span is not None:
             span.set_attribute('user.id', user.id)
-            TaskCredit = apps.get_model("api", "TaskCredit")
-            now = timezone.now()
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        now = timezone.now()
 
-            # Determine how many credits to consume for plan credits. For additional tasks,
-            # always consume 1 (they are metered as whole tasks for billing).
-            plan_amount = amount if amount is not None else get_default_task_credit_cost()
+        # Determine how many credits to consume for plan credits. For additional tasks,
+        # always consume 1 (they are metered as whole tasks for billing).
+        plan_amount = amount if amount is not None else get_default_task_credit_cost()
 
-            last_credit = None
-            if additional_task:
-                plan = get_user_plan(user)
-                with traced("TASKCREDIT Create Additional Credit", user_id=user.id) as span:
-                    span.set_attribute('user.id', user.id)
+        last_credit = None
+        if additional_task:
+            plan = get_user_plan(user)
 
-                    start, end = BillingService.get_current_billing_period_for_user(user)
+            start, end = BillingService.get_current_billing_period_for_user(user)
 
-                    credit = TaskCredit.objects.create(
-                        user_id=user.id,
-                        credits=plan_amount,
-                        credits_used=plan_amount,  # Consume the single additional-task credit immediately
-                        expiration_date=end,
-                        granted_date=start,
-                        additional_task=True,
-                        plan=PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE,
-                        grant_type=GrantTypeChoices.PLAN,
-                    )
-                    last_credit = credit
-            else:
-                # Consume possibly fractional amount across one or more credit blocks
-                with transaction.atomic():
-                    remaining = Decimal(plan_amount)
-                    while remaining > 0:
-                        with traced("TASKCREDIT Get Existing Credit") as span:
-                            span.set_attribute('user.id', user.id)
-                            credit = (
-                                TaskCredit.objects.select_for_update()
-                                .filter(
-                                    user_id=user.id,
-                                    expiration_date__gt=now,
-                                    credits_used__lt=F("credits"),
-                                    voided=False,
-                                )
-                                .order_by("expiration_date")
-                                .first()
-                            )
-
-                        if credit is None:
-                            # No more credits to consume from
-                            raise ValidationError({"credits": "Insufficient task credits"})
-
-                        # Compute available on this block using current locked row values
-                        available_here = (credit.credits - credit.credits_used)
-
-                        consume_now = available_here if available_here <= remaining else remaining
-                        if consume_now <= 0:
-                            # Should not happen, but defensively skip
-                            break
-
-                        credit.credits_used = F("credits_used") + consume_now
-                        with traced("TASKCREDIT Save Credit"):
-                            credit.save(update_fields=["credits_used"])
-                        credit.refresh_from_db()
-                        remaining -= consume_now
-                        last_credit = credit
-
-            # Stripe metering handled by periodic rollup task; no per-task usage reporting
-
-            # Handle notification of task credit usage when thresholds are crossed
-            TaskCreditService.handle_task_threshold(user)
-
-            # Failsafe: if no block recorded (unlikely), fetch the next usable block for reference
-            if last_credit is None and not additional_task:
-                try:
-                    last_credit = (
-                        TaskCredit.objects
+            credit = TaskCredit.objects.create(
+                user_id=user.id,
+                credits=plan_amount,
+                credits_used=plan_amount,  # Consume the single additional-task credit immediately
+                expiration_date=end,
+                granted_date=start,
+                additional_task=True,
+                plan=PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE,
+                grant_type=GrantTypeChoices.PLAN,
+            )
+            last_credit = credit
+        else:
+            # Consume possibly fractional amount across one or more credit blocks
+            with transaction.atomic():
+                remaining = Decimal(plan_amount)
+                while remaining > 0:
+                    credit = (
+                        TaskCredit.objects.select_for_update()
                         .filter(
                             user_id=user.id,
                             expiration_date__gt=now,
+                            credits_used__lt=F("credits"),
                             voided=False,
                         )
                         .order_by("expiration_date")
                         .first()
                     )
-                except Exception:
-                    last_credit = None
 
-            # Return the last touched/created credit block for convenience
-            return last_credit
+                    if credit is None:
+                        # No more credits to consume from
+                        raise ValidationError({"credits": "Insufficient task credits"})
+
+                    # Compute available on this block using current locked row values
+                    available_here = (credit.credits - credit.credits_used)
+
+                    consume_now = available_here if available_here <= remaining else remaining
+                    if consume_now <= 0:
+                        # Should not happen, but defensively skip
+                        break
+
+                    credit.credits_used = F("credits_used") + consume_now
+                    credit.save(update_fields=["credits_used"])
+                    credit.refresh_from_db()
+                    remaining -= consume_now
+                    last_credit = credit
+
+        # Stripe metering handled by periodic rollup task; no per-task usage reporting
+
+        # Handle notification of task credit usage when thresholds are crossed
+        TaskCreditService.handle_task_threshold(user)
+
+        # Failsafe: if no block recorded (unlikely), fetch the next usable block for reference
+        if last_credit is None and not additional_task:
+            try:
+                last_credit = (
+                    TaskCredit.objects
+                    .filter(
+                        user_id=user.id,
+                        expiration_date__gt=now,
+                        voided=False,
+                    )
+                    .order_by("expiration_date")
+                    .first()
+                )
+            except Exception:
+                last_credit = None
+
+        # Return the last touched/created credit block for convenience
+        return last_credit
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get User Tasks Entitled")
@@ -636,7 +631,6 @@ class TaskCreditService:
         return TaskCreditService.get_tasks_entitled_for_owner(user)
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get Tasks Entitled For Owner")
     def get_tasks_entitled_for_owner(owner) -> int:
         """Return task entitlement for either a User or an Organization owner."""
         if TaskCreditService._is_community_unlimited():
@@ -734,7 +728,6 @@ class TaskCreditService:
 
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get Task Credits In Current Range")
     def get_current_task_credit(user):
         """
         Gets the set of task credits that are currently valid for a user. That is, the task credits that have been granted
@@ -920,7 +913,6 @@ class TaskCreditService:
         return entitled - used
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get User Task Credits Used")
     def get_user_task_credits_used(user, task_credits: list | None = None) -> int:
         """
         Gets the number of task credits used by a user.
@@ -1129,7 +1121,6 @@ class TaskCreditService:
         return total_tasks
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Get User Total Tasks Used")
     def get_user_total_tasks_used(user: User, task_credits: list | None = None) -> int:
         """
         Gets the total number of tasks used by a user, including both regular and additional tasks.
@@ -1182,7 +1173,6 @@ class TaskCreditService:
         return pct
 
     @staticmethod
-    @tracer.start_as_current_span("TaskCreditService Handle Task Threshold")
     def handle_task_threshold(user):
         """
         Handles task usage thresholds for a user. This function updates the user's monthly task usage counter and checks
@@ -1261,40 +1251,46 @@ class TaskCreditService:
                 "error_message": None,
             }
 
-        with tracer.start_as_current_span("CHECK User TaskCredit") as span:
+        span = trace.get_current_span()
+        if span is not None:
             span.set_attribute("user.id", str(user.id))
 
-            # --- 1. Optimistic consume of regular credit (atomic) ---
-            try:
-                credit = TaskCreditService.consume_credit(user, amount=amount)
+        # --- 1. Optimistic consume of regular credit (atomic) ---
+        try:
+            credit = TaskCreditService.consume_credit(user, amount=amount)
+            if span is not None:
                 span.add_event("Consumed regular task credit")
+            return {
+                "success": True,
+                "credit": credit,
+                "error_message": None,
+            }
+        except ValidationError:
+            if span is not None:
+                span.add_event("No regular credits – trying additional task path")
+
+        # --- 2. Attempt additional-task credit for paid plans ---
+        subscription = get_active_subscription(user)
+        if subscription is not None and allow_and_has_extra_tasks(user):
+            try:
+                credit = TaskCreditService.consume_credit(user, additional_task=True)
+                if span is not None:
+                    span.add_event("Consumed additional task credit")
                 return {
                     "success": True,
                     "credit": credit,
                     "error_message": None,
                 }
             except ValidationError:
-                span.add_event("No regular credits – trying additional task path")
-
-            # --- 2. Attempt additional-task credit for paid plans ---
-            subscription = get_active_subscription(user)
-            if subscription is not None and allow_and_has_extra_tasks(user):
-                try:
-                    credit = TaskCreditService.consume_credit(user, additional_task=True)
-                    span.add_event("Consumed additional task credit")
-                    return {
-                        "success": True,
-                        "credit": credit,
-                        "error_message": None,
-                    }
-                except ValidationError:
-                    # Highly unlikely – another race between the extra-task count
+                # Highly unlikely – another race between the extra-task count
+                if span is not None:
                     span.add_event("Additional task credit creation failed")
 
-            # --- 3. Out of credits ---
+        # --- 3. Out of credits ---
+        if span is not None:
             span.add_event("Insufficient credits – quota exceeded")
-            return {
-                "success": False,
-                "credit": None,
-                "error_message": "Task quota exceeded. You have no remaining task credits and no active subscription." if subscription is None else "Task quota exceeded. You have no remaining task credits nor additional tasks allowed.",
-            }
+        return {
+            "success": False,
+            "credit": None,
+            "error_message": "Task quota exceeded. You have no remaining task credits and no active subscription." if subscription is None else "Task quota exceeded. You have no remaining task credits nor additional tasks allowed.",
+        }
