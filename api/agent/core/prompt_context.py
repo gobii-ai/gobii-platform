@@ -2113,14 +2113,6 @@ def build_prompt_context(
             non_shrinkable=True,
         )
 
-    # Dynamic formatting guidance based on current medium context
-    formatting_guidance = _get_formatting_guidance(
-        agent,
-        implied_send_active,
-        peer_dm_context=peer_dm_context,
-    )
-
-
     # Secrets block
     secrets_block = _get_secrets_block(agent)
     important_group.section_text(
@@ -2188,14 +2180,6 @@ def build_prompt_context(
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
     _get_unified_history_prompt(agent, unified_history_group)
-
-    runtime_group = prompt.group("runtime_context", weight=6)
-    runtime_group.section_text(
-        "formatting_guidance",
-        formatting_guidance,
-        weight=3,
-        non_shrinkable=True,
-    )
 
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
@@ -3561,52 +3545,12 @@ def _get_email_formatting_guidance() -> str:
     )
 
 
-def _get_active_formatting_channel(
-    agent: PersistentAgent,
-    implied_send_active: bool,
-    *,
-    peer_dm_context: dict | None = None,
-) -> str:
-    """Return the primary channel label for the current run."""
-
-    if implied_send_active or peer_dm_context is not None:
-        return "web_chat"
-
-    primary_medium = agent.preferred_contact_endpoint.channel if agent.preferred_contact_endpoint else None
-    if primary_medium == CommsChannel.WEB:
-        return "web_chat"
-    if primary_medium == CommsChannel.EMAIL:
-        return "email"
-    if primary_medium == CommsChannel.SMS:
-        return "sms"
-    return "generic"
-
-
-def _get_formatting_guidance(
-    agent: PersistentAgent,
-    implied_send_active: bool,
-    *,
-    peer_dm_context: dict | None = None,
-) -> str:
-    """
-    Build formatting guidance based on the agent's current context.
-
-    Determines primary medium from:
-    1. Implied send active → web chat
-    2. Preferred contact endpoint → that channel
-    3. Fallback → general guidance for all channels
-    """
-    active_channel = _get_active_formatting_channel(
-        agent,
-        implied_send_active,
-        peer_dm_context=peer_dm_context,
-    )
+def _get_formatting_guidance() -> str:
+    """Return shared formatting guidance for all delivery surfaces."""
 
     return (
         "Formatting guidance:\n"
-        "Multiple channels can matter in the same run. Use the section matching the message you are producing, "
-        "and treat <active_channel> as the default when the current turn has one clear primary surface.\n\n"
-        f"<active_channel>{active_channel}</active_channel>\n\n"
+        "Multiple channels can matter in the same run. Use the section matching the message you are producing.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"
@@ -4438,6 +4382,7 @@ def _get_system_instruction(
         "Always start there when unsure. "
 
         f"{delivery_instructions}"
+        f"{_get_formatting_guidance()}\n\n"
 
         "The fetch→report rhythm: fetch data, then deliver it to the user. "
         "Fetching is not the finish line—a substantive report is. "
