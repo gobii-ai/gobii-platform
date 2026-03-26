@@ -315,9 +315,34 @@ class MCPToolManagerTests(TestCase):
             mock_select.side_effect = _side_effect
             proxy_url, error = self.manager._select_agent_proxy_url(agent)
 
-        mock_select.assert_called_once()
+            mock_select.assert_called_once()
         self.assertEqual(proxy_url, proxy.proxy_url)
         self.assertIsNone(error)
+
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._close_client_sync")
+    def test_close_active_clients_closes_clients_without_resetting_cached_state(self, mock_close_client):
+        """Per-task cleanup should only close live clients, not discard discovery state."""
+        shared_client = MagicMock()
+        pipedream_client = MagicMock()
+
+        self.manager._clients = {self.config_id: shared_client}
+        self.manager._pd_agent_clients = {"agent-1": pipedream_client}
+        self.manager._server_cache = {"server": MagicMock()}
+        self.manager._tools_cache = {"server": [MagicMock()]}
+        self.manager._tool_cache_fingerprints = {"server": "fingerprint"}
+        self.manager._initialized = True
+
+        self.manager.close_active_clients()
+
+        mock_close_client.assert_any_call(shared_client, context=self.config_id)
+        mock_close_client.assert_any_call(pipedream_client, context="agent-1")
+        self.assertEqual(mock_close_client.call_count, 2)
+        self.assertEqual(self.manager._clients, {})
+        self.assertEqual(self.manager._pd_agent_clients, {})
+        self.assertIn("server", self.manager._server_cache)
+        self.assertIn("server", self.manager._tools_cache)
+        self.assertEqual(self.manager._tool_cache_fingerprints["server"], "fingerprint")
+        self.assertTrue(self.manager._initialized)
 
     def test_select_agent_proxy_url_supports_socks5_proxy(self):
         user = get_user_model().objects.create_user(username="socks-agent@example.com")

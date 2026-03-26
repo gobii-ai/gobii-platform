@@ -110,28 +110,14 @@ class CeleryRedisConfigurationTest(TestCase):
 class CeleryTaskPostrunMCPCleanupTest(TestCase):
     """Test that MCP subprocess cleanup is hooked into the task_postrun signal."""
 
-    @patch('api.agent.tools.mcp_manager.cleanup_mcp_tools')
+    @patch('config.celery.get_cleanup_active_mcp_clients')
     @patch('django.db.close_old_connections')
-    def test_task_postrun_handler_calls_cleanup_mcp_tools(self, mock_close_conns, mock_cleanup):
-        """task_postrun_handler must call cleanup_mcp_tools to prevent MCP subprocess accumulation."""
-        from config.celery import task_postrun_handler
-        task_postrun_handler()
-        mock_cleanup.assert_called_once()
-
-    @patch('api.agent.tools.mcp_manager.cleanup_mcp_tools')
-    @patch('django.db.close_old_connections')
-    def test_task_postrun_handler_still_closes_db_connections(self, mock_close_conns, mock_cleanup):
-        """task_postrun_handler must still close old database connections."""
+    def test_task_postrun_handler_closes_db_connections_and_mcp_clients(self, mock_close_conns, mock_get_cleanup):
+        """task_postrun_handler must close DB connections and active MCP clients after each task."""
+        mock_cleanup = MagicMock()
+        mock_get_cleanup.return_value = mock_cleanup
         from config.celery import task_postrun_handler
         task_postrun_handler()
         mock_close_conns.assert_called_once()
-
-    @patch('api.agent.tools.mcp_manager.cleanup_mcp_tools', side_effect=RuntimeError("cleanup failed"))
-    @patch('django.db.close_old_connections')
-    def test_task_postrun_handler_tolerates_cleanup_errors(self, mock_close_conns, mock_cleanup):
-        """task_postrun_handler must not raise if cleanup_mcp_tools throws."""
-        from config.celery import task_postrun_handler
-        try:
-            task_postrun_handler()
-        except Exception:
-            self.fail("task_postrun_handler raised an exception when cleanup_mcp_tools failed")
+        mock_get_cleanup.assert_called_once()
+        mock_cleanup.assert_called_once()

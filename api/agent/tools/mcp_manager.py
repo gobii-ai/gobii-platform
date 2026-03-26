@@ -2186,15 +2186,8 @@ class MCPToolManager:
     
     def cleanup(self):
         """Clean up resources."""
-        # Attempt to close per-agent Pipedream clients
-        for c in self._pd_agent_clients.values():
-            try:
-                c.close()
-            except Exception:
-                pass
-        self._pd_agent_clients.clear()
+        self.close_active_clients()
         self._server_cache.clear()
-        self._clients.clear()
         self._tools_cache.clear()
         self._tool_cache_fingerprints.clear()
         self._last_refresh_marker = None
@@ -2202,6 +2195,16 @@ class MCPToolManager:
             self._loop.close()
         self._loop = None
         self._initialized = False
+
+    def close_active_clients(self) -> None:
+        """Close active MCP clients without discarding cached tool metadata."""
+        for config_id, client in list(self._clients.items()):
+            self._close_client_sync(client, context=config_id)
+        self._clients.clear()
+
+        for cache_key, client in list(self._pd_agent_clients.items()):
+            self._close_client_sync(client, context=cache_key)
+        self._pd_agent_clients.clear()
 
     def _resolve_tool_info(self, tool_name: str) -> Optional[MCPToolInfo]:
         """Resolve tool metadata, refreshing cache on demand."""
@@ -2425,3 +2428,8 @@ def get_pipedream_access_token() -> Optional[str]:
 def cleanup_mcp_tools():
     """Clean up MCP tool resources."""
     _mcp_manager.cleanup()
+
+
+def cleanup_active_mcp_clients() -> None:
+    """Close active MCP clients without resetting cached discovery state."""
+    _mcp_manager.close_active_clients()

@@ -1,7 +1,11 @@
-import pathlib, sys, os
+import os
+import pathlib
+import sys
+from functools import lru_cache
 from pathlib import Path
 from celery import Celery
 from celery.signals import worker_ready, worker_shutdown, worker_process_init, task_prerun, task_postrun
+
 from .bootsteps import LivenessProbe
 
 # Ensure the browser-use task counter signal handlers are registered
@@ -28,6 +32,14 @@ app.steps['worker'].add(LivenessProbe)
 
 # Load task modules from all registered Django app configs.
 app.autodiscover_tasks()
+
+
+@lru_cache(maxsize=1)
+def get_cleanup_active_mcp_clients():
+    """Resolve MCP cleanup lazily because Django apps are not ready during celery module import."""
+    from api.agent.tools.mcp_manager import cleanup_active_mcp_clients
+
+    return cleanup_active_mcp_clients
 
 
 @worker_ready.connect
@@ -72,12 +84,7 @@ def task_postrun_handler(sender=None, task_id=None, task=None, args=None, kwargs
     """
     from django.db import close_old_connections
     close_old_connections()
-
-    try:
-        from api.agent.tools.mcp_manager import cleanup_mcp_tools
-        cleanup_mcp_tools()
-    except Exception as e:
-        print(f"Error during MCP tools cleanup: {e}")
+    get_cleanup_active_mcp_clients()()
 
 @worker_shutdown.connect
 def worker_shutdown_handler(**_):
