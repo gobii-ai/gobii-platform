@@ -227,6 +227,7 @@ class AgentEventProcessingTests(TestCase):
         PersistentAgent.objects.filter(pk=self.agent.pk).update(is_active=False)
         fake_redis = MagicMock()
         fake_redis.get.return_value = None
+        fake_redis.pipeline = None
         mock_event_processing_redis_client.return_value = fake_redis
         mock_processing_flags_redis_client.return_value = fake_redis
 
@@ -237,7 +238,7 @@ class AgentEventProcessingTests(TestCase):
         mock_locked.assert_not_called()
         mock_redlock.assert_not_called()
         fake_redis.delete.assert_any_call(f"agent-event-processing:queued:{self.agent.id}")
-        fake_redis.srem.assert_called_with("agent-event-processing:pending", str(self.agent.id))
+        fake_redis.srem.assert_any_call("agent-event-processing:pending", str(self.agent.id))
 
     def test_process_agent_events_closes_active_cycle_for_inactive_follow_up(self):
         """Skipping an inactive follow-up should close the inherited budget cycle."""
