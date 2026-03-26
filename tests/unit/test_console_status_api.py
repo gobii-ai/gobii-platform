@@ -190,7 +190,7 @@ class SystemStatusAPITests(TestCase):
             proxy_server=stale_proxy,
             health_check_spec=spec,
             status=ProxyHealthCheckResult.Status.PASSED,
-            checked_at=now - timedelta(days=2),
+            checked_at=now - timedelta(days=4),
             response_time_ms=140,
         )
 

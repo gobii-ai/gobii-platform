@@ -35,7 +35,7 @@ from config.redis_client import get_redis_client
 logger = logging.getLogger(__name__)
 
 SYSTEM_STATUS_POLL_INTERVAL_SECONDS = 30
-SYSTEM_STATUS_PROXY_FRESHNESS_HOURS = 24
+SYSTEM_STATUS_PROXY_FRESHNESS_HOURS = 72
 SYSTEM_STATUS_ROW_LIMIT = 20
 
 STATUS_HEALTHY = "healthy"
