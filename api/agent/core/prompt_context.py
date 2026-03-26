@@ -1859,7 +1859,7 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
         "agent_capabilities_note": capabilities_note,
         "plan_info": "\n".join(lines),
         "agent_addons": _build_agent_addons_section(),
-        "agent_settings": _build_agent_settings_section(agent),
+        "agent_settings": _build_agent_settings_section(agent, plan_id=plan_id),
         "agent_email_settings": _build_agent_email_settings_section(agent),
     }
 
@@ -1875,7 +1875,7 @@ def _build_agent_addons_section() -> str:
     return "Agent add-ons:\n- " + "\n- ".join(lines)
 
 
-def _build_agent_settings_section(agent: PersistentAgent) -> str:
+def _build_agent_settings_section(agent: PersistentAgent, *, plan_id: str | None = None) -> str:
     """Return a bullet-style list of configurable settings for the agent."""
     agent_config_url = _build_console_url("agent_detail", pk=agent.id)
     contact_requests_url = _build_console_url("agent_contact_requests", pk=agent.id)
@@ -1897,19 +1897,22 @@ def _build_agent_settings_section(agent: PersistentAgent) -> str:
         f"Agent settings page: {agent_config_url}",
     ]
 
-    try:
-        owner = agent.organization or agent.user
-        plan = get_owner_plan(owner) or {}
-        plan_id = str(plan.get("id") or "").lower()
-        if plan_id and plan_id != "free":
-            settings_lines.append(
-                "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
+    resolved_plan_id = (plan_id or "").lower()
+    if not resolved_plan_id:
+        try:
+            owner = agent.organization or agent.user
+            plan = get_owner_plan(owner) or {}
+            resolved_plan_id = str(plan.get("id") or "").lower()
+        except DatabaseError:
+            logger.debug(
+                "Failed to append intelligence setting note for agent %s",
+                getattr(agent, "id", "unknown"),
+                exc_info=True,
             )
-    except DatabaseError:
-        logger.debug(
-            "Failed to append intelligence setting note for agent %s",
-            getattr(agent, "id", "unknown"),
-            exc_info=True,
+
+    if resolved_plan_id and resolved_plan_id != "free":
+        settings_lines.append(
+            "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
         )
 
     return "Agent settings:\n- " + "\n- ".join(settings_lines)
@@ -2444,17 +2447,6 @@ def build_prompt_context(
     else:
         span.set_attribute("prompt.archive_key", "")
 
-    # CRITICAL: DO NOT REMOVE OR MODIFY THESE PRINT STATEMENTS WITHOUT EXTREME CARE
-    # Using print() bypasses the 64KB container log truncation limit that affects logger.info()
-    # Container runtimes (Docker/Kubernetes) truncate log messages at 64KB, which cuts off
-    # our prompts mid-stream, losing critical debugging information especially the high-weight
-    # sections at the end (</critical>, </important>). Using separate print() calls ensures
-    # we can see the complete prompt in production logs for debugging agent issues.
-    # The BEGIN/END markers make it easy to extract full prompts with grep/awk.
-    # See: test_log_message_truncation.py and proof_64kb_truncation.py for evidence
-    print(f"__BEGIN_RENDERED_PROMPT_FOR_AGENT_{agent.id}__")
-    print(user_content)
-    print(f"__END_RENDERED_PROMPT_FOR_AGENT_{agent.id}__")
     span.set_attribute("prompt.token_budget", token_budget)
     span.set_attribute("prompt.tokens_before_fitting", tokens_before)
     span.set_attribute("prompt.tokens_after_fitting", tokens_after)

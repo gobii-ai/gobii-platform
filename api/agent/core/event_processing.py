@@ -61,6 +61,7 @@ from .processing_flags import (
     enqueue_pending_agent,
     get_pending_drain_settings,
     is_agent_pending,
+    is_processing_queued,
     set_processing_heartbeat,
 )
 from .llm_utils import (
@@ -677,6 +678,26 @@ def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, sp
             span.add_event("Pending drain task scheduled")
     except Exception as exc:
         logger.error("Failed to schedule pending drain task: %s", exc)
+
+
+def _schedule_agent_follow_up(*, agent_id: Union[str, UUID], delay_seconds: int, span=None, reason: str) -> None:
+    """Schedule a direct follow-up for a single agent without going through pending-drain."""
+    try:
+        from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
+
+        process_agent_events_task.apply_async(
+            args=[str(agent_id)],
+            countdown=delay_seconds,
+        )
+        if span is not None:
+            span.add_event(f"{reason} follow-up scheduled")
+    except Exception:
+        logger.warning(
+            "Failed to schedule %s follow-up for agent %s",
+            reason,
+            agent_id,
+            exc_info=True,
+        )
 
 
 def _stale_lock_threshold_seconds(
@@ -2143,17 +2164,17 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
     if budget_ctx is None:
         return
 
-    # If pending follow-ups are queued, keep the cycle open so they can run.
+    # If follow-ups are queued, keep the cycle open so they can run.
     try:
         redis_client = get_redis_client()
-        if is_agent_pending(agent.id, client=redis_client):
+        if is_agent_pending(agent.id, client=redis_client) or is_processing_queued(agent.id, client=redis_client):
             logger.info(
-                "Agent %s sleeping with pending work queued; keeping cycle active.",
+                "Agent %s sleeping with queued follow-up work; keeping cycle active.",
                 agent.id,
             )
             return
     except Exception:
-        logger.debug("Pending-flag check failed; proceeding to default close logic", exc_info=True)
+        logger.debug("Follow-up state check failed; proceeding to default close logic", exc_info=True)
 
     try:
         current_depth = (
@@ -4076,16 +4097,12 @@ def _run_agent_loop(
                         exc_info=True,
                     )
                 pending_settings = get_pending_drain_settings(settings)
-                enqueue_pending_agent(
-                    agent.id,
-                    ttl=pending_settings.pending_set_ttl_seconds,
-                )
-                _schedule_pending_drain(
+                _schedule_agent_follow_up(
+                    agent_id=agent.id,
                     delay_seconds=pending_settings.pending_drain_delay_seconds,
-                    schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
                     span=span,
+                    reason="Runtime limit",
                 )
-                span.add_event("Runtime limit follow-up queued")
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
             with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
@@ -4749,22 +4766,12 @@ def _run_agent_loop(
                 int(MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS),
                 int(pending_settings.pending_drain_delay_seconds),
             )
-            try:
-                from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
-
-                # Avoid globally throttling the pending-drain scheduler when a single agent
-                # hits its iteration cap; resume this agent directly after a cooldown.
-                process_agent_events_task.apply_async(
-                    args=[str(agent.id)],
-                    countdown=delay_seconds,
-                )
-                span.add_event("Max iterations follow-up scheduled")
-            except Exception:
-                logger.debug(
-                    "Failed to schedule max-iterations follow-up for agent %s",
-                    agent.id,
-                    exc_info=True,
-                )
+            _schedule_agent_follow_up(
+                agent_id=agent.id,
+                delay_seconds=delay_seconds,
+                span=span,
+                reason="Max iterations",
+            )
             _attempt_cycle_close_for_sleep(agent, budget_ctx)
 
         return cumulative_token_usage

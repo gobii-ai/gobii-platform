@@ -1,10 +1,14 @@
-"""Ensure pending work keeps the budget cycle open on sleep."""
+"""Ensure queued follow-up work keeps the budget cycle open on sleep."""
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
 from api.agent.core.budget import AgentBudgetManager, BudgetContext
 from api.agent.core.event_processing import _attempt_cycle_close_for_sleep
-from api.agent.core.processing_flags import enqueue_pending_agent, pending_set_key
+from api.agent.core.processing_flags import (
+    enqueue_pending_agent,
+    pending_set_key,
+    set_processing_queued_flag,
+)
 from api.models import BrowserUseAgent, PersistentAgent
 from config.redis_client import get_redis_client
 
@@ -58,6 +62,17 @@ class PendingFollowUpClosureTests(TestCase):
     def test_pending_set_keeps_cycle_open(self) -> None:
         budget_ctx = self._build_budget_context()
         enqueue_pending_agent(self.agent.id, client=self.redis, ttl=300)
+
+        _attempt_cycle_close_for_sleep(self.agent, budget_ctx)
+
+        self.assertEqual(
+            AgentBudgetManager.get_cycle_status(agent_id=str(self.agent.id)),
+            "active",
+        )
+
+    def test_processing_queued_flag_keeps_cycle_open(self) -> None:
+        budget_ctx = self._build_budget_context()
+        set_processing_queued_flag(self.agent.id, ttl=300)
 
         _attempt_cycle_close_for_sleep(self.agent, budget_ctx)
 
