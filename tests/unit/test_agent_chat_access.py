@@ -354,6 +354,23 @@ class AgentChatAccessTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("favorite_agent_ids"), [str(self.org_agent.id)])
 
+    def test_roster_includes_insights_panel_expanded_preference(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: False,
+            },
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload.get("insights_panel_expanded"))
+
     def test_roster_includes_mini_and_short_descriptions(self):
         self.org_agent.mini_description = "Revenue pipeline assistant"
         self.org_agent.short_description = "Qualifies inbound leads and drafts handoff-ready summaries."

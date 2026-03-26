@@ -594,6 +594,7 @@ class UserPreference(models.Model):
 
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
+    KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = "agent.chat.insights_panel.expanded"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -604,6 +605,10 @@ class UserPreference(models.Model):
         KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: {
             "default": [],
             "type": "uuid_list",
+        },
+        KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: {
+            "default": None,
+            "type": "nullable_boolean",
         },
         KEY_USER_TIMEZONE: {
             "default": "",
@@ -680,6 +685,12 @@ class UserPreference(models.Model):
         return value
 
     @classmethod
+    def _normalize_nullable_boolean_preference_value(cls, key: str, value: object) -> bool | None:
+        if value is None:
+            return None
+        return cls._normalize_boolean_preference_value(key, value)
+
+    @classmethod
     def _normalize_preference_value(
         cls,
         key: str,
@@ -699,6 +710,9 @@ class UserPreference(models.Model):
 
         if preference_type == "boolean":
             return cls._normalize_boolean_preference_value(key, value)
+
+        if preference_type == "nullable_boolean":
+            return cls._normalize_nullable_boolean_preference_value(key, value)
 
         if preference_type == "timezone":
             return cls._normalize_timezone_preference_value(key, value)

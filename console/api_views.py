@@ -1803,8 +1803,15 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         override = get_context_override(request)
         for_agent_id = request.GET.get("for_agent")
         requested_agent_status = None
-        agent_roster_sort_mode = UserPreference.resolve_agent_roster_sort_mode(request.user)
-        favorite_agent_ids = UserPreference.resolve_agent_favorite_ids(request.user)
+        resolved_preferences = UserPreference.resolve_known_preferences(request.user)
+        agent_roster_sort_mode = resolved_preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_SORT_MODE)
+        favorite_agent_ids = resolved_preferences.get(
+            UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
+            [],
+        )
+        insights_panel_expanded = resolved_preferences.get(
+            UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED
+        )
         if for_agent_id:
             override_for_agent, error_response, requested_agent_status = self._resolve_override_for_agent(
                 request,
@@ -1968,6 +1975,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "requested_agent_status": requested_agent_status,
                 "agent_roster_sort_mode": agent_roster_sort_mode,
                 "favorite_agent_ids": favorite_agent_ids,
+                "insights_panel_expanded": insights_panel_expanded,
                 "billingStatus": billing_status,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,

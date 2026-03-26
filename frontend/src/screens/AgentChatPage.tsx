@@ -6,8 +6,10 @@ import { createAgent, updateAgent } from '../api/agents'
 import { respondToHumanInputRequest, respondToHumanInputRequestsBatch } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
+  parseNullableBooleanPreference,
   updateUserPreferences,
   parseFavoriteAgentIdsPreference,
+  USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
 } from '../api/userPreferences'
@@ -407,6 +409,7 @@ type AgentRosterQueryData = {
   context: ConsoleContext
   agentRosterSortMode?: AgentRosterSortMode
   favoriteAgentIds?: string[]
+  insightsPanelExpanded?: boolean | null
   agents: AgentRosterEntry[]
   llmIntelligence?: unknown
 }
@@ -1103,7 +1106,9 @@ export function AgentChatPage({
   })
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
+  const [insightsPanelExpandedPreference, setInsightsPanelExpandedPreference] = useState<boolean | null>(null)
   const hasHydratedAgentRosterSortModeRef = useRef(false)
+  const hasHydratedInsightsPanelExpandedPreferenceRef = useRef(false)
 
   useEffect(() => {
     const serverSortMode = rosterQuery.data?.agentRosterSortMode
@@ -1124,6 +1129,15 @@ export function AgentChatPage({
         : serverFavoriteAgentIds
     ))
   }, [rosterQuery.data?.favoriteAgentIds])
+
+  useEffect(() => {
+    const serverInsightsPanelExpanded = rosterQuery.data?.insightsPanelExpanded
+    if (serverInsightsPanelExpanded === undefined || hasHydratedInsightsPanelExpandedPreferenceRef.current) {
+      return
+    }
+    hasHydratedInsightsPanelExpandedPreferenceRef.current = true
+    setInsightsPanelExpandedPreference(parseNullableBooleanPreference(serverInsightsPanelExpanded))
+  }, [rosterQuery.data?.insightsPanelExpanded])
 
   const handleAgentRosterSortModeChange = useCallback(
     (nextSortMode: AgentRosterSortMode) => {
@@ -1197,6 +1211,27 @@ export function AgentChatPage({
     [queryClient],
   )
 
+  const updateInsightsPanelExpandedInRosterCache = useCallback(
+    (nextInsightsPanelExpanded: boolean | null) => {
+      queryClient.setQueriesData<AgentRosterQueryData>(
+        { queryKey: ['agent-roster'] },
+        (current) => {
+          if (!isAgentRosterQueryData(current)) {
+            return current
+          }
+          if (current.insightsPanelExpanded === nextInsightsPanelExpanded) {
+            return current
+          }
+          return {
+            ...current,
+            insightsPanelExpanded: nextInsightsPanelExpanded,
+          }
+        },
+      )
+    },
+    [queryClient],
+  )
+
   const handleToggleAgentFavorite = useCallback(
     (agentId: string) => {
       const nextFavoriteAgentIds = favoriteAgentIds.includes(agentId)
@@ -1219,6 +1254,26 @@ export function AgentChatPage({
       }).catch(() => undefined)
     },
     [favoriteAgentIds, updateFavoriteAgentIdsInRosterCache],
+  )
+
+  const handleInsightsPanelExpandedPreferenceChange = useCallback(
+    (nextInsightsPanelExpanded: boolean) => {
+      setInsightsPanelExpandedPreference(nextInsightsPanelExpanded)
+      updateInsightsPanelExpandedInRosterCache(nextInsightsPanelExpanded)
+
+      void updateUserPreferences({
+        preferences: {
+          [USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED]: nextInsightsPanelExpanded,
+        },
+      }).then((response) => {
+        const persistedInsightsPanelExpanded = parseNullableBooleanPreference(
+          response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED],
+        )
+        setInsightsPanelExpandedPreference(persistedInsightsPanelExpanded)
+        updateInsightsPanelExpandedInRosterCache(persistedInsightsPanelExpanded)
+      }).catch(() => undefined)
+    },
+    [updateInsightsPanelExpandedInRosterCache],
   )
 
   useEffect(() => {
@@ -3207,7 +3262,7 @@ export function AgentChatPage({
         agentRoster={sidebarAgents}
         favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}
-        insightsPanelStorageKey={activeAgentId}
+        insightsPanelExpandedPreference={insightsPanelExpandedPreference}
         switchingAgentId={switchingAgentId}
         rosterLoading={rosterLoading}
         rosterError={rosterErrorMessage}
@@ -3217,6 +3272,7 @@ export function AgentChatPage({
         createAgentDisabledReason={createAgentDisabledReason}
         agentRosterSortMode={agentRosterSortMode}
         onAgentRosterSortModeChange={handleAgentRosterSortModeChange}
+        onInsightsPanelExpandedPreferenceChange={handleInsightsPanelExpandedPreferenceChange}
         contextSwitcher={contextSwitcher ?? undefined}
         currentContext={effectiveContext}
         onComposerFocus={handleComposerFocus}
