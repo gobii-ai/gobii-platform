@@ -390,9 +390,9 @@ def _collect_proxy_section(*, now):
 
     if summary["activeCount"] == 0:
         status = STATUS_INFO
-    elif summary["degradedCount"] > 0:
+    elif summary["degradedCount"] >= summary["activeCount"]:
         status = STATUS_CRITICAL
-    elif summary["staleCount"] > 0:
+    elif summary["degradedCount"] > 0 or summary["staleCount"] > 0:
         status = STATUS_WARNING
     else:
         status = STATUS_HEALTHY

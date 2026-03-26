@@ -203,6 +203,31 @@ class SystemStatusAPITests(TestCase):
         self.assertEqual(section["summary"]["degradedCount"], 1)
         self.assertEqual(section["summary"]["staleCount"], 1)
         self.assertEqual(section["summary"]["inactiveCount"], 1)
+        self.assertEqual(section["status"], "warning")
+
+    @patch("console.system_status.get_redis_client")
+    def test_proxy_section_marks_all_active_proxies_degraded_as_critical(self, mock_get_redis_client):
+        mock_get_redis_client.return_value = _FakeRedis()
+        spec = ProxyHealthCheckSpec.objects.create(name="Critical proxy check", prompt="Check")
+        now = timezone.now()
+
+        for name, port in (("Degraded A", 8101), ("Degraded B", 8102)):
+            proxy = ProxyServer.objects.create(name=name, host=f"{name.lower().replace(' ', '-')}.local", port=port, is_active=True)
+            ProxyHealthCheckResult.objects.create(
+                proxy_server=proxy,
+                health_check_spec=spec,
+                status=ProxyHealthCheckResult.Status.FAILED,
+                checked_at=now - timedelta(minutes=5),
+                response_time_ms=600,
+            )
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        section = response.json()["sections"]["proxies"]
+        self.assertEqual(section["summary"]["activeCount"], 2)
+        self.assertEqual(section["summary"]["healthyCount"], 0)
+        self.assertEqual(section["summary"]["degradedCount"], 2)
         self.assertEqual(section["status"], "critical")
 
     @patch("console.system_status._collect_proxy_section", side_effect=RuntimeError("proxy collector down"))
