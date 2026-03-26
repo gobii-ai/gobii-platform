@@ -16,6 +16,7 @@ from api.agent.comms.message_service import ingest_inbound_webhook_message
 from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
+    BrowserUseAgentTask,
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentConversation,
@@ -248,6 +249,31 @@ class AgentChatSignalTests(TestCase):
             payload.get("short_description"),
             "Finds qualified leads and drafts personalized outreach.",
         )
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.build_processing_snapshot")
+    def test_processing_broadcast_emits_agent_profile_event_with_processing_state(self, mock_build_processing_snapshot):
+        mock_build_processing_snapshot.return_value = type(
+            "Snapshot",
+            (),
+            {
+                "active": True,
+                "web_tasks": [],
+                "next_scheduled_at": None,
+            },
+        )()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            BrowserUseAgentTask.objects.create(
+                agent=self.browser_agent,
+                user=self.user,
+                prompt="Monitor the queue",
+                status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+            )
+
+        profile_event = self._receive_with_timeout(self.owner_profile_channel_name)
+        self.assertEqual(profile_event.get("type"), "agent_profile_event")
+        self.assertTrue(profile_event.get("payload", {}).get("processing_active"))
 
     @tag("batch_agent_chat")
     def test_collaborator_profile_group_receives_avatar_update(self):

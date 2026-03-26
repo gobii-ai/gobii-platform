@@ -130,6 +130,7 @@ from console.agent_chat.access import (
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
     TimelineDirection,
+    build_processing_activity_map,
     build_processing_snapshot,
     compute_processing_status,
     fetch_timeline_window,
@@ -1876,6 +1877,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         shared_agents = list(shared_qs.order_by("name"))
         collaborators_by_agent_id = {agent.id for agent in shared_agents}
         agents += shared_agents
+        processing_activity_by_agent_id = build_processing_activity_map(agents)
         user = request.user
         org_memberships = OrganizationMembership.objects.filter(
             user=user,
@@ -1952,6 +1954,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "email": get_display_email(agent),
                 "sms": get_primary_sms(agent),
                 "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
+                "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
             }
             for agent in agents
         ]

@@ -314,6 +314,7 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
         operation: classification.operation,
         operationLabel: display.operationLabel,
         purpose: display.purpose,
+        instructionsText: display.instructionsText,
         statementIndex: classification.index,
       },
     })

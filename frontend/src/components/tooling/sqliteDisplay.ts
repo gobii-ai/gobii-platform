@@ -292,6 +292,10 @@ function extractSqliteTargetLabel(
   }
 }
 
+function extractSqliteInstructionsText(statement: string, result: unknown): string | null {
+  return extractFieldFromSql(statement, ['instructions']) ?? extractFieldFromResult(result, ['instructions'])
+}
+
 export function extractSqliteResultStatus(result: unknown): string | null {
   const resultObject = parseResultObject(result)
   const message = coerceString(resultObject?.message)
@@ -342,6 +346,7 @@ export function getSqliteInternalTableDisplay(
   summary: string | null
   operationLabel: string
   purpose: string
+  instructionsText: string | null
   icon: LucideIcon
   iconBgClass: string
   iconColorClass: string
@@ -352,6 +357,7 @@ export function getSqliteInternalTableDisplay(
   const summaryKind = sqliteOperationSummaryKind(operation)
   const targetLabel = extractSqliteTargetLabel(kind, statement, result)
   const statusSummary = extractSqliteResultStatus(result)
+  const instructionsText = kind === 'agentSkills' ? extractSqliteInstructionsText(statement, result) : null
 
   let purpose = `Interacting with ${descriptor.tableName}.`
   if (kind === 'messages') {
@@ -370,10 +376,15 @@ export function getSqliteInternalTableDisplay(
 
   return {
     label: `${descriptor.labelPrefix} ${summaryKind}`,
-    caption: kind === 'toolResults' ? null : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix),
-    summary: statusSummary,
+    caption: kind === 'toolResults'
+      ? null
+      : kind === 'agentSkills'
+        ? (instructionsText ? truncate(instructionsText, 140) : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix))
+        : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix),
+    summary: kind === 'agentSkills' ? null : statusSummary,
     operationLabel: sqliteOperationDisplayLabel(operation),
     purpose,
+    instructionsText,
     icon: descriptor.icon,
     iconBgClass: descriptor.iconBgClass,
     iconColorClass: descriptor.iconColorClass,

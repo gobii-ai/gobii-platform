@@ -117,9 +117,14 @@ export function EnableDatabaseDetail({ entry }: ToolDetailProps) {
 
 export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
   const sqliteInfo = entry.sqliteInfo
+  const instructionsText = typeof sqliteInfo?.instructionsText === 'string' && sqliteInfo.instructionsText.trim().length
+    ? sqliteInfo.instructionsText
+    : null
   const resultObject = parseResultObject(entry.result)
   const status =
-    entry.summary ??
+    instructionsText
+      ? null
+      : entry.summary ??
     (typeof resultObject?.message === 'string' && resultObject.message.trim().length ? resultObject.message : null) ??
     (typeof resultObject?.status === 'string' && resultObject.status.trim().length ? resultObject.status : null)
   const fallbackResult =
@@ -131,6 +136,13 @@ export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
+      {instructionsText ? (
+        <Section title="Instructions">
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+            {instructionsText}
+          </pre>
+        </Section>
+      ) : null}
       <KeyValueList
         items={[
           status ? { label: 'Status', value: status } : null,

@@ -6,6 +6,7 @@ export type AgentRosterEntry = {
   avatarUrl: string | null
   displayColorHex: string | null
   isActive: boolean
+  processingActive: boolean
   lastInteractionAt: string | null
   miniDescription: string
   shortDescription: string

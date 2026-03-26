@@ -34,6 +34,7 @@ type AgentRosterPayload = {
     avatar_url: string | null
     display_color_hex: string | null
     is_active: boolean
+    processing_active: boolean
     mini_description: string
     short_description: string
     is_org_owned: boolean
@@ -67,6 +68,7 @@ export async function fetchAgentRoster(
     avatarUrl: agent.avatar_url,
     displayColorHex: agent.display_color_hex,
     isActive: agent.is_active,
+    processingActive: agent.processing_active,
     miniDescription: agent.mini_description,
     shortDescription: agent.short_description,
     auditUrl: agent.audit_url ?? null,

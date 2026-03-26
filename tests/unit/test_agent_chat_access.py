@@ -9,12 +9,14 @@ from unittest.mock import patch
 from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
+    BrowserUseAgentTask,
     Organization,
     OrganizationMembership,
     PersistentAgent,
     UserFlags,
     UserPreference,
 )
+from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 from console.agent_chat.access import resolve_agent
 from util.trial_enforcement import can_user_access_personal_agent_chat
 
@@ -373,6 +375,40 @@ class AgentChatAccessTests(TestCase):
             matching_entry.get("short_description"),
             "Qualifies inbound leads and drafts handoff-ready summaries.",
         )
+
+    def test_roster_includes_processing_activity_for_mixed_agents(self):
+        queued_agent_id = str(self.org_agent.id)
+        idle_org_agent = self._create_agent("Org Agent Idle", organization=self.org)
+        set_processing_queued_flag(self.org_agent.id)
+        with (
+            patch("api.models.BrowserUseAgentTask.full_clean", return_value=None),
+            patch(
+                "api.models.TaskCreditService.check_and_consume_credit_for_owner",
+                return_value={"success": True, "credit": None},
+            ),
+        ):
+            BrowserUseAgentTask.objects.create(
+                agent=self.org_agent_two.browser_use_agent,
+                user=self.user,
+                prompt="Review the pipeline",
+                status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+            )
+
+        try:
+            response = self.client.get(
+                reverse("console_agent_roster"),
+                HTTP_X_GOBII_CONTEXT_TYPE="organization",
+                HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+            )
+            self.assertEqual(response.status_code, 200)
+
+            payload = response.json()
+            roster_by_id = {entry["id"]: entry for entry in payload.get("agents", [])}
+            self.assertTrue(roster_by_id[queued_agent_id]["processing_active"])
+            self.assertTrue(roster_by_id[str(self.org_agent_two.id)]["processing_active"])
+            self.assertFalse(roster_by_id[str(idle_org_agent.id)]["processing_active"])
+        finally:
+            clear_processing_queued_flag(self.org_agent.id)
 
     def test_roster_includes_audit_url_for_staff(self):
         User = get_user_model()

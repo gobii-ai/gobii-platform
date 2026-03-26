@@ -450,6 +450,7 @@ type AgentSwitchMeta = {
   agentName?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
+  processingActive?: boolean
 }
 
 function deriveConnectionIndicator({
@@ -990,7 +991,8 @@ export function AgentChatPage({
       const hasAvatar = Object.prototype.hasOwnProperty.call(rawPayload, 'agent_avatar_url')
       const hasShortDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'short_description')
       const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
-      if (!hasName && !hasColor && !hasAvatar && !hasShortDescription && !hasMiniDescription) {
+      const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
+      if (!hasName && !hasColor && !hasAvatar && !hasShortDescription && !hasMiniDescription && !hasProcessingActive) {
         return
       }
       if (hasAvatar) {
@@ -1055,6 +1057,13 @@ export function AgentChatPage({
               const nextMiniDescription = typeof rawPayload.mini_description === 'string' ? rawPayload.mini_description : ''
               if (nextMiniDescription !== next.miniDescription) {
                 next.miniDescription = nextMiniDescription
+                changed = true
+              }
+            }
+            if (hasProcessingActive) {
+              const nextProcessingActive = Boolean(rawPayload.processing_active)
+              if (nextProcessingActive !== next.processingActive) {
+                next.processingActive = nextProcessingActive
                 changed = true
               }
             }
@@ -1342,6 +1351,7 @@ export function AgentChatPage({
       agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
       agentName: resolvedPendingMeta?.agentName ?? agentName,
       agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
+      processingActive: resolvedPendingMeta?.processingActive,
     })
     void fetchInsights()
   }, [
@@ -2180,6 +2190,7 @@ export function AgentChatPage({
       avatarUrl: resolvedAvatarUrl,
       displayColorHex: resolvedAgentColorHex ?? null,
       isActive: true,
+      processingActive: false,
       lastInteractionAt: null,
       miniDescription: '',
       shortDescription: '',
@@ -2348,6 +2359,7 @@ export function AgentChatPage({
         agentName: agent.name,
         agentColorHex: agent.displayColorHex,
         agentAvatarUrl: agent.avatarUrl,
+        processingActive: agent.processingActive,
       }
       setSwitchingAgentId(agent.id)
       setActiveAgentId(agent.id)
@@ -2449,6 +2461,7 @@ export function AgentChatPage({
           avatarUrl: null,
           displayColorHex: null,
           isActive: true,
+          processingActive: false,
           lastInteractionAt: new Date().toISOString(),
           miniDescription: '',
           shortDescription: '',
