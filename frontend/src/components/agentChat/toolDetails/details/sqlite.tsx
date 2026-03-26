@@ -1,6 +1,7 @@
 import type { ToolDetailProps } from '../../tooling/types'
 import { isRecord, parseResultObject } from '../../../../util/objectUtils'
-import { KeyValueList, Section } from '../shared'
+import { createNormalizeContext, normalizeStructuredValue, tryParseJson } from '../normalize'
+import { JsonBlock, KeyValueList, Section } from '../shared'
 import { stringify } from '../utils'
 
 export function SqliteBatchDetail({ entry }: ToolDetailProps) {
@@ -117,20 +118,90 @@ export function EnableDatabaseDetail({ entry }: ToolDetailProps) {
 
 export function SqliteInternalTableDetail({ entry }: ToolDetailProps) {
   const sqliteInfo = entry.sqliteInfo
+  const isAgentSkillsEntry = sqliteInfo?.kind === 'agentSkills'
+  const isToolResultsQuery = sqliteInfo?.kind === 'toolResults' && sqliteInfo.operation === 'select'
+  const stringResult = typeof entry.result === 'string' ? entry.result.trim() : null
+  const parsedJsonResult = stringResult ? tryParseJson(stringResult) : null
+  const objectResult =
+    entry.result && typeof entry.result === 'object'
+      ? (entry.result as Record<string, unknown> | unknown[])
+      : null
+  const structuredResult = objectResult ?? parsedJsonResult
+  const normalizedStructuredResult =
+    structuredResult !== null && structuredResult !== undefined
+      ? normalizeStructuredValue(structuredResult, createNormalizeContext())
+      : null
+  const hasStructuredResult =
+    Array.isArray(normalizedStructuredResult ?? structuredResult)
+    || isRecord(normalizedStructuredResult ?? structuredResult)
+  const instructionsText = typeof sqliteInfo?.instructionsText === 'string' && sqliteInfo.instructionsText.trim().length
+    ? sqliteInfo.instructionsText
+    : null
   const resultObject = parseResultObject(entry.result)
   const status =
-    entry.summary ??
+    instructionsText
+      ? null
+      : entry.summary ??
     (typeof resultObject?.message === 'string' && resultObject.message.trim().length ? resultObject.message : null) ??
     (typeof resultObject?.status === 'string' && resultObject.status.trim().length ? resultObject.status : null)
   const fallbackResult =
+    isToolResultsQuery
+      ? (
+        hasStructuredResult
+          ? null
+          : entry.result
+            ? stringify(entry.result)
+            : null
+      )
+      :
     status
       ? null
       : entry.result
         ? stringify(entry.result)
         : null
 
+  if (isAgentSkillsEntry) {
+    return (
+      <div className="space-y-3 text-sm text-slate-600">
+        {instructionsText ? (
+          <Section title="Instructions">
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+              {instructionsText}
+            </pre>
+          </Section>
+        ) : null}
+      </div>
+    )
+  }
+
+  if (isToolResultsQuery) {
+    return (
+      <div className="space-y-3 text-sm text-slate-600">
+        {hasStructuredResult ? (
+          <Section title="Result">
+            <JsonBlock value={(normalizedStructuredResult ?? structuredResult) as Record<string, unknown> | unknown[]} />
+          </Section>
+        ) : null}
+        {fallbackResult ? (
+          <Section title="Result">
+            <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+              {typeof fallbackResult === 'string' ? fallbackResult : stringify(fallbackResult)}
+            </pre>
+          </Section>
+        ) : null}
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-3 text-sm text-slate-600">
+      {instructionsText ? (
+        <Section title="Instructions">
+          <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 text-xs text-slate-700 shadow-inner">
+            {instructionsText}
+          </pre>
+        </Section>
+      ) : null}
       <KeyValueList
         items={[
           status ? { label: 'Status', value: status } : null,

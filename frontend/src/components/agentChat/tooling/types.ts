@@ -38,6 +38,7 @@ export type ToolEntryDisplay = {
     operation: SqliteStatementOperation
     operationLabel: string
     purpose: string
+    instructionsText?: string | null
     statementIndex: number
   }
   separateFromPreview?: boolean

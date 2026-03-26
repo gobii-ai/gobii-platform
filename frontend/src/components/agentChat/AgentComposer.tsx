@@ -9,7 +9,6 @@ import { HumanInputComposerPanel } from './HumanInputComposerPanel'
 import type { PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
-import { useLocalStorageState } from '../../hooks/useLocalStorageState'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
@@ -93,20 +92,6 @@ function getInsightBackground(insight: InsightEvent): string {
   return 'transparent'
 }
 
-const workingPanelStorageCodec = {
-  serialize: (value: boolean | null) => (value ? 'expanded' : 'collapsed'),
-  deserialize: (raw: string): boolean | null => {
-    if (raw === 'expanded') return true
-    if (raw === 'collapsed') return false
-    try {
-      const parsed = JSON.parse(raw) as unknown
-      return typeof parsed === 'boolean' ? parsed : null
-    } catch {
-      return null
-    }
-  },
-}
-
 type HumanInputComposerResponse = {
   requestId: string
   selectedOptionKey?: string
@@ -128,8 +113,9 @@ type AgentComposerProps = {
   // Key that triggers re-focus when changed (e.g., agentId for switching agents)
   focusKey?: string | null
   onFocus?: () => void
-  insightsPanelStorageKey?: string | null
   // Working panel props
+  insightsPanelExpandedPreference?: boolean | null
+  onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
   agentFirstName?: string
   isProcessing?: boolean
   processingTasks?: ProcessingWebTask[]
@@ -165,7 +151,8 @@ export const AgentComposer = memo(function AgentComposer({
   autoFocus = false,
   focusKey,
   onFocus,
-  insightsPanelStorageKey,
+  insightsPanelExpandedPreference = null,
+  onInsightsPanelExpandedPreferenceChange,
   agentFirstName = 'Agent',
   isProcessing = false,
   processingTasks = [],
@@ -218,31 +205,15 @@ export const AgentComposer = memo(function AgentComposer({
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
   const isProcessingRef = useRef(isProcessing)
-
-  const workingPanelStorageKey = insightsPanelStorageKey
-    ? `agent-chat:insights-panel:${insightsPanelStorageKey}`
-    : null
-
-  const [isWorkingExpanded, setIsWorkingExpanded] = useLocalStorageState<boolean | null>(
-    workingPanelStorageKey,
-    null,
-    workingPanelStorageCodec,
-  )
-
-  const resolvedWorkingExpanded = isWorkingExpanded ?? autoWorkingExpanded
+  const resolvedWorkingExpanded = insightsPanelExpandedPreference ?? autoWorkingExpanded
 
   useEffect(() => {
     isProcessingRef.current = isProcessing
   }, [isProcessing])
 
-  useEffect(() => {
-    setAutoWorkingExpanded(true)
-    wasProcessingRef.current = isProcessingRef.current
-  }, [workingPanelStorageKey])
-
   // Auto-expand when processing starts, auto-collapse when it ends
   useEffect(() => {
-    if (isWorkingExpanded === null) {
+    if (insightsPanelExpandedPreference === null) {
       if (!wasProcessingRef.current && isProcessing) {
         // Processing just started - auto-expand
         setAutoWorkingExpanded(true)
@@ -252,7 +223,7 @@ export const AgentComposer = memo(function AgentComposer({
       }
     }
     wasProcessingRef.current = isProcessing
-  }, [isProcessing, isWorkingExpanded])
+  }, [insightsPanelExpandedPreference, isProcessing])
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -306,7 +277,11 @@ export const AgentComposer = memo(function AgentComposer({
   const handleTabClick = useCallback((index: number) => {
     // Expand panel if collapsed
     if (!resolvedWorkingExpanded) {
-      setIsWorkingExpanded(true)
+      if (onInsightsPanelExpandedPreferenceChange) {
+        onInsightsPanelExpandedPreferenceChange(true)
+      } else {
+        setAutoWorkingExpanded(true)
+      }
     }
     onInsightIndexChange?.(index)
     onPauseChange?.(true) // Pause when user manually selects
@@ -324,7 +299,7 @@ export const AgentComposer = memo(function AgentComposer({
         totalInsights: insights.length,
       })
     }
-  }, [onInsightIndexChange, onPauseChange, resolvedWorkingExpanded, setIsWorkingExpanded, insights])
+  }, [insights, onInsightIndexChange, onInsightsPanelExpandedPreferenceChange, onPauseChange, resolvedWorkingExpanded])
 
   // Handle hover - pause auto-rotation
   const handleInsightMouseEnter = useCallback(() => {
@@ -344,13 +319,17 @@ export const AgentComposer = memo(function AgentComposer({
   // Handle panel expand/collapse toggle
   const handlePanelToggle = useCallback(() => {
     const newExpanded = !resolvedWorkingExpanded
-    setIsWorkingExpanded(newExpanded)
+    if (onInsightsPanelExpandedPreferenceChange) {
+      onInsightsPanelExpandedPreferenceChange(newExpanded)
+    } else {
+      setAutoWorkingExpanded(newExpanded)
+    }
     track(AnalyticsEvent.INSIGHT_PANEL_TOGGLED + " - " + (newExpanded ? "Open" : "Close"), {
       expanded: newExpanded,
       hasInsights,
       currentInsightType: currentInsight?.insightType ?? null,
     })
-  }, [resolvedWorkingExpanded, setIsWorkingExpanded, hasInsights, currentInsight?.insightType])
+  }, [currentInsight?.insightType, hasInsights, onInsightsPanelExpandedPreferenceChange, resolvedWorkingExpanded])
 
   // Wrap dismiss handler to track dismissals
   const handleDismissInsight = useCallback((insightId: string) => {

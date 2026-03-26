@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
+import logging
 import os
 import re
 from urllib.parse import unquote, urlencode
 import uuid
 from typing import Iterable, Literal, Sequence, Mapping
 
+import redis
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.humanize.templatetags.humanize import naturaltime
@@ -87,6 +89,8 @@ EMAIL_ALLOWED_CSS_PROPERTIES = [
     "padding",
     "padding-bottom",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def is_chat_hidden_message(message: PersistentAgentMessage) -> bool:
@@ -1242,6 +1246,73 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
     active = bool(heartbeat_active or lock_active or queued_flag or web_tasks)
     next_scheduled_at = _compute_next_scheduled_run(agent)
     return ProcessingSnapshot(active=active, web_tasks=web_tasks, next_scheduled_at=next_scheduled_at)
+
+
+def build_processing_activity_map(agents: Sequence[PersistentAgent]) -> dict[str, bool]:
+    """Compute processing activity for many agents with bulk Redis and task lookups."""
+
+    if not agents:
+        return {}
+
+    activity_by_agent_id = {str(agent.id): False for agent in agents}
+    agent_ids = [str(agent.id) for agent in agents]
+
+    queued_keys = [f"agent-event-processing:queued:{agent_id}" for agent_id in agent_ids]
+    heartbeat_keys = [f"agent-event-processing:heartbeat:{agent_id}" for agent_id in agent_ids]
+    lock_keys = [f"redlock:agent-event-processing:{agent_id}" for agent_id in agent_ids]
+
+    try:
+        from config.redis_client import get_redis_client
+
+        redis_client = get_redis_client()
+        if hasattr(redis_client, "mget"):
+            queued_values = redis_client.mget(queued_keys)
+            heartbeat_values = redis_client.mget(heartbeat_keys)
+            lock_values = redis_client.mget(lock_keys)
+        else:
+            queued_values = [redis_client.get(key) for key in queued_keys]
+            heartbeat_values = [redis_client.get(key) for key in heartbeat_keys]
+            lock_values = [redis_client.exists(key) for key in lock_keys]
+        for agent_id, queued_value, heartbeat_value, lock_value in zip(
+            agent_ids,
+            queued_values,
+            heartbeat_values,
+            lock_values,
+        ):
+            if queued_value or heartbeat_value or lock_value:
+                activity_by_agent_id[agent_id] = True
+    except redis.RedisError:
+        logger.warning(
+            "Failed to read bulk processing activity from Redis for %s agents",
+            len(agent_ids),
+            exc_info=True,
+        )
+
+    browser_agent_to_agent_ids: dict[int, list[str]] = {}
+    for agent in agents:
+        browser_agent_id = getattr(agent, "browser_use_agent_id", None)
+        if browser_agent_id is None:
+            continue
+        browser_agent_to_agent_ids.setdefault(browser_agent_id, []).append(str(agent.id))
+
+    if not browser_agent_to_agent_ids:
+        return activity_by_agent_id
+
+    task_qs: BrowserUseAgentTaskQuerySet = BrowserUseAgentTask.objects
+    active_tasks = task_qs.alive().filter(
+        agent_id__in=browser_agent_to_agent_ids.keys(),
+        status__in=WEB_TASK_ACTIVE_STATUSES,
+    )
+    max_age_seconds = int(getattr(settings, "AGENT_WEB_TASK_ACTIVE_MAX_AGE_SECONDS", 0))
+    if max_age_seconds > 0:
+        cutoff = timezone.now() - timedelta(seconds=max_age_seconds)
+        active_tasks = active_tasks.filter(updated_at__gte=cutoff)
+    active_browser_agent_ids = set(active_tasks.values_list("agent_id", flat=True).distinct())
+    for browser_agent_id in active_browser_agent_ids:
+        for agent_id in browser_agent_to_agent_ids.get(browser_agent_id, []):
+            activity_by_agent_id[agent_id] = True
+
+    return activity_by_agent_id
 
 
 def serialize_processing_snapshot(snapshot: ProcessingSnapshot) -> dict:

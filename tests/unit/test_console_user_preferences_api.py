@@ -33,6 +33,9 @@ class ConsoleUserPreferencesApiTests(TestCase):
             preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
             [],
         )
+        self.assertIsNone(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED),
+        )
         self.assertEqual(
             preferences.get(UserPreference.KEY_USER_TIMEZONE),
             "",
@@ -129,6 +132,50 @@ class ConsoleUserPreferencesApiTests(TestCase):
             (stored.preferences or {}).get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
             [favorite_agent_id, second_agent_id],
         )
+
+    def test_patch_updates_insights_panel_expanded_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: False,
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertFalse(preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED))
+
+        stored = UserPreference.objects.get(user=self.user)
+        self.assertFalse(
+            (stored.preferences or {}).get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED)
+        )
+
+    def test_patch_allows_resetting_insights_panel_expanded_preference_to_auto(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: True,
+            },
+        )
+
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: None,
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertIsNone(preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED))
 
     def test_patch_rejects_invalid_favorite_agent_ids(self):
         response = self.client.patch(

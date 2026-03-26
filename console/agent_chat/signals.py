@@ -48,6 +48,7 @@ _CREDIT_EVENT_NOTES = {
     "credit_insufficient_mid_loop",
     "credit_consumption_failure_mid_loop",
 }
+_LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID: dict[str, bool] = {}
 
 
 def _group_name(agent_id) -> str:
@@ -62,7 +63,7 @@ def _send(group: str, message_type: str, payload: dict) -> None:
     async_to_sync(channel_layer.group_send)(group, {"type": message_type, "payload": payload})
 
 
-def emit_agent_profile_update(agent: PersistentAgent) -> None:
+def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool | None = None) -> None:
     """Broadcast latest agent identity metadata to connected chat clients."""
     if not agent or not getattr(agent, "id", None):
         return
@@ -76,8 +77,21 @@ def emit_agent_profile_update(agent: PersistentAgent) -> None:
         "short_description": agent.short_description or "",
         "timestamp": timezone.now().isoformat(),
     }
+    if processing_active is not None:
+        normalized_processing_active = bool(processing_active)
+        payload["processing_active"] = normalized_processing_active
+        _LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID[str(agent.id)] = normalized_processing_active
     for user_id in _resolve_profile_listener_user_ids(agent):
         _send(user_profile_group_name(user_id), "agent_profile_event", payload)
+
+
+def _emit_processing_profile_update_if_changed(agent: PersistentAgent, processing_active: bool) -> None:
+    agent_id = str(agent.id)
+    normalized_processing_active = bool(processing_active)
+    previous_processing_active = _LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID.get(agent_id)
+    if previous_processing_active is not None and previous_processing_active == normalized_processing_active:
+        return
+    emit_agent_profile_update(agent, processing_active=normalized_processing_active)
 
 
 def _resolve_profile_listener_user_ids(agent: PersistentAgent) -> set[int]:
@@ -409,6 +423,7 @@ def _broadcast_processing(agent):
     snapshot = build_processing_snapshot(agent)
     payload = serialize_processing_snapshot(snapshot)
     _send(_group_name(agent.id), "processing_event", payload)
+    _emit_processing_profile_update_if_changed(agent, snapshot.active)
     try:
         send_audit_event(
             str(agent.id),

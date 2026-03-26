@@ -166,6 +166,7 @@ type AgentListItemProps = {
 const ITEM_STYLES = {
   drawer: {
     buttonClass: 'agent-drawer-item',
+    avatarWrapClass: 'agent-drawer-item-avatar-wrap',
     avatarClass: 'agent-drawer-item-avatar',
     imageClass: 'agent-drawer-item-avatar-image',
     textClass: 'agent-drawer-item-avatar-text',
@@ -176,6 +177,7 @@ const ITEM_STYLES = {
   },
   sidebar: {
     buttonClass: 'chat-sidebar-agent',
+    avatarWrapClass: 'chat-sidebar-agent-avatar-wrap',
     avatarClass: 'chat-sidebar-agent-avatar',
     imageClass: 'chat-sidebar-agent-avatar-image',
     textClass: 'chat-sidebar-agent-avatar-text',
@@ -184,6 +186,19 @@ const ITEM_STYLES = {
     descClass: 'chat-sidebar-agent-desc',
     stateClass: 'chat-sidebar-agent-state',
   },
+}
+
+function AgentWorkingIndicator({ label = true }: { label?: boolean }) {
+  return (
+    <span className="agent-list-working" aria-label="Working">
+      <span className="agent-list-working__dots" aria-hidden="true">
+        <span className="agent-list-working__dot" />
+        <span className="agent-list-working__dot" />
+        <span className="agent-list-working__dot" />
+      </span>
+      {label ? <span className="agent-list-working__label">Working</span> : null}
+    </span>
+  )
 }
 
 export function AgentListItem({
@@ -207,6 +222,8 @@ export function AgentListItem({
   const longDescription = (agent.shortDescription || '').trim()
   const hoverDescription = longDescription && longDescription !== miniDescription ? longDescription : undefined
   const showFavoriteButton = Boolean(onToggleFavorite) && (variant === 'drawer' || !collapsed) && showFavoriteToggle
+  const isWorking = Boolean(agent.processingActive)
+  const collapsedTitle = isWorking ? `${agent.name || 'Agent'} • Working` : agent.name || 'Agent'
 
   const handleToggleFavorite = (event: MouseEvent<HTMLElement>) => {
     event.preventDefault()
@@ -230,23 +247,35 @@ export function AgentListItem({
       data-active={isActive ? 'true' : 'false'}
       data-switching={isSwitching ? 'true' : 'false'}
       data-enabled={agent.isActive ? 'true' : 'false'}
+      data-working={isWorking ? 'true' : 'false'}
       onClick={() => onSelect(agent)}
-      title={variant === 'sidebar' && collapsed ? agent.name || 'Agent' : undefined}
+      title={variant === 'sidebar' && collapsed ? collapsedTitle : undefined}
       style={accentStyle}
       role="listitem"
       aria-current={isActive ? 'page' : undefined}
     >
-      <AgentAvatarBadge
-        name={agent.name || 'Agent'}
-        avatarUrl={agent.avatarUrl}
-        className={styles.avatarClass}
-        imageClassName={styles.imageClass}
-        textClassName={styles.textClass}
-      />
+      <span className={styles.avatarWrapClass}>
+        <AgentAvatarBadge
+          name={agent.name || 'Agent'}
+          avatarUrl={agent.avatarUrl}
+          className={styles.avatarClass}
+          imageClassName={styles.imageClass}
+          textClassName={styles.textClass}
+        />
+        {variant === 'sidebar' && collapsed && isWorking ? (
+          <span className="chat-sidebar-agent-working-badge" aria-hidden="true">
+            <AgentWorkingIndicator label={false} />
+          </span>
+        ) : null}
+      </span>
       {showMeta ? (
         <span className={styles.metaClass}>
           <span className={styles.nameClass}>{agent.name || 'Agent'}</span>
-          {miniDescription ? (
+          {isWorking ? (
+            <span className={styles.descClass}>
+              <AgentWorkingIndicator />
+            </span>
+          ) : miniDescription ? (
             <span className={styles.descClass} title={hoverDescription}>
               {miniDescription}
             </span>

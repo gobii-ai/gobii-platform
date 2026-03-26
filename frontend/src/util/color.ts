@@ -85,10 +85,6 @@ export function buildUserChatPalette(baseHex?: string | null): { cssVars: CSSVar
   const attachmentBg = textIsLight ? 'rgba(255, 255, 255, 0.2)' : adjustHex(base, 0.65)
   const attachmentHoverBg = textIsLight ? 'rgba(255, 255, 255, 0.28)' : adjustHex(base, 0.5)
   const attachmentColor = textIsLight ? '#EDE9FE' : adjustHex(base, -0.65)
-  const badgeBg = textIsLight ? 'rgba(255, 255, 255, 0.22)' : adjustHex(base, 0.55)
-  const badgeBorder = textIsLight ? 'rgba(255, 255, 255, 0.38)' : adjustHex(base, 0.4)
-  const badgeText = textIsLight ? 'rgba(255, 255, 255, 0.9)' : adjustHex(base, -0.65)
-
   const gradient = `linear-gradient(135deg, ${lighter} 0%, ${base} 55%, ${darker} 100%)`
 
   const cssVars: CSSVariableProperties = {
@@ -101,9 +97,6 @@ export function buildUserChatPalette(baseHex?: string | null): { cssVars: CSSVar
     '--user-attachment-bg': attachmentBg,
     '--user-attachment-hover-bg': attachmentHoverBg,
     '--user-attachment-color': attachmentColor,
-    '--user-channel-badge-bg': badgeBg,
-    '--user-channel-badge-border': badgeBorder,
-    '--user-channel-badge-text': badgeText,
   }
 
   return { cssVars }

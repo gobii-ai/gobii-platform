@@ -203,6 +203,96 @@ function decodeSqlLiteral(value: string): string | null {
   return null
 }
 
+function findMatchingParen(value: string, openIndex: number): number {
+  let depth = 0
+  let inSingle = false
+  let inDouble = false
+
+  for (let idx = openIndex; idx < value.length; idx += 1) {
+    const char = value[idx]
+    const next = idx + 1 < value.length ? value[idx + 1] : ''
+
+    if (inSingle) {
+      if (char === "'" && next === "'") {
+        idx += 1
+      } else if (char === "'") {
+        inSingle = false
+      }
+      continue
+    }
+
+    if (inDouble) {
+      if (char === '"' && next === '"') {
+        idx += 1
+      } else if (char === '"') {
+        inDouble = false
+      }
+      continue
+    }
+
+    if (char === "'") {
+      inSingle = true
+      continue
+    }
+    if (char === '"') {
+      inDouble = true
+      continue
+    }
+    if (char === '(') {
+      depth += 1
+      continue
+    }
+    if (char === ')') {
+      depth -= 1
+      if (depth === 0) {
+        return idx
+      }
+    }
+  }
+
+  return -1
+}
+
+function extractInsertColumnsAndValues(statement: string): { columns: string[]; values: string[] } | null {
+  const insertMatch = /\b(?:insert(?:\s+or\s+\w+)?|replace)\b[\s\S]*?\binto\b/i.exec(statement)
+  if (!insertMatch) {
+    return null
+  }
+
+  const insertStart = insertMatch.index + insertMatch[0].length
+  const columnsOpenIndex = statement.indexOf('(', insertStart)
+  if (columnsOpenIndex < 0) {
+    return null
+  }
+  const columnsCloseIndex = findMatchingParen(statement, columnsOpenIndex)
+  if (columnsCloseIndex < 0) {
+    return null
+  }
+
+  const valuesMatch = /\bvalues\b/i.exec(statement.slice(columnsCloseIndex + 1))
+  if (!valuesMatch) {
+    return null
+  }
+  const valuesKeywordIndex = columnsCloseIndex + 1 + valuesMatch.index
+  const valuesOpenIndex = statement.indexOf('(', valuesKeywordIndex)
+  if (valuesOpenIndex < 0) {
+    return null
+  }
+  const valuesCloseIndex = findMatchingParen(statement, valuesOpenIndex)
+  if (valuesCloseIndex < 0) {
+    return null
+  }
+
+  const columns = splitSqlByComma(statement.slice(columnsOpenIndex + 1, columnsCloseIndex))
+    .map((column) => column.replace(/["'`]/g, '').trim().toLowerCase())
+  const values = splitSqlByComma(statement.slice(valuesOpenIndex + 1, valuesCloseIndex))
+  if (!columns.length || columns.length !== values.length) {
+    return null
+  }
+
+  return { columns, values }
+}
+
 function extractSqlAssignment(statement: string, field: string): string | null {
   const token = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const singleQuote = new RegExp(`\\b${token}\\b\\s*=\\s*'((?:[^']|'')*)'`, 'i')
@@ -219,17 +309,11 @@ function extractSqlAssignment(statement: string, field: string): string | null {
 }
 
 function extractInsertValue(statement: string, field: string): string | null {
-  const match = statement.match(
-    /\b(?:insert(?:\s+or\s+\w+)?|replace)\b[\s\S]*?\binto\b[\s\S]*?\(([\s\S]*?)\)\s*values\s*\(([\s\S]*?)\)/i,
-  )
-  if (!match) {
+  const parsed = extractInsertColumnsAndValues(statement)
+  if (!parsed) {
     return null
   }
-  const columns = splitSqlByComma(match[1]).map((column) => column.replace(/["'`]/g, '').trim().toLowerCase())
-  const values = splitSqlByComma(match[2])
-  if (!columns.length || columns.length !== values.length) {
-    return null
-  }
+  const { columns, values } = parsed
   const targetIndex = columns.findIndex((column) => column === field.toLowerCase())
   if (targetIndex < 0) {
     return null
@@ -292,6 +376,10 @@ function extractSqliteTargetLabel(
   }
 }
 
+function extractSqliteInstructionsText(statement: string, result: unknown): string | null {
+  return extractFieldFromSql(statement, ['instructions']) ?? extractFieldFromResult(result, ['instructions'])
+}
+
 export function extractSqliteResultStatus(result: unknown): string | null {
   const resultObject = parseResultObject(result)
   const message = coerceString(resultObject?.message)
@@ -342,6 +430,7 @@ export function getSqliteInternalTableDisplay(
   summary: string | null
   operationLabel: string
   purpose: string
+  instructionsText: string | null
   icon: LucideIcon
   iconBgClass: string
   iconColorClass: string
@@ -350,8 +439,10 @@ export function getSqliteInternalTableDisplay(
 } {
   const descriptor = SQLITE_INTERNAL_TABLE_DESCRIPTORS[kind]
   const summaryKind = sqliteOperationSummaryKind(operation)
+  const isToolResultsQuery = kind === 'toolResults' && summaryKind === 'query'
   const targetLabel = extractSqliteTargetLabel(kind, statement, result)
   const statusSummary = extractSqliteResultStatus(result)
+  const instructionsText = kind === 'agentSkills' ? extractSqliteInstructionsText(statement, result) : null
 
   let purpose = `Interacting with ${descriptor.tableName}.`
   if (kind === 'messages') {
@@ -370,10 +461,17 @@ export function getSqliteInternalTableDisplay(
 
   return {
     label: `${descriptor.labelPrefix} ${summaryKind}`,
-    caption: kind === 'toolResults' ? null : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix),
-    summary: statusSummary,
+    caption: isToolResultsQuery
+      ? purpose
+      : kind === 'toolResults'
+        ? null
+      : kind === 'agentSkills'
+        ? (instructionsText ? truncate(instructionsText, 140) : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix))
+        : (targetLabel ? truncate(targetLabel, 56) : descriptor.labelPrefix),
+    summary: kind === 'agentSkills' || isToolResultsQuery ? null : statusSummary,
     operationLabel: sqliteOperationDisplayLabel(operation),
     purpose,
+    instructionsText,
     icon: descriptor.icon,
     iconBgClass: descriptor.iconBgClass,
     iconColorClass: descriptor.iconColorClass,

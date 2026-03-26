@@ -87,7 +87,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentRoster?: AgentRosterEntry[]
   favoriteAgentIds?: string[]
   activeAgentId?: string | null
-  insightsPanelStorageKey?: string | null
+  insightsPanelExpandedPreference?: boolean | null
   switchingAgentId?: string | null
   rosterLoading?: boolean
   rosterError?: string | null
@@ -97,6 +97,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   createAgentDisabledReason?: string | null
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
+  onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
   contextSwitcher?: AgentChatContextSwitcherData
   currentContext?: ConsoleContext | null
   autoFocusComposer?: boolean
@@ -209,7 +210,7 @@ export function AgentChatLayout({
   agentRoster,
   favoriteAgentIds,
   activeAgentId,
-  insightsPanelStorageKey,
+  insightsPanelExpandedPreference = null,
   switchingAgentId,
   rosterLoading,
   rosterError,
@@ -219,6 +220,7 @@ export function AgentChatLayout({
   createAgentDisabledReason = null,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
+  onInsightsPanelExpandedPreferenceChange,
   contextSwitcher,
   currentContext = null,
   autoFocusComposer = false,
@@ -1056,7 +1058,8 @@ export function AgentChatLayout({
               processingTasks={processingWebTasks}
               autoFocus={autoFocusComposer}
               focusKey={activeAgentId}
-              insightsPanelStorageKey={insightsPanelStorageKey}
+              insightsPanelExpandedPreference={insightsPanelExpandedPreference}
+              onInsightsPanelExpandedPreferenceChange={onInsightsPanelExpandedPreferenceChange}
               insights={insights}
               currentInsightIndex={currentInsightIndex}
               onDismissInsight={onDismissInsight}

@@ -309,6 +309,7 @@ export type AgentChatState = {
       agentColorHex?: string | null
       agentName?: string | null
       agentAvatarUrl?: string | null
+      processingActive?: boolean
     },
   ) => void
   refreshProcessing: () => Promise<void>
@@ -367,6 +368,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
     const providedName = options?.agentName ?? null
     const providedAvatarUrl = options?.agentAvatarUrl ?? null
+    const hasProvidedProcessingActive = Object.prototype.hasOwnProperty.call(options ?? {}, 'processingActive')
+    const providedProcessingActive = hasProvidedProcessingActive ? Boolean(options?.processingActive) : false
     const reuseExisting = get().agentId === agentId
 
     // Clear insight rotation timer when switching to a different agent
@@ -384,8 +387,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set({
       agentId,
       hasUnseenActivity: false,
-      processingActive: reuseExisting ? get().processingActive : false,
-      processingStartedAt: reuseExisting ? get().processingStartedAt : null,
+      processingActive: reuseExisting ? get().processingActive : providedProcessingActive,
+      processingStartedAt: reuseExisting ? get().processingStartedAt : (providedProcessingActive ? Date.now() : null),
       awaitingResponse: reuseExisting ? get().awaitingResponse : false,
       processingWebTasks: reuseExisting ? get().processingWebTasks : [],
       nextScheduledAt: reuseExisting ? get().nextScheduledAt : null,
