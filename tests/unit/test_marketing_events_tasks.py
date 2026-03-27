@@ -1,3 +1,4 @@
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, tag, override_settings
@@ -5,6 +6,7 @@ from django.test import SimpleTestCase, tag, override_settings
 from marketing_events.providers.base import PermanentError
 from marketing_events.tasks import (
     _analytics_user_id,
+    enqueue_complete_registration_marketing_event,
     enqueue_delayed_subscription_guarded_marketing_event,
     enqueue_marketing_event,
     enqueue_start_trial_marketing_event,
@@ -102,6 +104,66 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["user_id"], 88)
         self.assertEqual(kwargs["event"], "CAPI Event Sent")
         self.assertEqual(kwargs["properties"]["provider"], "GoogleAnalyticsMP")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.get_subscription_base_price", return_value=(Decimal("49.99"), "usd"))
+    @patch("marketing_events.tasks.get_active_subscription", return_value=MagicMock())
+    @patch("marketing_events.tasks.reconcile_user_plan_from_stripe", return_value={"id": "startup", "price": 50, "currency": "USD"})
+    @patch("marketing_events.tasks.get_user_model")
+    def test_enqueue_complete_registration_rehydrates_paid_plan_value(
+        self,
+        mock_get_user_model,
+        _mock_reconcile_user_plan,
+        _mock_get_active_subscription,
+        _mock_get_subscription_base_price,
+        mock_dispatch,
+    ):
+        user = MagicMock()
+        mock_get_user_model.return_value.objects.get.return_value = user
+
+        enqueue_complete_registration_marketing_event(
+            {
+                "event_name": "CompleteRegistration",
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-200", "plan": "free"},
+                "user": {"id": "42", "email": "test@example.com"},
+                "context": {},
+            }
+        )
+
+        mock_dispatch.assert_called_once()
+        dispatched_payload = mock_dispatch.call_args.args[0]
+        self.assertEqual(dispatched_payload["properties"]["plan"], "startup")
+        self.assertAlmostEqual(dispatched_payload["properties"]["value"], 14.997, places=6)
+        self.assertEqual(dispatched_payload["properties"]["currency"], "USD")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.reconcile_user_plan_from_stripe", return_value={"id": "free", "price": 0, "currency": "USD"})
+    @patch("marketing_events.tasks.get_user_model")
+    def test_enqueue_complete_registration_keeps_free_value_at_zero(
+        self,
+        mock_get_user_model,
+        _mock_reconcile_user_plan,
+        mock_dispatch,
+    ):
+        user = MagicMock()
+        mock_get_user_model.return_value.objects.get.return_value = user
+
+        enqueue_complete_registration_marketing_event(
+            {
+                "event_name": "CompleteRegistration",
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-201"},
+                "user": {"id": "42", "email": "test@example.com"},
+                "context": {},
+            }
+        )
+
+        mock_dispatch.assert_called_once()
+        dispatched_payload = mock_dispatch.call_args.args[0]
+        self.assertEqual(dispatched_payload["properties"]["plan"], "free")
+        self.assertEqual(dispatched_payload["properties"]["value"], 0.0)
+        self.assertEqual(dispatched_payload["properties"]["currency"], "USD")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks._dispatch_marketing_event")

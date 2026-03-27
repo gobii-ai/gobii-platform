@@ -1106,6 +1106,8 @@ REDDIT_CAPI_TEST_MODE = env.bool("REDDIT_CAPI_TEST_MODE", default=False)
 
 # Marketing/CAPI value tuning
 CAPI_LTV_MULTIPLE = env.float("CAPI_LTV_MULTIPLE", default=5.0)
+CAPI_COMPLETE_REGISTRATION_DELAY_MINUTES = env.int("CAPI_COMPLETE_REGISTRATION_DELAY_MINUTES", default=60)
+# Deprecated: CompleteRegistration now resolves its value at send time from the user's current plan.
 CAPI_REGISTRATION_VALUE = env.float("CAPI_REGISTRATION_VALUE", default=10.0)
 CAPI_START_TRIAL_CONV_RATE = env.float("CAPI_START_TRIAL_CONV_RATE", default=0.3)
 CAPI_START_TRIAL_DELAY_MINUTES = env.int("CAPI_START_TRIAL_DELAY_MINUTES", default=60)

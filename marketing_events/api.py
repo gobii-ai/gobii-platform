@@ -5,6 +5,7 @@ from django.conf import settings
 
 from .context import extract_click_context
 from .tasks import (
+    enqueue_complete_registration_marketing_event,
     enqueue_delayed_subscription_guarded_marketing_event,
     enqueue_marketing_event,
     enqueue_start_trial_marketing_event,
@@ -53,6 +54,31 @@ def capi_start_trial(user, properties=None, request=None, context=None, provider
     )
 
 
+def capi_complete_registration(user, properties=None, request=None, context=None, provider_targets=None):
+    """
+    Delay CompleteRegistration so value reflects the user's current plan intent.
+    """
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return
+
+    payload = _build_payload(
+        user=user,
+        event_name="CompleteRegistration",
+        properties=properties,
+        request=request,
+        context=context,
+        provider_targets=provider_targets,
+    )
+
+    payload["properties"].setdefault("event_time", int(time.time()))
+
+    delay_minutes = max(settings.CAPI_COMPLETE_REGISTRATION_DELAY_MINUTES, 0)
+    enqueue_complete_registration_marketing_event.apply_async(
+        args=[payload],
+        countdown=delay_minutes * 60,
+    )
+
+
 def capi_delay_subscription_guarded(
     user,
     event_name,
@@ -91,6 +117,15 @@ def capi(user, event_name, properties=None, request=None, context=None, provider
     Public entrypoint. Call from views/services to emit a marketing event.
     """
     if not settings.GOBII_PROPRIETARY_MODE:
+        return
+    if event_name == "CompleteRegistration":
+        capi_complete_registration(
+            user=user,
+            properties=properties,
+            request=request,
+            context=context,
+            provider_targets=provider_targets,
+        )
         return
     if event_name == "StartTrial":
         capi_start_trial(

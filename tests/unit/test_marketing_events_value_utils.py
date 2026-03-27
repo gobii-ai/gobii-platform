@@ -1,10 +1,13 @@
 from django.test import SimpleTestCase, tag
 
-from marketing_events.value_utils import calculate_start_trial_values
+from marketing_events.value_utils import calculate_conversion_value, calculate_start_trial_values
 
 
 @tag("batch_marketing_events")
 class StartTrialValueUtilsTests(SimpleTestCase):
+    def test_calculates_simple_conversion_value(self):
+        self.assertEqual(calculate_conversion_value(50, conversion_rate=0.3), 15.0)
+
     def test_calculates_values_from_numeric_inputs(self):
         predicted_ltv, conversion_value = calculate_start_trial_values(
             30,

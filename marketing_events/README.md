@@ -26,6 +26,8 @@ If a provider’s credentials are missing the task will skip it automatically.
 3. Generates `event_id` (UUID4) and `event_time` (epoch seconds) when not provided.
 4. Enqueues the `enqueue_marketing_event` Celery task which fans out to the active providers with retries on transient failures.
 
+`CompleteRegistration` is delayed by `CAPI_COMPLETE_REGISTRATION_DELAY_MINUTES` (default `60`) so its value can be resolved from the user's current plan at send time. `CAPI_REGISTRATION_VALUE` remains in settings only as a deprecated no-op.
+
 ### Request vs. context
 
 - Pass `request` when called inside a Django view to auto-capture IP, user agent, page URL, and cookies (`_fbp`, `_fbc`), plus UTM/click params.
@@ -51,10 +53,7 @@ def signup_complete_view(request):
     capi(
         user=user,
         event_name="CompleteRegistration",
-        properties={
-            "plan": "free",
-            "value": 0,
-        },
+        properties={"plan": "free"},
         request=request,  # auto-extracts click IDs, IP, UA, page URL
     )
 ```

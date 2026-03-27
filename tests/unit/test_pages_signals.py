@@ -211,11 +211,11 @@ class UserSignedUpSignalTests(TestCase):
             assessment_source=SIGNAL_SOURCE_SIGNUP,
         )
 
-    @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_REGISTRATION_VALUE=12.5)
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("pages.signals.capi")
     @patch("pages.signals.Analytics.track")
     @patch("pages.signals.Analytics.identify")
-    def test_signup_capi_includes_value_and_currency(self, mock_identify, mock_track, mock_capi):
+    def test_signup_capi_leaves_value_for_delayed_resolution(self, mock_identify, mock_track, mock_capi):
         request = self.factory.get("/signup")
         middleware = SessionMiddleware(lambda req: None)
         middleware.process_request(request)
@@ -228,8 +228,9 @@ class UserSignedUpSignalTests(TestCase):
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "CompleteRegistration")
         props = capi_kwargs["properties"]
-        self.assertEqual(props["value"], 12.5)
-        self.assertEqual(props["currency"], "USD")
+        self.assertNotIn("value", props)
+        self.assertNotIn("currency", props)
+        self.assertEqual(props["plan"], PlanNames.FREE)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("pages.signals.record_fbc_synthesized")

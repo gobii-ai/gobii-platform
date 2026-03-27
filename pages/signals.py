@@ -1492,9 +1492,6 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     'event_time': event_timestamp_unix,
                 }
             )
-            registration_value = float(getattr(settings, "CAPI_REGISTRATION_VALUE", 0.0) or 0.0)
-            marketing_properties["value"] = registration_value
-            marketing_properties.setdefault("currency", "USD")
             additional_click_ids = {
                 key: value
                 for key in CLICK_ID_PARAMS

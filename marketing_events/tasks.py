@@ -1,17 +1,27 @@
 import logging
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from celery import shared_task
+from django.contrib.auth import get_user_model
 from django.conf import settings
 
+from constants.plans import PlanNames
 from util.analytics import Analytics
 from util.integrations import stripe_status
 from util.payments_helper import PaymentsHelper
+from util.subscription_helper import (
+    get_active_subscription,
+    get_owner_plan,
+    get_subscription_base_price,
+    reconcile_user_plan_from_stripe,
+)
 from .providers import get_providers
 from .providers.base import TemporaryError, PermanentError
 from .schema import normalize_event
 from .telemetry import trace_event
+from .value_utils import calculate_conversion_value
 
 
 logger = logging.getLogger(__name__)
@@ -240,6 +250,87 @@ def _provider_target_key(provider) -> str:
     return _PROVIDER_TARGET_KEY_BY_CLASS.get(provider_name, provider_name.lower())
 
 
+def _payload_user(payload: dict):
+    user_payload = (payload or {}).get("user") or {}
+    raw_user_id = user_payload.get("id")
+    normalized_user_id = str(raw_user_id).strip() if raw_user_id is not None else ""
+    if not normalized_user_id:
+        return None
+
+    user_model = get_user_model()
+    try:
+        return user_model.objects.get(pk=normalized_user_id)
+    except user_model.DoesNotExist:
+        logger.info("Unable to resolve CompleteRegistration user %s", normalized_user_id)
+        return None
+
+
+def _plan_monthly_value(plan: dict | None) -> Decimal | None:
+    if not isinstance(plan, dict):
+        return None
+
+    plan_id = str(plan.get("id") or "").strip().lower()
+    candidate_keys = ["price"]
+    if plan_id == PlanNames.ORG_TEAM:
+        candidate_keys.insert(0, "price_per_seat")
+
+    for key in candidate_keys:
+        raw_value = plan.get(key)
+        if raw_value is None or isinstance(raw_value, bool):
+            continue
+        try:
+            return Decimal(str(raw_value))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+
+    return None
+
+
+def _hydrate_complete_registration_value(payload: dict) -> dict:
+    payload = dict(payload or {})
+    properties = dict(payload.get("properties") or {})
+    payload["properties"] = properties
+
+    user = _payload_user(payload)
+    if user is not None:
+        resolved_plan = reconcile_user_plan_from_stripe(user) or get_owner_plan(user) or {}
+    else:
+        resolved_plan = {}
+
+    plan_id = str((resolved_plan or {}).get("id") or properties.get("plan") or PlanNames.FREE).strip().lower()
+    properties["plan"] = plan_id or PlanNames.FREE
+
+    currency = str((resolved_plan or {}).get("currency") or "USD").strip().upper() or "USD"
+    monthly_value = None
+
+    if user is not None and plan_id and plan_id != PlanNames.FREE:
+        active_subscription = get_active_subscription(
+            user,
+            preferred_plan_id=plan_id,
+            sync_with_stripe=True,
+        )
+        if active_subscription is not None:
+            monthly_value, subscription_currency = get_subscription_base_price(active_subscription)
+            if isinstance(subscription_currency, str) and subscription_currency.strip():
+                currency = subscription_currency.strip().upper()
+
+    if monthly_value is None:
+        monthly_value = _plan_monthly_value(resolved_plan)
+
+    value = 0.0
+    if plan_id and plan_id != PlanNames.FREE:
+        resolved_value = calculate_conversion_value(
+            monthly_value,
+            conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+        )
+        if resolved_value is not None:
+            value = resolved_value
+
+    properties["value"] = value
+    properties["currency"] = currency
+    return payload
+
+
 def _dispatch_marketing_event(payload: dict):
     evt = normalize_event(payload)
     provider_targets = _normalize_provider_targets((payload or {}).get("provider_targets"))
@@ -325,6 +416,19 @@ def enqueue_start_trial_marketing_event(self, payload: dict):
         )
         return
     _dispatch_marketing_event(payload)
+
+
+@shared_task(
+    bind=True,
+    autoretry_for=(TemporaryError,),
+    retry_backoff=True,
+    retry_backoff_max=60,
+    max_retries=6,
+)
+def enqueue_complete_registration_marketing_event(self, payload: dict):
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return
+    _dispatch_marketing_event(_hydrate_complete_registration_value(payload))
 
 
 @shared_task(

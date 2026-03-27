@@ -11,6 +11,21 @@ def _to_decimal(value: object) -> Decimal | None:
         return None
 
 
+def calculate_conversion_value(
+    base_value: object,
+    *,
+    conversion_rate: object,
+) -> float | None:
+    """Return a simple conversion value from a base amount and conversion rate."""
+    base_decimal = _to_decimal(base_value)
+    conversion_rate_decimal = _to_decimal(conversion_rate)
+
+    if base_decimal is None or conversion_rate_decimal is None:
+        return None
+
+    return float(base_decimal * conversion_rate_decimal)
+
+
 def calculate_start_trial_values(
     base_value: object,
     *,

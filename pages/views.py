@@ -2129,7 +2129,8 @@ class ClearSignupTrackingView(View):
             'userId': str(request.user.id) if request.user.is_authenticated else '',
             'emailHash': analytics_data.get('email_hash', ''),
             'idHash': analytics_data.get('id_hash', ''),
-            'registrationValue': float(getattr(settings, 'CAPI_REGISTRATION_VALUE', 0) or 0),
+            # Client-side pixels fire immediately; delayed backend CAPI resolves the final value.
+            'registrationValue': 0.0,
             # Include pixel IDs so client knows which to fire
             'pixels': {
                 'ga': getattr(settings, 'GA_MEASUREMENT_ID', ''),

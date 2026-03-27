@@ -24,7 +24,6 @@ class ClearSignupTrackingViewTests(TestCase):
         TIKTOK_PIXEL_ID="tiktok-123",
         META_PIXEL_ID="meta-123",
         LINKEDIN_SIGNUP_CONVERSION_ID="123456",
-        CAPI_REGISTRATION_VALUE=12.5,
     )
     def test_returns_tracking_payload_and_clears_session(self):
         self.client.force_login(self.user)
@@ -50,7 +49,7 @@ class ClearSignupTrackingViewTests(TestCase):
             payload["idHash"],
             hashlib.sha256(str(self.user.id).encode("utf-8")).hexdigest(),
         )
-        self.assertEqual(payload["registrationValue"], 12.5)
+        self.assertEqual(payload["registrationValue"], 0.0)
         self.assertEqual(payload["pixels"]["ga"], "G-TEST123")
         self.assertEqual(payload["pixels"]["reddit"], "reddit-123")
         self.assertEqual(payload["pixels"]["tiktok"], "tiktok-123")
