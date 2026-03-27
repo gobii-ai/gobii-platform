@@ -166,6 +166,11 @@ class SystemDefaultTierTests(TestCase):
             with self.subTest(plan_name=plan_name):
                 self.assertTrue(_plan_supports_paid_tiers({"name": plan_name}))
 
+    def test_id_only_plans_are_treated_as_paid(self):
+        for plan_id in (PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM):
+            with self.subTest(plan_id=plan_id):
+                self.assertTrue(_plan_supports_paid_tiers({"id": plan_id}))
+
     def test_name_only_paid_plans_do_not_clamp_requested_tier_to_standard(self):
         for plan_name in (PlanNames.STARTUP, PlanNames.ORG_TEAM):
             with self.subTest(plan_name=plan_name):

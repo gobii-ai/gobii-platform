@@ -74,21 +74,17 @@ def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
     params["temperature"] = required_temp
 
 
-_PAID_PLAN_IDS = {
-    "pro",
-    "org",
-    PlanNames.SCALE,
-    PlanSlugs.SCALE,
-    PlanSlugs.STARTUP,
-    PlanSlugs.ORG_TEAM,
-}
-_PAID_PLAN_NAMES = {
+# Single lookup covering both legacy codes, PlanNames (IDs) and PlanSlugs so
+# that _plan_supports_paid_tiers never silently misses a paid plan variant.
+_PAID_PLAN_IDENTIFIERS = {
     "pro",
     "org",
     PlanNames.STARTUP,
     PlanNames.SCALE,
     PlanNames.ORG_TEAM,
+    PlanSlugs.STARTUP,
     PlanSlugs.SCALE,
+    PlanSlugs.ORG_TEAM,
 }
 _NEW_ACCOUNT_PREMIUM_GRACE_DAYS = getattr(settings, "NEW_ACCOUNT_PREMIUM_GRACE_DAYS", 30)
 
@@ -245,7 +241,7 @@ def _plan_supports_paid_tiers(plan: Optional[dict[str, Any]]) -> bool:
         return False
     plan_id = str(plan.get("id", "")).lower()
     plan_name = str(plan.get("name", "")).lower()
-    return plan_id in _PAID_PLAN_IDS or plan_name in _PAID_PLAN_NAMES
+    return plan_id in _PAID_PLAN_IDENTIFIERS or plan_name in _PAID_PLAN_IDENTIFIERS
 
 
 def max_allowed_tier_for_plan(
