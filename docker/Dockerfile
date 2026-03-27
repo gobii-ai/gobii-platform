@@ -7,6 +7,7 @@ FROM python:3.13-slim-bookworm AS deps
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
     PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/pw-browsers
 
 WORKDIR /app
@@ -74,10 +75,14 @@ COPY frontend ./frontend
 RUN --mount=type=cache,target=/root/.npm \
     if [ "$SKIP_FRONTEND_BUILD" != "true" ]; then npm run build --prefix frontend; fi
 
-COPY . .
+# When frontend build is skipped, download the manifest from CDN so Django
+# can resolve entry points to hashed filenames in CDN mode.
+RUN if [ "$SKIP_FRONTEND_BUILD" = "true" ] && [ -n "$VITE_BUILD_BASE_URL" ]; then \
+      mkdir -p static/frontend && \
+      curl -fsSL "${VITE_BUILD_BASE_URL}manifest.json" -o static/frontend/manifest.json; \
+    fi
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --editable .
+COPY . .
 
 ENV USE_EPHEMERAL_XVFB=true
 
