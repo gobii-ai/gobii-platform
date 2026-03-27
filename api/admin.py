@@ -1776,8 +1776,10 @@ class UserIdentitySignalAdmin(admin.ModelAdmin):
 class UserTrialEligibilityAdmin(admin.ModelAdmin):
     list_display = (
         "user",
+        "user_id_display",
         "effective_status_display",
         "auto_status",
+        "reason_display",
         "manual_action",
         "evaluated_at",
         "reviewed_by",
@@ -1816,6 +1818,18 @@ class UserTrialEligibilityAdmin(admin.ModelAdmin):
         if obj is None:
             return "-"
         return obj.effective_status
+
+    @admin.display(description="User Id", ordering="user_id")
+    def user_id_display(self, obj):
+        if obj is None:
+            return "-"
+        return obj.user_id
+
+    @admin.display(description="Reason")
+    def reason_display(self, obj):
+        if obj is None or not obj.reason_codes:
+            return "-"
+        return ", ".join(obj.reason_codes)
 
     def save_model(self, request, obj, form, change):
         if change and form.changed_data:
