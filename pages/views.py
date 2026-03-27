@@ -321,6 +321,86 @@ def _set_oauth_stash_cookies(
         response.delete_cookie(OAUTH_ATTRIBUTION_COOKIE)
 
 
+def _get_active_landing_page_or_404(code: str) -> LandingPage:
+    try:
+        return LandingPage.objects.get(code=code, disabled=False)
+    except LandingPage.DoesNotExist as exc:
+        raise Http404("Landing page not found") from exc
+
+
+def _build_landing_redirect_params(request, landing: LandingPage, code: str):
+    params = request.GET.copy()
+    params["g"] = code
+
+    utm_fields = (
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+    )
+    for field in utm_fields:
+        value = getattr(landing, field, "")
+        if value and not params.get(field):
+            params[field] = value
+
+    return params
+
+
+def _persist_landing_attribution(request, code: str) -> None:
+    try:
+        request.session.setdefault("landing_code_first", code)
+        request.session["landing_code_last"] = code
+        request.session.setdefault("landing_first_seen_at", dj_timezone.now().isoformat())
+        request.session["landing_last_seen_at"] = dj_timezone.now().isoformat()
+        request.session.modified = True
+    except Exception:
+        logger.exception("Failed to persist landing attribution in session for code %s", code)
+
+
+def _apply_landing_attribution_cookies(response, request, code: str, *, fbc_source: str) -> None:
+    try:
+        cookie_max_age = 60 * 24 * 60 * 60  # 60 days
+        response.set_cookie(
+            "landing_code",
+            code,
+            max_age=cookie_max_age,
+            samesite="Lax",
+        )
+        if "__landing_first" not in request.COOKIES:
+            response.set_cookie(
+                "__landing_first",
+                code,
+                max_age=cookie_max_age,
+                samesite="Lax",
+            )
+    except Exception:
+        logger.exception("Failed to persist landing attribution cookies for code %s", code)
+
+    try:
+        fbclid = (request.GET.get("fbclid") or "").strip()
+        if fbclid:
+            existing_fbc = request.COOKIES.get("_fbc") or ""
+            existing_fbclid = existing_fbc.rsplit(".", 1)[-1] if existing_fbc.startswith("fb.1.") else ""
+            if existing_fbclid != fbclid:
+                fbc = f"fb.1.{int(datetime.now(timezone.utc).timestamp() * 1000)}.{fbclid}"
+                response.set_cookie("_fbc", fbc, max_age=60 * 60 * 24 * 90)
+                record_fbc_synthesized(source=fbc_source)
+            response.set_cookie("fbclid", fbclid, max_age=60 * 60 * 24 * 90)
+    except Exception as exc:
+        logger.error("Error setting fbclid cookie: %s", exc)
+
+
+def _seed_landing_launch_session(request, landing: LandingPage) -> None:
+    request.session["agent_charter"] = landing.charter
+    request.session["agent_charter_source"] = "landing"
+    request.session.pop("agent_charter_override", None)
+    request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
+    request.session.pop(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, None)
+    request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+    request.session.modified = True
+
+
 POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
 
 
@@ -1278,83 +1358,88 @@ class LandingRedirectView(View):
     @tracer.start_as_current_span("LandingRedirectView.get")
     def get(self, request, code, *args, **kwargs):
         span = trace.get_current_span()
-        try:
-            landing = LandingPage.objects.get(code=code, disabled=False)
-            span.set_attribute("landing_page.code", code)
-        except LandingPage.DoesNotExist:
-            raise Http404("Landing page not found")
+        landing = _get_active_landing_page_or_404(code)
+        span.set_attribute("landing_page.code", code)
+        landing.increment_hits()
+        params = _build_landing_redirect_params(request, landing, code)
+        _persist_landing_attribution(request, code)
+        query_string = params.urlencode()
+        target_url = f"{reverse('pages:home')}?{query_string}" if query_string else reverse('pages:home')
+        response = HttpResponseRedirect(target_url)
+        _apply_landing_attribution_cookies(
+            response,
+            request,
+            code,
+            fbc_source="pages.views.landing_page_redirect",
+        )
+        return response
 
 
+class LandingLaunchView(View):
+    """Launch a landing page charter directly into the immersive app."""
+
+    @tracer.start_as_current_span("LandingLaunchView.get")
+    def get(self, request, code, *args, **kwargs):
+        from django.contrib.auth.views import redirect_to_login
+
+        span = trace.get_current_span()
+        landing = _get_active_landing_page_or_404(code)
+        span.set_attribute("landing_page.code", code)
 
         landing.increment_hits()
+        _persist_landing_attribution(request, code)
+        _seed_landing_launch_session(request, landing)
 
-        # 2  Start with whatever query-params came in (UTMs, fbclid, etc.)
-        params = request.GET.copy()          # QueryDict → mutable
-        params['g'] = code  # Always tag with the landing code
+        params = _build_landing_redirect_params(request, landing, code)
+        params["spawn"] = "1"
 
-        # Persist landing attribution in the session so we can reach it during signup.
-        try:
-            request.session.setdefault('landing_code_first', code)
-            request.session['landing_code_last'] = code
-            request.session.setdefault('landing_first_seen_at', dj_timezone.now().isoformat())
-            request.session['landing_last_seen_at'] = dj_timezone.now().isoformat()
-            request.session.modified = True
-        except Exception:
-            logger.exception("Failed to persist landing attribution in session for code %s", code)
+        raw_return_to = params.get("return_to")
+        if "return_to" in params:
+            del params["return_to"]
+        normalized_return_to = normalize_return_to(request, raw_return_to)
+        if normalized_return_to:
+            params["return_to"] = normalized_return_to
 
-        utm_fields = (
-            "utm_source",
-            "utm_medium",
-            "utm_campaign",
-            "utm_term",
-            "utm_content",
+        embed_requested = is_truthy_flag(params.get("embed"))
+        if "embed" in params:
+            del params["embed"]
+        if embed_requested:
+            params["embed"] = "1"
+
+        app_query = params.urlencode()
+        app_next_url = (
+            f"{IMMERSIVE_APP_BASE_PATH}/agents/new?{app_query}"
+            if app_query
+            else f"{IMMERSIVE_APP_BASE_PATH}/agents/new"
         )
-        for field in utm_fields:
-            value = getattr(landing, field, "")
-            if value and not params.get(field):
-                params[field] = value
 
-        # 4  Re-encode the combined query string
-        query_string = params.urlencode()
-
-        # 5  Redirect to the canonical homepage + merged params
-        target_url = f"{reverse('pages:home')}?{query_string}" if query_string else reverse('pages:home')
-
-        response = HttpResponseRedirect(target_url)
-
-        # Mirror landing attribution details in cookies (fallback if sessions are disabled).
-        try:
-            cookie_max_age = 60 * 24 * 60 * 60  # 60 days
-            response.set_cookie(
-                'landing_code',
-                code,
-                max_age=cookie_max_age,
-                samesite='Lax',
+        if request.user.is_authenticated:
+            response = HttpResponseRedirect(app_next_url)
+        else:
+            response = redirect_to_login(
+                next=app_next_url,
+                login_url=_login_url_with_utms(request),
             )
-            if '__landing_first' not in request.COOKIES:
-                response.set_cookie(
-                    '__landing_first',
-                    code,
-                    max_age=cookie_max_age,
-                    samesite='Lax',
-                )
-        except Exception:
-            logger.exception("Failed to persist landing attribution cookies for code %s", code)
+            charter_data = _build_oauth_charter_cookie_payload(
+                request,
+                charter=request.session.get("agent_charter") or "",
+                charter_source=str(request.session.get("agent_charter_source") or "landing"),
+            )
+            attribution_data = _build_oauth_attribution_cookie_payload(request)
+            _set_oauth_stash_cookies(
+                response,
+                request,
+                charter_data=charter_data,
+                attribution_data=attribution_data,
+                server_side_charter=True,
+            )
 
-        # Store the fbclid cookie if it exists
-        try:
-            fbclid = (request.GET.get("fbclid") or "").strip()
-            if fbclid:
-                existing_fbc = request.COOKIES.get("_fbc") or ""
-                existing_fbclid = existing_fbc.rsplit(".", 1)[-1] if existing_fbc.startswith("fb.1.") else ""
-                if existing_fbclid != fbclid:
-                    fbc = f"fb.1.{int(datetime.now(timezone.utc).timestamp() * 1000)}.{fbclid}"
-                    response.set_cookie("_fbc", fbc, max_age=60 * 60 * 24 * 90)
-                    record_fbc_synthesized(source="pages.views.landing_page_redirect")
-                response.set_cookie("fbclid", fbclid, max_age=60 * 60 * 24 * 90)
-        except Exception as e:
-            logger.error(f"Error setting fbclid cookie: {e}")
-
+        _apply_landing_attribution_cookies(
+            response,
+            request,
+            code,
+            fbc_source="pages.views.landing_page_launch",
+        )
         return response
 
 
