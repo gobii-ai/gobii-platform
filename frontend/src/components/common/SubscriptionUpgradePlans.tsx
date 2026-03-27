@@ -124,7 +124,7 @@ export function SubscriptionUpgradePlans({
       : 'px-6 py-6 sm:px-8'
   const rootClass = isExpandedModal ? 'flex h-full min-h-0 flex-col' : ''
   const gridClass = isExpandedModal
-    ? 'grid h-full min-h-full items-stretch gap-5 sm:grid-cols-2'
+    ? 'grid gap-5 sm:min-h-full sm:grid-cols-2 sm:items-stretch sm:[grid-auto-rows:1fr]'
     : 'grid gap-5 sm:grid-cols-2'
   const footerClass = variant === 'inline'
     ? 'mt-4 text-center'
@@ -143,7 +143,7 @@ export function SubscriptionUpgradePlans({
   return (
     <div className={rootClass}>
       <div className={wrapperClass}>
-        <div className={gridClass}>
+        <div className={gridClass} data-testid="subscription-plans-grid">
           {PLANS.map((plan) => {
             const isCurrent = isCurrentPlan(plan.id)
             const canUpgrade = canSelectPlan(plan.id)
@@ -177,13 +177,14 @@ export function SubscriptionUpgradePlans({
             return (
               <div
                 key={plan.id}
+                data-testid={`subscription-plan-${plan.id}`}
                 className={`group relative flex flex-col overflow-hidden rounded-2xl transition-all duration-200 ${
                   plan.highlight
                     ? 'bg-gradient-to-b from-indigo-600 to-blue-700 p-[2px] shadow-lg shadow-blue-500/20'
                     : 'border border-slate-200 bg-white hover:border-slate-300 hover:shadow-md'
-                } ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''} ${isExpandedModal ? 'h-full' : ''}`}
+                } ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''} ${isExpandedModal ? 'sm:h-full' : ''}`}
               >
-                <div className={`relative flex h-full flex-col ${plan.highlight ? 'rounded-[14px] bg-white' : ''}`}>
+                <div className={`relative flex flex-col ${isExpandedModal ? 'sm:h-full' : 'h-full'} ${plan.highlight ? 'rounded-[14px] bg-white' : ''}`}>
                   {plan.badge && (
                     <div
                       className={`absolute right-3 top-3 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${
