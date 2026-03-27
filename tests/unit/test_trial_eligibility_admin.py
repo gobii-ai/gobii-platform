@@ -25,6 +25,7 @@ class UserTrialEligibilityAdminTests(TestCase):
             (
                 "user",
                 "user_id_display",
+                "sign_up_date_display",
                 "effective_status_display",
                 "auto_status",
                 "reason_display",
@@ -67,6 +68,17 @@ class UserTrialEligibilityAdminTests(TestCase):
         eligibility = UserTrialEligibility.objects.create(user=user)
 
         self.assertEqual(self.admin.user_id_display(eligibility), user.id)
+
+    @tag("batch_pages")
+    def test_sign_up_date_display_returns_date_joined(self):
+        user = User.objects.create_user(
+            username="trial-admin-signup-date@example.com",
+            email="trial-admin-signup-date@example.com",
+            password="pw",
+        )
+        eligibility = UserTrialEligibility.objects.create(user=user)
+
+        self.assertEqual(self.admin.sign_up_date_display(eligibility), user.date_joined)
 
     @tag("batch_pages")
     def test_reason_display_handles_missing_reason_codes(self):
