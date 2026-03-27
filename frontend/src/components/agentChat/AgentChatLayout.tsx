@@ -311,6 +311,7 @@ export function AgentChatLayout({
   })
   const {
     currentPlan: subscriptionPlan,
+    isLoading: subscriptionLoading,
     isUpgradeModalOpen,
     closeUpgradeModal,
     upgradeModalSource,
@@ -405,10 +406,17 @@ export function AgentChatLayout({
     if (!isUpgradeModalOpen) {
       return
     }
-    if (!isProprietaryMode || isCollaborator) {
+    if (isCollaborator) {
+      closeUpgradeModal()
+      return
+    }
+    if (subscriptionLoading) {
+      return
+    }
+    if (!isProprietaryMode) {
       closeUpgradeModal()
     }
-  }, [closeUpgradeModal, isCollaborator, isProprietaryMode, isUpgradeModalOpen])
+  }, [closeUpgradeModal, isCollaborator, isProprietaryMode, isUpgradeModalOpen, subscriptionLoading])
 
   const handleUpgradeModalDismiss = useCallback(() => {
     if (!upgradeModalDismissible) {

@@ -172,6 +172,21 @@ type UserPlanResponse = {
   authenticated: boolean
 }
 
+type HydratedSubscriptionState = Pick<
+  SubscriptionState,
+  | 'currentPlan'
+  | 'isLoading'
+  | 'isProprietaryMode'
+  | 'pricingModalAlmostFullScreen'
+  | 'ctaPricingCancelTextUnderBtn'
+  | 'ctaStartFreeTrial'
+  | 'ctaPickAPlan'
+  | 'ctaContinueAgentBtn'
+  | 'ctaNoChargeDuringTrial'
+  | 'trialDaysByPlan'
+  | 'trialEligible'
+>
+
 function normalizePlan(plan: unknown): PlanTier | null {
   if (plan && ['free', 'startup', 'scale'].includes(String(plan))) {
     return plan as PlanTier
@@ -201,6 +216,33 @@ function normalizeTrialDaysByPlan(payload: UserPlanPayload | null | undefined): 
   return {
     startup: normalizeTrialDays(payload?.startup_trial_days),
     scale: normalizeTrialDays(payload?.scale_trial_days),
+  }
+}
+
+function buildHydratedSubscriptionState(
+  plan: PlanTier | null,
+  isProprietaryMode: boolean,
+  pricingModalAlmostFullScreen: boolean,
+  ctaPricingCancelTextUnderBtn: boolean,
+  ctaStartFreeTrial: boolean,
+  ctaPickAPlan: boolean,
+  ctaContinueAgentBtn: boolean,
+  ctaNoChargeDuringTrial: boolean,
+  trialDaysByPlan: TrialDaysByPlan,
+  trialEligible: boolean,
+): HydratedSubscriptionState {
+  return {
+    currentPlan: plan,
+    isLoading: false,
+    isProprietaryMode,
+    pricingModalAlmostFullScreen,
+    ctaPricingCancelTextUnderBtn,
+    ctaStartFreeTrial,
+    ctaPickAPlan,
+    ctaContinueAgentBtn,
+    ctaNoChargeDuringTrial,
+    trialDaysByPlan,
+    trialEligible,
   }
 }
 
@@ -313,16 +355,36 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     && ['free', 'startup', 'scale'].includes(planAttr)
     && trialEligibleAttr !== undefined
   ) {
-    useSubscriptionStore.getState().setProprietaryMode(proprietaryAttr === 'true')
-    useSubscriptionStore.getState().setCurrentPlan(planAttr as PlanTier)
-    useSubscriptionStore.getState().setTrialEligible(normalizeBoolean(trialEligibleAttr))
+    useSubscriptionStore.setState(buildHydratedSubscriptionState(
+      planAttr as PlanTier,
+      proprietaryAttr === 'true',
+      normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
+      normalizeBoolean(ctaPricingCancelTextUnderBtnAttr),
+      normalizeBoolean(ctaStartFreeTrialAttr),
+      normalizeBoolean(ctaPickAPlanAttr),
+      normalizeBoolean(ctaContinueAgentBtnAttr),
+      normalizeBoolean(ctaNoChargeDuringTrialAttr),
+      trialDaysByPlan,
+      normalizeBoolean(trialEligibleAttr),
+    ))
     return
   }
 
   // No data attributes (e.g., static app shell) - fetch from API
   useSubscriptionStore.setState({ isLoading: true })
-  fetchUserPlan().then((
-    {
+  void fetchUserPlan().then(async ({
+    plan,
+    isProprietaryMode,
+    pricingModalAlmostFullScreen,
+    ctaPricingCancelTextUnderBtn,
+    ctaStartFreeTrial,
+    ctaPickAPlan,
+    ctaContinueAgentBtn,
+    ctaNoChargeDuringTrial,
+    trialDaysByPlan: apiTrialDaysByPlan,
+    trialEligible,
+  }) => {
+    useSubscriptionStore.setState(buildHydratedSubscriptionState(
       plan,
       isProprietaryMode,
       pricingModalAlmostFullScreen,
@@ -331,19 +393,8 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       ctaPickAPlan,
       ctaContinueAgentBtn,
       ctaNoChargeDuringTrial,
-      trialDaysByPlan: apiTrialDaysByPlan,
+      apiTrialDaysByPlan,
       trialEligible,
-    },
-  ) => {
-    useSubscriptionStore.getState().setCurrentPlan(plan)
-    useSubscriptionStore.getState().setProprietaryMode(isProprietaryMode)
-    useSubscriptionStore.getState().setPricingModalAlmostFullScreen(pricingModalAlmostFullScreen)
-    useSubscriptionStore.getState().setCtaPricingCancelTextUnderBtn(ctaPricingCancelTextUnderBtn)
-    useSubscriptionStore.getState().setCtaStartFreeTrial(ctaStartFreeTrial)
-    useSubscriptionStore.getState().setCtaPickAPlan(ctaPickAPlan)
-    useSubscriptionStore.getState().setCtaContinueAgentBtn(ctaContinueAgentBtn)
-    useSubscriptionStore.getState().setCtaNoChargeDuringTrial(ctaNoChargeDuringTrial)
-    useSubscriptionStore.getState().setTrialDaysByPlan(apiTrialDaysByPlan)
-    useSubscriptionStore.getState().setTrialEligible(trialEligible)
+    ))
   })
 }

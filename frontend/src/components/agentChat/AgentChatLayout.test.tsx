@@ -1,0 +1,187 @@
+import { act, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { AgentChatLayout } from './AgentChatLayout'
+import { useSubscriptionStore } from '../../stores/subscriptionStore'
+
+vi.mock('../../util/analytics', () => ({
+  track: vi.fn(),
+}))
+
+vi.mock('./TypingIndicator', () => ({
+  TypingIndicator: () => null,
+  deriveTypingStatusText: vi.fn(() => ''),
+}))
+
+vi.mock('./AgentComposer', () => ({
+  AgentComposer: () => null,
+}))
+
+vi.mock('./TimelineVirtualItem', () => ({
+  TimelineVirtualItem: () => null,
+}))
+
+vi.mock('./StreamingReplyCard', () => ({
+  StreamingReplyCard: () => null,
+}))
+
+vi.mock('./StreamingThinkingCard', () => ({
+  StreamingThinkingCard: () => null,
+}))
+
+vi.mock('./ChatSidebar', () => ({
+  ChatSidebar: () => null,
+}))
+
+vi.mock('./AgentChatBanner', () => ({
+  AgentChatBanner: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+}))
+
+vi.mock('./AgentChatMobileSheet', () => ({
+  AgentChatMobileSheet: () => null,
+}))
+
+vi.mock('./AgentChatSettingsPanel', () => ({
+  AgentChatSettingsPanel: () => null,
+}))
+
+vi.mock('./AgentChatAddonsPanel', () => ({
+  AgentChatAddonsPanel: () => null,
+}))
+
+vi.mock('./HighPriorityBanner', () => ({
+  HighPriorityBanner: () => null,
+}))
+
+vi.mock('./HardLimitCalloutCard', () => ({
+  HardLimitCalloutCard: () => null,
+}))
+
+vi.mock('./ContactCapCalloutCard', () => ({
+  ContactCapCalloutCard: () => null,
+}))
+
+vi.mock('./TaskCreditsCalloutCard', () => ({
+  TaskCreditsCalloutCard: () => null,
+}))
+
+vi.mock('./ScheduledResumeCard', () => ({
+  ScheduledResumeCard: () => null,
+}))
+
+vi.mock('./StarterPromptSuggestions', () => ({
+  StarterPromptSuggestions: () => null,
+}))
+
+vi.mock('./useStarterPrompts', () => ({
+  useStarterPrompts: vi.fn(() => ({
+    starterPrompts: [],
+    starterPromptsLoading: false,
+    starterPromptSubmitting: false,
+    handleStarterPromptSelect: vi.fn(),
+  })),
+}))
+
+vi.mock('../common/SubscriptionUpgradePlans', () => ({
+  SubscriptionUpgradePlans: () => null,
+}))
+
+vi.mock('../common/SubscriptionUpgradeModal', () => ({
+  SubscriptionUpgradeModal: ({
+    source,
+    dismissible,
+  }: {
+    source?: string
+    dismissible?: boolean
+  }) => (
+    <div
+      data-testid="subscription-upgrade-modal"
+      data-source={source ?? ''}
+      data-dismissible={String(Boolean(dismissible))}
+    />
+  ),
+}))
+
+function buildInitialSubscriptionState() {
+  return {
+    currentPlan: 'free' as const,
+    isLoading: false,
+    isUpgradeModalOpen: false,
+    upgradeModalSource: null,
+    upgradeModalDismissible: true,
+    isProprietaryMode: true,
+    pricingModalAlmostFullScreen: true,
+    ctaPricingCancelTextUnderBtn: false,
+    ctaStartFreeTrial: true,
+    ctaPickAPlan: true,
+    ctaContinueAgentBtn: false,
+    ctaNoChargeDuringTrial: true,
+    trialDaysByPlan: { startup: 7, scale: 7 },
+    trialEligible: true,
+    ensureAuthenticated: vi.fn(async () => true),
+  }
+}
+
+function renderAgentChatLayout() {
+  return render(
+    <AgentChatLayout
+      agentFirstName="Agent"
+      events={[]}
+    />,
+  )
+}
+
+describe('AgentChatLayout upgrade modal gating', () => {
+  beforeEach(() => {
+    window.innerWidth = 1200
+    useSubscriptionStore.setState(buildInitialSubscriptionState())
+  })
+
+  afterEach(() => {
+    useSubscriptionStore.setState(buildInitialSubscriptionState())
+  })
+
+  it('keeps trial onboarding open while the subscription plan is still loading', async () => {
+    useSubscriptionStore.setState({
+      ...buildInitialSubscriptionState(),
+      isLoading: true,
+      isProprietaryMode: false,
+      isUpgradeModalOpen: true,
+      upgradeModalSource: 'trial_onboarding',
+      upgradeModalDismissible: false,
+    })
+
+    renderAgentChatLayout()
+
+    expect(screen.queryByTestId('subscription-upgrade-modal')).not.toBeInTheDocument()
+    expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(true)
+
+    await act(async () => {
+      useSubscriptionStore.setState({
+        isLoading: false,
+        isProprietaryMode: true,
+      })
+    })
+
+    const modal = await screen.findByTestId('subscription-upgrade-modal')
+    expect(modal).toHaveAttribute('data-source', 'trial_onboarding')
+    expect(modal).toHaveAttribute('data-dismissible', 'false')
+    expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(true)
+  })
+
+  it('closes the upgrade modal after plan hydration confirms proprietary mode is off', async () => {
+    useSubscriptionStore.setState({
+      ...buildInitialSubscriptionState(),
+      isLoading: false,
+      isProprietaryMode: false,
+      isUpgradeModalOpen: true,
+      upgradeModalSource: 'trial_onboarding',
+    })
+
+    renderAgentChatLayout()
+
+    await waitFor(() => {
+      expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(false)
+    })
+  })
+})
