@@ -120,7 +120,8 @@ ENV STATIC_ROOT=/app/staticfiles \
 # ── Granular COPY from builder ──────────────────
 # Copy only what's needed at runtime. Excludes: frontend/, node_modules/,
 # .npm, tests/, __pycache__/, gobii_platform.egg-info/, static/ (source),
-# docs/, scripts/, reports/, assets/, mediafiles/, .github/, .venv/
+# docs/, scripts/, reports/, assets/, mediafiles/, .github/, .venv/,
+# prompts/, sandbox_compute_server/, src/ (empty / not tracked in git)
 
 # Python application directories
 COPY --from=builder /app/api ./api
@@ -133,11 +134,8 @@ COPY --from=builder /app/marketing_events ./marketing_events
 COPY --from=builder /app/middleware ./middleware
 COPY --from=builder /app/misc ./misc
 COPY --from=builder /app/pages ./pages
-COPY --from=builder /app/prompts ./prompts
 COPY --from=builder /app/proprietary ./proprietary
-COPY --from=builder /app/sandbox_compute_server ./sandbox_compute_server
 COPY --from=builder /app/setup ./setup
-COPY --from=builder /app/src ./src
 COPY --from=builder /app/tasks ./tasks
 COPY --from=builder /app/templates ./templates
 COPY --from=builder /app/templatetags ./templatetags
