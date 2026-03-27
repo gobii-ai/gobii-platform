@@ -172,6 +172,23 @@ type UserPlanResponse = {
   authenticated: boolean
 }
 
+type HydratedSubscriptionState = Pick<
+  SubscriptionState,
+  | 'currentPlan'
+  | 'isLoading'
+  | 'isProprietaryMode'
+  | 'pricingModalAlmostFullScreen'
+  | 'ctaPricingCancelTextUnderBtn'
+  | 'ctaStartFreeTrial'
+  | 'ctaPickAPlan'
+  | 'ctaContinueAgentBtn'
+  | 'ctaNoChargeDuringTrial'
+  | 'trialDaysByPlan'
+  | 'trialEligible'
+>
+
+type BuildHydratedSubscriptionStateParams = Omit<HydratedSubscriptionState, 'isLoading'>
+
 function normalizePlan(plan: unknown): PlanTier | null {
   if (plan && ['free', 'startup', 'scale'].includes(String(plan))) {
     return plan as PlanTier
@@ -201,6 +218,15 @@ function normalizeTrialDaysByPlan(payload: UserPlanPayload | null | undefined): 
   return {
     startup: normalizeTrialDays(payload?.startup_trial_days),
     scale: normalizeTrialDays(payload?.scale_trial_days),
+  }
+}
+
+function buildHydratedSubscriptionState(
+  params: BuildHydratedSubscriptionStateParams,
+): HydratedSubscriptionState {
+  return {
+    ...params,
+    isLoading: false,
   }
 }
 
@@ -313,17 +339,37 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     && ['free', 'startup', 'scale'].includes(planAttr)
     && trialEligibleAttr !== undefined
   ) {
-    useSubscriptionStore.getState().setProprietaryMode(proprietaryAttr === 'true')
-    useSubscriptionStore.getState().setCurrentPlan(planAttr as PlanTier)
-    useSubscriptionStore.getState().setTrialEligible(normalizeBoolean(trialEligibleAttr))
+    useSubscriptionStore.setState(buildHydratedSubscriptionState({
+      currentPlan: planAttr as PlanTier,
+      isProprietaryMode: proprietaryAttr === 'true',
+      pricingModalAlmostFullScreen: normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
+      ctaPricingCancelTextUnderBtn: normalizeBoolean(ctaPricingCancelTextUnderBtnAttr),
+      ctaStartFreeTrial: normalizeBoolean(ctaStartFreeTrialAttr),
+      ctaPickAPlan: normalizeBoolean(ctaPickAPlanAttr),
+      ctaContinueAgentBtn: normalizeBoolean(ctaContinueAgentBtnAttr),
+      ctaNoChargeDuringTrial: normalizeBoolean(ctaNoChargeDuringTrialAttr),
+      trialDaysByPlan,
+      trialEligible: normalizeBoolean(trialEligibleAttr),
+    }))
     return
   }
 
   // No data attributes (e.g., static app shell) - fetch from API
   useSubscriptionStore.setState({ isLoading: true })
-  fetchUserPlan().then((
-    {
-      plan,
+  void fetchUserPlan().then(async ({
+    plan,
+    isProprietaryMode,
+    pricingModalAlmostFullScreen,
+    ctaPricingCancelTextUnderBtn,
+    ctaStartFreeTrial,
+    ctaPickAPlan,
+    ctaContinueAgentBtn,
+    ctaNoChargeDuringTrial,
+    trialDaysByPlan: apiTrialDaysByPlan,
+    trialEligible,
+  }) => {
+    useSubscriptionStore.setState(buildHydratedSubscriptionState({
+      currentPlan: plan,
       isProprietaryMode,
       pricingModalAlmostFullScreen,
       ctaPricingCancelTextUnderBtn,
@@ -333,17 +379,6 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       ctaNoChargeDuringTrial,
       trialDaysByPlan: apiTrialDaysByPlan,
       trialEligible,
-    },
-  ) => {
-    useSubscriptionStore.getState().setCurrentPlan(plan)
-    useSubscriptionStore.getState().setProprietaryMode(isProprietaryMode)
-    useSubscriptionStore.getState().setPricingModalAlmostFullScreen(pricingModalAlmostFullScreen)
-    useSubscriptionStore.getState().setCtaPricingCancelTextUnderBtn(ctaPricingCancelTextUnderBtn)
-    useSubscriptionStore.getState().setCtaStartFreeTrial(ctaStartFreeTrial)
-    useSubscriptionStore.getState().setCtaPickAPlan(ctaPickAPlan)
-    useSubscriptionStore.getState().setCtaContinueAgentBtn(ctaContinueAgentBtn)
-    useSubscriptionStore.getState().setCtaNoChargeDuringTrial(ctaNoChargeDuringTrial)
-    useSubscriptionStore.getState().setTrialDaysByPlan(apiTrialDaysByPlan)
-    useSubscriptionStore.getState().setTrialEligible(trialEligible)
+    }))
   })
 }
