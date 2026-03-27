@@ -187,6 +187,13 @@ def agent_accessible_server_configs(agent: PersistentAgent) -> List[MCPServerCon
             continue
         _add(cfg)
 
+    # Catch assigned servers not yet resolved (e.g. transferred agents whose
+    # assignments still reference the previous owner's personal configs).
+    remaining = assigned_ids - seen
+    if remaining:
+        for cfg in MCPServerConfig.objects.filter(id__in=remaining, is_active=True):
+            _add(cfg)
+
     return sorted(
         configs,
         key=lambda cfg: ((cfg.display_name or '').lower(), (cfg.name or '').lower()),

@@ -56,3 +56,39 @@ class MCPServerAssignmentTests(TestCase):
 
         accessible_after = mcp_servers.agent_accessible_server_configs(self.org_agent)
         self.assertTrue(any(cfg.id == server.id for cfg in accessible_after))
+
+    def test_transferred_agent_sees_previous_owner_personal_servers(self):
+        """After transfer, assigned personal servers from the old owner remain accessible."""
+        old_owner = self.user
+        new_owner = User.objects.create_user(
+            username="new_owner", email="new@example.com", password="pw"
+        )
+
+        personal_agent = PersistentAgent.objects.create(
+            user=old_owner,
+            name="Personal Agent",
+            charter="Help me",
+            browser_use_agent=BrowserUseAgent.objects.create(user=old_owner, name="B2"),
+        )
+
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=old_owner,
+            name="old-owner-server",
+            display_name="Old Owner Server",
+            command="/bin/true",
+        )
+        PersistentAgentMCPServer.objects.create(agent=personal_agent, server_config=server)
+
+        # Sanity: accessible before transfer
+        accessible_before = mcp_servers.agent_accessible_server_configs(personal_agent)
+        self.assertTrue(any(cfg.id == server.id for cfg in accessible_before))
+
+        # Simulate transfer: change user, clear org
+        personal_agent.user = new_owner
+        personal_agent.organization = None
+        personal_agent.save(update_fields=["user", "organization"])
+
+        # After transfer the server should still be accessible via the catch-all lookup
+        accessible_after = mcp_servers.agent_accessible_server_configs(personal_agent)
+        self.assertTrue(any(cfg.id == server.id for cfg in accessible_after))
