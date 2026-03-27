@@ -45,6 +45,7 @@ from util.integrations import stripe_status, IntegrationDisabledError
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_API_KEYS,
+    clear_trial_onboarding_intent,
     is_truthy_flag,
     normalize_trial_onboarding_target,
     set_trial_onboarding_intent,
@@ -68,6 +69,8 @@ from api.services.pipedream_apps import (
 )
 from api.pipedream_app_utils import normalize_app_slugs
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
+from middleware.utm_capture import UTMTrackingMiddleware
+from pages.mini_mode import set_mini_mode_cookie
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -100,6 +103,7 @@ HOMEPAGE_INLINE_INTEGRATION_SLUGS = (
     "trello",
     "slack",
 )
+_LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     """
@@ -358,6 +362,14 @@ def _persist_landing_attribution(request, code: str) -> None:
         logger.exception("Failed to persist landing attribution in session for code %s", code)
 
 
+def _persist_landing_tracking_params(request, params) -> bool:
+    try:
+        return _LANDING_UTM_TRACKER.capture_params(request, params)
+    except Exception:
+        logger.exception("Failed to persist landing tracking params for launch request")
+        return False
+
+
 def _apply_landing_attribution_cookies(response, request, code: str, *, fbc_source: str) -> None:
     try:
         cookie_max_age = 60 * 24 * 60 * 60  # 60 days
@@ -392,6 +404,7 @@ def _apply_landing_attribution_cookies(response, request, code: str, *, fbc_sour
 
 
 def _seed_landing_launch_session(request, landing: LandingPage) -> None:
+    clear_trial_onboarding_intent(request)
     request.session["agent_charter"] = landing.charter
     request.session["agent_charter_source"] = "landing"
     request.session.pop("agent_charter_override", None)
@@ -1391,6 +1404,7 @@ class LandingLaunchView(View):
         _seed_landing_launch_session(request, landing)
 
         params = _build_landing_redirect_params(request, landing, code)
+        should_set_mini_mode_cookie = _persist_landing_tracking_params(request, params)
         params["spawn"] = "1"
 
         raw_return_to = params.get("return_to")
@@ -1440,6 +1454,8 @@ class LandingLaunchView(View):
             code,
             fbc_source="pages.views.landing_page_launch",
         )
+        if should_set_mini_mode_cookie:
+            set_mini_mode_cookie(response, request)
         return response
 
 

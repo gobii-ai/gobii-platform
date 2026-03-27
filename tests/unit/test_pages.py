@@ -857,7 +857,9 @@ class LandingPageLaunchTests(TestCase):
         parsed = urlparse(response["Location"])
         self.assertEqual(parsed.path, reverse("account_login"))
         params = parse_qs(parsed.query)
-        self.assertEqual(params.get("utm_medium"), ["ads"])
+        self.assertEqual(params.get("utm_source"), ["paid-social"])
+        self.assertEqual(params.get("utm_medium"), ["paid_social"])
+        self.assertEqual(params.get("utm_campaign"), ["retargeting"])
 
         next_url = params.get("next")[0]
         next_parts = urlparse(next_url)
@@ -888,9 +890,74 @@ class LandingPageLaunchTests(TestCase):
         )
         self.assertEqual(
             attribution_payload.get("utm_last_touch"),
-            {"utm_source": "meta", "utm_campaign": "retargeting"},
+            {"utm_source": "paid-social", "utm_campaign": "retargeting"},
         )
-        self.assertEqual(attribution_payload.get("utm_querystring"), "utm_medium=ads")
+        self.assertEqual(
+            attribution_payload.get("utm_querystring"),
+            "utm_source=paid-social&utm_medium=paid_social&utm_campaign=retargeting",
+        )
+
+    @tag("batch_pages")
+    def test_landing_launch_clears_stale_trial_onboarding_state(self):
+        user = get_user_model().objects.create_user(
+            email="launch-onboarding@test.com",
+            password="pw",
+            username="launch_onboarding_user",
+        )
+        self.client.force_login(user)
+
+        landing = LandingPage.objects.create(charter="Launch without stale onboarding")
+        session = self.client.session
+        session[TRIAL_ONBOARDING_PENDING_SESSION_KEY] = True
+        session[TRIAL_ONBOARDING_TARGET_SESSION_KEY] = TRIAL_ONBOARDING_TARGET_API_KEYS
+        session[TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY] = True
+        session.save()
+
+        response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertNotIn(TRIAL_ONBOARDING_PENDING_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_TARGET_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, session)
+
+        spawn_intent_response = self.client.get(reverse("console_agent_spawn_intent"))
+        self.assertEqual(spawn_intent_response.status_code, 200)
+        payload = spawn_intent_response.json()
+        self.assertIsNone(payload.get("onboarding_target"))
+        self.assertFalse(payload.get("requires_plan_selection"))
+
+    @tag("batch_pages")
+    def test_landing_launch_persists_landing_utms_into_oauth_attribution(self):
+        landing = LandingPage.objects.create(
+            charter="Launch with landing defaults",
+            utm_source="newsletter",
+            utm_medium="email",
+            utm_campaign="spring-launch",
+        )
+
+        response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("utm_medium"), ["email"])
+        self.assertEqual(params.get("utm_campaign"), ["spring-launch"])
+
+        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
+        expected_touch = {
+            "utm_source": "newsletter",
+            "utm_medium": "email",
+            "utm_campaign": "spring-launch",
+        }
+        self.assertEqual(attribution_payload.get("utm_first_touch"), expected_touch)
+        self.assertEqual(attribution_payload.get("utm_last_touch"), expected_touch)
+        self.assertEqual(
+            attribution_payload.get("utm_querystring"),
+            "utm_source=newsletter&utm_medium=email&utm_campaign=spring-launch",
+        )
 
     @tag("batch_pages")
     def test_disabled_landing_launch_returns_404(self):

@@ -56,7 +56,9 @@ class UTMTrackingMiddleware:
         return response
 
     def _capture_params(self, request) -> bool:
-        params = request.GET
+        return self.capture_params(request, request.GET)
+
+    def capture_params(self, request, params) -> bool:
         if not params:
             return False
 
