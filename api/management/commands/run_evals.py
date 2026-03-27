@@ -10,7 +10,8 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
-from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, PersistentAgent
+from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
+from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
 
 class Command(BaseCommand):
@@ -69,6 +70,13 @@ class Command(BaseCommand):
             default=3,
             help="How many times to repeat each scenario (default: 3).",
         )
+        parser.add_argument(
+            "--routing-profile",
+            "--llm-routing-profile",
+            dest="routing_profile",
+            type=str,
+            help="LLM routing profile name or UUID to snapshot onto the eval suite run.",
+        )
 
     def handle(self, *args, **options):
         suites_requested = options["suites"] or []
@@ -79,6 +87,7 @@ class Command(BaseCommand):
         run_type_option = options["run_type"]
         run_type = EvalSuiteRun.RunType.OFFICIAL if options["official"] else run_type_option
         requested_runs = max(1, min(10, int(options.get("n_runs") or 1)))
+        routing_profile_ref = (options.get("routing_profile") or "").strip()
         base_site_url = (getattr(settings, "PUBLIC_SITE_URL", "http://localhost:8000") or "http://localhost:8000").rstrip("/")
         printed_audit_agents: set[str] = set()
 
@@ -121,6 +130,46 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("No suites found to run."))
             return
 
+        source_routing_profile = None
+        if routing_profile_ref:
+            routing_profile_uuid = None
+            try:
+                routing_profile_uuid = uuid.UUID(routing_profile_ref)
+            except ValueError:
+                pass
+
+            if routing_profile_uuid:
+                source_routing_profile = LLMRoutingProfile.objects.filter(
+                    id=routing_profile_uuid,
+                    is_eval_snapshot=False,
+                ).first()
+
+            if not source_routing_profile:
+                source_routing_profile = LLMRoutingProfile.objects.filter(
+                    name=routing_profile_ref,
+                    is_eval_snapshot=False,
+                ).first()
+
+            if not source_routing_profile:
+                snapshot_match = False
+                if routing_profile_uuid:
+                    snapshot_match = LLMRoutingProfile.objects.filter(
+                        id=routing_profile_uuid,
+                        is_eval_snapshot=True,
+                    ).exists()
+                if not snapshot_match:
+                    snapshot_match = LLMRoutingProfile.objects.filter(
+                        name=routing_profile_ref,
+                        is_eval_snapshot=True,
+                    ).exists()
+                if snapshot_match:
+                    raise CommandError("Routing profile must reference a non-snapshot profile.")
+                raise CommandError(f"Routing profile '{routing_profile_ref}' not found.")
+
+            self.stdout.write(
+                f"Using routing profile {source_routing_profile.name} ({source_routing_profile.id})"
+            )
+
         # Base user attribution
         User = get_user_model()
         user, _ = User.objects.get_or_create(username="eval_runner", defaults={"email": "eval@localhost"})
@@ -160,7 +209,12 @@ class Command(BaseCommand):
 
         for suite_slug, scenario_slugs, description in suites:
             scenario_slugs = list(dict.fromkeys(scenario_slugs))
+            suite_run_id = uuid.uuid4()
+            profile_snapshot = None
+            if source_routing_profile:
+                profile_snapshot = create_eval_profile_snapshot(source_routing_profile, str(suite_run_id))
             suite_run = EvalSuiteRun.objects.create(
+                id=suite_run_id,
                 suite_slug=suite_slug,
                 initiated_by=user,
                 status=EvalSuiteRun.Status.RUNNING,
@@ -169,6 +223,7 @@ class Command(BaseCommand):
                 agent_strategy=agent_strategy,
                 shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
                 started_at=timezone.now(),
+                llm_routing_profile=profile_snapshot,
             )
 
             self.stdout.write(self.style.SUCCESS(f"Created suite run {suite_run.id} ({suite_slug}) [{run_type}]"))
