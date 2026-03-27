@@ -7,6 +7,7 @@ FROM python:3.13-slim-bookworm AS deps
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
     PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/pw-browsers
 
 WORKDIR /app
@@ -75,9 +76,6 @@ RUN --mount=type=cache,target=/root/.npm \
     if [ "$SKIP_FRONTEND_BUILD" != "true" ]; then npm run build --prefix frontend; fi
 
 COPY . .
-
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --editable .
 
 ENV USE_EPHEMERAL_XVFB=true
 
