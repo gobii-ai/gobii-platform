@@ -792,6 +792,182 @@ class LandingPageRedirectTests(TestCase):
 
 
 @tag("batch_pages")
+class LandingPageLaunchTests(TestCase):
+    @tag("batch_pages")
+    def test_landing_launch_redirects_authenticated_user_into_app_spawn(self):
+        user = get_user_model().objects.create_user(
+            email="launch@test.com",
+            password="pw",
+            username="launch_user",
+        )
+        self.client.force_login(user)
+
+        landing = LandingPage.objects.create(
+            charter="Launch this agent",
+            utm_source="newsletter",
+            utm_campaign="launch-campaign",
+        )
+        session = self.client.session
+        session["agent_charter"] = "Old draft"
+        session["agent_charter_override"] = "Old override"
+        session["agent_preferred_llm_tier"] = "premium"
+        session[page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack"]
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = "sales-pipeline-whisperer"
+        session.save()
+
+        response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("g"), [landing.code])
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("utm_campaign"), ["launch-campaign"])
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), landing.charter)
+        self.assertEqual(session.get("agent_charter_source"), "landing")
+        self.assertNotIn("agent_charter_override", session)
+        self.assertNotIn("agent_preferred_llm_tier", session)
+        self.assertNotIn(page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, session)
+        self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertEqual(session.get("landing_code_last"), landing.code)
+
+        landing.refresh_from_db()
+        self.assertEqual(landing.hits, 1)
+
+    @tag("batch_pages")
+    def test_landing_launch_redirects_anon_to_login_and_stashes_charter(self):
+        landing = LandingPage.objects.create(
+            charter="Launch anonymously",
+            utm_source="paid-social",
+        )
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session["utm_first_touch"] = {"utm_source": "meta", "utm_medium": "paid_social"}
+        session["utm_last_touch"] = {"utm_source": "meta", "utm_campaign": "retargeting"}
+        session.save()
+
+        response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("utm_source"), ["paid-social"])
+        self.assertEqual(params.get("utm_medium"), ["paid_social"])
+        self.assertEqual(params.get("utm_campaign"), ["retargeting"])
+
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(next_params.get("g"), [landing.code])
+        self.assertEqual(next_params.get("utm_source"), ["paid-social"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+        stash_token_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        stash_token = stash_token_payload.get(OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY)
+        self.assertIsNotNone(stash_token)
+        cached_charter_payload = signing.loads(
+            get_redis_client().get(build_oauth_charter_stash_cache_key(stash_token))
+        )
+        self.assertEqual(cached_charter_payload.get("agent_charter"), landing.charter)
+        self.assertEqual(cached_charter_payload.get("agent_charter_source"), "landing")
+        self.assertNotIn("agent_charter_override", cached_charter_payload)
+        self.assertNotIn("agent_preferred_llm_tier", cached_charter_payload)
+
+        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
+        self.assertEqual(
+            attribution_payload.get("utm_first_touch"),
+            {"utm_source": "meta", "utm_medium": "paid_social"},
+        )
+        self.assertEqual(
+            attribution_payload.get("utm_last_touch"),
+            {"utm_source": "paid-social", "utm_campaign": "retargeting"},
+        )
+        self.assertEqual(
+            attribution_payload.get("utm_querystring"),
+            "utm_source=paid-social&utm_medium=paid_social&utm_campaign=retargeting",
+        )
+
+    @tag("batch_pages")
+    def test_landing_launch_clears_stale_trial_onboarding_state(self):
+        user = get_user_model().objects.create_user(
+            email="launch-onboarding@test.com",
+            password="pw",
+            username="launch_onboarding_user",
+        )
+        self.client.force_login(user)
+
+        landing = LandingPage.objects.create(charter="Launch without stale onboarding")
+        session = self.client.session
+        session[TRIAL_ONBOARDING_PENDING_SESSION_KEY] = True
+        session[TRIAL_ONBOARDING_TARGET_SESSION_KEY] = TRIAL_ONBOARDING_TARGET_API_KEYS
+        session[TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY] = True
+        session.save()
+
+        response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertNotIn(TRIAL_ONBOARDING_PENDING_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_TARGET_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, session)
+
+        spawn_intent_response = self.client.get(reverse("console_agent_spawn_intent"))
+        self.assertEqual(spawn_intent_response.status_code, 200)
+        payload = spawn_intent_response.json()
+        self.assertIsNone(payload.get("onboarding_target"))
+        self.assertFalse(payload.get("requires_plan_selection"))
+
+    @tag("batch_pages")
+    def test_landing_launch_persists_landing_utms_into_oauth_attribution(self):
+        landing = LandingPage.objects.create(
+            charter="Launch with landing defaults",
+            utm_source="newsletter",
+            utm_medium="email",
+            utm_campaign="spring-launch",
+        )
+
+        response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("utm_medium"), ["email"])
+        self.assertEqual(params.get("utm_campaign"), ["spring-launch"])
+
+        attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
+        expected_touch = {
+            "utm_source": "newsletter",
+            "utm_medium": "email",
+            "utm_campaign": "spring-launch",
+        }
+        self.assertEqual(attribution_payload.get("utm_first_touch"), expected_touch)
+        self.assertEqual(attribution_payload.get("utm_last_touch"), expected_touch)
+        self.assertEqual(
+            attribution_payload.get("utm_querystring"),
+            "utm_source=newsletter&utm_medium=email&utm_campaign=spring-launch",
+        )
+
+    @tag("batch_pages")
+    def test_disabled_landing_launch_returns_404(self):
+        landing = LandingPage.objects.create(charter="x", disabled=True)
+
+        response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+        self.assertEqual(response.status_code, 404)
+
+
+@tag("batch_pages")
 class RobotsTxtTests(TestCase):
     @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="prod")

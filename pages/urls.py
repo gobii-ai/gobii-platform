@@ -20,6 +20,7 @@ from .views import (
     StaticViewSitemap,
     PretrainedWorkerTemplateSitemap,
     LandingRedirectView,
+    LandingLaunchView,
     ClearSignupTrackingView,
     PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
@@ -90,6 +91,7 @@ urlpatterns = [
     path("docs/<path:slug>/", markdown_page_view, name="markdown_page"),
 
     # Short landing page redirects
+    path("g/<slug:code>/spawn/", LandingLaunchView.as_view(), name="landing_launch"),
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),
 
     # Solutions
