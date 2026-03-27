@@ -318,9 +318,10 @@ guess(identifier) → error   # you ARE about to get "no such column"
 # Only use two-step patterns when structure is truly unknown.
 unknown(structure) → step1: inspect → step2: use(inspected)
 sqlite_batch(sql="
-  SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='{id}';  -- step1: get enough context
-  SELECT regexp_extract(result_text, 'pattern1'), ...  -- step2: use paths from step1
-  FROM __tool_results WHERE result_id='{id}'")
+  SELECT is_json, top_keys, substr(result_text, 1, 8000)
+  FROM __tool_results WHERE result_id='{id}'")   # step1: inspect shape
+# if is_json=1 → extract from result_json with json_extract/json_each
+# if is_json=0 → extract from result_text with regexp_extract/grep
 one_result_id = one_sqlite_batch   # never query same result_id in separate calls
 budget ~10k chars total per batch   # don't look through a straw—get enough context in one call
 TEMP TABLE = gone next call   # TEMP tables vanish after each sqlite_batch; use CREATE TABLE (no TEMP)
@@ -340,9 +341,10 @@ transform(identifier) → error                      # no pluralize, no case cha
 # __tool_results (special table)
 __tool_results.columns = {result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes}
 access_result → WHERE result_id = '{exact_id_from_result}'
-result_text   → always populated (use this for inspection/extraction)
-result_json   → populated when is_json=1 (enables json_extract/json_each)
+result_text   → always populated (use this to inspect unknown/plain-text outputs)
+result_json   → populated when is_json=1 (prefer this for json_extract/json_each extraction)
 analysis_json → optional hints (not the data)
+if is_json=1  → extract from result_json before falling back to regexp_extract(result_text)
 do not invent columns; only use those listed above
 
 # __messages (special table)
@@ -408,6 +410,7 @@ unknown columns → PRAGMA table_info(table)
 **You have a tendency to hallucinate.** This is not a hypothetical warning—it's an observed pattern. You will confidently state facts, URLs, names, and numbers that don't exist. You will construct plausible-sounding information that has no basis in reality.
 
 **The rule is simple: if it didn't come from a tool result or schema/metadata, it isn't real.**
+Search-query terms are not evidence that every result matches the request. Treat the user's core constraints as hard filters and verify them on the selected rows before reporting; do not count duplicate or near-duplicate evidence as separate results. Once you have enough verified rows to satisfy the request, stop searching and answer; if the final set still does not satisfy the constraints, keep working.
 
 ```
 # Reality check
@@ -719,6 +722,7 @@ will_continue_work = (after_this_action has more work for me)
 Mark each card done only after verifying the work is actually complete. If the task involved a tool call, wait for its successful result before marking done.
 
 **Critical: Send report BEFORE marking complete.** When wrapping up, always send your findings first, then mark the last card done. This ensures your report is delivered before you stop.
+If this run started from a user request and you have not sent any outbound reply yet, `will_continue_work=false` is almost certainly wrong.
 
 Example wrap-up (model your future state):
 ```
@@ -2070,7 +2074,7 @@ def build_prompt_context(
     else:
         important_group.section_text(
             "schedule_note",
-            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
+            "⚠️ NO SCHEDULE SET. This is fine for one-off requests. Set a schedule only if the work is recurring or you need to resume unfinished work later. Without a schedule, stopping ends the task until the next inbound message.",
             weight=1,
             non_shrinkable=True
         )
@@ -2144,14 +2148,14 @@ def build_prompt_context(
         )
         important_group.section_text(
             "charter_note",
-            "UPDATE THIS CHARTER NOW if it's vague, incomplete, or doesn't match what the user just asked for. Your charter is your persistent memory—make it specific and actionable. Don't wait for permission; evolve it immediately when you learn something new.",
+            "Update charter only when the user gives you an ongoing responsibility or the current charter would mislead future runs. For one-off requests, usually leave it alone.",
             weight=2,
             non_shrinkable=True
         )
     else:
         important_group.section_text(
             "charter_missing",
-            "⚠️ NO CHARTER SET. Your FIRST action should be to set your charter via sqlite_batch. Without a charter, you have no persistent identity. Capture your purpose immediately based on what the user wants.",
+            "⚠️ NO CHARTER SET. This is fine for one-off work. Set one when taking on an ongoing responsibility or when future runs would otherwise lose important purpose or preferences.",
             weight=5,
             non_shrinkable=True
         )
@@ -2249,7 +2253,7 @@ def build_prompt_context(
         "(single row, id=1). It resets every LLM call and is applied after tools run. "
         "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
         "Clear schedule with schedule=NULL or ''. "
-        "When in doubt, set a schedule (default '0 9 * * *'). "
+        "Set a schedule only for recurring work or when unfinished work needs a future resume; one-off requests usually keep schedule=NULL. "
         "CRITICAL: Charter/schedule updates are NOT work. "
         "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
         "(e.g., quick lookups) until you fetch and report the result."
@@ -3333,7 +3337,6 @@ def add_budget_awareness_sections(
             (
                 "pacing_guidance",
                 (
-                    "Pacing: Prefer one tool call, then reassess. "
                     "Batch related updates into one sqlite_batch when possible. "
                     "Before sleeping: if todo/doing cards remain, keep working or set a schedule—don't orphan work."
                 ),
@@ -3784,6 +3787,7 @@ def _get_system_instruction(
         "**CONTINUE (will_continue_work=true)** — ONLY when you have kanban cards in todo/doing:\n"
         "- Kanban cards still in todo/doing → will_continue_work=true, keep going.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true, keep going.\n"
+        "- Requested count/distinctness/constraints not yet verified on the final set → will_continue_work=true, keep going.\n"
         "- 'research competitors' → search_tools(will_continue_work=true) → keep working until all work done AND marked done.\n"
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
@@ -3796,7 +3800,7 @@ def _get_system_instruction(
         "3. You're done—no extra turn, no announcement\n\n"
         "**Guardrail:** If you mark the last kanban card done, your final report MUST already be sent "
         "(same turn is OK: send_chat_message(..., will_continue_work=true) then sqlite_batch(..., will_continue_work=false)).\n\n"
-        "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
+        "**The rule:** Recurring or truly multi-phase work may need charter, kanban, or schedule updates; one-off work usually needs none.\n"
     )
 
     if implied_send_active:
@@ -3894,8 +3898,8 @@ def _get_system_instruction(
         "Tool output (French), user in English: \"Erreur: permission refusee\"\n"
         "Assistant (English): \"The tool reported a permission error. I'll retry with the correct permissions or ask for approval if needed.\"\n\n"
 
-        "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, update __agent_config.charter via sqlite_batch right away—ideally alongside your greeting. "
-        "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
+        "Your charter is your memory of purpose. Update it when the user gives you an ongoing responsibility or changes durable preferences/scope; for one-off requests, leave it alone unless the current charter would become misleading. "
+        "You control your schedule. Set or change it only when the work is recurring or you need a future resume point. "
         "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
         "Ask about timezone if relevant. "
 
@@ -3953,11 +3957,11 @@ def _get_system_instruction(
         "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
         "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
 
-        "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
+        "**Golden rule**: persistent tracking is for recurring work or truly multi-phase work. One-off requests usually need neither charter nor schedule, and often no kanban.\n\n"
 
         "### When to use kanban cards:\n"
-        "**USE CARDS** for work with multiple independent phases—research across several sources, multi-part investigations, tasks where you'd lose your place without tracking.\n"
-        "**SKIP CARDS** when the work is one logical thing, even if it takes several tool calls. Also skip for: greetings, awaiting instructions, and user-requested tracking (if user wants 'a todo list' or 'track X for me', that's their data in a custom table—not your kanban).\n\n"
+        "**USE CARDS** for work with multiple independent phases or anything likely to span turns.\n"
+        "**SKIP CARDS** when the work is one logical deliverable, even if it takes several tool calls or a few sources. Also skip for: greetings, awaiting instructions, and user-requested tracking (if user wants 'a todo list' or 'track X for me', that's their data in a custom table—not your kanban).\n\n"
         "NO cards: 'What's Bitcoin?' / 'Hi!' / 'Summarize this' / 'Look up X and tell me about it' / 'Find the best Y' → just do it.\n"
         "YES cards: 'Research competitors and compare pricing across 5 companies' / 'Monitor daily' / 'Analyze X, then Y, then synthesize' → distinct phases.\n\n"
 
@@ -4379,7 +4383,7 @@ def _get_system_instruction(
         "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
         "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
-        "Always start there when unsure. "
+        "Use it before raw web search when the task looks like a known structured domain, and otherwise when unsure. "
 
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"
