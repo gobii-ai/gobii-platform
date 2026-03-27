@@ -58,6 +58,7 @@ FROM deps AS builder
 # runtime 500s with Manifest lookups. Setting these envs guarantees
 # CompressedManifestStaticFilesStorage during collectstatic.
 ARG VITE_BUILD_BASE_URL
+ARG SKIP_FRONTEND_BUILD=false
 ENV IN_DOCKER=1 \
     GOBII_RELEASE_ENV=build \
     DEBUG=0 \
@@ -67,11 +68,11 @@ ENV IN_DOCKER=1 \
 # can leverage cached layers when only application code changes.
 COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --prefix frontend
+    if [ "$SKIP_FRONTEND_BUILD" != "true" ]; then npm ci --prefix frontend; fi
 
 COPY frontend ./frontend
 RUN --mount=type=cache,target=/root/.npm \
-    npm run build --prefix frontend
+    if [ "$SKIP_FRONTEND_BUILD" != "true" ]; then npm run build --prefix frontend; fi
 
 COPY . .
 
@@ -116,7 +117,46 @@ ENV STATIC_ROOT=/app/staticfiles \
     USE_EPHEMERAL_XVFB=true \
     NPM_CONFIG_CACHE=/tmp/.npm
 
-COPY --from=builder /app /app
+# ── Granular COPY from builder ──────────────────
+# Copy only what's needed at runtime. Excludes: frontend/, node_modules/,
+# .npm, tests/, __pycache__/, gobii_platform.egg-info/, static/ (source),
+# docs/, scripts/, reports/, assets/, mediafiles/, .github/, .venv/,
+# prompts/, sandbox_compute_server/, src/ (empty / not tracked in git)
+
+# Python application directories
+COPY --from=builder /app/api ./api
+COPY --from=builder /app/agents ./agents
+COPY --from=builder /app/billing ./billing
+COPY --from=builder /app/config ./config
+COPY --from=builder /app/console ./console
+COPY --from=builder /app/constants ./constants
+COPY --from=builder /app/marketing_events ./marketing_events
+COPY --from=builder /app/middleware ./middleware
+COPY --from=builder /app/misc ./misc
+COPY --from=builder /app/pages ./pages
+COPY --from=builder /app/proprietary ./proprietary
+COPY --from=builder /app/setup ./setup
+COPY --from=builder /app/tasks ./tasks
+COPY --from=builder /app/templates ./templates
+COPY --from=builder /app/templatetags ./templatetags
+COPY --from=builder /app/util ./util
+COPY --from=builder /app/vendor ./vendor
+
+# tests/ is required because it's listed in INSTALLED_APPS (Django app)
+COPY --from=builder /app/tests ./tests
+
+# Root-level Python files
+COPY --from=builder /app/manage.py ./manage.py
+COPY --from=builder /app/observability.py ./observability.py
+COPY --from=builder /app/turnstile_signup.py ./turnstile_signup.py
+COPY --from=builder /app/agent_namer.py ./agent_namer.py
+COPY --from=builder /app/celery_task_counter.py ./celery_task_counter.py
+
+# Package metadata
+COPY --from=builder /app/pyproject.toml ./pyproject.toml
+
+# Collected static files (output of collectstatic)
+COPY --from=builder /app/staticfiles ./staticfiles
 
 # Write git commit SHA for runtime traceability (passed from CI)
 ARG GIT_COMMIT=unknown
