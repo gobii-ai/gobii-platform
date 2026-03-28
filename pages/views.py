@@ -2133,10 +2133,6 @@ class ClearSignupTrackingView(View):
             'registrationValue': 0.0,
             # Include pixel IDs so client knows which to fire
             'pixels': {
-                'ga': getattr(settings, 'GA_MEASUREMENT_ID', ''),
-                'reddit': getattr(settings, 'REDDIT_PIXEL_ID', ''),
-                'tiktok': getattr(settings, 'TIKTOK_PIXEL_ID', ''),
-                'meta': getattr(settings, 'META_PIXEL_ID', ''),
                 'linkedin': getattr(settings, 'LINKEDIN_SIGNUP_CONVERSION_ID', ''),
             },
         }

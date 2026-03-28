@@ -1,16 +1,21 @@
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from django.test import SimpleTestCase, tag, override_settings
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, tag, override_settings
 
+from api.models import Organization, OrganizationMembership
+from constants.plans import PlanNames
 from marketing_events.providers.base import PermanentError
 from marketing_events.tasks import (
     _analytics_user_id,
+    _complete_registration_candidate_owners,
     enqueue_complete_registration_marketing_event,
     enqueue_delayed_subscription_guarded_marketing_event,
     enqueue_marketing_event,
     enqueue_start_trial_marketing_event,
 )
+from util.subscription_helper import mark_organization_billing_with_plan
 
 
 @tag("batch_marketing_events")
@@ -106,6 +111,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["properties"]["provider"], "GoogleAnalyticsMP")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._complete_registration_candidate_owners")
     @patch("marketing_events.tasks._dispatch_marketing_event")
     @patch("marketing_events.tasks.get_subscription_base_price", return_value=(Decimal("49.99"), "usd"))
     @patch("marketing_events.tasks.get_active_subscription", return_value=MagicMock())
@@ -118,9 +124,11 @@ class MarketingEventsTaskTests(SimpleTestCase):
         _mock_get_active_subscription,
         _mock_get_subscription_base_price,
         mock_dispatch,
+        mock_candidate_owners,
     ):
         user = MagicMock()
         mock_get_user_model.return_value.objects.get.return_value = user
+        mock_candidate_owners.return_value = [{"owner": user, "owner_type": "user"}]
 
         enqueue_complete_registration_marketing_event(
             {
@@ -138,17 +146,22 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(dispatched_payload["properties"]["currency"], "USD")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._complete_registration_candidate_owners")
     @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.get_active_subscription", return_value=None)
     @patch("marketing_events.tasks.reconcile_user_plan_from_stripe", return_value={"id": "free", "price": 0, "currency": "USD"})
     @patch("marketing_events.tasks.get_user_model")
     def test_enqueue_complete_registration_keeps_free_value_at_zero(
         self,
         mock_get_user_model,
         _mock_reconcile_user_plan,
+        _mock_get_active_subscription,
         mock_dispatch,
+        mock_candidate_owners,
     ):
         user = MagicMock()
         mock_get_user_model.return_value.objects.get.return_value = user
+        mock_candidate_owners.return_value = [{"owner": user, "owner_type": "user"}]
 
         enqueue_complete_registration_marketing_event(
             {
@@ -331,3 +344,87 @@ class MarketingEventsTaskTests(SimpleTestCase):
 
         mock_dispatch.assert_called_once_with(payload)
         mock_track.assert_not_called()
+
+
+@tag("batch_marketing_events")
+class CompleteRegistrationOwnerResolutionTests(TestCase):
+    def setUp(self):
+        user_model = get_user_model()
+        self.user = user_model.objects.create_user(
+            username="marketing-owner-user",
+            email="marketing-owner@example.com",
+            password="pw",
+        )
+        self.other_user = user_model.objects.create_user(
+            username="marketing-other-user",
+            email="marketing-other@example.com",
+            password="pw",
+        )
+
+    def test_complete_registration_candidates_include_active_owner_membership_org(self):
+        organization = Organization.objects.create(
+            name="Acme Org",
+            slug="acme-org",
+            created_by=self.other_user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        candidates = _complete_registration_candidate_owners(self.user)
+        candidate_owners = [candidate["owner"] for candidate in candidates]
+
+        self.assertIn(self.user, candidate_owners)
+        self.assertIn(organization, candidate_owners)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.get_subscription_base_price", return_value=(Decimal("250"), "usd"))
+    @patch("marketing_events.tasks.get_active_subscription")
+    @patch("marketing_events.tasks.reconcile_user_plan_from_stripe", return_value={"id": "free", "price": 0, "currency": "USD"})
+    def test_enqueue_complete_registration_prefers_paid_org_owner_over_free_user(
+        self,
+        _mock_reconcile_user_plan,
+        mock_get_active_subscription,
+        _mock_get_subscription_base_price,
+        mock_dispatch,
+    ):
+        organization = Organization.objects.create(
+            name="Paid Org",
+            slug="paid-org",
+            created_by=self.other_user,
+        )
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        mark_organization_billing_with_plan(organization, PlanNames.ORG_TEAM)
+
+        org_subscription = MagicMock()
+
+        def active_subscription_side_effect(owner, **_kwargs):
+            if getattr(owner, "pk", None) == organization.pk:
+                return org_subscription
+            return None
+
+        mock_get_active_subscription.side_effect = active_subscription_side_effect
+
+        enqueue_complete_registration_marketing_event(
+            {
+                "event_name": "CompleteRegistration",
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-org-200", "plan": "free"},
+                "user": {"id": str(self.user.id), "email": self.user.email},
+                "context": {},
+            }
+        )
+
+        mock_dispatch.assert_called_once()
+        dispatched_payload = mock_dispatch.call_args.args[0]
+        self.assertEqual(dispatched_payload["properties"]["plan"], PlanNames.ORG_TEAM)
+        self.assertEqual(dispatched_payload["properties"]["value"], 75.0)
+        self.assertEqual(dispatched_payload["properties"]["currency"], "USD")

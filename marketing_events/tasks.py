@@ -4,8 +4,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from celery import shared_task
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.db.models import Q
 
 from constants.plans import PlanNames
 from util.analytics import Analytics
@@ -16,6 +18,7 @@ from util.subscription_helper import (
     get_owner_plan,
     get_subscription_base_price,
     reconcile_user_plan_from_stripe,
+    resolve_plan_from_subscription_data,
 )
 from .providers import get_providers
 from .providers.base import TemporaryError, PermanentError
@@ -38,6 +41,7 @@ _PROVIDER_TARGET_ALIASES = {
     "ga4": "google_analytics",
     "googleanalyticsmp": "google_analytics",
 }
+_QUALIFYING_COMPLETE_REGISTRATION_ORG_ROLES = ("owner", "billing_admin")
 
 
 def _extract_value(container: Any, key: str):
@@ -286,39 +290,86 @@ def _plan_monthly_value(plan: dict | None) -> Decimal | None:
     return None
 
 
-def _hydrate_complete_registration_value(payload: dict) -> dict:
-    payload = dict(payload or {})
-    properties = dict(payload.get("properties") or {})
-    payload["properties"] = properties
+def _complete_registration_candidate_owners(user) -> list[dict[str, Any]]:
+    if user is None or getattr(user, "id", None) is None:
+        return []
 
-    user = _payload_user(payload)
-    if user is not None:
-        resolved_plan = reconcile_user_plan_from_stripe(user) or get_owner_plan(user) or {}
+    candidates = [{"owner": user, "owner_type": "user"}]
+
+    try:
+        Organization = apps.get_model("api", "Organization")
+        OrganizationMembership = apps.get_model("api", "OrganizationMembership")
+    except LookupError:
+        return candidates
+
+    organizations = (
+        Organization.objects.filter(is_active=True)
+        .filter(
+            Q(created_by_id=user.id)
+            | Q(
+                organizationmembership__user_id=user.id,
+                organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+                organizationmembership__role__in=_QUALIFYING_COMPLETE_REGISTRATION_ORG_ROLES,
+            )
+        )
+        .select_related("billing", "billing__plan_version", "billing__plan_version__plan")
+        .distinct()
+    )
+
+    candidates.extend(
+        {"owner": organization, "owner_type": "organization"}
+        for organization in organizations
+    )
+    return candidates
+
+
+def _resolve_complete_registration_metrics(
+    owner,
+    *,
+    owner_type: str,
+    fallback_plan_id: str | None = None,
+) -> dict[str, Any]:
+    if owner_type == "user":
+        resolved_plan = reconcile_user_plan_from_stripe(owner) or get_owner_plan(owner) or {}
     else:
-        resolved_plan = {}
+        resolved_plan = get_owner_plan(owner) or {}
 
-    plan_id = str((resolved_plan or {}).get("id") or properties.get("plan") or PlanNames.FREE).strip().lower()
-    properties["plan"] = plan_id or PlanNames.FREE
+    plan_id = str((resolved_plan or {}).get("id") or fallback_plan_id or PlanNames.FREE).strip().lower()
+    if not plan_id:
+        plan_id = PlanNames.FREE
 
     currency = str((resolved_plan or {}).get("currency") or "USD").strip().upper() or "USD"
-    monthly_value = None
+    active_subscription = get_active_subscription(
+        owner,
+        preferred_plan_id=plan_id if plan_id != PlanNames.FREE else None,
+        sync_with_stripe=True,
+    )
 
-    if user is not None and plan_id and plan_id != PlanNames.FREE:
-        active_subscription = get_active_subscription(
-            user,
-            preferred_plan_id=plan_id,
-            sync_with_stripe=True,
+    monthly_value = None
+    if active_subscription is not None:
+        subscription_plan, _plan_version, _licensed_item = resolve_plan_from_subscription_data(
+            getattr(active_subscription, "stripe_data", {}) or {},
+            owner_type=owner_type,
         )
-        if active_subscription is not None:
-            monthly_value, subscription_currency = get_subscription_base_price(active_subscription)
-            if isinstance(subscription_currency, str) and subscription_currency.strip():
-                currency = subscription_currency.strip().upper()
+        if subscription_plan:
+            resolved_plan = {
+                **resolved_plan,
+                **subscription_plan,
+            }
+            plan_id = str((resolved_plan or {}).get("id") or fallback_plan_id or PlanNames.FREE).strip().lower()
+            if not plan_id:
+                plan_id = PlanNames.FREE
+            currency = str((resolved_plan or {}).get("currency") or currency or "USD").strip().upper() or "USD"
+
+        monthly_value, subscription_currency = get_subscription_base_price(active_subscription)
+        if isinstance(subscription_currency, str) and subscription_currency.strip():
+            currency = subscription_currency.strip().upper()
 
     if monthly_value is None:
         monthly_value = _plan_monthly_value(resolved_plan)
 
     value = 0.0
-    if plan_id and plan_id != PlanNames.FREE:
+    if plan_id != PlanNames.FREE:
         resolved_value = calculate_conversion_value(
             monthly_value,
             conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
@@ -326,8 +377,49 @@ def _hydrate_complete_registration_value(payload: dict) -> dict:
         if resolved_value is not None:
             value = resolved_value
 
-    properties["value"] = value
-    properties["currency"] = currency
+    return {
+        "owner": owner,
+        "owner_type": owner_type,
+        "plan_id": plan_id,
+        "currency": currency,
+        "value": value,
+    }
+
+
+def _complete_registration_metrics_score(metrics: dict[str, Any]) -> tuple[int, float, int]:
+    return (
+        1 if metrics.get("plan_id") != PlanNames.FREE else 0,
+        float(metrics.get("value") or 0.0),
+        1 if metrics.get("owner_type") == "organization" else 0,
+    )
+
+
+def _hydrate_complete_registration_value(payload: dict) -> dict:
+    payload = dict(payload or {})
+    properties = dict(payload.get("properties") or {})
+    payload["properties"] = properties
+
+    user = _payload_user(payload)
+    fallback_plan_id = str(properties.get("plan") or PlanNames.FREE).strip().lower() or PlanNames.FREE
+    candidate_metrics = [
+        _resolve_complete_registration_metrics(
+            candidate["owner"],
+            owner_type=candidate["owner_type"],
+            fallback_plan_id=fallback_plan_id,
+        )
+        for candidate in _complete_registration_candidate_owners(user)
+    ]
+
+    if candidate_metrics:
+        best_metrics = max(candidate_metrics, key=_complete_registration_metrics_score)
+        properties["plan"] = best_metrics["plan_id"]
+        properties["value"] = best_metrics["value"]
+        properties["currency"] = best_metrics["currency"]
+        return payload
+
+    properties["plan"] = fallback_plan_id
+    properties["value"] = 0.0
+    properties["currency"] = "USD"
     return payload
 
 

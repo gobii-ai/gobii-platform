@@ -50,10 +50,7 @@ class ClearSignupTrackingViewTests(TestCase):
             hashlib.sha256(str(self.user.id).encode("utf-8")).hexdigest(),
         )
         self.assertEqual(payload["registrationValue"], 0.0)
-        self.assertEqual(payload["pixels"]["ga"], "G-TEST123")
-        self.assertEqual(payload["pixels"]["reddit"], "reddit-123")
-        self.assertEqual(payload["pixels"]["tiktok"], "tiktok-123")
-        self.assertEqual(payload["pixels"]["meta"], "meta-123")
+        self.assertEqual(payload["pixels"], {"linkedin": "123456"})
         self.assertEqual(payload["pixels"]["linkedin"], "123456")
 
         session = self.client.session
