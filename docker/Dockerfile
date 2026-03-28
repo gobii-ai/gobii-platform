@@ -163,6 +163,9 @@ COPY --from=builder /app/pyproject.toml ./pyproject.toml
 # Collected static files (output of collectstatic)
 COPY --from=builder /app/staticfiles ./staticfiles
 
+# Vite manifest needed for Django template tag to resolve frontend assets
+COPY --from=builder /app/static/frontend/manifest.json ./static/frontend/manifest.json
+
 # Write git commit SHA for runtime traceability (passed from CI)
 ARG GIT_COMMIT=unknown
 RUN echo "${GIT_COMMIT}" > /app/.git-commit
