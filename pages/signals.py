@@ -551,6 +551,38 @@ def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
     return owner, owner_type, organization_billing, customer_id
 
 
+def _resolve_setup_intent_owner(
+    payload: Mapping[str, Any],
+    payment_method_data: Mapping[str, Any] | None = None,
+    customer_id: str | None = None,
+):
+    resolved_customer_id = customer_id
+    if resolved_customer_id is None:
+        resolved_customer_id = _extract_stripe_object_id(payload.get("customer"))
+    if resolved_customer_id is None:
+        resolved_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
+
+    resolved_customer = _get_customer_with_subscriber(resolved_customer_id)
+    owner = None
+    owner_type = ""
+    organization_billing: OrganizationBilling | None = None
+
+    if resolved_customer and getattr(resolved_customer, "subscriber", None):
+        owner = resolved_customer.subscriber
+        owner_type = "user"
+    elif resolved_customer_id:
+        organization_billing = (
+            OrganizationBilling.objects.select_related("organization")
+            .filter(stripe_customer_id=resolved_customer_id)
+            .first()
+        )
+        if organization_billing and organization_billing.organization:
+            owner = organization_billing.organization
+            owner_type = "organization"
+
+    return owner, owner_type, organization_billing, resolved_customer_id
+
+
 def _resolve_actor_user_id(owner: Any, owner_type: str) -> int | None:
     if owner_type == "user":
         return getattr(owner, "id", None)
@@ -560,6 +592,61 @@ def _resolve_actor_user_id(owner: Any, owner_type: str) -> int | None:
         # guaranteed to match the user who initiated the billing action.
         return getattr(owner, "created_by_id", None)
     return None
+
+
+def _resolve_actor_user(owner: Any, owner_type: str):
+    if owner_type == "user":
+        return owner
+    if owner_type == "organization":
+        return getattr(owner, "created_by", None)
+    return None
+
+
+def _build_analytics_identify_traits(user: Any) -> dict[str, Any]:
+    traits: dict[str, Any] = {}
+    first_name = getattr(user, "first_name", None)
+    last_name = getattr(user, "last_name", None)
+    email = getattr(user, "email", None)
+    username = getattr(user, "username", None)
+    date_joined = getattr(user, "date_joined", None)
+
+    if first_name:
+        traits["first_name"] = first_name
+    if last_name:
+        traits["last_name"] = last_name
+    if email:
+        traits["email"] = email
+    if username:
+        traits["username"] = username
+    if date_joined:
+        traits["date_joined"] = date_joined
+
+    return traits
+
+
+def _build_actor_user_properties(user: Any) -> dict[str, Any]:
+    if not user:
+        return {}
+
+    properties: dict[str, Any] = {}
+    user_id = getattr(user, "id", None)
+    email = getattr(user, "email", None)
+    username = getattr(user, "username", None)
+    full_name = ""
+    get_full_name = getattr(user, "get_full_name", None)
+    if callable(get_full_name):
+        full_name = get_full_name() or ""
+
+    if user_id:
+        properties["actor_user_id"] = str(user_id)
+    if email:
+        properties["actor_user_email"] = email
+    if username:
+        properties["actor_user_username"] = username
+    if full_name:
+        properties["actor_user_name"] = full_name
+
+    return properties
 
 
 def _build_invoice_properties(
@@ -1054,6 +1141,345 @@ def _extract_invoice_failure_properties(
         properties["payment_method_type"] = payment_method_type
 
     return properties
+
+
+def _retrieve_setup_intent_data(setup_intent_id: str | None) -> dict[str, Any]:
+    if not setup_intent_id:
+        return {}
+    try:
+        setup_intent = stripe.SetupIntent.retrieve(
+            setup_intent_id,
+            expand=["payment_method", "last_setup_error.payment_method"],
+        )
+    except stripe.error.StripeError:
+        logger.info(
+            "Unable to retrieve Stripe setup intent %s for failure analytics",
+            setup_intent_id,
+            exc_info=True,
+        )
+        return {}
+    return _coerce_metadata_dict(setup_intent)
+
+
+def _retrieve_payment_method_data(payment_method_id: str | None) -> dict[str, Any]:
+    if not payment_method_id:
+        return {}
+    try:
+        payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
+    except stripe.error.StripeError:
+        logger.info(
+            "Unable to retrieve Stripe payment method %s for failure analytics",
+            payment_method_id,
+            exc_info=True,
+        )
+        return {}
+    return _coerce_metadata_dict(payment_method)
+
+
+def _extract_payment_method_analytics_properties(
+    payment_method_data: Mapping[str, Any] | None,
+    *,
+    fallback_type: Any | None = None,
+) -> dict[str, Any]:
+    normalized_payment_method = _coerce_metadata_dict(payment_method_data)
+    if not normalized_payment_method:
+        return {}
+
+    payment_method_id = _extract_stripe_object_id(normalized_payment_method)
+    payment_method_type = _first_present(
+        _get_stripe_data_value(normalized_payment_method, "type"),
+        fallback_type,
+    )
+
+    type_data = {}
+    if isinstance(payment_method_type, str) and payment_method_type:
+        type_data = _coerce_metadata_dict(
+            _get_stripe_data_value(normalized_payment_method, payment_method_type)
+        )
+
+    generated_from_data = _coerce_metadata_dict(_get_stripe_data_value(type_data, "generated_from"))
+    generated_payment_method_details = _coerce_metadata_dict(
+        _get_stripe_data_value(generated_from_data, "payment_method_details")
+    )
+    generated_type = _get_stripe_data_value(generated_payment_method_details, "type")
+    generated_type_data = {}
+    if isinstance(generated_type, str) and generated_type:
+        generated_type_data = _coerce_metadata_dict(
+            _get_stripe_data_value(generated_payment_method_details, generated_type)
+        )
+
+    card_present_data = _coerce_metadata_dict(_get_stripe_data_value(normalized_payment_method, "card_present"))
+    interac_present_data = _coerce_metadata_dict(
+        _get_stripe_data_value(normalized_payment_method, "interac_present")
+    )
+    type_networks = _coerce_metadata_dict(_get_stripe_data_value(type_data, "networks"))
+    generated_type_networks = _coerce_metadata_dict(
+        _get_stripe_data_value(generated_type_data, "networks")
+    )
+    card_present_networks = _coerce_metadata_dict(_get_stripe_data_value(card_present_data, "networks"))
+    interac_present_networks = _coerce_metadata_dict(
+        _get_stripe_data_value(interac_present_data, "networks")
+    )
+    billing_details = _coerce_metadata_dict(_get_stripe_data_value(normalized_payment_method, "billing_details"))
+    billing_address = _coerce_metadata_dict(_get_stripe_data_value(billing_details, "address"))
+    link_data = _coerce_metadata_dict(_get_stripe_data_value(normalized_payment_method, "link"))
+
+    payment_method_brand = _first_present(
+        _get_stripe_data_value(type_data, "display_brand"),
+        _get_stripe_data_value(type_data, "brand"),
+        _get_stripe_data_value(card_present_data, "brand"),
+        _get_stripe_data_value(interac_present_data, "brand"),
+        _get_stripe_data_value(generated_type_data, "brand"),
+    )
+    payment_method_display_brand = _first_present(
+        _get_stripe_data_value(type_data, "display_brand"),
+        _get_stripe_data_value(generated_type_data, "display_brand"),
+    )
+    payment_method_last4 = _first_present(
+        _get_stripe_data_value(type_data, "last4"),
+        _get_stripe_data_value(card_present_data, "last4"),
+        _get_stripe_data_value(interac_present_data, "last4"),
+        _get_stripe_data_value(generated_type_data, "last4"),
+    )
+    payment_method_fingerprint = _first_present(
+        _get_stripe_data_value(type_data, "fingerprint"),
+        _get_stripe_data_value(card_present_data, "fingerprint"),
+        _get_stripe_data_value(interac_present_data, "fingerprint"),
+        _get_stripe_data_value(generated_type_data, "fingerprint"),
+    )
+    payment_method_funding = _first_present(
+        _get_stripe_data_value(type_data, "funding"),
+        _get_stripe_data_value(card_present_data, "funding"),
+        _get_stripe_data_value(interac_present_data, "funding"),
+        _get_stripe_data_value(generated_type_data, "funding"),
+    )
+    payment_method_country = _first_present(
+        _get_stripe_data_value(type_data, "country"),
+        _get_stripe_data_value(card_present_data, "country"),
+        _get_stripe_data_value(interac_present_data, "country"),
+        _get_stripe_data_value(generated_type_data, "country"),
+    )
+    payment_method_network = _first_present(
+        _get_stripe_data_value(type_data, "network"),
+        _get_stripe_data_value(type_networks, "preferred"),
+        _get_stripe_data_value(card_present_data, "network"),
+        _get_stripe_data_value(card_present_networks, "preferred"),
+        _get_stripe_data_value(interac_present_data, "network"),
+        _get_stripe_data_value(interac_present_networks, "preferred"),
+        _get_stripe_data_value(generated_type_data, "network"),
+        _get_stripe_data_value(generated_type_networks, "preferred"),
+    )
+    payment_method_issuer = _first_present(
+        _get_stripe_data_value(card_present_data, "issuer"),
+        _get_stripe_data_value(interac_present_data, "issuer"),
+        _get_stripe_data_value(generated_type_data, "issuer"),
+    )
+
+    properties: dict[str, Any] = {}
+    if payment_method_id:
+        properties["stripe.payment_method_id"] = payment_method_id
+    if payment_method_type:
+        properties["payment_method_type"] = payment_method_type
+    if payment_method_brand:
+        properties["payment_method_brand"] = payment_method_brand
+    if payment_method_display_brand:
+        properties["payment_method_display_brand"] = payment_method_display_brand
+    if payment_method_last4:
+        properties["payment_method_last4"] = payment_method_last4
+    if payment_method_fingerprint:
+        properties["payment_method_fingerprint"] = payment_method_fingerprint
+    if payment_method_funding:
+        properties["payment_method_funding"] = payment_method_funding
+    if payment_method_country:
+        properties["payment_method_country"] = payment_method_country
+    if payment_method_network:
+        properties["payment_method_network"] = payment_method_network
+    if payment_method_issuer:
+        properties["payment_method_issuer"] = payment_method_issuer
+    if _get_stripe_data_value(billing_details, "name"):
+        properties["payment_method_billing_name"] = _get_stripe_data_value(billing_details, "name")
+    if _get_stripe_data_value(billing_details, "email"):
+        properties["payment_method_billing_email"] = _get_stripe_data_value(billing_details, "email")
+    if _get_stripe_data_value(billing_address, "country"):
+        properties["payment_method_billing_country"] = _get_stripe_data_value(billing_address, "country")
+    if _get_stripe_data_value(billing_address, "postal_code"):
+        properties["payment_method_billing_postal_code"] = _get_stripe_data_value(billing_address, "postal_code")
+    if _get_stripe_data_value(link_data, "email"):
+        properties["payment_method_link_email"] = _get_stripe_data_value(link_data, "email")
+
+    return properties
+
+
+def _build_setup_intent_failure_properties(
+    payload: Mapping[str, Any],
+    *,
+    allow_stripe_lookup: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    setup_intent_id = _extract_stripe_object_id(payload)
+    setup_intent_data: dict[str, Any] = {}
+    last_setup_error_data = _coerce_metadata_dict(payload.get("last_setup_error"))
+
+    payment_method_id = _extract_stripe_object_id(payload.get("payment_method"))
+    payment_method_data = _coerce_metadata_dict(payload.get("payment_method"))
+    error_payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(last_setup_error_data, "payment_method"))
+    if not payment_method_data and error_payment_method_data:
+        payment_method_data = error_payment_method_data
+    if payment_method_id is None:
+        payment_method_id = _extract_stripe_object_id(error_payment_method_data) or _extract_stripe_object_id(
+            payment_method_data
+        )
+
+    customer_id_from_payload = _extract_stripe_object_id(payload.get("customer"))
+    payment_method_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
+    payment_method_missing_customer = not customer_id_from_payload and not payment_method_customer_id
+
+    if allow_stripe_lookup and setup_intent_id and (
+        not last_setup_error_data or not payment_method_data or payment_method_missing_customer
+    ):
+        setup_intent_data = _retrieve_setup_intent_data(setup_intent_id)
+        if not last_setup_error_data:
+            last_setup_error_data = _coerce_metadata_dict(_get_stripe_data_value(setup_intent_data, "last_setup_error"))
+        if payment_method_id is None:
+            payment_method_id = _extract_stripe_object_id(_get_stripe_data_value(setup_intent_data, "payment_method"))
+        if not payment_method_data:
+            payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(last_setup_error_data, "payment_method"))
+        if not payment_method_data:
+            payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(setup_intent_data, "payment_method"))
+
+    setup_intent_customer_id = _extract_stripe_object_id(_get_stripe_data_value(setup_intent_data, "customer"))
+    payment_method_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
+    payment_method_missing_customer = (
+        not customer_id_from_payload
+        and not payment_method_customer_id
+        and not setup_intent_customer_id
+    )
+    if allow_stripe_lookup and payment_method_id and (not payment_method_data or payment_method_missing_customer):
+        retrieved_payment_method_data = _retrieve_payment_method_data(payment_method_id)
+        if retrieved_payment_method_data:
+            payment_method_data = retrieved_payment_method_data
+
+    customer_id = _first_present(
+        customer_id_from_payload,
+        _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer")),
+        setup_intent_customer_id,
+    )
+
+    failure_type = _get_stripe_data_value(last_setup_error_data, "type")
+    failure_message = _get_stripe_data_value(last_setup_error_data, "message")
+    failure_code = _get_stripe_data_value(last_setup_error_data, "code")
+    decline_code = _get_stripe_data_value(last_setup_error_data, "decline_code")
+    network_decline_code = _get_stripe_data_value(last_setup_error_data, "network_decline_code")
+    network_advice_code = _get_stripe_data_value(last_setup_error_data, "network_advice_code")
+    failure_reason = _first_present(
+        failure_message,
+        decline_code,
+        network_decline_code,
+        failure_code,
+        failure_type,
+    )
+
+    payment_method_types = payload.get("payment_method_types")
+    fallback_payment_method_type = None
+    if isinstance(payment_method_types, list) and payment_method_types:
+        fallback_payment_method_type = payment_method_types[0]
+
+    properties: dict[str, Any] = {
+        "stripe.setup_intent_id": setup_intent_id,
+        "stripe.customer_id": customer_id,
+        "stripe.payment_method_id": payment_method_id,
+        "status": payload.get("status"),
+        "usage": payload.get("usage"),
+        "livemode": bool(payload.get("livemode")),
+    }
+
+    if failure_reason:
+        properties["failure_reason"] = failure_reason
+    if failure_message:
+        properties["failure_message"] = failure_message
+    if failure_code:
+        properties["failure_code"] = failure_code
+    if decline_code:
+        properties["decline_code"] = decline_code
+    if network_decline_code:
+        properties["network_decline_code"] = network_decline_code
+    if network_advice_code:
+        properties["network_advice_code"] = network_advice_code
+    if failure_type:
+        properties["failure_type"] = failure_type
+
+    properties.update(
+        _extract_payment_method_analytics_properties(
+            payment_method_data,
+            fallback_type=fallback_payment_method_type,
+        )
+    )
+
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    if metadata.get("gobii_event_id"):
+        properties["gobii_event_id"] = metadata.get("gobii_event_id")
+
+    properties = {key: value for key, value in properties.items() if value not in (None, "")}
+    return properties, payment_method_data, customer_id
+
+
+def _build_setup_intent_failure_properties_fallback(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    last_setup_error_data = _coerce_metadata_dict(payload.get("last_setup_error"))
+    error_payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(last_setup_error_data, "payment_method"))
+    payment_method_types = payload.get("payment_method_types")
+    payment_method_type = None
+    if isinstance(payment_method_types, list) and payment_method_types:
+        payment_method_type = payment_method_types[0]
+
+    payment_method_id = _extract_stripe_object_id(payload.get("payment_method"))
+    customer_id = _extract_stripe_object_id(payload.get("customer"))
+    if customer_id is None:
+        customer_id = _extract_stripe_object_id(_get_stripe_data_value(error_payment_method_data, "customer"))
+
+    failure_type = _get_stripe_data_value(last_setup_error_data, "type")
+    failure_message = _get_stripe_data_value(last_setup_error_data, "message")
+    failure_code = _get_stripe_data_value(last_setup_error_data, "code")
+    decline_code = _get_stripe_data_value(last_setup_error_data, "decline_code")
+    failure_reason = _first_present(failure_message, decline_code, failure_code, failure_type)
+
+    properties = {
+        "stripe.setup_intent_id": _extract_stripe_object_id(payload),
+        "stripe.customer_id": customer_id,
+        "stripe.payment_method_id": payment_method_id,
+        "status": payload.get("status"),
+        "usage": payload.get("usage"),
+        "livemode": bool(payload.get("livemode")),
+        "failure_reason": failure_reason,
+        "failure_message": failure_message,
+        "failure_code": failure_code,
+        "decline_code": decline_code,
+        "failure_type": failure_type,
+        "payment_method_type": payment_method_type,
+    }
+    return (
+        {key: value for key, value in properties.items() if value not in (None, "")},
+        {},
+        customer_id,
+    )
+
+
+def _safe_build_setup_intent_failure_properties(
+    payload: Mapping[str, Any],
+    *,
+    allow_stripe_lookup: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    try:
+        return _build_setup_intent_failure_properties(
+            payload,
+            allow_stripe_lookup=allow_stripe_lookup,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to build full setup intent analytics properties for setup intent %s; using fallback payload",
+            payload.get("id"),
+        )
+        return _build_setup_intent_failure_properties_fallback(payload)
 
 
 def _get_subscription_items_data(source: Any) -> list:
@@ -1847,6 +2273,86 @@ def handle_invoice_payment_failed(event, **kwargs):
         except Exception:
             span.add_event("analytics_failure")
             logger.exception("Failed to track invoice.payment_failed for invoice %s", payload.get("id"))
+
+
+@djstripe_receiver(["setup_intent.setup_failed"])
+def handle_setup_intent_setup_failed(event, **kwargs):
+    """Emit analytics when Stripe cannot save a payment method with a SetupIntent."""
+    with tracer.start_as_current_span("handle_setup_intent_setup_failed") as span:
+        payload = event.data.get("object", {}) or {}
+        if payload.get("object") != "setup_intent":
+            span.add_event("unexpected_object", {"object": payload.get("object")})
+            logger.info("Setup intent failed webhook received non-setup-intent payload")
+            return
+
+        status = stripe_status()
+        if not status.enabled:
+            span.add_event("stripe_disabled")
+            logger.info("Stripe disabled; ignoring setup intent failed webhook %s", payload.get("id"))
+            return
+
+        stripe_key = PaymentsHelper.get_stripe_key()
+        if not stripe_key:
+            span.add_event("stripe_key_missing")
+            logger.warning("Stripe key unavailable; ignoring setup intent failed webhook %s", payload.get("id"))
+            return
+
+        stripe.api_key = stripe_key
+
+        properties, payment_method_data, customer_id = _safe_build_setup_intent_failure_properties(
+            payload,
+            allow_stripe_lookup=True,
+        )
+        owner, owner_type, _organization_billing, resolved_customer_id = _resolve_setup_intent_owner(
+            payload,
+            payment_method_data,
+            customer_id=customer_id,
+        )
+        customer_id = resolved_customer_id or customer_id
+        if customer_id and "stripe.customer_id" not in properties:
+            properties["stripe.customer_id"] = customer_id
+
+        if owner_type:
+            span.set_attribute("setup_intent.owner.type", owner_type)
+        if owner:
+            span.set_attribute("setup_intent.owner.id", str(getattr(owner, "id", "")))
+        if not owner:
+            span.add_event(
+                "owner_not_found",
+                {
+                    "customer.id": customer_id or "",
+                    "payment_method.id": str(properties.get("stripe.payment_method_id", "") or ""),
+                },
+            )
+
+        actor_user = _resolve_actor_user(owner, owner_type)
+        properties.update(_build_actor_user_properties(actor_user))
+        properties = Analytics.with_org_properties(
+            properties,
+            organization=owner if owner_type == "organization" else None,
+            organization_flag=owner_type == "organization",
+        )
+
+        try:
+            if actor_user and getattr(actor_user, "id", None):
+                identify_traits = _build_analytics_identify_traits(actor_user)
+                if identify_traits:
+                    Analytics.identify(actor_user.id, identify_traits)
+                Analytics.track_event(
+                    user_id=actor_user.id,
+                    event=AnalyticsEvent.PAYMENT_SETUP_INTENT_FAILED,
+                    source=AnalyticsSource.API,
+                    properties=properties,
+                )
+            else:
+                span.add_event("analytics_skipped_no_actor")
+                logger.info(
+                    "Skipping analytics for setup intent %s: no resolved user context",
+                    payload.get("id"),
+                )
+        except Exception:
+            span.add_event("analytics_failure")
+            logger.exception("Failed to track setup_intent.setup_failed for setup intent %s", payload.get("id"))
 
 
 @djstripe_receiver(["invoice.payment_succeeded"])
