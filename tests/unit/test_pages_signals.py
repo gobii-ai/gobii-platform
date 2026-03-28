@@ -2736,7 +2736,7 @@ class PaymentSetupIntentFailedSignalTests(TestCase):
             "customer": "cus_lookup_fail",
             "payment_method": {
                 "id": "pm_lookup_fail",
-                "customer": "cus_lookup_fail",
+                "customer": None,
                 "type": "card",
                 "card": {
                     "brand": "mastercard",
@@ -2753,7 +2753,7 @@ class PaymentSetupIntentFailedSignalTests(TestCase):
                 "message": "Your card has insufficient funds.",
                 "payment_method": {
                     "id": "pm_lookup_fail",
-                    "customer": "cus_lookup_fail",
+                    "customer": None,
                     "type": "card",
                     "card": {
                         "brand": "mastercard",
@@ -2771,7 +2771,7 @@ class PaymentSetupIntentFailedSignalTests(TestCase):
             patch(
                 "pages.signals._get_customer_with_subscriber",
                 return_value=SimpleNamespace(id="cus_lookup_fail", subscriber=self.user),
-            ), \
+            ) as mock_get_customer_with_subscriber, \
             patch("pages.signals.stripe.SetupIntent.retrieve", return_value=retrieved_setup_intent) as mock_setup_intent_retrieve, \
             patch("pages.signals.stripe.PaymentMethod.retrieve") as mock_payment_method_retrieve, \
             patch("pages.signals.Analytics.identify") as mock_identify, \
@@ -2783,6 +2783,7 @@ class PaymentSetupIntentFailedSignalTests(TestCase):
         mock_track_anonymous.assert_not_called()
         mock_identify.assert_called_once()
         mock_track_event.assert_called_once()
+        mock_get_customer_with_subscriber.assert_called_once_with("cus_lookup_fail")
         mock_setup_intent_retrieve.assert_called_once_with(
             "seti_lookup_fail",
             expand=["payment_method", "last_setup_error.payment_method"],

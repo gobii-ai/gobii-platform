@@ -554,12 +554,15 @@ def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
 def _resolve_setup_intent_owner(
     payload: Mapping[str, Any],
     payment_method_data: Mapping[str, Any] | None = None,
+    customer_id: str | None = None,
 ):
-    customer_id = _extract_stripe_object_id(payload.get("customer"))
-    if customer_id is None:
-        customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
+    resolved_customer_id = customer_id
+    if resolved_customer_id is None:
+        resolved_customer_id = _extract_stripe_object_id(payload.get("customer"))
+    if resolved_customer_id is None:
+        resolved_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
 
-    resolved_customer = _get_customer_with_subscriber(customer_id)
+    resolved_customer = _get_customer_with_subscriber(resolved_customer_id)
     owner = None
     owner_type = ""
     organization_billing: OrganizationBilling | None = None
@@ -567,17 +570,17 @@ def _resolve_setup_intent_owner(
     if resolved_customer and getattr(resolved_customer, "subscriber", None):
         owner = resolved_customer.subscriber
         owner_type = "user"
-    elif customer_id:
+    elif resolved_customer_id:
         organization_billing = (
             OrganizationBilling.objects.select_related("organization")
-            .filter(stripe_customer_id=customer_id)
+            .filter(stripe_customer_id=resolved_customer_id)
             .first()
         )
         if organization_billing and organization_billing.organization:
             owner = organization_billing.organization
             owner_type = "organization"
 
-    return owner, owner_type, organization_billing, customer_id
+    return owner, owner_type, organization_billing, resolved_customer_id
 
 
 def _resolve_actor_user_id(owner: Any, owner_type: str) -> int | None:
@@ -1343,8 +1346,13 @@ def _build_setup_intent_failure_properties(
         if not payment_method_data:
             payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(setup_intent_data, "payment_method"))
 
+    setup_intent_customer_id = _extract_stripe_object_id(_get_stripe_data_value(setup_intent_data, "customer"))
     payment_method_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
-    payment_method_missing_customer = not customer_id_from_payload and not payment_method_customer_id
+    payment_method_missing_customer = (
+        not customer_id_from_payload
+        and not payment_method_customer_id
+        and not setup_intent_customer_id
+    )
     if allow_stripe_lookup and payment_method_id and (not payment_method_data or payment_method_missing_customer):
         retrieved_payment_method_data = _retrieve_payment_method_data(payment_method_id)
         if retrieved_payment_method_data:
@@ -1353,7 +1361,7 @@ def _build_setup_intent_failure_properties(
     customer_id = _first_present(
         customer_id_from_payload,
         _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer")),
-        _extract_stripe_object_id(_get_stripe_data_value(setup_intent_data, "customer")),
+        setup_intent_customer_id,
     )
 
     failure_type = _get_stripe_data_value(last_setup_error_data, "type")
@@ -2298,6 +2306,7 @@ def handle_setup_intent_setup_failed(event, **kwargs):
         owner, owner_type, _organization_billing, resolved_customer_id = _resolve_setup_intent_owner(
             payload,
             payment_method_data,
+            customer_id=customer_id,
         )
         customer_id = resolved_customer_id or customer_id
         if customer_id and "stripe.customer_id" not in properties:
