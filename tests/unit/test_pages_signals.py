@@ -29,6 +29,7 @@ from pages.signals import (
     handle_subscription_event,
     handle_user_signed_up,
     handle_invoice_payment_failed,
+    handle_setup_intent_setup_failed,
     handle_invoice_payment_succeeded,
 )
 from util.analytics import AnalyticsEvent
@@ -578,6 +579,34 @@ def _build_invoice_payload(
         payload["payment_intent"] = payment_intent
     if payments is not None:
         payload["payments"] = payments
+    return payload
+
+
+def _build_setup_intent_payload(
+    *,
+    setup_intent_id="seti_fail",
+    customer_id="cus_setup",
+    payment_method="pm_setup",
+    status="requires_payment_method",
+    usage="off_session",
+    livemode=True,
+    payment_method_types=None,
+    last_setup_error=None,
+):
+    payload = {
+        "object": "setup_intent",
+        "id": setup_intent_id,
+        "status": status,
+        "usage": usage,
+        "livemode": livemode,
+        "payment_method_types": payment_method_types or ["card"],
+    }
+    if customer_id is not None:
+        payload["customer"] = customer_id
+    if payment_method is not None:
+        payload["payment_method"] = payment_method
+    if last_setup_error is not None:
+        payload["last_setup_error"] = last_setup_error
     return payload
 
 
@@ -2586,6 +2615,274 @@ class PaymentFailedSignalTests(TestCase):
         kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(kwargs["user_id"], self.user.id)
         self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_PAYMENT_FAILED)
+
+
+@tag("batch_pages")
+class PaymentSetupIntentFailedSignalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="setup-fail-user",
+            email="setup-fail@example.com",
+            password="pw",
+            first_name="Setup",
+            last_name="User",
+        )
+
+    def test_setup_intent_failed_tracks_user_with_payment_method_details(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_fail",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_user",
+            last_setup_error={
+                "type": "card_error",
+                "code": "card_declined",
+                "decline_code": "do_not_honor",
+                "message": "Your card was declined.",
+                "payment_method": {
+                    "id": "pm_setup_user",
+                    "customer": "cus_setup_user",
+                    "type": "card",
+                    "billing_details": {
+                        "address": {
+                            "country": "US",
+                            "postal_code": "95825",
+                        },
+                        "email": "setup-fail@example.com",
+                        "name": "Setup User",
+                    },
+                    "card": {
+                        "brand": "visa",
+                        "display_brand": "visa",
+                        "fingerprint": "j0UyCwqiJdhXcPc0",
+                        "last4": "4242",
+                        "funding": "credit",
+                        "country": "US",
+                        "generated_from": {
+                            "payment_method_details": {
+                                "type": "card_present",
+                                "card_present": {
+                                    "issuer": "Chase Bank",
+                                },
+                            }
+                        },
+                    },
+                },
+            },
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.setup_failed")
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._get_customer_with_subscriber",
+                return_value=SimpleNamespace(id="cus_setup_user", subscriber=self.user),
+            ), \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous:
+
+            handle_setup_intent_setup_failed(event)
+
+        mock_track_anonymous.assert_not_called()
+        mock_identify.assert_called_once()
+        identify_args = mock_identify.call_args.args
+        self.assertEqual(identify_args[0], self.user.id)
+        self.assertEqual(identify_args[1]["email"], self.user.email)
+
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PAYMENT_SETUP_INTENT_FAILED)
+        props = kwargs["properties"]
+        self.assertEqual(props["stripe.setup_intent_id"], "seti_user_fail")
+        self.assertEqual(props["stripe.customer_id"], "cus_setup_user")
+        self.assertEqual(props["stripe.payment_method_id"], "pm_setup_user")
+        self.assertEqual(props["failure_reason"], "Your card was declined.")
+        self.assertEqual(props["failure_message"], "Your card was declined.")
+        self.assertEqual(props["failure_code"], "card_declined")
+        self.assertEqual(props["decline_code"], "do_not_honor")
+        self.assertEqual(props["failure_type"], "card_error")
+        self.assertEqual(props["payment_method_type"], "card")
+        self.assertEqual(props["payment_method_brand"], "visa")
+        self.assertEqual(props["payment_method_last4"], "4242")
+        self.assertEqual(props["payment_method_fingerprint"], "j0UyCwqiJdhXcPc0")
+        self.assertEqual(props["payment_method_funding"], "credit")
+        self.assertEqual(props["payment_method_country"], "US")
+        self.assertEqual(props["payment_method_issuer"], "Chase Bank")
+        self.assertEqual(props["payment_method_billing_name"], "Setup User")
+        self.assertEqual(props["payment_method_billing_email"], "setup-fail@example.com")
+        self.assertEqual(props["payment_method_billing_country"], "US")
+        self.assertEqual(props["payment_method_billing_postal_code"], "95825")
+        self.assertEqual(props["actor_user_id"], str(self.user.id))
+        self.assertEqual(props["actor_user_email"], self.user.email)
+        self.assertFalse(props["organization"])
+
+    def test_setup_intent_failed_fetches_customer_and_payment_method_details_from_stripe(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_lookup_fail",
+            customer_id=None,
+            payment_method="pm_lookup_fail",
+            last_setup_error={
+                "type": "card_error",
+                "code": "card_declined",
+                "decline_code": "insufficient_funds",
+                "message": "Your card has insufficient funds.",
+            },
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.setup_failed")
+
+        retrieved_setup_intent = {
+            "id": "seti_lookup_fail",
+            "customer": "cus_lookup_fail",
+            "payment_method": {
+                "id": "pm_lookup_fail",
+                "customer": "cus_lookup_fail",
+                "type": "card",
+                "card": {
+                    "brand": "mastercard",
+                    "fingerprint": "lookupfingerprint123",
+                    "last4": "4444",
+                    "funding": "debit",
+                    "country": "US",
+                },
+            },
+            "last_setup_error": {
+                "type": "card_error",
+                "code": "card_declined",
+                "decline_code": "insufficient_funds",
+                "message": "Your card has insufficient funds.",
+                "payment_method": {
+                    "id": "pm_lookup_fail",
+                    "customer": "cus_lookup_fail",
+                    "type": "card",
+                    "card": {
+                        "brand": "mastercard",
+                        "fingerprint": "lookupfingerprint123",
+                        "last4": "4444",
+                        "funding": "debit",
+                        "country": "US",
+                    },
+                },
+            },
+        }
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._get_customer_with_subscriber",
+                return_value=SimpleNamespace(id="cus_lookup_fail", subscriber=self.user),
+            ), \
+            patch("pages.signals.stripe.SetupIntent.retrieve", return_value=retrieved_setup_intent) as mock_setup_intent_retrieve, \
+            patch("pages.signals.stripe.PaymentMethod.retrieve") as mock_payment_method_retrieve, \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous:
+
+            handle_setup_intent_setup_failed(event)
+
+        mock_track_anonymous.assert_not_called()
+        mock_identify.assert_called_once()
+        mock_track_event.assert_called_once()
+        mock_setup_intent_retrieve.assert_called_once_with(
+            "seti_lookup_fail",
+            expand=["payment_method", "last_setup_error.payment_method"],
+        )
+        mock_payment_method_retrieve.assert_not_called()
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["stripe.customer_id"], "cus_lookup_fail")
+        self.assertEqual(props["stripe.payment_method_id"], "pm_lookup_fail")
+        self.assertEqual(props["payment_method_brand"], "mastercard")
+        self.assertEqual(props["payment_method_last4"], "4444")
+        self.assertEqual(props["payment_method_fingerprint"], "lookupfingerprint123")
+        self.assertEqual(props["payment_method_funding"], "debit")
+        self.assertEqual(props["failure_reason"], "Your card has insufficient funds.")
+
+    def test_setup_intent_failed_tracks_link_payment_method_details_when_present(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_link_fail",
+            customer_id="cus_link_fail",
+            payment_method=None,
+            payment_method_types=["card", "link", "amazon_pay"],
+            last_setup_error={
+                "type": "card_error",
+                "code": "",
+                "decline_code": "generic_decline",
+                "message": "Your payment method was declined.",
+                "payment_method": {
+                    "id": "pm_link_fail",
+                    "customer": None,
+                    "type": "link",
+                    "billing_details": {
+                        "address": {
+                            "country": "US",
+                            "postal_code": "90249",
+                        },
+                        "email": "philr@imperiummktg.com",
+                        "name": "Phil Reed",
+                    },
+                    "link": {
+                        "email": "philr@imperiummktg.com",
+                    },
+                },
+            },
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.setup_failed")
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._get_customer_with_subscriber",
+                return_value=SimpleNamespace(id="cus_link_fail", subscriber=self.user),
+            ), \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event:
+
+            handle_setup_intent_setup_failed(event)
+
+        mock_identify.assert_called_once()
+        mock_track_event.assert_called_once()
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["stripe.customer_id"], "cus_link_fail")
+        self.assertEqual(props["stripe.payment_method_id"], "pm_link_fail")
+        self.assertEqual(props["payment_method_type"], "link")
+        self.assertEqual(props["failure_reason"], "Your payment method was declined.")
+        self.assertEqual(props["decline_code"], "generic_decline")
+        self.assertEqual(props["payment_method_billing_name"], "Phil Reed")
+        self.assertEqual(props["payment_method_billing_email"], "philr@imperiummktg.com")
+        self.assertEqual(props["payment_method_billing_country"], "US")
+        self.assertEqual(props["payment_method_billing_postal_code"], "90249")
+        self.assertEqual(props["payment_method_link_email"], "philr@imperiummktg.com")
+        self.assertNotIn("payment_method_fingerprint", props)
+        self.assertNotIn("payment_method_funding", props)
+        self.assertNotIn("payment_method_issuer", props)
+
+    def test_setup_intent_failed_skips_when_user_cannot_be_resolved(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_unresolved_fail",
+            customer_id="cus_unresolved",
+            payment_method="pm_unresolved",
+            last_setup_error={
+                "type": "card_error",
+                "code": "card_declined",
+                "message": "Your card was declined.",
+            },
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.setup_failed")
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals._get_customer_with_subscriber", return_value=None), \
+            patch("pages.signals._retrieve_setup_intent_data", return_value={}), \
+            patch("pages.signals._retrieve_payment_method_data", return_value={}), \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous:
+
+            handle_setup_intent_setup_failed(event)
+
+        mock_identify.assert_not_called()
+        mock_track_event.assert_not_called()
+        mock_track_anonymous.assert_not_called()
 
 
 @tag("batch_pages")
