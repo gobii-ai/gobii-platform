@@ -178,7 +178,7 @@ function hasCursorAdvanced(previous: string | null, next: string | null): boolea
   return compareTimelineCursors(next, previous) > 0
 }
 
-function mergeLatestPageIntoTailAndDetectGap(
+export function mergeLatestPageIntoTailAndDetectGap(
   queryClient: QueryClient,
   key: ReturnType<typeof timelineQueryKey>,
   latestPage: TimelinePage,
@@ -218,7 +218,10 @@ function mergeLatestPageIntoTailAndDetectGap(
       events: merged,
       newestCursor: nextNewestCursor,
       oldestCursor: nextOldestCursor,
-      hasMoreNewer: hasNewerGap,
+      // Use the server-reported value instead of the local gap heuristic.
+      // The strict cursor comparison can falsely flag a gap after a tab switch,
+      // which sets hasMoreNewer=true and hides the processing indicator.
+      hasMoreNewer: latestPage.hasMoreNewer,
       raw: latestPage.raw,
     }
 
