@@ -30,10 +30,12 @@ from config.socialaccount_adapter import (
     serialize_oauth_charter_cookie_payload,
 )
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     STRIPE_CHECKOUT_FLOW_TYPE_TRIAL,
     build_checkout_customer_metadata,
     build_checkout_flow_metadata,
+    clear_checkout_customer_metadata,
 )
 from config.stripe_config import get_stripe_settings
 
@@ -535,6 +537,75 @@ def _set_customer_checkout_context(*, customer_id: str, flow_type: str, event_id
         ),
         api_key=stripe.api_key,
     )
+
+
+def _clear_customer_checkout_context_if_matches(*, customer_id: str, expected_event_id: str) -> bool:
+    """Clear transient checkout context when the same checkout is still active."""
+    customer_payload = stripe.Customer.retrieve(customer_id, api_key=stripe.api_key)
+    customer_metadata = getattr(customer_payload, "metadata", None)
+    if customer_metadata is None and hasattr(customer_payload, "get"):
+        customer_metadata = customer_payload.get("metadata")
+
+    current_event_id = ""
+    if hasattr(customer_metadata, "get"):
+        current_event_id = str(
+            customer_metadata.get(STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY) or ""
+        ).strip()
+    if current_event_id != expected_event_id:
+        return False
+
+    stripe.Customer.modify(
+        customer_id,
+        metadata=clear_checkout_customer_metadata(),
+        api_key=stripe.api_key,
+    )
+    return True
+
+
+def _create_checkout_session_with_customer_context(
+    *,
+    customer_id: str,
+    flow_type: str,
+    event_id: str,
+    checkout_kwargs: dict,
+):
+    """
+    Set the customer context before Checkout so Radar can inspect it.
+
+    The metadata write is best-effort, and a failed Checkout creation clears the
+    transient marker when the same checkout is still the active one.
+    """
+    customer_checkout_context_set = False
+    try:
+        _set_customer_checkout_context(
+            customer_id=customer_id,
+            flow_type=flow_type,
+            event_id=event_id,
+        )
+        customer_checkout_context_set = True
+    except stripe.error.StripeError as exc:
+        logger.warning(
+            "Failed to set checkout customer context for %s before Checkout creation: %s",
+            customer_id,
+            exc,
+        )
+
+    try:
+        return stripe.checkout.Session.create(**checkout_kwargs)
+    except stripe.error.StripeError:
+        if customer_checkout_context_set:
+            try:
+                _clear_customer_checkout_context_if_matches(
+                    customer_id=customer_id,
+                    expected_event_id=event_id,
+                )
+            except stripe.error.StripeError as cleanup_exc:
+                logger.warning(
+                    "Failed to clear checkout customer context for %s after Checkout creation failed: %s",
+                    customer_id,
+                    cleanup_exc,
+                )
+        raise
 
 
 class HomePage(TemplateView):
@@ -1740,11 +1811,6 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             base_metadata,
             flow_type=flow_type,
         )
-        _set_customer_checkout_context(
-            customer_id=customer.id,
-            flow_type=flow_type,
-            event_id=event_id,
-        )
         subscription_data = {"metadata": checkout_metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
@@ -1765,7 +1831,12 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
             checkout_kwargs["client_reference_id"] = rewardful_referral
-        session = stripe.checkout.Session.create(**checkout_kwargs)
+        session = _create_checkout_session_with_customer_context(
+            customer_id=customer.id,
+            flow_type=flow_type,
+            event_id=event_id,
+            checkout_kwargs=checkout_kwargs,
+        )
 
         _emit_checkout_initiated_event(
             request=request,
@@ -1914,11 +1985,6 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             base_metadata,
             flow_type=flow_type,
         )
-        _set_customer_checkout_context(
-            customer_id=customer.id,
-            flow_type=flow_type,
-            event_id=event_id,
-        )
         subscription_data = {"metadata": checkout_metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
@@ -1939,7 +2005,12 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
             checkout_kwargs["client_reference_id"] = rewardful_referral
-        session = stripe.checkout.Session.create(**checkout_kwargs)
+        session = _create_checkout_session_with_customer_context(
+            customer_id=customer.id,
+            flow_type=flow_type,
+            event_id=event_id,
+            checkout_kwargs=checkout_kwargs,
+        )
 
         _emit_checkout_initiated_event(
             request=request,
