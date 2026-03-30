@@ -15,6 +15,7 @@ const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
 const SystemStatusScreen = lazy(async () => ({ default: (await import('./screens/SystemStatusScreen')).SystemStatusScreen }))
+const StaffUsersScreen = lazy(async () => ({ default: (await import('./screens/StaffUsersScreen')).StaffUsersScreen }))
 const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
 const LibraryScreen = lazy(async () => ({ default: (await import('./screens/LibraryScreen')).LibraryScreen }))
 const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
@@ -67,6 +68,9 @@ const viewerUserIdRaw = mountNode.dataset.viewerUserId
 const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
 const viewerUserId = Number.isFinite(viewerUserIdValue) ? viewerUserIdValue : null
 const viewerEmail = mountNode.dataset.viewerEmail || null
+const selectedUserIdRaw = mountNode.dataset.userId
+const selectedUserIdValue = selectedUserIdRaw ? Number.parseInt(selectedUserIdRaw, 10) : null
+const selectedUserId = typeof selectedUserIdValue === 'number' && Number.isFinite(selectedUserIdValue) ? selectedUserIdValue : null
 const canManageCollaboratorsRaw = mountNode.dataset.canManageCollaborators
 const canManageCollaborators =
   canManageCollaboratorsRaw === 'true'
@@ -172,6 +176,9 @@ switch (appName) {
     break
   case 'system-status':
     screen = <SystemStatusScreen />
+    break
+  case 'staff-users':
+    screen = <StaffUsersScreen selectedUserId={selectedUserId} />
     break
   case 'persistent-agents': {
     const propsId = mountNode.dataset.propsJsonId

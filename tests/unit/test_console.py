@@ -134,7 +134,22 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 403)
 
     @tag("batch_console_agents")
-    def test_staff_nav_shows_status_link_only_for_staff(self):
+    def test_legacy_status_url_redirects_to_staff_status(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-status-redirect@example.com",
+            email="admin-status-redirect@example.com",
+            password="testpass123",
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.get("/console/status/")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], reverse("console-status"))
+
+    @tag("batch_console_agents")
+    def test_staff_nav_shows_status_and_users_links_only_for_staff(self):
         User = get_user_model()
         admin_user = User.objects.create_superuser(
             username="admin-status-nav@example.com",
@@ -146,11 +161,261 @@ class ConsoleViewsTest(TestCase):
         staff_client.force_login(admin_user)
         staff_response = staff_client.get(reverse("usage"))
         self.assertEqual(staff_response.status_code, 200)
-        self.assertContains(staff_response, 'href="/console/status/"')
+        self.assertContains(staff_response, 'href="/staff/status/"')
+        self.assertContains(staff_response, 'href="/staff/users/"')
 
         nonstaff_response = self.client.get(reverse("usage"))
         self.assertEqual(nonstaff_response.status_code, 200)
-        self.assertNotContains(nonstaff_response, 'href="/console/status/"')
+        self.assertNotContains(nonstaff_response, 'href="/staff/status/"')
+        self.assertNotContains(nonstaff_response, 'href="/staff/users/"')
+
+    @tag("batch_console_agents")
+    def test_staff_users_page_renders_react_mount(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-users@example.com",
+            email="admin-users@example.com",
+            password="testpass123",
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("staff-users"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-app="staff-users"')
+        self.assertContains(response, 'data-user-id=""')
+        self.assertNotContains(response, 'id="console-submenu"')
+
+    @tag("batch_console_agents")
+    def test_staff_users_page_requires_staff(self):
+        response = self.client.get(reverse("staff-users"))
+        self.assertEqual(response.status_code, 403)
+
+    @tag("batch_console_agents")
+    def test_staff_user_detail_page_renders_selected_user_id(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-users-detail@example.com",
+            email="admin-users-detail@example.com",
+            password="testpass123",
+        )
+
+        target_user = User.objects.create_user(
+            username="staff-target@example.com",
+            email="staff-target@example.com",
+            password="testpass123",
+            first_name="Staff",
+            last_name="Target",
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("staff-user-detail", kwargs={"user_id": target_user.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'data-user-id="{target_user.id}"')
+
+    @tag("batch_console_agents")
+    def test_staff_user_search_api_matches_name_email_and_exact_id(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-user-search@example.com",
+            email="admin-user-search@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="jane-doe",
+            email="jane.doe@example.com",
+            password="testpass123",
+            first_name="Jane",
+            last_name="Doe",
+        )
+
+        self.client.force_login(admin_user)
+
+        by_name = self.client.get(reverse("staff-user-search"), {"q": "Jane Doe"})
+        self.assertEqual(by_name.status_code, 200)
+        self.assertIn(target_user.id, [entry["id"] for entry in by_name.json()["users"]])
+
+        by_email = self.client.get(reverse("staff-user-search"), {"q": "jane.doe@"})
+        self.assertEqual(by_email.status_code, 200)
+        self.assertIn(target_user.id, [entry["id"] for entry in by_email.json()["users"]])
+
+        by_id = self.client.get(reverse("staff-user-search"), {"q": str(target_user.id)})
+        self.assertEqual(by_id.status_code, 200)
+        self.assertIn(target_user.id, [entry["id"] for entry in by_id.json()["users"]])
+
+    @tag("batch_console_agents")
+    def test_staff_user_detail_api_returns_billing_agents_and_task_credits(self):
+        from api.models import AddonEntitlement, BrowserUseAgent, Organization, PersistentAgent, TaskCredit
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-user-detail-api@example.com",
+            email="admin-user-detail-api@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="detail-user",
+            email="detail-user@example.com",
+            password="testpass123",
+            first_name="Detail",
+            last_name="User",
+        )
+        from api.models import TaskCredit as TaskCreditModel
+        TaskCreditModel.objects.filter(user=target_user).update(voided=True)
+        organization = Organization.objects.create(
+            name="Ops Team",
+            slug="ops-team",
+            created_by=admin_user,
+        )
+        organization.billing.purchased_seats = 1
+        organization.billing.save(update_fields=["purchased_seats"])
+        personal_browser_agent = BrowserUseAgent.objects.create(user=target_user, name="Personal Browser")
+        org_browser_agent = BrowserUseAgent.objects.create(user=target_user, name="Org Browser")
+        personal_agent = PersistentAgent.objects.create(
+            user=target_user,
+            name="Personal Agent",
+            charter="Personal",
+            browser_use_agent=personal_browser_agent,
+        )
+        org_agent = PersistentAgent.objects.create(
+            user=target_user,
+            organization=organization,
+            name="Org Agent",
+            charter="Org",
+            browser_use_agent=org_browser_agent,
+        )
+        AddonEntitlement.objects.create(
+            user=target_user,
+            price_id="price_task_pack",
+            quantity=2,
+            task_credits_delta=10,
+        )
+        TaskCredit.objects.create(
+            user=target_user,
+            credits=Decimal("12.5"),
+            credits_used=Decimal("2.5"),
+            granted_date=timezone.now() - timedelta(days=1),
+            expiration_date=timezone.now() + timedelta(days=30),
+            plan=PlanNames.FREE,
+            grant_type="Compensation",
+            additional_task=False,
+            voided=False,
+        )
+        TaskCredit.objects.create(
+            user=target_user,
+            credits=Decimal("4"),
+            credits_used=Decimal("0"),
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=7),
+            plan=PlanNames.FREE,
+            grant_type="Promo",
+            additional_task=False,
+            voided=True,
+        )
+
+        self.client.force_login(admin_user)
+        with patch("console.api_views.get_user_plan", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.api_views.get_stripe_customer", return_value=SimpleNamespace(id="cus_test_user", livemode=False)):
+            response = self.client.get(reverse("staff-user-detail-api", kwargs={"user_id": target_user.id}))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["user"]["id"], target_user.id)
+        self.assertEqual(payload["billing"]["plan"]["id"], "startup")
+        self.assertEqual(payload["billing"]["stripeCustomerUrl"], "https://dashboard.stripe.com/test/customers/cus_test_user")
+        self.assertEqual(len(payload["billing"]["addons"]), 1)
+        self.assertEqual(payload["billing"]["addons"][0]["label"], "Task Pack")
+        self.assertEqual(len(payload["agents"]), 2)
+        self.assertEqual({entry["id"] for entry in payload["agents"]}, {str(personal_agent.id), str(org_agent.id)})
+        org_entry = next(entry for entry in payload["agents"] if entry["id"] == str(org_agent.id))
+        self.assertEqual(org_entry["organizationName"], "Ops Team")
+        self.assertEqual(payload["taskCredits"]["available"], 10.0)
+        self.assertEqual(len(payload["taskCredits"]["recentGrants"]), 1)
+        self.assertEqual(payload["taskCredits"]["recentGrants"][0]["grantType"], "Compensation")
+
+    @tag("batch_console_agents")
+    def test_staff_user_email_verify_api_marks_current_email_verified_and_primary(self):
+        from allauth.account.models import EmailAddress
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-user-verify@example.com",
+            email="admin-user-verify@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="verify-user",
+            email="verify-user@example.com",
+            password="testpass123",
+        )
+        EmailAddress.objects.create(
+            user=target_user,
+            email="old-primary@example.com",
+            verified=True,
+            primary=True,
+        )
+        EmailAddress.objects.create(
+            user=target_user,
+            email=target_user.email,
+            verified=False,
+            primary=False,
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.post(reverse("staff-user-email-verify", kwargs={"user_id": target_user.id}))
+
+        self.assertEqual(response.status_code, 200)
+        current_email = EmailAddress.objects.get(user=target_user, email=target_user.email)
+        old_email = EmailAddress.objects.get(user=target_user, email="old-primary@example.com")
+        self.assertTrue(current_email.verified)
+        self.assertTrue(current_email.primary)
+        self.assertFalse(old_email.primary)
+
+    @tag("batch_console_agents")
+    def test_staff_user_task_credit_grant_api_creates_manual_personal_credit(self):
+        from api.models import TaskCredit
+
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-user-grant@example.com",
+            email="admin-user-grant@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="grant-user",
+            email="grant-user@example.com",
+            password="testpass123",
+        )
+        from api.models import TaskCredit as TaskCreditModel
+        TaskCreditModel.objects.filter(user=target_user).update(voided=True)
+
+        self.client.force_login(admin_user)
+        before = timezone.now()
+        response = self.client.post(
+            reverse("staff-user-task-credit-grant", kwargs={"user_id": target_user.id}),
+            data=json.dumps(
+                {
+                    "credits": "12.5",
+                    "grantType": "Promo",
+                    "expirationPreset": "one_month",
+                }
+            ),
+            content_type="application/json",
+        )
+        after = timezone.now()
+
+        self.assertEqual(response.status_code, 201)
+        task_credit = TaskCredit.objects.get(user=target_user, grant_type="Promo", credits=Decimal("12.5"))
+        self.assertEqual(task_credit.credits, Decimal("12.5"))
+        self.assertEqual(task_credit.grant_type, "Promo")
+        self.assertEqual(task_credit.plan, PlanNames.FREE)
+        self.assertFalse(task_credit.additional_task)
+        self.assertGreaterEqual(task_credit.granted_date, before)
+        self.assertLessEqual(task_credit.granted_date, after)
+        expiration_days = (task_credit.expiration_date - task_credit.granted_date).days
+        self.assertGreaterEqual(expiration_days, 28)
+        self.assertLessEqual(expiration_days, 31)
 
     @tag("batch_console_agents")
     def test_admin_action_can_undelete_soft_deleted_agent(self):

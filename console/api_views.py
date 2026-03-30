@@ -10,11 +10,14 @@ import uuid
 import base64
 import zipfile
 from datetime import datetime, timedelta, timezone as dt_timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
 import zstandard as zstd
+from dateutil.relativedelta import relativedelta
+from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
@@ -85,6 +88,8 @@ from api.models import (
     OrganizationMembership,
     AgentCollaborator,
     UserPreference,
+    AddonEntitlement,
+    TaskCredit,
     build_web_agent_address,
     build_web_user_address,
     UserPhoneNumber,
@@ -204,17 +209,22 @@ from api.services.system_settings import (
     serialize_setting,
     set_setting_value,
 )
+from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
+from tasks.services import TaskCreditService
 from util.integrations import stripe_status
 from util.subscription_helper import (
     get_active_subscription,
+    get_stripe_customer,
     get_organization_plan,
-    reconcile_user_plan_from_stripe,
+    get_user_plan,
 )
+from util.constants.task_constants import TASKS_UNLIMITED
 from console.role_constants import BILLING_MANAGE_ROLES
 
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
 
 GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
 MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
@@ -1277,6 +1287,310 @@ class SystemAdminAPIView(LoginRequiredMixin, View):
         if not (request.user.is_staff or request.user.is_superuser):
             return JsonResponse({"error": "forbidden"}, status=403)
         return super().dispatch(request, *args, **kwargs)
+
+
+def _staff_user_display_name(user) -> str:
+    full_name = user.get_full_name().strip()
+    if full_name:
+        return full_name
+    if user.email:
+        return user.email
+    return user.get_username()
+
+
+def _staff_user_admin_url(user) -> str:
+    return reverse(f"admin:{user._meta.app_label}_{user._meta.model_name}_change", args=[user.pk])
+
+
+def _staff_stripe_customer_dashboard_url(customer) -> str | None:
+    customer_id = getattr(customer, "id", "") or ""
+    if not customer_id:
+        return None
+    live_mode = bool(getattr(customer, "livemode", settings.STRIPE_LIVE_MODE))
+    base_url = "https://dashboard.stripe.com"
+    if not live_mode:
+        base_url = f"{base_url}/test"
+    return f"{base_url}/customers/{customer_id}"
+
+
+def _coerce_decimal_payload(value: Any, *, default: Decimal = Decimal("0")) -> Decimal:
+    try:
+        return Decimal(str(value))
+    except (TypeError, ValueError, InvalidOperation):
+        return default
+
+
+def _current_user_email_is_verified(user) -> bool:
+    email = (getattr(user, "email", "") or "").strip()
+    if not email:
+        return False
+    from allauth.account.models import EmailAddress
+
+    return EmailAddress.objects.filter(user=user, email__iexact=email, verified=True).exists()
+
+
+def _serialize_staff_addon(entitlement: AddonEntitlement) -> dict[str, Any]:
+    total_task_credits = entitlement.task_credits_delta * entitlement.quantity
+    total_contacts = entitlement.contact_cap_delta * entitlement.quantity
+    total_browser_tasks = entitlement.browser_task_daily_delta * entitlement.quantity
+    total_captcha = entitlement.advanced_captcha_resolution_delta * entitlement.quantity
+
+    if total_task_credits:
+        kind = "task_pack"
+        label = "Task Pack"
+    elif total_contacts:
+        kind = "contact_pack"
+        label = "Contact Pack"
+    elif total_browser_tasks:
+        kind = "browser_task_pack"
+        label = "Browser Task Pack"
+    elif total_captcha:
+        kind = "advanced_captcha"
+        label = "Advanced CAPTCHA"
+    else:
+        kind = "addon"
+        label = "Add-on"
+
+    summary_parts: list[str] = []
+    if total_task_credits:
+        summary_parts.append(f"+{total_task_credits:g} task credits")
+    if total_contacts:
+        summary_parts.append(f"+{total_contacts} contacts")
+    if total_browser_tasks:
+        summary_parts.append(f"+{total_browser_tasks} browser tasks/day")
+    if total_captcha:
+        summary_parts.append("CAPTCHA solving enabled")
+
+    return {
+        "id": str(entitlement.id),
+        "kind": kind,
+        "label": label,
+        "quantity": entitlement.quantity,
+        "priceId": entitlement.price_id,
+        "summary": ", ".join(summary_parts) or "Configured",
+        "startsAt": entitlement.starts_at.isoformat() if entitlement.starts_at else None,
+        "expiresAt": entitlement.expires_at.isoformat() if entitlement.expires_at else None,
+        "isRecurring": bool(entitlement.is_recurring),
+    }
+
+
+def _serialize_task_credit(task_credit: TaskCredit) -> dict[str, Any]:
+    return {
+        "id": str(task_credit.id),
+        "credits": float(task_credit.credits),
+        "used": float(task_credit.credits_used),
+        "available": float(task_credit.available_credits),
+        "grantType": task_credit.grant_type,
+        "grantedAt": task_credit.granted_date.isoformat(),
+        "expiresAt": task_credit.expiration_date.isoformat(),
+        "comments": task_credit.comments or "",
+    }
+
+
+def _serialize_staff_user_detail(user) -> dict[str, Any]:
+    plan_payload = get_user_plan(user) or {}
+    stripe_customer = get_stripe_customer(user)
+    available_credits = TaskCreditService.calculate_available_tasks(user)
+    unlimited_credits = available_credits == TASKS_UNLIMITED
+
+    addons = [
+        _serialize_staff_addon(entitlement)
+        for entitlement in AddonEntitlement.objects.for_owner(user).active().order_by("-created_at")
+    ]
+    agents = [
+        {
+            "id": str(agent.id),
+            "name": agent.name or "",
+            "organizationName": agent.organization.name if agent.organization_id else None,
+            "adminUrl": reverse("admin:api_persistentagent_change", args=[agent.id]),
+            "auditUrl": reverse("console-agent-audit", kwargs={"agent_id": agent.id}),
+        }
+        for agent in PersistentAgent.objects.filter(user=user).select_related("organization").order_by("-created_at")
+    ]
+    recent_grants = [
+        _serialize_task_credit(task_credit)
+        for task_credit in TaskCredit.objects.filter(user=user, voided=False).order_by("-granted_date")[:5]
+    ]
+
+    return {
+        "user": {
+            "id": user.id,
+            "name": _staff_user_display_name(user),
+            "email": user.email or "",
+            "adminUrl": _staff_user_admin_url(user),
+        },
+        "emailVerification": {
+            "email": user.email or "",
+            "isVerified": _current_user_email_is_verified(user),
+        },
+        "billing": {
+            "plan": {
+                "id": plan_payload.get("id") or PlanNamesChoices.FREE,
+                "name": plan_payload.get("name") or "Free",
+            },
+            "stripeCustomerId": getattr(stripe_customer, "id", None),
+            "stripeCustomerUrl": _staff_stripe_customer_dashboard_url(stripe_customer),
+            "addons": addons,
+        },
+        "agents": agents,
+        "taskCredits": {
+            "available": None if unlimited_credits else float(available_credits),
+            "unlimited": bool(unlimited_credits),
+            "recentGrants": recent_grants,
+        },
+    }
+
+
+class StaffUserSearchAPIView(SystemAdminAPIView):
+    """Search users by name, email, or exact numeric identifier."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        query = (request.GET.get("q") or "").strip()
+        limit_raw = request.GET.get("limit") or "8"
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            return HttpResponseBadRequest("limit must be an integer")
+        limit = max(1, min(limit, 25))
+        if not query:
+            return JsonResponse({"users": []})
+
+        filters = (
+            Q(email__icontains=query)
+            | Q(username__icontains=query)
+            | Q(first_name__icontains=query)
+            | Q(last_name__icontains=query)
+        )
+        terms = [term for term in query.split() if term]
+        if len(terms) >= 2:
+            filters |= Q(first_name__icontains=terms[0], last_name__icontains=" ".join(terms[1:]))
+            filters |= Q(first_name__icontains=" ".join(terms[:-1]), last_name__icontains=terms[-1])
+        if query.isdigit():
+            filters |= Q(id=int(query))
+
+        matches = User.objects.filter(filters).order_by("first_name", "last_name", "email", "id")[:limit]
+        payload = [
+            {
+                "id": user.id,
+                "name": _staff_user_display_name(user),
+                "email": user.email or "",
+            }
+            for user in matches
+        ]
+        return JsonResponse({"users": payload})
+
+
+class StaffUserDetailAPIView(SystemAdminAPIView):
+    """Return the full staff user-management payload for one user."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, user_id: int, *args: Any, **kwargs: Any):
+        user = get_object_or_404(User, pk=user_id)
+        return JsonResponse(_serialize_staff_user_detail(user))
+
+
+class StaffUserEmailVerifyAPIView(SystemAdminAPIView):
+    """Allow staff to manually mark a user's current email as verified."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, user_id: int, *args: Any, **kwargs: Any):
+        user = get_object_or_404(User, pk=user_id)
+        email = (user.email or "").strip()
+        if not email:
+            return JsonResponse({"error": "user_has_no_email"}, status=400)
+
+        from allauth.account.models import EmailAddress
+
+        with transaction.atomic():
+            email_address = (
+                EmailAddress.objects
+                .select_for_update()
+                .filter(user=user, email__iexact=email)
+                .order_by("-primary", "-verified", "pk")
+                .first()
+            )
+            if email_address is None:
+                EmailAddress.objects.filter(user=user, primary=True).update(primary=False)
+                email_address = EmailAddress.objects.create(
+                    user=user,
+                    email=email,
+                    verified=True,
+                    primary=True,
+                )
+            else:
+                EmailAddress.objects.filter(user=user, primary=True).exclude(pk=email_address.pk).update(primary=False)
+                updated_fields: list[str] = []
+                if email_address.email != email:
+                    email_address.email = email
+                    updated_fields.append("email")
+                if not email_address.verified:
+                    email_address.verified = True
+                    updated_fields.append("verified")
+                if not email_address.primary:
+                    email_address.primary = True
+                    updated_fields.append("primary")
+                if updated_fields:
+                    email_address.save(update_fields=updated_fields)
+
+            EmailAddress.objects.filter(user=user, email__iexact=email).exclude(pk=email_address.pk).update(
+                verified=True,
+                primary=False,
+            )
+
+        return JsonResponse(
+            {
+                "ok": True,
+                "emailVerification": _serialize_staff_user_detail(user)["emailVerification"],
+            }
+        )
+
+
+class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
+    """Create a manual personal task-credit grant for a selected user."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, user_id: int, *args: Any, **kwargs: Any):
+        user = get_object_or_404(User, pk=user_id)
+        try:
+            payload = json.loads(request.body.decode("utf-8") or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "invalid_json"}, status=400)
+
+        credits = _coerce_decimal_payload(payload.get("credits"))
+        if credits <= Decimal("0"):
+            return JsonResponse({"error": "credits_must_be_positive"}, status=400)
+
+        grant_type = str(payload.get("grantType") or "").strip()
+        if grant_type not in {GrantTypeChoices.COMPENSATION, GrantTypeChoices.PROMO}:
+            return JsonResponse({"error": "invalid_grant_type"}, status=400)
+
+        expiration_preset = str(payload.get("expirationPreset") or "").strip()
+        if expiration_preset == "one_month":
+            expiration_delta = relativedelta(months=1)
+        elif expiration_preset == "one_year":
+            expiration_delta = relativedelta(years=1)
+        else:
+            return JsonResponse({"error": "invalid_expiration_preset"}, status=400)
+
+        granted_at = timezone.now()
+        task_credit = TaskCredit.objects.create(
+            user=user,
+            credits=credits,
+            credits_used=Decimal("0"),
+            granted_date=granted_at,
+            expiration_date=granted_at + expiration_delta,
+            plan=PlanNamesChoices.FREE,
+            grant_type=grant_type,
+            additional_task=False,
+            voided=False,
+        )
+
+        return JsonResponse({"ok": True, "taskCredit": _serialize_task_credit(task_credit)}, status=201)
 
 
 class StaffAgentSearchAPIView(SystemAdminAPIView):
