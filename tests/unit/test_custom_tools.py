@@ -34,6 +34,7 @@ from api.models import (
     TaskCredit,
     UserQuota,
 )
+from api.services.sandbox_compute import LocalSandboxBackend
 
 
 @tag("batch_agent_tools")
@@ -349,8 +350,65 @@ class CustomToolsTests(TestCase):
         self.assertEqual(call.kwargs["env"]["SANDBOX_CUSTOM_TOOL_SOURCE_PATH"], "/tools/increment.py")
         self.assertEqual(call.kwargs["sqlite_env_key"], "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH")
         self.assertTrue(call.kwargs["local_sqlite_db_path"])
+        self.assertIn('RUNTIME_CACHE_ROOT="${SANDBOX_RUNTIME_CACHE_ROOT:-/tmp}"', call.args[1])
         self.assertIn('SOURCE_EXEC_PATH="${SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH:-/workspace$SANDBOX_CUSTOM_TOOL_SOURCE_PATH}"', call.args[1])
+        self.assertIn('UV_CACHE_DIR="${SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR:-$RUNTIME_CACHE_ROOT/uv-cache}"', call.args[1])
+        self.assertIn('UV_INSTALL_DIR="${SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR:-$RUNTIME_CACHE_ROOT/uv-bin}"', call.args[1])
+        self.assertIn('mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR"', call.args[1])
+        self.assertIn('UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR"', call.args[1])
+        self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
         self.assertIn('uv run "$SOURCE_EXEC_PATH"', call.args[1])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_execute_custom_tool_uses_temp_uv_dirs_for_local_backend(
+        self,
+        mock_service_cls,
+        _mock_bridge_url,
+        _mock_sandbox,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return {'ok': True}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/local_temp_dirs.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Local Temp Dirs",
+            tool_name="custom_local_temp_dirs",
+            description="Use local temp uv dirs.",
+            source_path="/tools/local_temp_dirs.py",
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=30,
+        )
+
+        mock_service = MagicMock()
+        mock_service._backend = LocalSandboxBackend()
+        mock_service.run_custom_tool_command.return_value = {
+            "status": "ok",
+            "stdout": f"{CUSTOM_TOOL_RESULT_MARKER}{{\"result\": {{\"ok\": true}}}}\n",
+            "stderr": "",
+        }
+        mock_service_cls.return_value = mock_service
+
+        result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "ok")
+        env = mock_service.run_custom_tool_command.call_args.kwargs["env"]
+        self.assertIn("SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR", env)
+        self.assertIn("SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR", env)
+        self.assertNotIn("/workspace", env["SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR"])
+        self.assertNotIn("/workspace", env["SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR"])
 
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)

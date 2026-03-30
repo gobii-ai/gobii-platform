@@ -24,7 +24,11 @@ from api.services.sandbox_compute import (
     _build_nonzero_exit_error_payload,
     _post_sync_queue_key,
 )
-from api.services.sandbox_internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH, CUSTOM_TOOL_SQLITE_WORKSPACE_PATH
+from api.services.sandbox_internal_paths import (
+    CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+    CUSTOM_TOOL_SQLITE_WORKSPACE_PATH,
+    is_sandbox_internal_path,
+)
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.tasks.sandbox_compute import sync_filespace_after_call
 
@@ -213,6 +217,22 @@ class SandboxComputeSyncTests(TestCase):
             path=CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
             overwrite=True,
         )
+        gobii_internal = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"hidden-trace",
+            extension="",
+            mime_type="text/plain",
+            path="/.gobii/internal/tool.log",
+            overwrite=True,
+        )
+        uv_cache = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"wheel-cache",
+            extension="",
+            mime_type="application/octet-stream",
+            path="/.uv-cache/wheels/pkg.whl",
+            overwrite=True,
+        )
         visible = write_bytes_to_dir(
             agent=self.agent,
             content_bytes=b"user-file",
@@ -223,6 +243,8 @@ class SandboxComputeSyncTests(TestCase):
         )
 
         self.assertEqual(internal.get("status"), "ok")
+        self.assertEqual(gobii_internal.get("status"), "ok")
+        self.assertEqual(uv_cache.get("status"), "ok")
         self.assertEqual(visible.get("status"), "ok")
 
         manifest = build_filespace_pull_manifest(self.agent)
@@ -231,6 +253,8 @@ class SandboxComputeSyncTests(TestCase):
         paths = [entry.get("path") for entry in manifest.get("files") or []]
         self.assertIn("/visible.txt", paths)
         self.assertNotIn(CUSTOM_TOOL_SQLITE_FILESPACE_PATH, paths)
+        self.assertNotIn("/.gobii/internal/tool.log", paths)
+        self.assertNotIn("/.uv-cache/wheels/pkg.whl", paths)
 
     def test_apply_filespace_push_ignores_internal_custom_tool_sqlite_path(self):
         result = apply_filespace_push(
@@ -242,6 +266,16 @@ class SandboxComputeSyncTests(TestCase):
                     "mime_type": "application/vnd.sqlite3",
                 },
                 {
+                    "path": "/.gobii/internal/tool.log",
+                    "content_b64": "aGlkZGVuLXRyYWNl",
+                    "mime_type": "text/plain",
+                },
+                {
+                    "path": "/.uv-cache/wheels/pkg.whl",
+                    "content_b64": "d2hlZWwtY2FjaGU=",
+                    "mime_type": "application/octet-stream",
+                },
+                {
                     "path": "/visible.txt",
                     "content_b64": "dmlzaWJsZQ==",
                     "mime_type": "text/plain",
@@ -250,9 +284,17 @@ class SandboxComputeSyncTests(TestCase):
         )
 
         self.assertEqual(result.get("status"), "ok")
-        self.assertEqual(result.get("skipped"), 1)
+        self.assertEqual(result.get("skipped"), 3)
         self.assertFalse(AgentFsNode.objects.filter(path=CUSTOM_TOOL_SQLITE_FILESPACE_PATH).exists())
+        self.assertFalse(AgentFsNode.objects.filter(path="/.gobii/internal/tool.log").exists())
+        self.assertFalse(AgentFsNode.objects.filter(path="/.uv-cache/wheels/pkg.whl").exists())
         self.assertTrue(AgentFsNode.objects.filter(path="/visible.txt").exists())
+
+    def test_is_sandbox_internal_path_matches_reserved_subtrees(self):
+        self.assertTrue(is_sandbox_internal_path(CUSTOM_TOOL_SQLITE_FILESPACE_PATH))
+        self.assertTrue(is_sandbox_internal_path("/.gobii/internal/tool.log"))
+        self.assertTrue(is_sandbox_internal_path("/.uv-cache/wheels/pkg.whl"))
+        self.assertFalse(is_sandbox_internal_path("/reports/.uv-cache-not-really.txt"))
 
     def test_nonzero_exit_error_uses_last_stderr_line_as_message(self):
         stderr = (

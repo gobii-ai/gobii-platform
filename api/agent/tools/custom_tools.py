@@ -3,8 +3,10 @@ import base64
 import contextlib
 import json
 import logging
+import os
 import posixpath
 import re
+import tempfile
 import textwrap
 from typing import Any, Dict, Optional
 
@@ -48,6 +50,8 @@ _TOKEN_ENV_KEY = "SANDBOX_CUSTOM_TOOL_TOKEN"
 _TOOL_NAME_ENV_KEY = "SANDBOX_CUSTOM_TOOL_NAME"
 _SOURCE_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SOURCE_PATH"
 _EXEC_SOURCE_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH"
+_UV_CACHE_DIR_ENV_KEY = "SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR"
+_UV_INSTALL_DIR_ENV_KEY = "SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR"
 _SQLITE_DB_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"
 
 _GOBII_CTX_MODULE = textwrap.dedent(
@@ -176,15 +180,19 @@ _GOBII_CTX_MODULE = textwrap.dedent(
 )
 
 CUSTOM_TOOL_BOOTSTRAP_COMMAND = (
-    "if ! command -v uv >/dev/null 2>&1; then curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1; fi && \\\n"
-    'export PATH="$HOME/.local/bin:$PATH" && \\\n'
+    'RUNTIME_CACHE_ROOT="${SANDBOX_RUNTIME_CACHE_ROOT:-/tmp}" && \\\n'
+    f'UV_CACHE_DIR="${{{_UV_CACHE_DIR_ENV_KEY}:-$RUNTIME_CACHE_ROOT/uv-cache}}" && \\\n'
+    f'UV_INSTALL_DIR="${{{_UV_INSTALL_DIR_ENV_KEY}:-$RUNTIME_CACHE_ROOT/uv-bin}}" && \\\n'
+    'mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR" && \\\n'
+    'if ! command -v uv >/dev/null 2>&1; then UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR" curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1; fi && \\\n'
+    'export PATH="$UV_INSTALL_DIR:$PATH" && \\\n'
     "command -v uv >/dev/null 2>&1 && \\\n"
     f'SOURCE_EXEC_PATH="${{{_EXEC_SOURCE_PATH_ENV_KEY}:-/workspace${_SOURCE_PATH_ENV_KEY}}}" && \\\n'
     "mkdir -p /tmp/_gobii && \\\n"
     "cat > /tmp/_gobii/_gobii_ctx.py <<'CTXEOF'\n"
     f"{_GOBII_CTX_MODULE}"
     "CTXEOF\n"
-    'PYTHONPATH=/tmp/_gobii:${PYTHONPATH:-} uv run "$SOURCE_EXEC_PATH"'
+    'UV_CACHE_DIR="$UV_CACHE_DIR" PYTHONPATH=/tmp/_gobii:${PYTHONPATH:-} uv run "$SOURCE_EXEC_PATH"'
 )
 
 
@@ -452,6 +460,19 @@ def _custom_tool_sqlite_db(agent: PersistentAgent):
         yield db_path
 
 
+@contextlib.contextmanager
+def _custom_tool_uv_runtime_dirs(service: SandboxComputeService):
+    if not isinstance(service._backend, LocalSandboxBackend):
+        yield None, None
+        return
+
+    with tempfile.TemporaryDirectory(prefix="gobii-custom-tool-uv-runtime-") as runtime_root:
+        yield (
+            os.path.join(runtime_root, "uv-cache"),
+            os.path.join(runtime_root, "uv-bin"),
+        )
+
+
 def get_create_custom_tool_tool() -> Dict[str, Any]:
     return {
         "type": "function",
@@ -699,7 +720,13 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
         if local_exec_source_path:
             env[_EXEC_SOURCE_PATH_ENV_KEY] = local_exec_source_path
 
-    with _custom_tool_sqlite_db(agent) as sqlite_db_path:
+    with _custom_tool_uv_runtime_dirs(service) as (uv_cache_dir, uv_install_dir), _custom_tool_sqlite_db(
+        agent
+    ) as sqlite_db_path:
+        if uv_cache_dir:
+            env[_UV_CACHE_DIR_ENV_KEY] = uv_cache_dir
+        if uv_install_dir:
+            env[_UV_INSTALL_DIR_ENV_KEY] = uv_install_dir
         result = service.run_custom_tool_command(
             agent,
             CUSTOM_TOOL_BOOTSTRAP_COMMAND,
