@@ -5747,6 +5747,29 @@ class ConsoleStatusView(SystemAdminRequiredMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class LegacyConsoleStatusRedirectView(View):
+    """Preserve the legacy status URL while redirecting to the staff route."""
+
+    def get(self, request, *args, **kwargs):
+        return redirect("console-status")
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - redirect only
+        return HttpResponseNotAllowed(['GET'])
+
+
+class StaffUsersView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/staff_users.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user_id = kwargs.get("user_id")
+        context["selected_user_id"] = str(user_id) if user_id is not None else ""
+        return context
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
+
+
 class SystemSettingsView(SystemAdminRequiredMixin, TemplateView):
     template_name = "system_settings.html"
 
