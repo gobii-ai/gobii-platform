@@ -2990,6 +2990,7 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "Standard proxy env vars are already injected for sandbox execution: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, plus lowercase variants. "
         "Global `env_var` secrets are available as environment variables inside sandbox execution contexts. "
         "For outbound network work, prefer `http_request` or `ctx.call_tool('http_request', ...)` inside custom tools before raw sockets or hand-rolled proxy logic. "
+        "For raw outbound apart from `http_request` or `ctx.call_tool('http_request', ...)`, you MUST use the proxy. "
         "Prefer higher-level HTTP/HTTPS libraries and APIs when possible, and do not spend cycles re-proving basic sandbox connectivity unless you have a concrete failure."
     )
 
