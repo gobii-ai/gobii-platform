@@ -15,6 +15,7 @@ from django.db import transaction
 
 from api.models import PersistentAgentSkill
 
+from .skill_utils import normalize_skill_tool_ids
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from .sqlite_state import AGENT_SKILLS_TABLE, get_sqlite_db_path
 
@@ -89,7 +90,7 @@ def seed_sqlite_skills(agent) -> Optional[AgentSkillsSnapshot]:
             name = (skill.name or "").strip()
             description = (skill.description or "").strip()
             version = int(skill.version or 0)
-            tools = _normalize_tools_sequence(skill.tools)
+            tools = normalize_skill_tool_ids(skill.tools)
             instructions = (skill.instructions or "").strip()
             rows.append(
                 (
@@ -205,6 +206,7 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
             next_version = (latest.version if latest else 0) + 1
             PersistentAgentSkill.objects.create(
                 agent=agent,
+                global_skill=None,
                 name=name,
                 description=row.description,
                 version=next_version,
@@ -244,7 +246,7 @@ def get_required_skill_tool_ids(agent) -> set[str]:
     """Return the union of canonical tool IDs required by latest skill versions."""
     required: set[str] = set()
     for skill in get_latest_skill_versions(agent):
-        for tool_id in _normalize_tools_sequence(skill.tools):
+        for tool_id in normalize_skill_tool_ids(skill.tools):
             required.add(tool_id)
     return required
 
@@ -260,7 +262,7 @@ def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
 
     sections: list[str] = []
     for skill in latest:
-        tools = _normalize_tools_sequence(skill.tools)
+        tools = normalize_skill_tool_ids(skill.tools)
         tool_text = ", ".join(tools) if tools else "(none)"
         description = (skill.description or "").strip() or "(no description)"
         instructions = (skill.instructions or "").strip()
@@ -378,25 +380,9 @@ def _rows_match_snapshot(row: _SQLiteSkillRow, baseline: AgentSkillSnapshotRow) 
 def _is_same_skill_content(skill: PersistentAgentSkill, row: _SQLiteSkillRow) -> bool:
     return (
         (skill.description or "").strip() == row.description
-        and _normalize_tools_sequence(skill.tools) == row.tools
+        and normalize_skill_tool_ids(skill.tools) == row.tools
         and (skill.instructions or "").strip() == row.instructions
     )
-
-
-def _normalize_tools_sequence(raw_tools) -> tuple[str, ...]:
-    if not isinstance(raw_tools, list):
-        return ()
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for item in raw_tools:
-        if not isinstance(item, str):
-            continue
-        tool_id = item.strip()
-        if not tool_id or tool_id in seen:
-            continue
-        seen.add(tool_id)
-        normalized.append(tool_id)
-    return tuple(normalized)
 
 
 def _parse_tools_json(raw_value) -> tuple[list[str], Optional[str]]:

@@ -44,6 +44,7 @@ from .models import (
     PersistentAgent, PersistentAgentTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSkill, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
+    GlobalAgentSkill,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
@@ -2519,8 +2520,8 @@ class PersistentAgentSkillInline(admin.TabularInline):
 
     model = PersistentAgentSkill
     extra = 0
-    fields = ("name", "version", "description", "tools", "updated_at")
-    readonly_fields = ("updated_at",)
+    fields = ("name", "global_skill", "version", "description", "tools", "updated_at")
+    readonly_fields = ("global_skill", "updated_at")
     ordering = ("name", "-version", "-updated_at")
     show_change_link = True
 
@@ -3507,18 +3508,28 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
 @admin.register(PersistentAgentSkill)
 class PersistentAgentSkillAdmin(admin.ModelAdmin):
-    list_display = ("name", "version", "agent", "updated_at", "created_at")
-    list_filter = ("created_at", "updated_at")
+    list_display = ("name", "version", "agent", "global_skill", "updated_at", "created_at")
+    list_filter = ("global_skill", "created_at", "updated_at")
     search_fields = (
         "name",
         "description",
         "instructions",
+        "global_skill__name",
         "agent__name",
         "agent__user__email",
     )
-    raw_id_fields = ("agent",)
+    raw_id_fields = ("agent", "global_skill")
     ordering = ("name", "-version", "-updated_at")
-    list_select_related = ("agent",)
+    list_select_related = ("agent", "global_skill")
+
+
+@admin.register(GlobalAgentSkill)
+class GlobalAgentSkillAdmin(admin.ModelAdmin):
+    list_display = ("name", "is_active", "updated_at", "created_at")
+    list_filter = ("is_active", "created_at", "updated_at")
+    search_fields = ("name", "description", "instructions")
+    readonly_fields = ("created_at", "updated_at")
+    ordering = ("name",)
 
 
 @admin.register(PersistentAgentCommsEndpoint)

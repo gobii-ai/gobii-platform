@@ -7436,6 +7436,29 @@ class PersistentAgentCustomTool(models.Model):
         return f"CustomTool<{self.tool_name}> for {getattr(self.agent, 'name', 'agent')}"
 
 
+class GlobalAgentSkill(models.Model):
+    """Platform-managed reusable skill template available to all compatible agents."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=128, unique=True)
+    description = models.TextField(blank=True)
+    tools = models.JSONField(default=list, blank=True)
+    instructions = models.TextField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["is_active", "name"], name="ga_skill_active_name_idx"),
+            models.Index(fields=["-updated_at"], name="ga_skill_updated_idx"),
+        ]
+        ordering = ["name"]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"GlobalSkill<{self.name}>"
+
+
 class PersistentAgentSkill(models.Model):
     """Versioned workflow skill authored by a persistent agent."""
 
@@ -7444,6 +7467,13 @@ class PersistentAgentSkill(models.Model):
         "PersistentAgent",
         on_delete=models.CASCADE,
         related_name="skills",
+    )
+    global_skill = models.ForeignKey(
+        "GlobalAgentSkill",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="imported_agent_skills",
     )
     name = models.CharField(max_length=128)
     description = models.TextField(blank=True)

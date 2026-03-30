@@ -29,7 +29,9 @@ from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
+from .global_skills import enable_global_skills, get_compatible_global_skills
 from .mcp_manager import get_mcp_manager
+from .skill_utils import normalize_skill_tool_ids
 from .tool_manager import (
     enable_tools,
     CREATE_IMAGE_TOOL_NAME,
@@ -285,6 +287,252 @@ def _build_app_lines(
     return lines
 
 
+def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
+    lines: list[str] = []
+    for skill in global_skills:
+        name = _tool_attr(skill, "name")
+        if not isinstance(name, str) or not name:
+            continue
+        description = _strip_description(_tool_attr(skill, "description", "") or "")
+        normalized_tools = list(normalize_skill_tool_ids(_tool_attr(skill, "tools", []) or []))
+        tool_text = ", ".join(normalized_tools) if normalized_tools else "(none)"
+        line = f"- {name}"
+        if description:
+            line += f": {description}"
+        line += f" | tools: {tool_text}"
+        lines.append(line)
+    return lines
+
+
+def _build_search_tool_definitions(
+    *,
+    max_items: int,
+    include_global_skills: bool,
+    include_app_enablement: bool,
+) -> list[dict[str, Any]]:
+    tool_defs: list[dict[str, Any]] = [
+        {
+            "type": "function",
+            "function": {
+                "name": "enable_tools",
+                "description": (
+                    "Enable tools and optionally suggest external resources. "
+                    "Use exact full names from the catalog."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "tool_names": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "minItems": 1,
+                            "maxItems": max_items,
+                            "description": "List of full tool names to enable",
+                        },
+                        "external_resources": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string", "description": "Resource name"},
+                                    "description": {"type": "string", "description": "Brief description"},
+                                    "url": {"type": "string", "description": "Full URL"},
+                                },
+                                "required": ["name", "description", "url"],
+                            },
+                            "maxItems": 5,
+                            "description": "Public APIs, websites, or datasets with verified URLs",
+                        },
+                    },
+                    "required": ["tool_names"],
+                },
+            },
+        }
+    ]
+    if include_global_skills:
+        tool_defs.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_global_skills",
+                    "description": (
+                        "Import global skills into the agent's local skill history. "
+                        "Use exact names from the Available global skills list."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "skill_names": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "description": "List of exact global skill names to enable",
+                            },
+                        },
+                        "required": ["skill_names"],
+                    },
+                },
+            }
+        )
+    if include_app_enablement:
+        tool_defs.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_apps",
+                    "description": (
+                        "Enable Pipedream apps for future tool discovery. "
+                        "Use exact app slugs from the Available Pipedream apps list."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "app_slugs": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "description": "List of exact Pipedream app slugs to enable",
+                            },
+                        },
+                        "required": ["app_slugs"],
+                    },
+                },
+            }
+        )
+    return tool_defs
+
+
+def _parse_search_tool_calls(tool_calls: Iterable[Any], *, provider_name: str) -> dict[str, list[Any]]:
+    requested_tools: list[str] = []
+    requested_skills: list[str] = []
+    requested_apps: list[str] = []
+    external_resources: list[dict[str, str]] = []
+
+    for tool_call in tool_calls:
+        try:
+            if not tool_call:
+                continue
+            function_block = getattr(tool_call, "function", None) or tool_call.get("function")
+            if not function_block:
+                continue
+            function_name = getattr(function_block, "name", None) or function_block.get("name")
+            raw_args = getattr(function_block, "arguments", None) or function_block.get("arguments") or "{}"
+            arguments = json.loads(raw_args)
+            if function_name == "enable_tools":
+                names = arguments.get("tool_names") or []
+                if isinstance(names, list):
+                    for name in names:
+                        if isinstance(name, str) and name not in requested_tools:
+                            requested_tools.append(name)
+                resources = arguments.get("external_resources") or []
+                if isinstance(resources, list):
+                    for res in resources:
+                        if isinstance(res, dict) and res.get("name") and res.get("url"):
+                            url = res.get("url", "")
+                            if url.startswith("http://") or url.startswith("https://"):
+                                external_resources.append(
+                                    {
+                                        "name": str(res.get("name", ""))[:100],
+                                        "description": str(res.get("description", ""))[:200],
+                                        "url": url[:500],
+                                    }
+                                )
+            elif function_name == "enable_global_skills":
+                skill_names = arguments.get("skill_names") or []
+                if isinstance(skill_names, list):
+                    for skill_name in skill_names:
+                        if isinstance(skill_name, str) and skill_name not in requested_skills:
+                            requested_skills.append(skill_name)
+            elif function_name == "enable_apps":
+                app_slugs = arguments.get("app_slugs") or []
+                if isinstance(app_slugs, list):
+                    for app_slug in app_slugs:
+                        if isinstance(app_slug, str) and app_slug not in requested_apps:
+                            requested_apps.append(app_slug)
+        except Exception:  # pragma: no cover - defensive parsing
+            logger.exception("search_tools.%s: failed to parse tool call; skipping", provider_name)
+
+    return {
+        "tools": requested_tools,
+        "skills": requested_skills,
+        "apps": requested_apps,
+        "external_resources": external_resources,
+    }
+
+
+def _normalize_requested_selection(
+    requested: list[str],
+    available_names: set[str],
+    *,
+    provider_name: str,
+    item_label: str,
+) -> list[str]:
+    valid_requested = [name for name in requested if name in available_names]
+    invalid_requested = [name for name in requested if name not in available_names]
+    if invalid_requested:
+        logger.info(
+            "search_tools.%s: ignoring invalid %s: %s",
+            provider_name,
+            item_label,
+            ", ".join(invalid_requested[:10]) + ("..." if len(invalid_requested) > 10 else ""),
+        )
+    return valid_requested
+
+
+def _section_payload(
+    *,
+    enabled: Optional[list[str]] = None,
+    already_enabled: Optional[list[str]] = None,
+    evicted: Optional[list[str]] = None,
+    invalid: Optional[list[str]] = None,
+    conflicts: Optional[list[str]] = None,
+    effective_apps: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "enabled": list(enabled or []),
+        "already_enabled": list(already_enabled or []),
+    }
+    if evicted is not None:
+        payload["evicted"] = list(evicted)
+    if invalid is not None:
+        payload["invalid"] = list(invalid)
+    if conflicts is not None:
+        payload["conflicts"] = list(conflicts)
+    if effective_apps is not None:
+        payload["effective_apps"] = list(effective_apps)
+    return payload
+
+
+def _append_section_summary(
+    message_lines: list[str],
+    result: Optional[dict[str, Any]],
+    *,
+    enabled_label: str,
+    already_enabled_label: str,
+    evicted_label: Optional[str] = None,
+    invalid_label: Optional[str] = None,
+    conflicts_label: Optional[str] = None,
+) -> None:
+    if not result or result.get("status") != "success":
+        return
+
+    summary: list[str] = []
+    if result.get("enabled"):
+        summary.append(f"{enabled_label}: {', '.join(result['enabled'])}")
+    if result.get("already_enabled"):
+        summary.append(f"{already_enabled_label}: {', '.join(result['already_enabled'])}")
+    if evicted_label and result.get("evicted"):
+        summary.append(f"{evicted_label}: {', '.join(result['evicted'])}")
+    if invalid_label and result.get("invalid"):
+        summary.append(f"{invalid_label}: {', '.join(result['invalid'])}")
+    if conflicts_label and result.get("conflicts"):
+        summary.append(f"{conflicts_label}: {', '.join(result['conflicts'])}")
+    if summary:
+        message_lines.append("; ".join(summary))
+
+
 def _search_with_llm(
     agent: PersistentAgent,
     query: str,
@@ -293,25 +541,33 @@ def _search_with_llm(
     enable_callback: Callable[[PersistentAgent, List[str]], Dict[str, Any]],
     empty_message: str,
     *,
+    global_skill_catalog: Optional[Iterable[Any]] = None,
     enable_apps_callback: Optional[Callable[[PersistentAgent, List[str]], Dict[str, Any]]] = None,
     pipedream_app_catalog: Optional[Iterable[Any]] = None,
     enabled_app_slugs: Optional[Iterable[str]] = None,
     auto_enable_apps: bool = True,
 ) -> ToolSearchResult:
     tools = list(catalog)
+    global_skills = list(global_skill_catalog or [])
     app_catalog = list(pipedream_app_catalog or [])
     logger.info(
-        "search_tools.%s: %d tools available, %d pipedream apps available",
+        "search_tools.%s: %d tools available, %d global skills available, %d pipedream apps available",
         provider_name,
         len(tools),
+        len(global_skills),
         len(app_catalog),
     )
 
-    if not tools and not app_catalog:
+    if not tools and not global_skills and not app_catalog:
         return {"status": "success", "tools": [], "message": empty_message}
     available_names = {
         _tool_attr(tool, "full_name") or _tool_attr(tool, "name")
         for tool in tools
+    }
+    available_global_skill_names = {
+        _tool_attr(skill, "name")
+        for skill in global_skills
+        if isinstance(_tool_attr(skill, "name"), str)
     }
 
     tool_lines: List[str] = []
@@ -345,6 +601,7 @@ def _search_with_llm(
     except Exception:  # pragma: no cover - defensive logging
         logger.exception("search_tools.%s: failed to log compact catalog preview", provider_name)
 
+    global_skill_lines = _build_global_skill_lines(global_skills)
     app_lines = _build_app_lines(app_catalog, enabled_app_slugs=enabled_app_slugs)
     enable_apps_manually_url = _build_console_url("console-mcp-servers")
     manual_app_guidance = (
@@ -367,8 +624,8 @@ def _search_with_llm(
 
     system_prompt = (
         "You select tools for research tasks. Be INCLUSIVE - enable all tools that might help.\n"
-        "CRITICAL: Use EXACT tool names and app slugs from the lists below. Never invent or modify names.\n"
-        "If no tools or apps match, do NOT call any tool.\n\n"
+        "CRITICAL: Use EXACT tool names, skill names, and app slugs from the lists below. Never invent or modify names.\n"
+        "If nothing matches, do NOT call any tool.\n\n"
         f"{examples_block}"
         "## Format\n"
         "Call enable_tools with tool_names copied verbatim from the Available tools list.\n"
@@ -378,17 +635,23 @@ def _search_with_llm(
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
+    if global_skill_lines:
+        system_prompt += (
+            "\n- Only include skill names that appear in Available global skills.\n"
+            "Call enable_global_skills with skill_names copied verbatim from the Available global skills list.\n"
+        )
     if app_lines:
         if auto_enable_apps and enable_apps_callback is not None:
             system_prompt += (
                 "\n- Only include app slugs that appear in Available Pipedream apps.\n"
                 "Call enable_apps with app_slugs copied verbatim from the Available Pipedream apps list.\n"
-                "Do not call enable_tools in the same response as enable_apps.\n"
+                "Do not call enable_tools or enable_global_skills in the same response as enable_apps.\n"
                 "If a needed Pipedream app is not enabled yet, call enable_apps with exact app slugs and stop there.\n"
                 "Do this sparingly and only if you truly require the integration. "
                 "You may already have the tools you need for integration via http_request or other methods."
                 "Example (placeholders, do not copy names):\n"
                 "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
+                "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
                 "app_slugs: [\"<APP_SLUG_FROM_LIST>\"]\n"
             )
         else:
@@ -398,21 +661,25 @@ def _search_with_llm(
                 "Only enable tools that are already available in Available tools.\n"
                 "Example (placeholders, do not copy names):\n"
                 "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
+                "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
             )
     else:
         system_prompt += (
             "\nExample (placeholders, do not copy names):\n"
             "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
+            "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
         )
     user_prompt = f"Query: {query}\n\nAvailable tools:\n" + "\n".join(tool_lines)
+    if global_skill_lines:
+        user_prompt += "\n\nAvailable global skills:\n" + "\n".join(global_skill_lines)
     if app_lines:
         user_prompt += (
             "\n\nAvailable Pipedream apps:\n"
             + "\n".join(app_lines)
-            + "\n\nUse ONLY tool names and app slugs from the lists above."
+            + "\n\nUse ONLY tool names, skill names, and app slugs from the lists above."
         )
         if auto_enable_apps and enable_apps_callback is not None:
-            user_prompt += " If none match, do not call enable_tools or enable_apps."
+            user_prompt += " If none match, do not call enable_tools, enable_global_skills, or enable_apps."
         else:
             user_prompt += (
                 f' If a needed app is not enabled, you may tell the user to go to "Add Apps" '
@@ -420,10 +687,10 @@ def _search_with_llm(
                 "Do this sparingly and only if you truly require the integration. "
                 "You may already have the tools you need for integration via http_request or other methods."
             )
-            user_prompt += " If none match, do not call enable_tools."
+            user_prompt += " If none match, do not call enable_tools or enable_global_skills."
     else:
-        user_prompt += "\n\nUse ONLY tool names from the list above."
-        user_prompt += " If none match, do not call enable_tools."
+        user_prompt += "\n\nUse ONLY tool names and skill names from the lists above."
+        user_prompt += " If none match, do not call enable_tools or enable_global_skills."
 
     try:
         failover_configs = get_llm_config_with_failover(
@@ -443,70 +710,11 @@ def _search_with_llm(
                 )
                 max_items = get_enabled_tool_limit(agent)
 
-                enable_tools_def = {
-                    "type": "function",
-                    "function": {
-                        "name": "enable_tools",
-                        "description": (
-                            "Enable tools and optionally suggest external resources. "
-                            "Use exact full names from the catalog."
-                        ),
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "tool_names": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "minItems": 1,
-                                    "maxItems": max_items,
-                                    "description": "List of full tool names to enable",
-                                },
-                                "external_resources": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "object",
-                                        "properties": {
-                                            "name": {"type": "string", "description": "Resource name"},
-                                            "description": {"type": "string", "description": "Brief description"},
-                                            "url": {"type": "string", "description": "Full URL"},
-                                        },
-                                        "required": ["name", "description", "url"],
-                                    },
-                                    "maxItems": 5,
-                                    "description": "Public APIs, websites, or datasets with verified URLs",
-                                },
-                            },
-                            "required": ["tool_names"],
-                        },
-                    },
-                }
-                tool_defs = [enable_tools_def]
-                if app_lines and auto_enable_apps and enable_apps_callback is not None:
-                    tool_defs.append(
-                        {
-                            "type": "function",
-                            "function": {
-                                "name": "enable_apps",
-                                "description": (
-                                    "Enable Pipedream apps for future tool discovery. "
-                                    "Use exact app slugs from the Available Pipedream apps list."
-                                ),
-                                "parameters": {
-                                    "type": "object",
-                                    "properties": {
-                                        "app_slugs": {
-                                            "type": "array",
-                                            "items": {"type": "string"},
-                                            "minItems": 1,
-                                            "maxItems": 20,
-                                            "description": "List of exact Pipedream app slugs to enable",
-                                        },
-                                    },
-                                    "required": ["app_slugs"],
-                                },
-                            },
-                        }
-                    )
+                tool_defs = _build_search_tool_definitions(
+                    max_items=max_items,
+                    include_global_skills=bool(global_skill_lines),
+                    include_app_enablement=bool(app_lines and auto_enable_apps and enable_apps_callback is not None),
+                )
 
                 run_kwargs: Dict[str, Any] = {}
                 safety_value = getattr(agent.user, "id", None) if agent and agent.user else None
@@ -541,56 +749,24 @@ def _search_with_llm(
                 message = response.choices[0].message
                 content_text = getattr(message, "content", None) or ""
 
-                requested: List[str] = []
-                requested_apps: List[str] = []
-                external_resources: List[Dict[str, str]] = []
-                tool_calls = getattr(message, "tool_calls", None) or []
-                for tool_call in tool_calls:
-                    try:
-                        if not tool_call:
-                            continue
-                        function_block = getattr(tool_call, "function", None) or tool_call.get("function")
-                        if not function_block:
-                            continue
-                        function_name = getattr(function_block, "name", None) or function_block.get("name")
-                        raw_args = getattr(function_block, "arguments", None) or function_block.get("arguments") or "{}"
-                        arguments = json.loads(raw_args)
-                        if function_name == "enable_tools":
-                            names = arguments.get("tool_names") or []
-                            if isinstance(names, list):
-                                for name in names:
-                                    if isinstance(name, str) and name not in requested:
-                                        requested.append(name)
-                            resources = arguments.get("external_resources") or []
-                            if isinstance(resources, list):
-                                for res in resources:
-                                    if isinstance(res, dict) and res.get("name") and res.get("url"):
-                                        url = res.get("url", "")
-                                        if url.startswith("http://") or url.startswith("https://"):
-                                            external_resources.append({
-                                                "name": str(res.get("name", ""))[:100],
-                                                "description": str(res.get("description", ""))[:200],
-                                                "url": url[:500],
-                                            })
-                        elif function_name == "enable_apps":
-                            app_slugs = arguments.get("app_slugs") or []
-                            if isinstance(app_slugs, list):
-                                for app_slug in app_slugs:
-                                    if isinstance(app_slug, str) and app_slug not in requested_apps:
-                                        requested_apps.append(app_slug)
-                    except Exception:  # pragma: no cover - defensive parsing
-                        logger.exception("search_tools.%s: failed to parse tool call; skipping", provider_name)
-
-                valid_requested = [name for name in requested if name in available_names]
-                invalid_requested = [name for name in requested if name not in available_names]
-                if invalid_requested:
-                    logger.info(
-                        "search_tools.%s: ignoring invalid tool names: %s",
-                        provider_name,
-                        ", ".join(invalid_requested[:10]) + ("..." if len(invalid_requested) > 10 else ""),
-                    )
-
-                requested = valid_requested
+                parsed_calls = _parse_search_tool_calls(
+                    getattr(message, "tool_calls", None) or [],
+                    provider_name=provider_name,
+                )
+                requested = _normalize_requested_selection(
+                    parsed_calls["tools"],
+                    available_names,
+                    provider_name=provider_name,
+                    item_label="tool names",
+                )
+                requested_skills = _normalize_requested_selection(
+                    parsed_calls["skills"],
+                    available_global_skill_names,
+                    provider_name=provider_name,
+                    item_label="global skill names",
+                )
+                requested_apps = parsed_calls["apps"]
+                external_resources = parsed_calls["external_resources"]
                 enabled_apps_result = None
                 if requested_apps and enable_apps_callback is not None:
                     try:
@@ -620,12 +796,25 @@ def _search_with_llm(
                     response_payload: ToolSearchResult = {
                         "status": "success",
                         "message": "\n".join([line for line in message_lines if line]) or "",
-                        "enabled_apps": enabled_apps_result.get("enabled", []),
-                        "already_enabled": enabled_apps_result.get("already_enabled", []),
-                        "invalid": enabled_apps_result.get("invalid", []),
-                        "effective_apps": enabled_apps_result.get("effective_apps", []),
+                        "apps": _section_payload(
+                            enabled=enabled_apps_result.get("enabled", []),
+                            already_enabled=enabled_apps_result.get("already_enabled", []),
+                            invalid=enabled_apps_result.get("invalid", []),
+                            effective_apps=enabled_apps_result.get("effective_apps", []),
+                        ),
                     }
                     return response_payload
+
+                enabled_global_skills_result = None
+                if requested_skills:
+                    try:
+                        enabled_global_skills_result = enable_global_skills(
+                            agent,
+                            requested_skills,
+                            available_skills=global_skills,
+                        )
+                    except Exception as err:  # pragma: no cover - defensive enabling
+                        logger.error("search_tools.%s: enable_global_skills failed: %s", provider_name, err)
 
                 enabled_result = None
                 if requested:
@@ -646,18 +835,21 @@ def _search_with_llm(
                 message_lines: List[str] = []
                 if content_text:
                     message_lines.append(content_text.strip())
-                if enabled_result and enabled_result.get("status") == "success":
-                    summary: List[str] = []
-                    if enabled_result.get("enabled"):
-                        summary.append(f"Enabled: {', '.join(enabled_result['enabled'])}")
-                    if enabled_result.get("already_enabled"):
-                        summary.append(f"Already enabled: {', '.join(enabled_result['already_enabled'])}")
-                    if enabled_result.get("evicted"):
-                        summary.append(f"Evicted (LRU): {', '.join(enabled_result['evicted'])}")
-                    if enabled_result.get("invalid"):
-                        summary.append(f"Invalid: {', '.join(enabled_result['invalid'])}")
-                    if summary:
-                        message_lines.append("; ".join(summary))
+                _append_section_summary(
+                    message_lines,
+                    enabled_global_skills_result,
+                    enabled_label="Enabled skills",
+                    already_enabled_label="Already enabled skills",
+                    conflicts_label="Skill conflicts",
+                )
+                _append_section_summary(
+                    message_lines,
+                    enabled_result,
+                    enabled_label="Enabled tools",
+                    already_enabled_label="Already enabled tools",
+                    evicted_label="Evicted (LRU)",
+                    invalid_label="Invalid tools",
+                )
 
                 # Fallback: if the LLM did not call enable_tools, heuristically enable core built-ins
                 if not requested:
@@ -671,30 +863,34 @@ def _search_with_llm(
                                 provider_name,
                                 ", ".join(fallback),
                             )
-                            if enabled_result and enabled_result.get("status") == "success":
-                                summary: List[str] = []
-                                if enabled_result.get("enabled"):
-                                    summary.append(f"Enabled: {', '.join(enabled_result['enabled'])}")
-                                if enabled_result.get("already_enabled"):
-                                    summary.append(f"Already enabled: {', '.join(enabled_result['already_enabled'])}")
-                                if enabled_result.get("evicted"):
-                                    summary.append(f"Evicted (LRU): {', '.join(enabled_result['evicted'])}")
-                                if enabled_result.get("invalid"):
-                                    summary.append(f"Invalid: {', '.join(enabled_result['invalid'])}")
-                                if summary:
-                                    message_lines.append("; ".join(summary))
+                            _append_section_summary(
+                                message_lines,
+                                enabled_result,
+                                enabled_label="Enabled tools",
+                                already_enabled_label="Already enabled tools",
+                                evicted_label="Evicted (LRU)",
+                                invalid_label="Invalid tools",
+                            )
                         except Exception as err:  # pragma: no cover - defensive enabling
                             logger.error("search_tools.%s: fallback enable_tools failed: %s", provider_name, err)
 
                 # Build explicit message about what happened
+                skills_were_enabled = (
+                    enabled_global_skills_result
+                    and enabled_global_skills_result.get("status") == "success"
+                    and (
+                        enabled_global_skills_result.get("enabled")
+                        or enabled_global_skills_result.get("already_enabled")
+                    )
+                )
                 tools_were_enabled = enabled_result and enabled_result.get("status") == "success" and (
                     enabled_result.get("enabled") or enabled_result.get("already_enabled")
                 )
 
-                if not message_lines and not tools_were_enabled:
+                if not message_lines and not tools_were_enabled and not skills_were_enabled:
                     # Make it explicit when no tools were enabled
                     message_lines.append(
-                        "No matching tools found for your query. "
+                        "No matching tools or global skills found for your query. "
                         "Try a more specific query like 'linkedin profile' or 'crunchbase company', "
                         "or use the web search/scrape tools from the available list."
                     )
@@ -703,14 +899,18 @@ def _search_with_llm(
                     "status": "success",
                     "message": "\n".join([line for line in message_lines if line]) or "",
                 }
+                if enabled_global_skills_result and enabled_global_skills_result.get("status") == "success":
+                    response_payload["skills"] = _section_payload(
+                        enabled=enabled_global_skills_result.get("enabled", []),
+                        already_enabled=enabled_global_skills_result.get("already_enabled", []),
+                        conflicts=enabled_global_skills_result.get("conflicts", []),
+                    )
                 if enabled_result and enabled_result.get("status") == "success":
-                    response_payload.update(
-                        {
-                            "enabled_tools": enabled_result.get("enabled", []),
-                            "already_enabled": enabled_result.get("already_enabled", []),
-                            "evicted": enabled_result.get("evicted", []),
-                            "invalid": enabled_result.get("invalid", []),
-                        }
+                    response_payload["tools"] = _section_payload(
+                        enabled=enabled_result.get("enabled", []),
+                        already_enabled=enabled_result.get("already_enabled", []),
+                        evicted=enabled_result.get("evicted", []),
+                        invalid=enabled_result.get("invalid", []),
                     )
                 # Include external resources if any were suggested
                 if external_resources:
@@ -765,6 +965,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         }
         for entry in get_available_custom_tool_entries(agent).values()
     ]
+    global_skill_catalog = get_compatible_global_skills(agent)
 
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog
     pipedream_app_catalog: list[Any] = []
@@ -780,7 +981,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         except PipedreamCatalogError as exc:
             logger.warning("search_tools: unable to search Pipedream apps for agent %s: %s", agent.id, exc)
 
-    if not combined_catalog and not pipedream_app_catalog:
+    if not combined_catalog and not global_skill_catalog and not pipedream_app_catalog:
         logger.info("search_tools: no tools available for agent %s", agent.id)
         return {"status": "success", "tools": [], "message": "No tools available"}
 
@@ -791,6 +992,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         catalog=combined_catalog,
         enable_callback=enable_tools,
         empty_message="No tools available",
+        global_skill_catalog=global_skill_catalog,
         enable_apps_callback=(
             partial(
                 enable_pipedream_apps_for_agent,

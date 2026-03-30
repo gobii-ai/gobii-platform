@@ -21,6 +21,7 @@ from api.agent.tools.tool_manager import (
 )
 from api.models import (
     BrowserUseAgent,
+    GlobalAgentSkill,
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentSkill,
@@ -244,6 +245,58 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertEqual(result.deleted_names, [])
         self.assertEqual(result.created_versions, [])
         mock_available_tools.assert_not_called()
+
+    @patch("api.agent.tools.tool_manager.get_available_tool_ids", return_value={"sqlite_batch", "read_file"})
+    def test_sqlite_skill_update_forks_global_skill_source_on_local_edit(self, _mock_available_tools):
+        global_skill = GlobalAgentSkill.objects.create(
+            name="daily-brief-template",
+            description="Daily digest workflow",
+            tools=["sqlite_batch"],
+            instructions="Collect updates and summarize.",
+        )
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            global_skill=global_skill,
+            name="daily-brief-template",
+            description="Daily digest workflow",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Collect updates and summarize.",
+        )
+
+        baseline = seed_sqlite_skills(self.agent)
+        self.assertIsNotNone(baseline)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                UPDATE "__agent_skills"
+                SET instructions = ?, tools = ?
+                WHERE name = ? AND version = 1;
+                """,
+                (
+                    "Collect updates, summarize, and include blockers.",
+                    '["sqlite_batch","read_file"]',
+                    "daily-brief-template",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = apply_sqlite_skill_updates(self.agent, baseline)
+
+        self.assertFalse(result.errors)
+        self.assertIn("daily-brief-template@2", result.created_versions)
+        latest = (
+            PersistentAgentSkill.objects.filter(agent=self.agent, name="daily-brief-template")
+            .order_by("-version")
+            .first()
+        )
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertIsNone(latest.global_skill)
 
     def test_prompt_block_uses_top_three_latest_skills(self):
         now = timezone.now()

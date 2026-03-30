@@ -18,7 +18,9 @@ from api.models import (
     PersistentAgent,
     BrowserUseAgent,
     ProxyServer,
+    GlobalAgentSkill,
     PersistentAgentEnabledTool,
+    PersistentAgentSkill,
     MCPServerConfig,
     MCPServerOAuthCredential,
     PersistentAgentMCPServer,
@@ -1357,8 +1359,8 @@ class MCPToolFunctionsTests(TestCase):
 
         result = search_tools(self.agent, "scrape web pages")
         self.assertEqual(result["status"], "success")
-        self.assertIn("Enabled:", result["message"]) 
-        self.assertEqual(result.get("enabled_tools"), ["mcp_brightdata_scrape", "mcp_brightdata_search"]) 
+        self.assertIn("Enabled tools:", result["message"]) 
+        self.assertEqual(result.get("tools", {}).get("enabled"), ["mcp_brightdata_scrape", "mcp_brightdata_search"]) 
         mock_enable_batch.assert_called_once()
 
     @patch('api.agent.tools.search_tools.enable_tools')
@@ -1496,6 +1498,318 @@ class MCPToolFunctionsTests(TestCase):
         self.assertIn("http_request", user_message)
         self.assertNotIn("create_image", user_message)
         mock_search_apps.assert_not_called()
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_includes_global_skill_prompt_section(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate an ops report",
+            tools=["sqlite_batch"],
+            instructions="Collect the latest operational metrics and summarize them.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "anything")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Available global skills:", user_message)
+        self.assertIn("- ops-report: Generate an ops report | tools: sqlite_batch", user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual(
+            [tool_def["function"]["name"] for tool_def in tool_defs],
+            ["enable_tools", "enable_global_skills"],
+        )
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_omits_incompatible_global_skills_from_prompt(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        GlobalAgentSkill.objects.create(
+            name="missing-integration-skill",
+            description="Requires an unavailable integration",
+            tools=["mcp_missing_tool"],
+            instructions="Use the unavailable integration.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "anything")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn("Available global skills:", user_message)
+        self.assertNotIn("missing-integration-skill", user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools"])
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_enables_global_skill_and_imports_agent_copy(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate an ops report",
+            tools=["sqlite_batch"],
+            instructions="Collect the latest operational metrics and summarize them.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the ops report skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_global_skills",
+                    "arguments": json.dumps({"skill_names": ["ops-report"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "generate recurring ops reports")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["skills"]["enabled"], ["ops-report"])
+        self.assertEqual(result["skills"]["already_enabled"], [])
+        self.assertEqual(result["skills"]["conflicts"], [])
+        imported = PersistentAgentSkill.objects.get(agent=self.agent, name="ops-report")
+        self.assertEqual(imported.global_skill, skill)
+        self.assertEqual(imported.version, 1)
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_global_skill_enablement_is_idempotent(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate an ops report",
+            tools=["sqlite_batch"],
+            instructions="Collect the latest operational metrics and summarize them.",
+        )
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            global_skill=skill,
+            name="ops-report",
+            description=skill.description,
+            version=1,
+            tools=["sqlite_batch"],
+            instructions=skill.instructions,
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the ops report skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_global_skills",
+                    "arguments": json.dumps({"skill_names": ["ops-report"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "generate recurring ops reports")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["skills"]["enabled"], [])
+        self.assertEqual(result["skills"]["already_enabled"], ["ops-report"])
+        self.assertEqual(
+            PersistentAgentSkill.objects.filter(agent=self.agent, global_skill=skill).count(),
+            1,
+        )
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_global_skill_conflict_does_not_merge_histories(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate an ops report",
+            tools=["sqlite_batch"],
+            instructions="Collect the latest operational metrics and summarize them.",
+        )
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="ops-report",
+            description="Locally customized skill",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Use a local variant instead.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the ops report skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_global_skills",
+                    "arguments": json.dumps({"skill_names": ["ops-report"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "generate recurring ops reports")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["skills"]["enabled"], [])
+        self.assertEqual(result["skills"]["conflicts"], ["ops-report"])
+        self.assertFalse(PersistentAgentSkill.objects.filter(agent=self.agent, global_skill=skill).exists())
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.tool_manager.get_enabled_tool_limit', return_value=1)
+    def test_search_tools_global_skill_enablement_preserves_required_tools(
+        self,
+        _mock_limit,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        GlobalAgentSkill.objects.create(
+            name="file-review",
+            description="Read files before summarizing them",
+            tools=["read_file"],
+            instructions="Open the requested file before summarizing it.",
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="create_chart",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the file review skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_global_skills",
+                    "arguments": json.dumps({"skill_names": ["file-review"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "review files consistently")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["skills"]["enabled"], ["file-review"])
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="read_file").exists()
+        )
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="create_chart").exists()
+        )
         mock_enable_tools.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')
@@ -1672,10 +1986,10 @@ class MCPToolFunctionsTests(TestCase):
         result = search_tools(self.agent, "post to slack")
 
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["enabled_apps"], ["slack"])
-        self.assertEqual(result["already_enabled"], [])
-        self.assertEqual(result["invalid"], [])
-        self.assertEqual(result["effective_apps"], ["google_sheets", "slack"])
+        self.assertEqual(result["apps"]["enabled"], ["slack"])
+        self.assertEqual(result["apps"]["already_enabled"], [])
+        self.assertEqual(result["apps"]["invalid"], [])
+        self.assertEqual(result["apps"]["effective_apps"], ["google_sheets", "slack"])
         self.assertIn("Run search_tools again", result["message"])
         mock_enable_pipedream_apps_for_agent.assert_called_once_with(
             self.agent,
@@ -1740,7 +2054,7 @@ class MCPToolFunctionsTests(TestCase):
         result = search_tools(self.agent, "search the web")
 
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["enabled_tools"], ["mcp_brightdata_search"])
+        self.assertEqual(result["tools"]["enabled"], ["mcp_brightdata_search"])
         mock_enable_tools.assert_called_once_with(self.agent, ["mcp_brightdata_search"])
 
     @patch('api.agent.tools.search_tools.enable_tools')
@@ -2155,10 +2469,12 @@ class MCPToolExecutorsTests(TestCase):
         mock_search.return_value = {
             "status": "success",
             "message": "Enabled: mcp_tool_a",
-            "enabled_tools": ["mcp_tool_a"],
-            "already_enabled": [],
-            "evicted": [],
-            "invalid": []
+            "tools": {
+                "enabled": ["mcp_tool_a"],
+                "already_enabled": [],
+                "evicted": [],
+                "invalid": [],
+            },
         }
         result = execute_search_tools(self.agent, {"query": "test query"})
         self.assertEqual(result["status"], "success")
@@ -2171,7 +2487,7 @@ class MCPToolExecutorsTests(TestCase):
         mock_search.return_value = {
             "status": "success",
             "message": "Enabled: mcp_tool_a",
-            "enabled_tools": ["mcp_tool_a"],
+            "tools": {"enabled": ["mcp_tool_a"], "already_enabled": []},
         }
         result = execute_search_tools(self.agent, {"query": "test query", "will_continue_work": False})
         self.assertEqual(result["status"], "success")

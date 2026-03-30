@@ -11,6 +11,7 @@ from api.admin import PersistentAgentAdmin
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
+    GlobalAgentSkill,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
@@ -133,9 +134,18 @@ class PersistentAgentAdminTests(TestCase):
         inline_models = {inline.model for inline in model_admin.inlines}
 
         self.assertIn(PersistentAgentSkill, inline_models)
+        skill_inline = next(inline for inline in model_admin.inlines if inline.model is PersistentAgentSkill)
+        self.assertIn("global_skill", skill_inline.fields)
+        self.assertIn("global_skill", skill_inline.readonly_fields)
 
     def test_persistent_agent_skill_admin_is_registered(self):
         self.assertIn(PersistentAgentSkill, admin.site._registry)
+
+    def test_global_agent_skill_admin_is_registered(self):
+        self.assertIn(GlobalAgentSkill, admin.site._registry)
+        admin_view = admin.site._registry[GlobalAgentSkill]
+        self.assertIn("is_active", admin_view.list_display)
+        self.assertIn("instructions", admin_view.search_fields)
 
     def test_trigger_processing_skips_expired_agents_when_requested(self):
         expired_agent = self._create_agent(
