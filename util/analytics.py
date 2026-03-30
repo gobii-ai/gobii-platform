@@ -107,6 +107,10 @@ class AnalyticsEvent(StrEnum):
     HUMAN_INPUT_PANEL_SHOWN = 'Human Input Panel Shown'
     HUMAN_INPUT_OPTION_SELECTED = 'Human Input Option Selected'
     HUMAN_INPUT_RESPONSE_SUBMITTED = 'Human Input Response Submitted'
+    SANDBOX_SESSION_STARTED = 'Sandbox Session Started'
+    SANDBOX_EXECUTION_ROUTED = 'Sandbox Execution Routed'
+    SANDBOX_UNAVAILABLE = 'Sandbox Unavailable'
+    SANDBOX_SESSION_STOPPED = 'Sandbox Session Stopped'
 
     # Persistent Agent Events
     PERSISTENT_AGENT_CREATED = 'Persistent Agent Created'
