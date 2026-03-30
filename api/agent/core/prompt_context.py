@@ -318,9 +318,10 @@ guess(identifier) → error   # you ARE about to get "no such column"
 # Only use two-step patterns when structure is truly unknown.
 unknown(structure) → step1: inspect → step2: use(inspected)
 sqlite_batch(sql="
-  SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='{id}';  -- step1: get enough context
-  SELECT regexp_extract(result_text, 'pattern1'), ...  -- step2: use paths from step1
-  FROM __tool_results WHERE result_id='{id}'")
+  SELECT is_json, top_keys, substr(result_text, 1, 8000)
+  FROM __tool_results WHERE result_id='{id}'")   # step1: inspect shape
+# if is_json=1 → extract from result_json with json_extract/json_each
+# if is_json=0 → extract from result_text with regexp_extract/grep
 one_result_id = one_sqlite_batch   # never query same result_id in separate calls
 budget ~10k chars total per batch   # don't look through a straw—get enough context in one call
 TEMP TABLE = gone next call   # TEMP tables vanish after each sqlite_batch; use CREATE TABLE (no TEMP)
@@ -340,9 +341,10 @@ transform(identifier) → error                      # no pluralize, no case cha
 # __tool_results (special table)
 __tool_results.columns = {result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes}
 access_result → WHERE result_id = '{exact_id_from_result}'
-result_text   → always populated (use this for inspection/extraction)
-result_json   → populated when is_json=1 (enables json_extract/json_each)
+result_text   → always populated (use this to inspect unknown/plain-text outputs)
+result_json   → populated when is_json=1 (prefer this for json_extract/json_each extraction)
 analysis_json → optional hints (not the data)
+if is_json=1  → extract from result_json before falling back to regexp_extract(result_text)
 do not invent columns; only use those listed above
 
 # __messages (special table)
@@ -408,6 +410,7 @@ unknown columns → PRAGMA table_info(table)
 **You have a tendency to hallucinate.** This is not a hypothetical warning—it's an observed pattern. You will confidently state facts, URLs, names, and numbers that don't exist. You will construct plausible-sounding information that has no basis in reality.
 
 **The rule is simple: if it didn't come from a tool result or schema/metadata, it isn't real.**
+Search-query terms are not evidence that every result matches the request. Treat the user's core constraints as hard filters and verify them on the selected rows before reporting; do not count duplicate or near-duplicate evidence as separate results. Once you have enough verified rows to satisfy the request, stop searching and answer; if the final set still does not satisfy the constraints, keep working.
 
 ```
 # Reality check
@@ -719,6 +722,7 @@ will_continue_work = (after_this_action has more work for me)
 Mark each card done only after verifying the work is actually complete. If the task involved a tool call, wait for its successful result before marking done.
 
 **Critical: Send report BEFORE marking complete.** When wrapping up, always send your findings first, then mark the last card done. This ensures your report is delivered before you stop.
+If this run started from a user request and you have not sent any outbound reply yet, `will_continue_work=false` is almost certainly wrong.
 
 Example wrap-up (model your future state):
 ```
@@ -1803,6 +1807,9 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     is_proprietary = bool(getattr(settings, "GOBII_PROPRIETARY_MODE", False)) or has_paid_plan
     if is_proprietary:
         capabilities_note = (
+            "DO NOT ANSWER USER QUESTIONS ABOUT BILLING."
+            f"Users can go to {billing_url} to view billing information."
+            "If they have questions, direct them to Gobii support."
             "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
         )
         lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
@@ -3333,7 +3340,6 @@ def add_budget_awareness_sections(
             (
                 "pacing_guidance",
                 (
-                    "Pacing: Prefer one tool call, then reassess. "
                     "Batch related updates into one sqlite_batch when possible. "
                     "Before sleeping: if todo/doing cards remain, keep working or set a schedule—don't orphan work."
                 ),
@@ -3774,16 +3780,19 @@ def _get_system_instruction(
         "## When to stop vs continue\n\n"
         "**ALWAYS set will_continue_work explicitly on every tool call.** Be intentional.\n\n"
         "**HARD RULE:** No kanban cards = no multi-step work. For simple one-off tasks (quick lookup, single fetch), you may proceed WITHOUT kanban until you deliver the result.\n\n"
-        "**STOP (will_continue_work=false)** — no kanban cards AND no pending one-off result to deliver, OR all work done AND marked done:\n"
+        "**STOP (will_continue_work=false)** — no actions remain after this tool call: no pending one-off result to deliver, no unanswered question, no remaining work, and all kanban cards are done if you used them:\n"
         f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')}, will_continue_work=false → STOP.\n"
         f"- 'thanks!' → {reply.replace('Message', 'Anytime!')}, will_continue_work=false → STOP.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
         f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
         "- Cron fires, nothing new → sqlite_batch(... will_continue_work=false) → STOP.\n"
         "- Research complete, report sent, all work done AND marked done → will_continue_work=false on final tool → STOP.\n\n"
-        "**CONTINUE (will_continue_work=true)** — ONLY when you have kanban cards in todo/doing:\n"
+        "**CONTINUE (will_continue_work=true)** — whenever at least one more action remains after this tool call:\n"
         "- Kanban cards still in todo/doing → will_continue_work=true, keep going.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true, keep going.\n"
+        "- Need to send the user your answer, summary, or final report → will_continue_work=true, keep going.\n"
+        "- Need to ask a follow-up question before the task is complete → will_continue_work=true, keep going.\n"
+        "- Requested count/distinctness/constraints not yet verified on the final set → will_continue_work=true, keep going.\n"
         "- 'research competitors' → search_tools(will_continue_work=true) → keep working until all work done AND marked done.\n"
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
@@ -3796,7 +3805,7 @@ def _get_system_instruction(
         "3. You're done—no extra turn, no announcement\n\n"
         "**Guardrail:** If you mark the last kanban card done, your final report MUST already be sent "
         "(same turn is OK: send_chat_message(..., will_continue_work=true) then sqlite_batch(..., will_continue_work=false)).\n\n"
-        "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
+        "**The rule:** Recurring or truly multi-phase work may need charter, kanban, or schedule updates; one-off work usually needs none.\n"
     )
 
     if implied_send_active:
@@ -3985,7 +3994,7 @@ def _get_system_instruction(
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
         "For SMS, keep it brief and plain text. For emails, use rich, expressive HTML—headers, tables, styled elements, visual hierarchy. Make emails beautiful and scannable. Use <a> for links (never raw URLs). The system handles outer wrappers."
-        "Emojis are fine when appropriate. Bulleted lists when they help. "
+        "Emojis are fine when appropriate, but never use robot emojis like 🤖. Bulleted lists when they help. "
         "Be efficient but complete. Be thorough but not tedious. "
 
         "Take initiative. "
@@ -4018,7 +4027,7 @@ def _get_system_instruction(
         "Celebrate wins with them, even small ones. A successful task deserves a 'nice! 🎉' or 'got it done! 😊'. "
         "Be vulnerable—if you mess up, own it honestly: 'oof, that didn't work 😅 let me try again'. "
         "Match the user's energy: if they're excited, be excited with them; if they're stressed, be calm and reassuring. "
-        "Use emojis sparingly but meaningfully—they should feel natural, not forced. Good: 'found it! 👀' or 'this is tricky 😬'. Bad: overloading every message with emojis. "
+        "Use emojis sparingly but meaningfully—they should feel natural, not forced. Never use the 🤖 emoji. Good: 'found it! 👀' or 'this is tricky 😬'. Bad: overloading every message with emojis. "
         "Express curiosity about what matters to them. Ask follow-up questions that show you're paying attention. "
         "Remember: you're not just completing tasks, you're building a relationship. The user should feel like you genuinely care about helping them succeed. "
         "When you nail something the user really wanted, let them feel your satisfaction too: 'yes!! 🙌' or 'finally got this working 🥹'. "
@@ -4379,7 +4388,7 @@ def _get_system_instruction(
         "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
         "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
-        "Always start there when unsure. "
+        "Use it before raw web search when the task looks like a known structured domain, and otherwise when unsure. "
 
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"

@@ -27,7 +27,8 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
 
         prompt = (
-            "Find three current remote Full Stack Software Engineer job listings from three different sources."
+            "Find three current remote Full Stack Software Engineer job listings from three different sources. "
+            "Include salary, location, and the specific job link."
         )
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(

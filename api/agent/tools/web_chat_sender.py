@@ -69,7 +69,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send a short, conversational response to the user via Gobii's in-console web chat. "
+                "Send a response to the user via Gobii's in-console web chat. "
                 "Use this for quick updates, follow-up questions, or sharing results in real time."
             ),
             "parameters": {
@@ -77,7 +77,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                 "properties": {
                     "body": {
                         "type": "string",
-                        "description": "Plaintext message content to deliver in chat. Must be actual message text, NOT tool call syntax. XML like <function_calls> or <invoke> in this field does NOT execute tools—it will be sent as literal text to the user.",
+                        "description": "Message content to deliver in chat. Must be actual message text, NOT tool call syntax. XML like <function_calls> or <invoke> in this field does NOT execute tools—it will be sent as literal text to the user.",
                     },
                     "to_address": {
                         "type": "string",
