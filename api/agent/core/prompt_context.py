@@ -2999,12 +2999,14 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "Filespace paths like `/reports/foo.txt` map to `/workspace/reports/foo.txt`; in tool arguments, prefer filespace paths and avoid writing `/workspace` explicitly. "
         "For `run_command`, `cwd` is relative to the workspace root; do not pass `/workspace` as the cwd. "
         "Common CLI tools available by default include `git`, `curl`, `rg`, `jq`, `less`, `unzip`, `zip`, `file`, `tree`, and `fd`/`fdfind`. "
-        "Standard proxy env vars are already injected for sandbox execution: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, plus lowercase variants. "
-        "Global `env_var` secrets are available as environment variables inside sandbox execution contexts. "
-        "Use the exact env var names shown in the secrets block; do not assume a script's variable names exist. "
-        "For outbound network work, prefer `http_request` or `ctx.call_tool('http_request', ...)` inside custom tools before raw sockets or hand-rolled proxy logic. "
-        "For raw outbound apart from `http_request` or `ctx.call_tool('http_request', ...)`, you MUST use the proxy. "
-        "Prefer higher-level HTTP/HTTPS libraries and APIs when possible, and do not spend cycles re-proving basic sandbox connectivity unless you have a concrete failure."
+        "Custom tools can import any pip package — declare deps with PEP 723 inline metadata and they are auto-installed via uv. "
+        "Standard proxy env vars are already injected: `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, plus lowercase variants. "
+        "All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
+        "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx). "
+        "subprocess curl honors proxy env vars automatically. For tool-to-tool calls, use ctx.call_tool() as-is; it handles the internal bridge transport for you. "
+        "Secrets (API keys, DB credentials, auth tokens) are available as env vars via `os.environ`. "
+        "ALWAYS use secrets for sensitive values — never hardcode credentials. "
+        "Use the exact env var names shown in the secrets block; do not assume a script's variable names exist."
     )
 
 

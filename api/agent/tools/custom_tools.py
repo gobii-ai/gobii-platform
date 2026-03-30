@@ -24,6 +24,7 @@ from api.models import (
 from api.agent.tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
 from api.services.sandbox_compute import (
+    LocalSandboxBackend,
     SandboxComputeService,
     SandboxComputeUnavailable,
     sandbox_compute_enabled_for_agent,
@@ -41,44 +42,33 @@ MAX_CUSTOM_TOOL_TIMEOUT_SECONDS = 900
 MAX_CUSTOM_TOOL_SOURCE_BYTES = 64 * 1024
 ENTRYPOINT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-_SOURCE_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SOURCE_B64"
 _PARAMS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_PARAMS_B64"
 _ENTRYPOINT_ENV_KEY = "SANDBOX_CUSTOM_TOOL_ENTRYPOINT"
 _BRIDGE_URL_ENV_KEY = "SANDBOX_CUSTOM_TOOL_BRIDGE_URL"
 _TOKEN_ENV_KEY = "SANDBOX_CUSTOM_TOOL_TOKEN"
 _TOOL_NAME_ENV_KEY = "SANDBOX_CUSTOM_TOOL_NAME"
 _SOURCE_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SOURCE_PATH"
+_EXEC_SOURCE_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH"
 _SQLITE_DB_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"
 
-CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
-    f"""
-    python - <<'PY'
+_GOBII_CTX_MODULE = textwrap.dedent(
+    f"""\
     import base64
-    import inspect
     import json
     import os
-    import sqlite3
+    import subprocess
     import sys
-    import traceback
     import urllib.error
     import urllib.request
 
     RESULT_MARKER = {CUSTOM_TOOL_RESULT_MARKER!r}
-
-
-    def _decode_text_env(key):
-        raw = os.environ.get(key, "")
-        if not raw:
-            return ""
-        return base64.b64decode(raw.encode("utf-8")).decode("utf-8")
-
+    CURL_STATUS_MARKER = "__GOBII_CURL_STATUS__:"
 
     def _decode_json_env(key, default):
         raw = os.environ.get(key, "")
         if not raw:
             return default
         return json.loads(base64.b64decode(raw.encode("utf-8")).decode("utf-8"))
-
 
     class ToolContext:
         def __init__(self):
@@ -88,12 +78,7 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
             self.token = os.environ.get({_TOKEN_ENV_KEY!r}, "")
             self.sqlite_db_path = os.environ.get({_SQLITE_DB_PATH_ENV_KEY!r}, "")
 
-        def call_tool(self, tool_name, params=None, **kwargs):
-            payload = {{
-                "tool_name": tool_name,
-                "params": params if params is not None else kwargs,
-            }}
-            body = json.dumps(payload).encode("utf-8")
+        def _call_tool_via_urllib(self, body):
             request = urllib.request.Request(
                 self.bridge_url,
                 data=body,
@@ -105,12 +90,72 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
             )
             try:
                 with urllib.request.urlopen(request, timeout=300) as response:
-                    raw = response.read().decode("utf-8")
+                    return response.read().decode("utf-8")
             except urllib.error.HTTPError as exc:
                 detail = exc.read().decode("utf-8", "replace")
                 raise RuntimeError(f"Tool bridge returned HTTP {{exc.code}}: {{detail[:500]}}") from exc
             except urllib.error.URLError as exc:
                 raise RuntimeError(f"Tool bridge request failed: {{exc}}") from exc
+
+        def _call_tool_via_curl(self, body):
+            command = [
+                "curl",
+                "-sS",
+                "-X",
+                "POST",
+                "-H",
+                "Content-Type: application/json",
+                "-H",
+                f"Authorization: Bearer {{self.token}}",
+                "--data-binary",
+                "@-",
+                "-w",
+                "\\n" + CURL_STATUS_MARKER + "%{{http_code}}",
+                self.bridge_url,
+            ]
+            try:
+                completed = subprocess.run(
+                    command,
+                    input=body,
+                    capture_output=True,
+                    timeout=300,
+                    check=False,
+                )
+            except FileNotFoundError:
+                return self._call_tool_via_urllib(body)
+            except subprocess.TimeoutExpired as exc:
+                raise RuntimeError("Tool bridge request timed out.") from exc
+
+            if completed.returncode != 0:
+                stderr = completed.stderr.decode("utf-8", "replace")
+                raise RuntimeError(f"Tool bridge request failed via curl: {{stderr[:500]}}")
+
+            stdout = completed.stdout.decode("utf-8", "replace")
+            marker = f"\\n{{CURL_STATUS_MARKER}}"
+            marker_index = stdout.rfind(marker)
+            if marker_index == -1:
+                marker = CURL_STATUS_MARKER
+                marker_index = stdout.rfind(marker)
+            if marker_index == -1:
+                raise RuntimeError(f"Tool bridge curl response missing status marker: {{stdout[:500]}}")
+
+            raw = stdout[:marker_index]
+            status_text = stdout[marker_index + len(marker):].strip()
+            try:
+                status_code = int(status_text)
+            except ValueError as exc:
+                raise RuntimeError(f"Tool bridge curl response had invalid status: {{status_text[:100]}}") from exc
+            if status_code >= 400:
+                raise RuntimeError(f"Tool bridge returned HTTP {{status_code}}: {{raw[:500]}}")
+            return raw
+
+        def call_tool(self, tool_name, params=None, **kwargs):
+            payload = {{
+                "tool_name": tool_name,
+                "params": params if params is not None else kwargs,
+            }}
+            body = json.dumps(payload).encode("utf-8")
+            raw = self._call_tool_via_curl(body)
             try:
                 return json.loads(raw or "{{}}")
             except json.JSONDecodeError as exc:
@@ -119,80 +164,50 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = textwrap.dedent(
         def log(self, *parts):
             print(*parts, file=sys.stderr)
 
-
     def _json_safe(value):
         return json.loads(json.dumps(value, default=str))
 
-
-    def _checkpoint_sqlite(sqlite_db_path):
-        if not sqlite_db_path or not os.path.exists(sqlite_db_path):
-            return
-        try:
-            conn = sqlite3.connect(sqlite_db_path)
-            try:
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
-                conn.commit()
-            finally:
-                conn.close()
-        except Exception as exc:
-            print(f"SQLite checkpoint failed: {{exc}}", file=sys.stderr)
-
-
-    def _invoke(entry, params, ctx):
-        signature = inspect.signature(entry)
-        positional = [
-            param
-            for param in signature.parameters.values()
-            if param.kind in (
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            )
-        ]
-        if len(positional) >= 2:
-            first = positional[0].name.lower()
-            if first in ("ctx", "context"):
-                return entry(ctx, params)
-            return entry(params, ctx)
-        if len(positional) == 1:
-            first = positional[0].name.lower()
-            if first in ("ctx", "context"):
-                return entry(ctx)
-            return entry(params)
-        return entry()
-
-
-    def _main():
-        source = _decode_text_env({_SOURCE_ENV_KEY!r})
+    def main(run_fn):
+        import inspect, sqlite3, traceback
         params = _decode_json_env({_PARAMS_ENV_KEY!r}, {{}})
-        entrypoint_name = os.environ.get({_ENTRYPOINT_ENV_KEY!r}, "run")
-        source_path = os.environ.get({_SOURCE_PATH_ENV_KEY!r}, os.environ.get({_TOOL_NAME_ENV_KEY!r}, "custom_tool.py"))
-
-        namespace = {{
-            "__name__": "__custom_tool__",
-            "__file__": source_path,
-        }}
-        exec(compile(source, source_path, "exec"), namespace)
-
-        entry = namespace.get(entrypoint_name)
-        if not callable(entry):
-            raise RuntimeError(f"Custom tool entrypoint '{{entrypoint_name}}' is not callable")
-
         ctx = ToolContext()
         if ctx.sqlite_db_path:
             os.makedirs(os.path.dirname(ctx.sqlite_db_path), exist_ok=True)
-        result = _invoke(entry, params, ctx)
-        _checkpoint_sqlite(ctx.sqlite_db_path)
+        sig = inspect.signature(run_fn)
+        pos = [p for p in sig.parameters.values() if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+        try:
+            if len(pos) >= 2:
+                result = run_fn(ctx, params) if pos[0].name.lower() in ("ctx", "context") else run_fn(params, ctx)
+            elif len(pos) == 1:
+                result = run_fn(ctx) if pos[0].name.lower() in ("ctx", "context") else run_fn(params)
+            else:
+                result = run_fn()
+        except Exception:
+            traceback.print_exc(file=sys.stderr)
+            raise
+        if ctx.sqlite_db_path and os.path.exists(ctx.sqlite_db_path):
+            try:
+                conn = sqlite3.connect(ctx.sqlite_db_path)
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
+                conn.commit()
+                conn.close()
+            except Exception as exc:
+                print(f"SQLite checkpoint failed: {{exc}}", file=sys.stderr)
         print(RESULT_MARKER + json.dumps({{"result": _json_safe(result)}}, default=str))
-
-
-    try:
-        _main()
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-        raise
-    PY
     """
-).strip()
+)
+
+CUSTOM_TOOL_BOOTSTRAP_COMMAND = (
+    "if ! command -v uv >/dev/null 2>&1; then curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1; fi && \\\n"
+    'export PATH="$HOME/.local/bin:$PATH" && \\\n'
+    "command -v uv >/dev/null 2>&1 && \\\n"
+    f'SOURCE_EXEC_PATH="${{{_EXEC_SOURCE_PATH_ENV_KEY}:-/workspace${_SOURCE_PATH_ENV_KEY}}}" && \\\n'
+    "mkdir -p /tmp/_gobii && \\\n"
+    "cat > /tmp/_gobii/_gobii_ctx.py <<'CTXEOF'\n"
+    f"{_GOBII_CTX_MODULE}"
+    "CTXEOF\n"
+    'PYTHONPATH=/tmp/_gobii:${PYTHONPATH:-} uv run "$SOURCE_EXEC_PATH"'
+)
 
 
 def is_custom_tools_available_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -351,8 +366,17 @@ def _encode_env_json(value: Dict[str, Any]) -> str:
     return base64.b64encode(json.dumps(value).encode("utf-8")).decode("ascii")
 
 
-def _encode_env_text(value: str) -> str:
-    return base64.b64encode(value.encode("utf-8")).decode("ascii")
+def _resolve_local_exec_source_path(agent: PersistentAgent, source_path: str) -> Optional[str]:
+    node = _get_filespace_file(agent, source_path)
+    if node is None or node.node_type != AgentFsNode.NodeType.FILE:
+        return None
+    if not node.content or not getattr(node.content, "name", None):
+        return None
+
+    try:
+        return node.content.path
+    except (AttributeError, NotImplementedError, OSError, ValueError):
+        return None
 
 
 def _resolve_bridge_base_url() -> str:
@@ -426,25 +450,20 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
             "name": "create_custom_tool",
             "description": (
                 "Create or update a sandboxed Python custom tool for this agent. "
-                "Use custom tools for bulk data processing, repetitive deterministic work, "
-                "or reusable multi-step tool orchestration. "
-                "The source file must be self-contained and define `run(params, ctx)` "
-                "(or `run(ctx, params)`) returning JSON-serializable data. "
-                "Inside the tool, use `ctx.call_tool(name, params)` to invoke other agent tools, "
-                "including MCP tools and other `custom_*` tools. "
-                "`ctx.sqlite_db_path` points at the agent's embedded SQLite file for direct `sqlite3` reads/writes. "
-                "Sandbox env vars and env_var secrets are injected into the script process; "
-                "read them with normal Python `os.environ`, e.g. for API keys or auth tokens. "
-                "All outbound network traffic must honor the standard proxy env vars `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY`; "
-                "HTTP(S) and SOCKS5 proxy settings are available there, so do not bypass the managed proxy in custom code. "
-                "Agent filespace contents are synced into the sandbox before execution. "
-                "For file-heavy work, shell out with Python subprocess using sandbox tools like "
-                "`rg`, `fd`, `jq`, `sqlite3`, `sed`, `awk`, `file`, `tar`, `unzip`, `fzf`, `yq`, and `git` "
-                "instead of iterating through `read_file`. "
-                "Example flow: `fd`/`rg --files` to shortlist files -> `rg -n` or `sed -n` to inspect exact regions -> "
-                "`jq`/`awk`/`sqlite3` to normalize and persist results. "
-                "Common patterns: authenticated API sync into SQLite, DB-to-SQLite reconciliation, filespace indexing, "
-                "bulk export normalization, checkpointed multi-tool workers, and dry-run/sample-first validation loops. "
+                "Prefer custom tools over manual multi-step procedures — they are far more efficient. "
+                "Write tools eagerly: if work involves 3+ steps, loops, data transforms, or API calls, make a tool. "
+                "Source is a complete Python script run via `uv run`. Structure:\n"
+                "1. PEP 723 metadata at top for third-party deps (if any): `# /// script\\n# dependencies = [\"requests\"]\\n# ///`\n"
+                "2. `from _gobii_ctx import main` (plus ToolContext if you need type hints)\n"
+                "3. `def run(params, ctx): ...` — your tool logic, return JSON-serializable data\n"
+                "4. `if __name__ == '__main__': main(run)`\n"
+                "ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools). "
+                "Write results directly to SQLite via ctx.sqlite_db_path instead of returning large intermediate data. "
+                "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
+                "PROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
+                "For direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx) "
+                "or subprocess curl, and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
+                "For tool-to-tool calls, use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
                 "Provide `source_code` to write the file now, or point at an existing filespace `.py` file. "
                 "The saved tool gets a canonical id like `custom_my_tool` and is enabled by default."
             ),
@@ -469,7 +488,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                     },
                     "parameters_schema": {
                         "type": "object",
-                        "description": "JSON schema object describing the tool input parameters.",
+                        "description": "JSON schema for tool input params. Use {\"type\": \"object\", \"properties\": {}} if no params needed.",
                     },
                     "entrypoint": {
                         "type": "string",
@@ -656,7 +675,6 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
     parent_step_id = execution_context.step_id if execution_context is not None else None
     bridge_url = f"{base_url}{reverse('api:custom-tool-bridge-execute')}"
     env = {
-        _SOURCE_ENV_KEY: _encode_env_text(source_text),
         _PARAMS_ENV_KEY: _encode_env_json(params or {}),
         _ENTRYPOINT_ENV_KEY: tool.entrypoint,
         _BRIDGE_URL_ENV_KEY: bridge_url,
@@ -669,6 +687,11 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
         service = SandboxComputeService()
     except SandboxComputeUnavailable as exc:
         return {"status": "error", "message": str(exc)}
+
+    if isinstance(service._backend, LocalSandboxBackend):
+        local_exec_source_path = _resolve_local_exec_source_path(agent, tool.source_path)
+        if local_exec_source_path:
+            env[_EXEC_SOURCE_PATH_ENV_KEY] = local_exec_source_path
 
     with _custom_tool_sqlite_db(agent) as sqlite_db_path:
         result = service.run_custom_tool_command(
@@ -736,42 +759,80 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
     summary = (
         f"Custom tools: {total} saved, {enabled} enabled. "
         "Discoverable via search_tools; share the enabled-tool limit. "
-        "Use custom tools when you need programmatic logic (loops, conditionals, error handling, data transforms), "
-        "direct embedded SQLite access, bulk data processing, repetitive deterministic work, "
-        "or reusable orchestration around tool calls. "
-        "For simple sequential tool use, call tools directly instead. "
-        "Dev loop: create_custom_tool(source_code=...) -> invoke the custom_* tool -> inspect result/error -> "
-        "file_str_replace to patch source -> re-invoke. "
-        "Source must define run(params, ctx) returning JSON-serializable data. "
-        "ctx.call_tool(name, params) can call any available agent tool, including MCP, builtins, and other custom_* tools, "
-        "and returns the result dict. "
-        "ctx.sqlite_db_path points at the embedded SQLite DB for direct sqlite3 reads/writes. "
-        "Sandbox env vars and env_var secrets are injected into the script process and are readable with os.environ "
-        "for authenticated API calls, SDK clients, and other secret-backed logic. "
-        "All outbound network traffic must honor the standard proxy env vars HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, and NO_PROXY; "
-        "HTTP(S) and SOCKS5 proxy configuration is available there, so never bypass the managed proxy with direct sockets or hard-coded no-proxy clients. "
+        "\nPHILOSOPHY: Never shuttle data through your context when a tool can handle it directly. "
+        "Passing intermediate results back to you for processing wastes tokens, loses fidelity, and adds latency. "
+        "Custom tools run Python at machine speed with full data precision — you decide WHAT to do, the tool DOES it. "
+        "Write a tool that fetches, transforms, and stores data in SQLite, then read back a summary. "
+        "Your job is to orchestrate, not to manually iterate over rows or transform JSON in your context. "
+        "\nWHEN TO CREATE: Whenever work involves multiple steps, data processing, API calls, loops, or batch operations. "
+        "If you're about to chain 3+ tool calls or handle intermediate data between steps — stop and write a tool instead. "
+        "Bias toward creating tools early — they are cheap to write, test, and iterate on. "
+        "\nDEV LOOP: create_custom_tool(source_code=...) -> invoke the custom_* tool -> inspect result/error -> "
+        "file_str_replace to patch source -> re-invoke. Jump straight in — don't ask, just write the tool and run it. "
+        "\nSOURCE: Scripts are run via `uv run` — any pip package is available. "
+        "Add PEP 723 metadata at the top for third-party deps: "
+        "# /// script\\n# dependencies = [\"requests\"]\\n# ///\\n"
+        "Structure: `from _gobii_ctx import main` at top, `def run(params, ctx): ...` for logic, "
+        "`if __name__ == '__main__': main(run)` at bottom. That's it. "
+        "\nTEMPLATE:\\n"
+        "```\\n"
+        "# /// script\\n"
+        "# dependencies = [\"some-package\"]\\n"
+        "# ///\\n"
+        "import os, sqlite3\\n"
+        "from _gobii_ctx import main\\n\\n"
+        "def run(params, ctx):\\n"
+        "    # Use os.environ for secrets (API keys, DB creds, etc.)\\n"
+        "    # Use ctx.call_tool(name, params) to call other agent tools\\n"
+        "    # Write results to SQLite instead of returning large data:\\n"
+        "    db = sqlite3.connect(ctx.sqlite_db_path)\\n"
+        "    db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, value TEXT)')\\n"
+        "    db.executemany('INSERT OR REPLACE INTO results VALUES (?, ?)', rows)\\n"
+        "    db.commit()\\n"
+        "    return {'rows_written': len(rows)}\\n\\n"
+        "if __name__ == '__main__':\\n"
+        "    main(run)\\n"
+        "```\\n"
+        "\nSQLITE-FIRST: Write results directly to ctx.sqlite_db_path using sqlite3 instead of returning large data. "
+        "Your custom tool shares the agent's embedded SQLite DB — INSERT/UPDATE/SELECT directly. "
+        "This is far more efficient than passing intermediate results back to the agent for processing. "
+        "Pattern: tool fetches data -> normalizes it -> writes to SQLite tables -> returns a summary. "
+        "\nTOOL ORCHESTRATION: ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools) "
+        "and returns the result dict. Use this to build pipelines entirely inside a custom tool: "
+        "e.g., call search/scrape tools in a loop, process results, store in SQLite — all in one tool execution. "
+        "\nSECRETS: API keys, DB connection strings, auth tokens, and all sensitive values are available as "
+        "env vars via os.environ. ALWAYS use secrets for credentials — never hardcode them. "
+        "Use the exact env var names shown in the secrets/env_var configuration. "
+        "\nPROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
+        "The proxy is SOCKS5. For direct outbound requests in your own code, "
+        "use SOCKS5-capable libraries (requests[socks], httpx) and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
+        "subprocess curl honors these proxy env vars automatically. "
+        "For tool-to-tool calls, always use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
+        "\nSANDBOX TOOLS: rg, fd, jq, sqlite3, sed, awk, file, tar, unzip, fzf, yq, git are available via subprocess. "
         "Agent filespace contents are synced into the sandbox before each run. "
-        "The sandbox includes rg, fd, jq, sqlite3, sed, awk, file, tar, unzip, fzf, yq, and git; "
-        "use them directly via subprocess for file-heavy work instead of repeated read_file calls. "
-        "\nMicro trajectories:"
-        "\n- Filespace indexing: fd/rg --files to inventory candidate files -> rg -n or sed -n to inspect exact matches -> "
-        "store a path/symbol/snippet index in sqlite3 -> answer later lookups without rescanning the tree."
-        "\n- Bulk export normalization: rg -l or fd to collect many JSON/CSV/log files -> jq/awk to normalize rows -> "
-        "load them into sqlite3 or write a merged artifact under /exports/."
-        "\n- Authenticated API sync: read API tokens from os.environ -> fetch paginated records -> normalize/upsert into sqlite3 -> "
-        "serve repeated queries locally without re-fetching the upstream API."
-        "\n- DB reconciliation: use sandbox env vars for auth and an available DB client/driver or DB-facing MCP tool -> "
-        "pull remote rows in batches -> persist canonical tables in sqlite3 -> compute deltas and emit updates or exports."
-        "\n- Checkpointed orchestration: loop over many IDs/files -> call MCP tools or other custom_* tools -> "
-        "record cursors, retries, and partial results in sqlite3 -> resume safely after failures or timeouts."
-        "\n- Safe development loop: start with a tiny sample or dry_run flag -> return diagnostics/stdout plus proposed writes -> "
-        "patch with file_str_replace -> widen scope only after the sample output looks right."
-        "\n- Safe mutation testing: write candidate transforms to /exports/ or temp sqlite tables first -> compare counts/diffs -> "
-        "promote to durable tables or external updates only after validation passes."
-        "\n- Proxy-aware integration testing: read auth from os.environ -> verify HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY -> "
-        "call a small read-only endpoint or query through the managed HTTP(S)/SOCKS5 proxy -> verify connectivity and schema on 1-2 records -> then enable the full sync/reconciliation loop."
-        "Example: result = ctx.call_tool('http_request', {'method': 'GET', 'url': url}). "
-        "Once stable, save the workflow as a skill referencing the canonical custom_* tool id."
+        "\nPATTERNS:"
+        "\n- Data sync to SQLite: fetch data from external sources (APIs, scraping, MCP tools) -> normalize -> "
+        "conn = sqlite3.connect(ctx.sqlite_db_path); conn.execute('CREATE TABLE IF NOT EXISTS ...'); "
+        "conn.executemany('INSERT OR REPLACE INTO ...', rows); conn.commit() -> return {'rows_synced': len(rows)}. "
+        "The agent can then query this table via sqlite_batch without re-fetching. "
+        "This is the most common pattern — sync once, query many times."
+        "\n- Bulk read & process from SQLite: read existing agent data from SQLite, transform, enrich, "
+        "aggregate, or export it. conn = sqlite3.connect(ctx.sqlite_db_path); "
+        "rows = conn.execute('SELECT ...').fetchall(); process rows in Python (join, filter, compute) -> "
+        "write results back to new SQLite tables or return a summary. "
+        "Use this to derive insights, build reports, or prepare data for export without manual row-by-row tool calls."
+        "\n- Tool composition: call multiple tools inside one custom tool: "
+        "results = [ctx.call_tool('mcp_brightdata_search_engine', {'query': q}) for q in queries]; "
+        "process all results, write to SQLite, return summary. "
+        "One custom tool call replaces dozens of manual tool calls."
+        "\n- Custom tool chains: custom tools can call other custom tools via ctx.call_tool('custom_other_tool', params). "
+        "Build layered pipelines: one tool syncs data, another transforms, another exports."
+        "\n- Authenticated API sync: read tokens from os.environ -> paginate through API -> "
+        "upsert rows into SQLite -> return count."
+        "\n- Checkpointed orchestration: loop over items -> call tools -> "
+        "record progress in SQLite -> resume safely after failures or timeouts."
+        "\n- Safe dev loop: start with a small sample -> inspect output -> file_str_replace to patch -> widen scope."
+        "\nOnce stable, save the workflow as a skill referencing the canonical custom_* tool id."
     )
 
     recent = format_recent_custom_tools_for_prompt(agent, limit=recent_limit)
