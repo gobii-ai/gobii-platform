@@ -184,7 +184,7 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = (
     f'UV_CACHE_DIR="${{{_UV_CACHE_DIR_ENV_KEY}:-$RUNTIME_CACHE_ROOT/uv-cache}}" && \\\n'
     f'UV_INSTALL_DIR="${{{_UV_INSTALL_DIR_ENV_KEY}:-$RUNTIME_CACHE_ROOT/uv-bin}}" && \\\n'
     'mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR" && \\\n'
-    'if ! command -v uv >/dev/null 2>&1; then UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR" curl -LsSf https://astral.sh/uv/install.sh | sh > /dev/null 2>&1; fi && \\\n'
+    'if ! command -v uv >/dev/null 2>&1; then curl -LsSf https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR" sh > /dev/null 2>&1; fi && \\\n'
     'export PATH="$UV_INSTALL_DIR:$PATH" && \\\n'
     "command -v uv >/dev/null 2>&1 && \\\n"
     f'SOURCE_EXEC_PATH="${{{_EXEC_SOURCE_PATH_ENV_KEY}:-/workspace${_SOURCE_PATH_ENV_KEY}}}" && \\\n'

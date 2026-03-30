@@ -355,7 +355,10 @@ class CustomToolsTests(TestCase):
         self.assertIn('UV_CACHE_DIR="${SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR:-$RUNTIME_CACHE_ROOT/uv-cache}"', call.args[1])
         self.assertIn('UV_INSTALL_DIR="${SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR:-$RUNTIME_CACHE_ROOT/uv-bin}"', call.args[1])
         self.assertIn('mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR"', call.args[1])
-        self.assertIn('UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR"', call.args[1])
+        self.assertIn(
+            'curl -LsSf https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR" sh',
+            call.args[1],
+        )
         self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
         self.assertIn('uv run "$SOURCE_EXEC_PATH"', call.args[1])
 
