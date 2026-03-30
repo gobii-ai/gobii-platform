@@ -350,7 +350,7 @@ def _search_with_llm(
     manual_app_guidance = (
         f'If a needed Pipedream app is not enabled yet and you require it, tell the user to go to "Add Apps" here: '
         f"{enable_apps_manually_url} and search for the exact app slug.\n"
-        "Do this sparingly and only if you truly require the integration."
+        "Do this sparingly and only if you truly require the integration. "
         "You may already have the tools you need for integration via http_request or other methods."
     )
 
@@ -385,7 +385,7 @@ def _search_with_llm(
                 "Call enable_apps with app_slugs copied verbatim from the Available Pipedream apps list.\n"
                 "Do not call enable_tools in the same response as enable_apps.\n"
                 "If a needed Pipedream app is not enabled yet, call enable_apps with exact app slugs and stop there.\n"
-                "Do this sparingly and only if you truly require the integration."
+                "Do this sparingly and only if you truly require the integration. "
                 "You may already have the tools you need for integration via http_request or other methods."
                 "Example (placeholders, do not copy names):\n"
                 "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
@@ -415,9 +415,9 @@ def _search_with_llm(
             user_prompt += " If none match, do not call enable_tools or enable_apps."
         else:
             user_prompt += (
-                f'If a needed app is not enabled, you may the user to go to "Add Apps" '
-                f"here: {enable_apps_manually_url} and search for the exact app slug."
-                "Do this sparingly and only if you truly require the integration."
+                f' If a needed app is not enabled, you may tell the user to go to "Add Apps" '
+                f"here: {enable_apps_manually_url} and search for the exact app slug. "
+                "Do this sparingly and only if you truly require the integration. "
                 "You may already have the tools you need for integration via http_request or other methods."
             )
             user_prompt += " If none match, do not call enable_tools."

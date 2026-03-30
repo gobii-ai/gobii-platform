@@ -1590,8 +1590,8 @@ class MCPToolFunctionsTests(TestCase):
         system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertIn("Do not call enable_apps", system_message)
+        self.assertIn("Automatic Pipedream app enablement is disabled.", system_message)
         self.assertIn('go to "Add Apps" here: https://gobii.ai/console/advanced/mcp-servers/', system_message)
-        self.assertIn('Automatic app enablement is disabled.', user_message)
         self.assertIn('https://gobii.ai/console/advanced/mcp-servers/', user_message)
         tool_defs = mock_run_completion.call_args.kwargs["tools"]
         self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools"])
