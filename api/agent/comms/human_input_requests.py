@@ -26,6 +26,7 @@ from api.models import (
     PersistentAgentMessage,
     build_web_agent_address,
 )
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
@@ -503,6 +504,88 @@ def _build_request_result(
     return result
 
 
+def _request_ids_from_result(result: dict[str, Any] | None) -> list[str]:
+    if not isinstance(result, dict):
+        return []
+
+    request_ids: list[str] = []
+    request_id = _coerce_string(result.get("request_id"))
+    if request_id:
+        request_ids.append(request_id)
+
+    raw_request_ids = result.get("request_ids")
+    if isinstance(raw_request_ids, list):
+        request_ids.extend(_coerce_string(value) for value in raw_request_ids if _coerce_string(value))
+
+    return list(dict.fromkeys(request_ids))
+
+
+def _build_human_input_batch_analytics_properties(
+    agent: PersistentAgent,
+    request_objects: list[PersistentAgentHumanInputRequest],
+    *,
+    batch_id: str,
+) -> dict[str, Any]:
+    ordered_requests = _order_requests_for_batch(request_objects)
+    options_request_count = 0
+    total_option_count = 0
+
+    for request_obj in ordered_requests:
+        options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
+        option_count = len(options)
+        total_option_count += option_count
+        if option_count > 0:
+            options_request_count += 1
+
+    payload = {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name,
+        "batch_id": batch_id,
+        "request_count": len(ordered_requests),
+        "is_batch": len(ordered_requests) > 1,
+        "active_conversation_channel": ordered_requests[0].requested_via_channel if ordered_requests else None,
+        "options_request_count": options_request_count,
+        "free_text_request_count": len(ordered_requests) - options_request_count,
+        "total_option_count": total_option_count,
+    }
+    return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
+
+
+def track_human_input_request_created(step, result: dict[str, Any] | None) -> None:
+    request_ids = _request_ids_from_result(result)
+    if step is None or not request_ids:
+        return
+
+    request_objects = list(
+        PersistentAgentHumanInputRequest.objects.filter(
+            id__in=request_ids,
+            agent=step.agent,
+        ).order_by("created_at", "id")
+    )
+    if not request_objects:
+        return
+
+    properties = _build_human_input_batch_analytics_properties(
+        step.agent,
+        request_objects,
+        batch_id=str(step.id),
+    )
+    first_request = request_objects[0]
+    properties.update(
+        {
+            "creation_status": "partial_success" if result.get("partial_success") else "ok",
+            "recipient_channel": _coerce_string(first_request.recipient_channel)
+            or _coerce_string(result.get("target_channel")),
+        }
+    )
+    Analytics.track_event(
+        user_id=str(step.agent.user_id),
+        event=AnalyticsEvent.HUMAN_INPUT_REQUEST_CREATED,
+        source=AnalyticsSource.AGENT,
+        properties=properties,
+    )
+
+
 def _create_human_input_request_for_target(
     agent: PersistentAgent,
     target: HumanInputTarget,
@@ -650,13 +733,7 @@ def create_human_input_requests_batch(
 def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> None:
     if not step or not isinstance(result, dict):
         return
-    request_ids: list[str] = []
-    request_id = result.get("request_id")
-    if request_id:
-        request_ids.append(str(request_id))
-    raw_request_ids = result.get("request_ids")
-    if isinstance(raw_request_ids, list):
-        request_ids.extend(str(value) for value in raw_request_ids if value)
+    request_ids = _request_ids_from_result(result)
     if not request_ids:
         return
     PersistentAgentHumanInputRequest.objects.filter(
@@ -1610,6 +1687,8 @@ def _build_batch_response_body(prepared_responses: list[PreparedHumanInputRespon
 def submit_human_input_responses_batch(
     agent: PersistentAgent,
     responses: list[dict[str, str]],
+    *,
+    actor_user_id: int | str | None = None,
 ) -> PersistentAgentMessage:
     if not responses:
         raise ValueError("At least one human input response is required.")
@@ -1679,6 +1758,24 @@ def submit_human_input_responses_batch(
     if len(prepared_responses) == 1:
         raw_payload.update(prepared_responses[0].raw_payload)
 
+    analytics_properties = _build_human_input_batch_analytics_properties(
+        agent,
+        [prepared.request for prepared in prepared_responses],
+        batch_id=str(first_request.originating_step_id or first_request.id),
+    )
+    analytics_properties.update(
+        {
+            "response_count": len(prepared_responses),
+            "selected_option_response_count": sum(
+                1 for prepared in prepared_responses if prepared.selected_option_key
+            ),
+            "free_text_response_count": sum(
+                1 for prepared in prepared_responses if prepared.free_text
+            ),
+        }
+    )
+    analytics_user_id = str(actor_user_id or agent.user_id)
+
     with transaction.atomic():
         human_endpoint = _get_or_create_endpoint(
             channel=first_request.conversation.channel,
@@ -1730,6 +1827,14 @@ def submit_human_input_responses_batch(
             lambda: __import__("api.agent.tasks", fromlist=["process_agent_events_task"])
             .process_agent_events_task.delay(str(agent.id))
         )
+        transaction.on_commit(
+            lambda: Analytics.track_event(
+                user_id=analytics_user_id,
+                event=AnalyticsEvent.HUMAN_INPUT_RESPONSE_SUBMITTED,
+                source=AnalyticsSource.WEB,
+                properties=analytics_properties,
+            )
+        )
 
     return message
 
@@ -1739,6 +1844,7 @@ def submit_human_input_response(
     *,
     selected_option_key: str | None = None,
     free_text: str | None = None,
+    actor_user_id: int | str | None = None,
 ) -> PersistentAgentMessage:
     return submit_human_input_responses_batch(
         request_obj.agent,
@@ -1749,4 +1855,5 @@ def submit_human_input_response(
                 "free_text": free_text or "",
             }
         ],
+        actor_user_id=actor_user_id,
     )
