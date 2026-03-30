@@ -324,13 +324,13 @@ if GOBII_PROPRIETARY_MODE:
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
-    "middleware.app_shell.AppShellMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "middleware.app_shell.AppShellMiddleware",
     "middleware.console_timezone.ConsoleApiTimezoneInferenceMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "allauth.account.middleware.AccountMiddleware",
