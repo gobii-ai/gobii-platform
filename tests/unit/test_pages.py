@@ -1672,6 +1672,8 @@ class CheckoutRedirectTests(TestCase):
             kwargs["payment_method_types"],
             PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
         )
+        self.assertEqual(kwargs["metadata"]["flow_type"], "trial")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         self.assertEqual(
             kwargs["line_items"],
@@ -1722,6 +1724,8 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
 
         kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(kwargs["metadata"]["flow_type"], "trial")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         mock_trial_eligibility.assert_not_called()
 
@@ -1828,6 +1832,8 @@ class CheckoutRedirectTests(TestCase):
             kwargs["payment_method_types"],
             PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
         )
+        self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
         self.assertEqual(
             kwargs["line_items"],

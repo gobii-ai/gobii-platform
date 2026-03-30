@@ -29,6 +29,11 @@ from config.socialaccount_adapter import (
     OAUTH_CHARTER_SESSION_KEYS,
     serialize_oauth_charter_cookie_payload,
 )
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
+    STRIPE_CHECKOUT_FLOW_TYPE_TRIAL,
+    build_checkout_flow_metadata,
+)
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -1649,7 +1654,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         if additional_price_id:
             line_items.append({"price": additional_price_id})
 
-        metadata = {
+        base_metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.STARTUP,
             "checkout_source_url": urlsplit(request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL)._replace(query="", fragment="").geturl()[:500],
@@ -1671,7 +1676,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             ensure_kwargs: dict[str, object] = {
                 "customer_id": customer.id,
                 "licensed_price_id": price_id,
-                "metadata": metadata,
+                "metadata": base_metadata,
                 "idempotency_key": f"startup-individual-{customer.id}-{event_id}",
                 "create_if_missing": False,
             }
@@ -1712,7 +1717,16 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             capture_source=SIGNAL_SOURCE_CHECKOUT,
         )
 
-        subscription_data = {"metadata": metadata}
+        flow_type = (
+            STRIPE_CHECKOUT_FLOW_TYPE_TRIAL
+            if include_trial
+            else STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE
+        )
+        checkout_metadata = build_checkout_flow_metadata(
+            base_metadata,
+            flow_type=flow_type,
+        )
+        subscription_data = {"metadata": checkout_metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
 
@@ -1724,6 +1738,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "mode": "subscription",
             "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
             "allow_promotion_codes": True,
+            "metadata": checkout_metadata,
             "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-startup-{customer.id}-{event_id}",
@@ -1808,7 +1823,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         if additional_price_id:
             line_items.append({"price": additional_price_id})
 
-        metadata = {
+        base_metadata = {
             "gobii_event_id": event_id,
             "plan": PlanNames.SCALE,
             "checkout_source_url": urlsplit(request.META.get("HTTP_REFERER") or settings.PUBLIC_SITE_URL)._replace(query="", fragment="").geturl()[:500],
@@ -1832,7 +1847,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                 ensure_kwargs: dict[str, object] = {
                     "customer_id": customer.id,
                     "licensed_price_id": price_id,
-                    "metadata": metadata,
+                    "metadata": base_metadata,
                     "idempotency_key": f"scale-individual-upgrade-{customer.id}-{event_id}",
                     "create_if_missing": False,
                 }
@@ -1871,7 +1886,16 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             capture_source=SIGNAL_SOURCE_CHECKOUT,
         )
 
-        subscription_data = {"metadata": metadata}
+        flow_type = (
+            STRIPE_CHECKOUT_FLOW_TYPE_TRIAL
+            if include_trial
+            else STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE
+        )
+        checkout_metadata = build_checkout_flow_metadata(
+            base_metadata,
+            flow_type=flow_type,
+        )
+        subscription_data = {"metadata": checkout_metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
 
@@ -1883,6 +1907,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "mode": "subscription",
             "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
             "allow_promotion_codes": True,
+            "metadata": checkout_metadata,
             "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-scale-{customer.id}-{event_id}",

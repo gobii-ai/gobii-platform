@@ -11,6 +11,10 @@ from django.urls import reverse
 from django.utils import timezone
 
 from billing.addons import AddonEntitlementService
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
+    build_checkout_flow_metadata,
+)
 from billing.services import BillingService
 from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
@@ -519,6 +523,13 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                     success_url = request.build_absolute_uri(reverse("billing")) + "?seats_success=1"
                     cancel_url = request.build_absolute_uri(reverse("billing")) + "?seats_cancelled=1"
 
+                    checkout_metadata = build_checkout_flow_metadata(
+                        {
+                            "org_id": str(owner_obj.id),
+                            "seat_requestor_id": str(request.user.id),
+                        },
+                        flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
+                    )
                     session = stripe.checkout.Session.create(
                         customer=customer.id,
                         api_key=stripe.api_key,
@@ -528,10 +539,8 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                         excluded_payment_method_types=EXCLUDED_PAYMENT_METHOD_TYPES,
                         allow_promotion_codes=True,
                         line_items=[{"price": seat_price_id, "quantity": seats_target_int}],
-                        metadata={
-                            "org_id": str(owner_obj.id),
-                            "seat_requestor_id": str(request.user.id),
-                        },
+                        metadata=checkout_metadata,
+                        subscription_data={"metadata": checkout_metadata},
                     )
                     response_dict["redirectUrl"] = session.url
                 except stripe.error.StripeError as exc:

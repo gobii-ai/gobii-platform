@@ -233,6 +233,8 @@ class OrganizationInvitesTest(TestCase):
         self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(line_items[0]["price"], stripe_settings.org_team_price_id)
         self.assertEqual(line_items[0]["quantity"], 1)
+        self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
         overage_price = stripe_settings.org_team_additional_task_price_id
         self.assertEqual(len(line_items), 1)
 
@@ -885,6 +887,8 @@ class OrganizationBillingCheckoutHelpersTest(TestCase):
             EXCLUDED_PAYMENT_METHOD_TYPES,
         )
         self.assertNotIn("payment_method_types", kwargs)
+        self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_addon", "quantity": 3}],
