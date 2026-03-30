@@ -1,15 +1,18 @@
 import hashlib
 import json
 
+from django.contrib.auth.views import redirect_to_login
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified
 from django.templatetags.static import static
+from django.urls import reverse
 
 from api.services.system_settings import get_max_file_size
 from config.vite import ViteManifestError, get_vite_asset
 from util.fish_collateral import is_fish_collateral_enabled
 
 APP_PATH_PREFIX = "/app"
+APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 
 
@@ -206,7 +209,7 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
 
 
 class AppShellMiddleware:
-    """Serve a static SPA shell for /app without touching session/auth middleware."""
+    """Serve the immersive app shell and gate protected immersive routes."""
 
     def __init__(self, get_response):
         self.get_response = get_response
@@ -220,6 +223,9 @@ class AppShellMiddleware:
 
         if request.method not in {"GET", "HEAD"}:
             return HttpResponseNotAllowed(["GET", "HEAD"])
+
+        if self._requires_login(request.path) and not request.user.is_authenticated:
+            return redirect_to_login(request.get_full_path(), login_url=reverse("account_login"))
 
         fish_collateral_enabled = is_fish_collateral_enabled()
         if (
@@ -248,6 +254,10 @@ class AppShellMiddleware:
     @staticmethod
     def _should_handle(path: str) -> bool:
         return path == APP_PATH_PREFIX or path.startswith(f"{APP_PATH_PREFIX}/")
+
+    @staticmethod
+    def _requires_login(path: str) -> bool:
+        return path == APP_PROTECTED_PATH_PREFIX or path.startswith(f"{APP_PROTECTED_PATH_PREFIX}/")
 
     def _etag_matches(self, request_etag: str | None) -> bool:
         if not request_etag or not self._cached_etag:

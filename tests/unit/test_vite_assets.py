@@ -1,8 +1,12 @@
 import json
+import uuid
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from urllib.parse import parse_qs, urlparse
 
+from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings, tag
+from django.urls import reverse
 
 from config.vite import ViteAssetReleaseNotFound, clear_manifest_cache, get_vite_asset
 
@@ -121,3 +125,54 @@ class AppShellCacheHeaderTests(TestCase):
         self.assertEqual(response.status_code, 304)
         self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
         self.assertEqual(response["ETag"], initial_response["ETag"])
+
+
+@tag("batch_pages")
+class AppShellAuthenticationTests(TestCase):
+    def test_unauthenticated_protected_paths_redirect_to_login(self):
+        protected_paths = [
+            "/app/agents/",
+            "/app/agents/new",
+        ]
+        for path in protected_paths:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+
+                self.assertEqual(response.status_code, 302)
+                parsed = urlparse(response["Location"])
+                self.assertEqual(parsed.path, reverse("account_login"))
+                self.assertEqual(parse_qs(parsed.query), {"next": [path]})
+
+    def test_unauthenticated_agent_detail_redirects_to_login_with_query_string(self):
+        agent_id = uuid.uuid4()
+        response = self.client.get(f"/app/agents/{agent_id}/", {"return_to": "/console/agents/"})
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        self.assertEqual(
+            parse_qs(parsed.query),
+            {"next": [f"/app/agents/{agent_id}/?return_to=%2Fconsole%2Fagents%2F"]},
+        )
+
+    def test_unauthenticated_app_root_still_serves_shell(self):
+        response = self.client.get("/app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+        self.assertContains(response, 'id="gobii-frontend-root"')
+
+    def test_authenticated_agents_detail_serves_shell(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="appshell@example.com",
+            email="appshell@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(f"/app/agents/{uuid.uuid4()}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+        self.assertContains(response, 'id="gobii-frontend-root"')
