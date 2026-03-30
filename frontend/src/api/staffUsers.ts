@@ -44,13 +44,13 @@ export type StaffUserDetail = {
     auditUrl: string
   }>
   taskCredits: {
-    available: number | null
+    available: string | null
     unlimited: boolean
     recentGrants: Array<{
       id: string
-      credits: number
-      used: number
-      available: number
+      credits: string
+      used: string
+      available: string
       grantType: string
       grantedAt: string
       expiresAt: string

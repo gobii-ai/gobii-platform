@@ -330,7 +330,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual({entry["id"] for entry in payload["agents"]}, {str(personal_agent.id), str(org_agent.id)})
         org_entry = next(entry for entry in payload["agents"] if entry["id"] == str(org_agent.id))
         self.assertEqual(org_entry["organizationName"], "Ops Team")
-        self.assertEqual(payload["taskCredits"]["available"], 10.0)
+        self.assertEqual(Decimal(payload["taskCredits"]["available"]), Decimal("10"))
         self.assertEqual(len(payload["taskCredits"]["recentGrants"]), 1)
         self.assertEqual(payload["taskCredits"]["recentGrants"][0]["grantType"], "Compensation")
 
@@ -416,6 +416,36 @@ class ConsoleViewsTest(TestCase):
         expiration_days = (task_credit.expiration_date - task_credit.granted_date).days
         self.assertGreaterEqual(expiration_days, 28)
         self.assertLessEqual(expiration_days, 31)
+
+    @tag("batch_console_agents")
+    def test_staff_user_task_credit_grant_api_rejects_non_finite_credits(self):
+        User = get_user_model()
+        admin_user = User.objects.create_superuser(
+            username="admin-user-grant-nan@example.com",
+            email="admin-user-grant-nan@example.com",
+            password="testpass123",
+        )
+        target_user = User.objects.create_user(
+            username="grant-user-nan",
+            email="grant-user-nan@example.com",
+            password="testpass123",
+        )
+
+        self.client.force_login(admin_user)
+        response = self.client.post(
+            reverse("staff-user-task-credit-grant", kwargs={"user_id": target_user.id}),
+            data=json.dumps(
+                {
+                    "credits": "NaN",
+                    "grantType": "Promo",
+                    "expirationPreset": "one_month",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "credits_must_be_finite")
 
     @tag("batch_console_agents")
     def test_admin_action_can_undelete_soft_deleted_agent(self):
@@ -1836,6 +1866,39 @@ class ConsoleViewsTest(TestCase):
             source="agent_addons_api_owner_resume",
         )
         mock_agent_resume.assert_not_called()
+
+    @tag("batch_console_agents")
+    def test_agent_addons_context_resolves_personal_plan_payload(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+        from console import api_views as console_api_views
+        from django.test.client import RequestFactory
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Addons API Context Browser",
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Addons API Context Agent",
+            charter="Task pack context flow",
+            browser_use_agent=browser_agent,
+        )
+        request = RequestFactory().get("/")
+        request.user = self.user
+
+        with patch("console.api_views.resolve_agent_for_request", return_value=agent), \
+            patch("console.api_views.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"}), \
+             patch("console.api_views._can_manage_contact_packs", return_value=True), \
+             patch("console.api_views._can_open_agent_billing", return_value=True):
+            resolved_agent, owner, plan_payload, can_manage_billing, can_open_billing = (
+                console_api_views.AgentAddonsAPIView._resolve_agent_addons_context(request, str(agent.id))
+            )
+
+        self.assertEqual(resolved_agent, agent)
+        self.assertEqual(owner, self.user)
+        self.assertEqual(plan_payload["id"], "startup")
+        self.assertTrue(can_manage_billing)
+        self.assertTrue(can_open_billing)
 
     @tag("batch_console_agents")
     def test_agent_addons_api_falls_back_to_agent_resume_when_owner_resume_noops(self):

@@ -217,6 +217,7 @@ from util.subscription_helper import (
     get_active_subscription,
     get_stripe_customer,
     get_organization_plan,
+    reconcile_user_plan_from_stripe,
     get_user_plan,
 )
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -1320,6 +1321,10 @@ def _coerce_decimal_payload(value: Any, *, default: Decimal = Decimal("0")) -> D
         return default
 
 
+def _serialize_decimal(value: Decimal | int | float) -> str:
+    return str(value)
+
+
 def _current_user_email_is_verified(user) -> bool:
     email = (getattr(user, "email", "") or "").strip()
     if not email:
@@ -1327,6 +1332,13 @@ def _current_user_email_is_verified(user) -> bool:
     from allauth.account.models import EmailAddress
 
     return EmailAddress.objects.filter(user=user, email__iexact=email, verified=True).exists()
+
+
+def _serialize_email_verification(user) -> dict[str, Any]:
+    return {
+        "email": user.email or "",
+        "isVerified": _current_user_email_is_verified(user),
+    }
 
 
 def _serialize_staff_addon(entitlement: AddonEntitlement) -> dict[str, Any]:
@@ -1377,9 +1389,9 @@ def _serialize_staff_addon(entitlement: AddonEntitlement) -> dict[str, Any]:
 def _serialize_task_credit(task_credit: TaskCredit) -> dict[str, Any]:
     return {
         "id": str(task_credit.id),
-        "credits": float(task_credit.credits),
-        "used": float(task_credit.credits_used),
-        "available": float(task_credit.available_credits),
+        "credits": _serialize_decimal(task_credit.credits),
+        "used": _serialize_decimal(task_credit.credits_used),
+        "available": _serialize_decimal(task_credit.available_credits),
         "grantType": task_credit.grant_type,
         "grantedAt": task_credit.granted_date.isoformat(),
         "expiresAt": task_credit.expiration_date.isoformat(),
@@ -1419,10 +1431,7 @@ def _serialize_staff_user_detail(user) -> dict[str, Any]:
             "email": user.email or "",
             "adminUrl": _staff_user_admin_url(user),
         },
-        "emailVerification": {
-            "email": user.email or "",
-            "isVerified": _current_user_email_is_verified(user),
-        },
+        "emailVerification": _serialize_email_verification(user),
         "billing": {
             "plan": {
                 "id": plan_payload.get("id") or PlanNamesChoices.FREE,
@@ -1434,7 +1443,7 @@ def _serialize_staff_user_detail(user) -> dict[str, Any]:
         },
         "agents": agents,
         "taskCredits": {
-            "available": None if unlimited_credits else float(available_credits),
+            "available": None if unlimited_credits else _serialize_decimal(available_credits),
             "unlimited": bool(unlimited_credits),
             "recentGrants": recent_grants,
         },
@@ -1544,7 +1553,7 @@ class StaffUserEmailVerifyAPIView(SystemAdminAPIView):
         return JsonResponse(
             {
                 "ok": True,
-                "emailVerification": _serialize_staff_user_detail(user)["emailVerification"],
+                "emailVerification": _serialize_email_verification(user),
             }
         )
 
@@ -1562,6 +1571,8 @@ class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
             return JsonResponse({"error": "invalid_json"}, status=400)
 
         credits = _coerce_decimal_payload(payload.get("credits"))
+        if not credits.is_finite():
+            return JsonResponse({"error": "credits_must_be_finite"}, status=400)
         if credits <= Decimal("0"):
             return JsonResponse({"error": "credits_must_be_positive"}, status=400)
 
@@ -1569,12 +1580,13 @@ class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
         if grant_type not in {GrantTypeChoices.COMPENSATION, GrantTypeChoices.PROMO}:
             return JsonResponse({"error": "invalid_grant_type"}, status=400)
 
+        expiration_presets = {
+            "one_month": relativedelta(months=1),
+            "one_year": relativedelta(years=1),
+        }
         expiration_preset = str(payload.get("expirationPreset") or "").strip()
-        if expiration_preset == "one_month":
-            expiration_delta = relativedelta(months=1)
-        elif expiration_preset == "one_year":
-            expiration_delta = relativedelta(years=1)
-        else:
+        expiration_delta = expiration_presets.get(expiration_preset)
+        if expiration_delta is None:
             return JsonResponse({"error": "invalid_expiration_preset"}, status=400)
 
         granted_at = timezone.now()
