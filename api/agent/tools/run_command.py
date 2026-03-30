@@ -12,6 +12,7 @@ def get_run_command_tool() -> Dict[str, Any]:
             "description": (
                 "Run a non-interactive shell command inside the agent's sandboxed workspace. "
                 "Use for one-shot commands that should complete and return stdout/stderr. "
+                "Sandbox proxy env vars and sandbox env_var secrets are already present in the command environment. "
                 "The workspace root is /workspace; filespace paths like /reports/foo.txt map to "
                 "/workspace/reports/foo.txt. Avoid using /workspace in paths."
             ),

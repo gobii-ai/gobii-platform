@@ -108,6 +108,17 @@ DEFAULT_PROVIDER_VISION_SUPPORT: dict[str, bool] = {
     "fireworks": False,
 }
 
+
+def _browser_proxy_scheme(proxy_server: Optional[ProxyServer]) -> str:
+    if proxy_server is None:
+        return "https"
+
+    proxy_type = str(proxy_server.proxy_type or "").strip().upper()
+    if proxy_type == ProxyServer.ProxyType.HTTP:
+        return "http"
+    return "https"
+
+
 # --------------------------------------------------------------------------- #
 #  Optional libs – in the worker container these are installed; in migrations
 #  or other management contexts they may be missing.
@@ -1012,7 +1023,7 @@ async def _run_agent(
             proxy_settings = None
             if proxy_server:
                 proxy_settings = ProxySettings(
-                    server=f"{proxy_server.proxy_type.lower()}://{proxy_server.host}:{proxy_server.port}"
+                    server=f"{_browser_proxy_scheme(proxy_server)}://{proxy_server.host}:{proxy_server.port}"
                 )
                 if proxy_server.username:
                     proxy_settings.username = proxy_server.username
@@ -1035,10 +1046,10 @@ async def _run_agent(
                     logger.warning("Failed to build available_file_paths in thread for agent %s", persistent_agent_id, exc_info=True)
 
             accept_downloads = persistent_agent_id is not None and settings.ALLOW_FILE_DOWNLOAD
-            
+
             # Force headless if this is an eval run to avoid X server issues during CI/tests
             headless_mode = settings.BROWSER_HEADLESS or is_eval
-            
+
             profile = BrowserProfile(
                 stealth=True,
                 headless=headless_mode,

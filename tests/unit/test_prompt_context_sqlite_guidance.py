@@ -40,3 +40,28 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         examples = prompt_context._get_sqlite_examples()
         self.assertIn("Browser task completions are pushed into unified history", examples)
         self.assertIn("don't poll __tool_results/__files waiting for them", examples)
+
+    def test_sqlite_retry_warning_flags_repeated_empty_probes(self):
+        warning = prompt_context._build_sqlite_retry_warning(
+            [
+                (
+                    {"sql": "SELECT * FROM __tool_results WHERE result_id='73b1fa'"},
+                    '{"results":[{"message":"Query 0 returned 0 rows."}]}',
+                ),
+                (
+                    {"sql": "SELECT grep_context_all(result_text, 'Tomorrow') FROM __tool_results WHERE result_id='73b1fa'"},
+                    '{"results":[{"message":"Query 0 returned 0 rows."}]}',
+                ),
+                (
+                    {"sql": "SELECT csv_headers(result_text) FROM __tool_results WHERE result_id='73b1fa'"},
+                    '{"results":[{"result":[{"headers":"[\\"New York\\",\\"Forecast\\"]"}]}]}',
+                ),
+                (
+                    {"sql": "SELECT regexp_extract(result_text, 'Hi: (\\\\d+)') FROM __tool_results WHERE result_id='73b1fa'"},
+                    '{"results":[{"message":"Query 0 returned 0 rows."}]}',
+                ),
+            ]
+        )
+
+        self.assertIn("Loop warning", warning)
+        self.assertIn("73b1fa", warning)

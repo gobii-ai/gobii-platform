@@ -7,6 +7,7 @@ structure information, and hints that help agents write correct SQL queries.
 
 import base64
 import binascii
+from collections import Counter
 import csv
 import gzip
 import io
@@ -1558,6 +1559,14 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
     rows = [row for row in raw_rows if row and any(cell.strip() for cell in row)]
     if not rows:
         return False, info
+
+    row_width_counts: Counter[int] = Counter(len(row) for row in rows)
+    common_width, common_width_count = row_width_counts.most_common(1)[0]
+    min_consistent_rows = 2 if len(rows) <= 3 else 3
+    if common_width < 2 or common_width_count < min_consistent_rows:
+        return False, info
+
+    rows = [row for row in rows if len(row) == common_width]
 
     header_row = rows[0]
     columns = [c.strip().strip('"\'') for c in header_row]
