@@ -129,21 +129,19 @@ class AppShellCacheHeaderTests(TestCase):
 
 @tag("batch_pages")
 class AppShellAuthenticationTests(TestCase):
-    def test_unauthenticated_agents_index_redirects_to_login(self):
-        response = self.client.get("/app/agents/")
+    def test_unauthenticated_protected_paths_redirect_to_login(self):
+        protected_paths = [
+            "/app/agents/",
+            "/app/agents/new",
+        ]
+        for path in protected_paths:
+            with self.subTest(path=path):
+                response = self.client.get(path)
 
-        self.assertEqual(response.status_code, 302)
-        parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_login"))
-        self.assertEqual(parse_qs(parsed.query), {"next": ["/app/agents/"]})
-
-    def test_unauthenticated_new_agent_redirects_to_login(self):
-        response = self.client.get("/app/agents/new")
-
-        self.assertEqual(response.status_code, 302)
-        parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_login"))
-        self.assertEqual(parse_qs(parsed.query), {"next": ["/app/agents/new"]})
+                self.assertEqual(response.status_code, 302)
+                parsed = urlparse(response["Location"])
+                self.assertEqual(parsed.path, reverse("account_login"))
+                self.assertEqual(parse_qs(parsed.query), {"next": [path]})
 
     def test_unauthenticated_agent_detail_redirects_to_login_with_query_string(self):
         agent_id = uuid.uuid4()
