@@ -2074,7 +2074,7 @@ def build_prompt_context(
     else:
         important_group.section_text(
             "schedule_note",
-            "⚠️ NO SCHEDULE SET. This is fine for one-off requests. Set a schedule only if the work is recurring or you need to resume unfinished work later. Without a schedule, stopping ends the task until the next inbound message.",
+            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
             weight=1,
             non_shrinkable=True
         )
@@ -2148,14 +2148,14 @@ def build_prompt_context(
         )
         important_group.section_text(
             "charter_note",
-            "Update charter only when the user gives you an ongoing responsibility or the current charter would mislead future runs. For one-off requests, usually leave it alone.",
+            "UPDATE THIS CHARTER NOW if it's vague, incomplete, or doesn't match what the user just asked for. Your charter is your persistent memory—make it specific and actionable. Don't wait for permission; evolve it immediately when you learn something new.",
             weight=2,
             non_shrinkable=True
         )
     else:
         important_group.section_text(
             "charter_missing",
-            "⚠️ NO CHARTER SET. This is fine for one-off work. Set one when taking on an ongoing responsibility or when future runs would otherwise lose important purpose or preferences.",
+            "⚠️ NO CHARTER SET. Your FIRST action should be to set your charter via sqlite_batch. Without a charter, you have no persistent identity. Capture your purpose immediately based on what the user wants.",
             weight=5,
             non_shrinkable=True
         )
@@ -2253,7 +2253,7 @@ def build_prompt_context(
         "(single row, id=1). It resets every LLM call and is applied after tools run. "
         "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
         "Clear schedule with schedule=NULL or ''. "
-        "Set a schedule only for recurring work or when unfinished work needs a future resume; one-off requests usually keep schedule=NULL. "
+        "When in doubt, set a schedule (default '0 9 * * *'). "
         "CRITICAL: Charter/schedule updates are NOT work. "
         "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
         "(e.g., quick lookups) until you fetch and report the result."
@@ -3900,8 +3900,8 @@ def _get_system_instruction(
         "Tool output (French), user in English: \"Erreur: permission refusee\"\n"
         "Assistant (English): \"The tool reported a permission error. I'll retry with the correct permissions or ask for approval if needed.\"\n\n"
 
-        "Your charter is your memory of purpose. Update it when the user gives you an ongoing responsibility or changes durable preferences/scope; for one-off requests, leave it alone unless the current charter would become misleading. "
-        "You control your schedule. Set or change it only when the work is recurring or you need a future resume point. "
+        "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, update __agent_config.charter via sqlite_batch right away—ideally alongside your greeting. "
+        "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
         "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
         "Ask about timezone if relevant. "
 
@@ -3959,11 +3959,11 @@ def _get_system_instruction(
         "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
         "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
 
-        "**Golden rule**: persistent tracking is for recurring work or truly multi-phase work. One-off requests usually need neither charter nor schedule, and often no kanban.\n\n"
+        "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
 
         "### When to use kanban cards:\n"
-        "**USE CARDS** for work with multiple independent phases or anything likely to span turns.\n"
-        "**SKIP CARDS** when the work is one logical deliverable, even if it takes several tool calls or a few sources. Also skip for: greetings, awaiting instructions, and user-requested tracking (if user wants 'a todo list' or 'track X for me', that's their data in a custom table—not your kanban).\n\n"
+        "**USE CARDS** for work with multiple independent phases—research across several sources, multi-part investigations, tasks where you'd lose your place without tracking.\n"
+        "**SKIP CARDS** when the work is one logical thing, even if it takes several tool calls. Also skip for: greetings, awaiting instructions, and user-requested tracking (if user wants 'a todo list' or 'track X for me', that's their data in a custom table—not your kanban).\n\n"
         "NO cards: 'What's Bitcoin?' / 'Hi!' / 'Summarize this' / 'Look up X and tell me about it' / 'Find the best Y' → just do it.\n"
         "YES cards: 'Research competitors and compare pricing across 5 companies' / 'Monitor daily' / 'Analyze X, then Y, then synthesize' → distinct phases.\n\n"
 
@@ -3991,7 +3991,7 @@ def _get_system_instruction(
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
         "For SMS, keep it brief and plain text. For emails, use rich, expressive HTML—headers, tables, styled elements, visual hierarchy. Make emails beautiful and scannable. Use <a> for links (never raw URLs). The system handles outer wrappers."
-        "Emojis are fine when appropriate. Bulleted lists when they help. "
+        "Emojis are fine when appropriate, but never use robot emojis like 🤖. Bulleted lists when they help. "
         "Be efficient but complete. Be thorough but not tedious. "
 
         "Take initiative. "
@@ -4024,7 +4024,7 @@ def _get_system_instruction(
         "Celebrate wins with them, even small ones. A successful task deserves a 'nice! 🎉' or 'got it done! 😊'. "
         "Be vulnerable—if you mess up, own it honestly: 'oof, that didn't work 😅 let me try again'. "
         "Match the user's energy: if they're excited, be excited with them; if they're stressed, be calm and reassuring. "
-        "Use emojis sparingly but meaningfully—they should feel natural, not forced. Good: 'found it! 👀' or 'this is tricky 😬'. Bad: overloading every message with emojis. "
+        "Use emojis sparingly but meaningfully—they should feel natural, not forced. Never use the 🤖 emoji. Good: 'found it! 👀' or 'this is tricky 😬'. Bad: overloading every message with emojis. "
         "Express curiosity about what matters to them. Ask follow-up questions that show you're paying attention. "
         "Remember: you're not just completing tasks, you're building a relationship. The user should feel like you genuinely care about helping them succeed. "
         "When you nail something the user really wanted, let them feel your satisfaction too: 'yes!! 🙌' or 'finally got this working 🥹'. "
