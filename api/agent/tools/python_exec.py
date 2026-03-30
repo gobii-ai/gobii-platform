@@ -9,6 +9,7 @@ def get_python_exec_tool() -> Dict[str, Any]:
             "description": (
                 "Execute Python code inside the agent's sandboxed compute session. "
                 "Use for quick scripts, data transforms, and calculations. "
+                "Sandbox proxy env vars and sandbox env_var secrets are already available via os.environ. "
                 "Supports a timeout (default 30s, max 120s)."
             ),
             "parameters": {
