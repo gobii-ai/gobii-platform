@@ -32,6 +32,7 @@ from config.socialaccount_adapter import (
 from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     STRIPE_CHECKOUT_FLOW_TYPE_TRIAL,
+    build_checkout_customer_metadata,
     build_checkout_flow_metadata,
 )
 from config.stripe_config import get_stripe_settings
@@ -522,6 +523,19 @@ def _emit_checkout_initiated_event(
         )
     except Exception:
         logger.exception("Failed to emit %s marketing event for %s", event_name, plan_code)
+
+
+def _set_customer_checkout_context(*, customer_id: str, flow_type: str, event_id: str) -> None:
+    """Mark the customer with the active checkout context for Radar evaluation."""
+    stripe.Customer.modify(
+        customer_id,
+        metadata=build_checkout_customer_metadata(
+            flow_type=flow_type,
+            event_id=event_id,
+        ),
+        api_key=stripe.api_key,
+    )
+
 
 class HomePage(TemplateView):
     template_name = "home.html"
@@ -1726,6 +1740,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             base_metadata,
             flow_type=flow_type,
         )
+        _set_customer_checkout_context(
+            customer_id=customer.id,
+            flow_type=flow_type,
+            event_id=event_id,
+        )
         subscription_data = {"metadata": checkout_metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
@@ -1894,6 +1913,11 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         checkout_metadata = build_checkout_flow_metadata(
             base_metadata,
             flow_type=flow_type,
+        )
+        _set_customer_checkout_context(
+            customer_id=customer.id,
+            flow_type=flow_type,
+            event_id=event_id,
         )
         subscription_data = {"metadata": checkout_metadata}
         if include_trial:

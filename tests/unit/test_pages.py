@@ -23,6 +23,10 @@ from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from config.redis_client import get_redis_client
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+)
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from api.services.pipedream_apps import PipedreamCatalogError
@@ -1631,6 +1635,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1641,6 +1646,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        mock_customer_modify,
         mock_ensure,
         _mock_trial_eligible,
         _,
@@ -1679,12 +1685,23 @@ class CheckoutRedirectTests(TestCase):
             kwargs["line_items"],
             [{"price": "price_startup", "quantity": 1}],
         )
+        customer_modify_args, customer_modify_kwargs = mock_customer_modify.call_args
+        self.assertEqual(customer_modify_args[0], "cus_trial")
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY],
+            "trial",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
+            kwargs["metadata"]["gobii_event_id"],
+        )
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions", return_value=[])
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1695,6 +1712,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        _mock_customer_modify,
         _mock_existing_subs,
         mock_ensure,
         mock_trial_eligibility,
@@ -1733,6 +1751,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1743,6 +1762,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        _mock_customer_modify,
         mock_ensure,
         _mock_trial_eligible,
         _,
@@ -1789,6 +1809,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1799,6 +1820,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        mock_customer_modify,
         mock_existing_subs,
         mock_ensure,
         _mock_trial_eligible,
@@ -1838,6 +1860,16 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_scale", "quantity": 1}],
+        )
+        customer_modify_args, customer_modify_kwargs = mock_customer_modify.call_args
+        self.assertEqual(customer_modify_args[0], "cus_scale_trial")
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY],
+            "purchase",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
+            kwargs["metadata"]["gobii_event_id"],
         )
 
 
