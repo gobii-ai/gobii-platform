@@ -1303,6 +1303,12 @@ class MCPToolFunctionsTests(TestCase):
         self.server_name = self.server_config.name
         # Ensure persistent LLM config exists for DB-only selection
         seed_persistent_basic(include_openrouter=False)
+
+    def _set_tool_search_auto_enable_apps(self, enabled: bool) -> None:
+        config, _ = ToolConfig.objects.get_or_create(plan_name=PlanNames.FREE)
+        config.tool_search_auto_enable_apps = enabled
+        config.save()
+        invalidate_tool_settings_cache()
         
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
@@ -1509,6 +1515,8 @@ class MCPToolFunctionsTests(TestCase):
         mock_run_completion,
         mock_enable_tools,
     ):
+        self._set_tool_search_auto_enable_apps(True)
+
         mock_search_apps.return_value = [
             SimpleNamespace(slug="slack", name="Slack"),
             SimpleNamespace(slug="trello", name="Trello"),
@@ -1560,10 +1568,7 @@ class MCPToolFunctionsTests(TestCase):
         mock_run_completion,
         mock_enable_tools,
     ):
-        config, _ = ToolConfig.objects.get_or_create(plan_name=PlanNames.FREE)
-        config.tool_search_auto_enable_apps = False
-        config.save()
-        invalidate_tool_settings_cache()
+        self._set_tool_search_auto_enable_apps(False)
 
         mock_search_apps.return_value = [
             SimpleNamespace(slug="slack", name="Slack"),
@@ -1616,6 +1621,8 @@ class MCPToolFunctionsTests(TestCase):
         mock_enable_tools,
         mock_enable_pipedream_apps_for_agent,
     ):
+        self._set_tool_search_auto_enable_apps(True)
+
         mock_search_apps.return_value = [
             SimpleNamespace(slug="slack", name="Slack"),
         ]
