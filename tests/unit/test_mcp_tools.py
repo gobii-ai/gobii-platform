@@ -59,6 +59,7 @@ from api.agent.tools.search_tools import (
 from api.services.prompt_settings import invalidate_prompt_settings_cache
 from api.services.tool_settings import invalidate_tool_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
+from util.analytics import AnalyticsEvent
 
 
 def _default_fake_run_completion(*args, **kwargs):
@@ -1627,7 +1628,8 @@ class MCPToolFunctionsTests(TestCase):
         mock_response.choices = [choice]
         mock_run_completion.return_value = mock_response
 
-        result = search_tools(self.agent, "generate recurring ops reports")
+        with patch("util.analytics.Analytics.track_event") as mock_track_event:
+            result = search_tools(self.agent, "generate recurring ops reports")
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["skills"]["enabled"], ["ops-report"])
@@ -1636,6 +1638,18 @@ class MCPToolFunctionsTests(TestCase):
         imported = PersistentAgentSkill.objects.get(agent=self.agent, name="ops-report")
         self.assertEqual(imported.global_skill, skill)
         self.assertEqual(imported.version, 1)
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_GLOBAL_SKILL_IMPORTED)
+        self.assertEqual(kwargs["user_id"], self.agent.user_id)
+        self.assertEqual(kwargs["properties"]["agent_id"], str(self.agent.id))
+        self.assertEqual(kwargs["properties"]["skill_name"], "ops-report")
+        self.assertEqual(kwargs["properties"]["skill_version"], 1)
+        self.assertEqual(kwargs["properties"]["skill_origin"], "global_import")
+        self.assertEqual(kwargs["properties"]["global_skill_id"], str(skill.id))
+        self.assertEqual(kwargs["properties"]["global_skill_name"], "ops-report")
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch"])
+        self.assertFalse(kwargs["properties"]["organization"])
         mock_enable_tools.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')
@@ -1687,7 +1701,8 @@ class MCPToolFunctionsTests(TestCase):
         mock_response.choices = [choice]
         mock_run_completion.return_value = mock_response
 
-        result = search_tools(self.agent, "generate recurring ops reports")
+        with patch("util.analytics.Analytics.track_event") as mock_track_event:
+            result = search_tools(self.agent, "generate recurring ops reports")
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["skills"]["enabled"], [])
@@ -1696,6 +1711,7 @@ class MCPToolFunctionsTests(TestCase):
             PersistentAgentSkill.objects.filter(agent=self.agent, global_skill=skill).count(),
             1,
         )
+        mock_track_event.assert_not_called()
         mock_enable_tools.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')
@@ -1746,12 +1762,14 @@ class MCPToolFunctionsTests(TestCase):
         mock_response.choices = [choice]
         mock_run_completion.return_value = mock_response
 
-        result = search_tools(self.agent, "generate recurring ops reports")
+        with patch("util.analytics.Analytics.track_event") as mock_track_event:
+            result = search_tools(self.agent, "generate recurring ops reports")
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["skills"]["enabled"], [])
         self.assertEqual(result["skills"]["conflicts"], ["ops-report"])
         self.assertFalse(PersistentAgentSkill.objects.filter(agent=self.agent, global_skill=skill).exists())
+        mock_track_event.assert_not_called()
         mock_enable_tools.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')

@@ -7,6 +7,11 @@ from django.db import transaction
 from django.db.models import Q
 
 from api.models import GlobalAgentSkill, PersistentAgent, PersistentAgentSkill
+from api.services.skill_analytics import (
+    SKILL_ORIGIN_GLOBAL_IMPORT,
+    track_agent_skill_event,
+)
+from util.analytics import AnalyticsEvent
 from .skill_utils import normalize_skill_tool_ids
 
 logger = logging.getLogger(__name__)
@@ -94,6 +99,16 @@ def enable_global_skills(
     if new_rows:
         with transaction.atomic():
             PersistentAgentSkill.objects.bulk_create(new_rows)
+        for row in new_rows:
+            track_agent_skill_event(
+                agent=agent,
+                event=AnalyticsEvent.PERSISTENT_AGENT_GLOBAL_SKILL_IMPORTED,
+                skill_name=row.name,
+                skill_version=row.version,
+                tools=row.tools,
+                skill_origin=SKILL_ORIGIN_GLOBAL_IMPORT,
+                global_skill=row.global_skill,
+            )
 
     tool_manager_result = None
     if enabled:

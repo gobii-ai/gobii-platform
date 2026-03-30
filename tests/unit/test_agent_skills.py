@@ -27,6 +27,7 @@ from api.models import (
     PersistentAgentSkill,
     UserQuota,
 )
+from util.analytics import AnalyticsEvent
 
 
 @tag("batch_agent_tools")
@@ -61,8 +62,50 @@ class AgentSkillsPersistenceTests(TestCase):
         reset_sqlite_db_path(self.token)
         self.tmp.cleanup()
 
+    @patch("util.analytics.Analytics.track_event")
+    @patch("api.agent.tools.tool_manager.get_available_tool_ids", return_value={"sqlite_batch"})
+    def test_sqlite_skill_create_emits_analytics(self, _mock_available_tools, mock_track_event):
+        baseline = seed_sqlite_skills(self.agent)
+        self.assertIsNotNone(baseline)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                INSERT INTO "__agent_skills" (id, name, description, version, tools, instructions)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    "skill-create-1",
+                    "daily-brief",
+                    "Daily digest workflow",
+                    1,
+                    '["sqlite_batch"]',
+                    "Collect updates and summarize.",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = apply_sqlite_skill_updates(self.agent, baseline)
+
+        self.assertFalse(result.errors)
+        self.assertTrue(result.changed)
+        self.assertEqual(result.created_versions, ["daily-brief@1"])
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_SKILL_CREATED)
+        self.assertEqual(kwargs["user_id"], self.agent.user_id)
+        self.assertEqual(kwargs["properties"]["skill_name"], "daily-brief")
+        self.assertEqual(kwargs["properties"]["skill_version"], 1)
+        self.assertEqual(kwargs["properties"]["skill_origin"], "local")
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch"])
+        self.assertFalse(kwargs["properties"]["organization"])
+
+    @patch("util.analytics.Analytics.track_event")
     @patch("api.agent.tools.tool_manager.get_available_tool_ids", return_value={"sqlite_batch", "read_file"})
-    def test_sqlite_skill_update_creates_new_version(self, _mock_available_tools):
+    def test_sqlite_skill_update_creates_new_version(self, _mock_available_tools, mock_track_event):
         PersistentAgentSkill.objects.create(
             agent=self.agent,
             name="daily-brief",
@@ -112,9 +155,17 @@ class AgentSkillsPersistenceTests(TestCase):
             latest.instructions,
             "Collect updates, summarize, and include blockers.",
         )
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_SKILL_UPDATED)
+        self.assertEqual(kwargs["properties"]["skill_name"], "daily-brief")
+        self.assertEqual(kwargs["properties"]["skill_version"], 2)
+        self.assertEqual(kwargs["properties"]["skill_origin"], "local")
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch", "read_file"])
 
+    @patch("util.analytics.Analytics.track_event")
     @patch("api.agent.tools.tool_manager.get_available_tool_ids", return_value={"sqlite_batch"})
-    def test_sqlite_skill_update_rejects_unknown_tool_ids(self, _mock_available_tools):
+    def test_sqlite_skill_update_rejects_unknown_tool_ids(self, _mock_available_tools, mock_track_event):
         PersistentAgentSkill.objects.create(
             agent=self.agent,
             name="weekly-brief",
@@ -150,9 +201,11 @@ class AgentSkillsPersistenceTests(TestCase):
             PersistentAgentSkill.objects.filter(agent=self.agent, name="weekly-brief").count(),
             1,
         )
+        mock_track_event.assert_not_called()
 
+    @patch("util.analytics.Analytics.track_event")
     @patch("api.agent.tools.tool_manager.get_available_tool_ids", return_value={"sqlite_batch"})
-    def test_sqlite_skill_delete_by_name_removes_all_versions(self, _mock_available_tools):
+    def test_sqlite_skill_delete_by_name_removes_all_versions(self, _mock_available_tools, mock_track_event):
         PersistentAgentSkill.objects.create(
             agent=self.agent,
             name="ops-report",
@@ -186,9 +239,17 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertTrue(result.changed)
         self.assertEqual(result.deleted_names, ["ops-report"])
         self.assertFalse(PersistentAgentSkill.objects.filter(agent=self.agent, name="ops-report").exists())
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_SKILL_DELETED)
+        self.assertEqual(kwargs["properties"]["skill_name"], "ops-report")
+        self.assertEqual(kwargs["properties"]["skill_version"], 2)
+        self.assertEqual(kwargs["properties"]["skill_origin"], "local")
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch"])
 
+    @patch("util.analytics.Analytics.track_event")
     @patch("api.agent.tools.tool_manager.get_available_tool_ids")
-    def test_invalid_skill_row_does_not_delete_existing_versions(self, mock_available_tools):
+    def test_invalid_skill_row_does_not_delete_existing_versions(self, mock_available_tools, mock_track_event):
         PersistentAgentSkill.objects.create(
             agent=self.agent,
             name="ops-report",
@@ -222,10 +283,12 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertEqual(result.deleted_names, [])
         self.assertFalse(result.changed)
         self.assertTrue(PersistentAgentSkill.objects.filter(agent=self.agent, name="ops-report").exists())
+        mock_track_event.assert_not_called()
         mock_available_tools.assert_not_called()
 
+    @patch("util.analytics.Analytics.track_event")
     @patch("api.agent.tools.tool_manager.get_available_tool_ids")
-    def test_noop_skill_sync_skips_tool_discovery(self, mock_available_tools):
+    def test_noop_skill_sync_skips_tool_discovery(self, mock_available_tools, mock_track_event):
         PersistentAgentSkill.objects.create(
             agent=self.agent,
             name="daily-brief",
@@ -244,10 +307,12 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertFalse(result.changed)
         self.assertEqual(result.deleted_names, [])
         self.assertEqual(result.created_versions, [])
+        mock_track_event.assert_not_called()
         mock_available_tools.assert_not_called()
 
+    @patch("util.analytics.Analytics.track_event")
     @patch("api.agent.tools.tool_manager.get_available_tool_ids", return_value={"sqlite_batch", "read_file"})
-    def test_sqlite_skill_update_forks_global_skill_source_on_local_edit(self, _mock_available_tools):
+    def test_sqlite_skill_update_forks_global_skill_source_on_local_edit(self, _mock_available_tools, mock_track_event):
         global_skill = GlobalAgentSkill.objects.create(
             name="daily-brief-template",
             description="Daily digest workflow",
@@ -297,6 +362,15 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIsNotNone(latest)
         assert latest is not None
         self.assertIsNone(latest.global_skill)
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_GLOBAL_SKILL_FORKED)
+        self.assertEqual(kwargs["properties"]["skill_name"], "daily-brief-template")
+        self.assertEqual(kwargs["properties"]["skill_version"], 2)
+        self.assertEqual(kwargs["properties"]["skill_origin"], "forked_from_global")
+        self.assertEqual(kwargs["properties"]["global_skill_id"], str(global_skill.id))
+        self.assertEqual(kwargs["properties"]["global_skill_name"], "daily-brief-template")
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch", "read_file"])
 
     def test_prompt_block_uses_top_three_latest_skills(self):
         now = timezone.now()

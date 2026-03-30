@@ -13,6 +13,7 @@ from django.db.models.expressions import OuterRef, Exists
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.proactive_activation import ProactiveActivationService
+from api.services.skill_analytics import track_global_agent_skill_event
 from api.services.owner_execution_pause import (
     get_owner_execution_pause_state,
     pause_owner_execution,
@@ -3530,6 +3531,40 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
     search_fields = ("name", "description", "instructions")
     readonly_fields = ("created_at", "updated_at")
     ordering = ("name",)
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        track_global_agent_skill_event(
+            user_id=getattr(request.user, "id", None),
+            event=(
+                AnalyticsEvent.GLOBAL_AGENT_SKILL_UPDATED
+                if change
+                else AnalyticsEvent.GLOBAL_AGENT_SKILL_CREATED
+            ),
+            skill=obj,
+            source=AnalyticsSource.WEB,
+        )
+
+    def delete_model(self, request, obj):
+        skill = GlobalAgentSkill.objects.get(pk=obj.pk)
+        super().delete_model(request, obj)
+        track_global_agent_skill_event(
+            user_id=getattr(request.user, "id", None),
+            event=AnalyticsEvent.GLOBAL_AGENT_SKILL_DELETED,
+            skill=skill,
+            source=AnalyticsSource.WEB,
+        )
+
+    def delete_queryset(self, request, queryset):
+        skills = list(queryset)
+        super().delete_queryset(request, queryset)
+        for skill in skills:
+            track_global_agent_skill_event(
+                user_id=getattr(request.user, "id", None),
+                event=AnalyticsEvent.GLOBAL_AGENT_SKILL_DELETED,
+                skill=skill,
+                source=AnalyticsSource.WEB,
+            )
 
 
 @admin.register(PersistentAgentCommsEndpoint)

@@ -14,6 +14,12 @@ from typing import Optional, Sequence
 from django.db import transaction
 
 from api.models import PersistentAgentSkill
+from api.services.skill_analytics import (
+    SKILL_ORIGIN_FORKED_FROM_GLOBAL,
+    infer_agent_skill_origin,
+    track_agent_skill_event,
+)
+from util.analytics import AnalyticsEvent
 
 from .skill_utils import normalize_skill_tool_ids
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
@@ -143,6 +149,7 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
     created_versions: list[str] = []
     deleted_names: list[str] = []
     errors: list[str] = []
+    pending_events: list[dict[str, object]] = []
 
     current_rows, read_errors, invalid_skill_ids, invalid_skill_names = _read_sqlite_skills()
     if read_errors:
@@ -174,12 +181,45 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
             continue
         candidates_by_name[row.name] = row
 
+    existing_rows = list(
+        PersistentAgentSkill.objects.filter(agent=agent)
+        .select_related("global_skill")
+        .order_by("name", "-version", "-updated_at")
+    )
+    latest_by_name: dict[str, PersistentAgentSkill] = {}
+    global_source_by_name: dict[str, object] = {}
+    for existing in existing_rows:
+        if existing.name not in latest_by_name:
+            latest_by_name[existing.name] = existing
+        if existing.name not in global_source_by_name and existing.global_skill is not None:
+            global_source_by_name[existing.name] = existing.global_skill
+
     with transaction.atomic():
         if deleted_names:
+            deleted_rows = {
+                name: latest_by_name[name]
+                for name in deleted_names
+                if name in latest_by_name
+            }
             PersistentAgentSkill.objects.filter(
                 agent=agent,
                 name__in=deleted_names,
             ).delete()
+            for name, deleted_row in deleted_rows.items():
+                had_global_ancestor = name in global_source_by_name
+                pending_events.append(
+                    {
+                        "event": AnalyticsEvent.PERSISTENT_AGENT_SKILL_DELETED,
+                        "skill_name": name,
+                        "skill_version": deleted_row.version,
+                        "tools": deleted_row.tools,
+                        "skill_origin": infer_agent_skill_origin(
+                            deleted_row,
+                            had_global_ancestor=had_global_ancestor,
+                        ),
+                        "global_skill": global_source_by_name.get(name),
+                    }
+                )
 
         valid_tool_ids: set[str] = set()
         if candidates_by_name:
@@ -195,16 +235,12 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
                 )
                 continue
 
-            latest = (
-                PersistentAgentSkill.objects.filter(agent=agent, name=name)
-                .order_by("-version", "-updated_at")
-                .first()
-            )
+            latest = latest_by_name.get(name)
             if latest and _is_same_skill_content(latest, row):
                 continue
 
             next_version = (latest.version if latest else 0) + 1
-            PersistentAgentSkill.objects.create(
+            created_skill = PersistentAgentSkill.objects.create(
                 agent=agent,
                 global_skill=None,
                 name=name,
@@ -214,8 +250,42 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
                 instructions=row.instructions,
             )
             created_versions.append(f"{name}@{next_version}")
+            had_global_ancestor = name in global_source_by_name
+            if latest is None:
+                event = AnalyticsEvent.PERSISTENT_AGENT_SKILL_CREATED
+                skill_origin = infer_agent_skill_origin(None, had_global_ancestor=False)
+            elif latest.global_skill_id:
+                event = AnalyticsEvent.PERSISTENT_AGENT_GLOBAL_SKILL_FORKED
+                skill_origin = SKILL_ORIGIN_FORKED_FROM_GLOBAL
+            else:
+                event = AnalyticsEvent.PERSISTENT_AGENT_SKILL_UPDATED
+                skill_origin = infer_agent_skill_origin(
+                    latest,
+                    had_global_ancestor=had_global_ancestor,
+                )
+            pending_events.append(
+                {
+                    "event": event,
+                    "skill_name": name,
+                    "skill_version": created_skill.version,
+                    "tools": created_skill.tools,
+                    "skill_origin": skill_origin,
+                    "global_skill": global_source_by_name.get(name),
+                }
+            )
+            latest_by_name[name] = created_skill
 
     _drop_skill_table()
+    for pending_event in pending_events:
+        track_agent_skill_event(
+            agent=agent,
+            event=pending_event["event"],
+            skill_name=pending_event["skill_name"],
+            skill_version=pending_event.get("skill_version"),
+            tools=pending_event.get("tools"),
+            skill_origin=pending_event["skill_origin"],
+            global_skill=pending_event.get("global_skill"),
+        )
     return AgentSkillsApplyResult(
         created_versions=created_versions,
         deleted_names=deleted_names,

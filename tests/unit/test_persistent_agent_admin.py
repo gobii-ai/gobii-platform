@@ -20,6 +20,7 @@ from api.models import (
     PersistentAgentSystemMessage,
     PersistentAgentSystemMessageBroadcast,
 )
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_api_persistent_agents")
@@ -146,6 +147,110 @@ class PersistentAgentAdminTests(TestCase):
         admin_view = admin.site._registry[GlobalAgentSkill]
         self.assertIn("is_active", admin_view.list_display)
         self.assertIn("instructions", admin_view.search_fields)
+
+    @patch("util.analytics.Analytics.track_event")
+    def test_global_agent_skill_admin_create_emits_analytics(self, mock_track_event):
+        admin_view = admin.site._registry[GlobalAgentSkill]
+        request = self.request_factory.post("/admin/api/globalagentskill/add/")
+        request.user = self.admin_user
+        skill = GlobalAgentSkill(
+            name="ops-report",
+            description="Generate operations reports",
+            tools=["sqlite_batch"],
+            instructions="Summarize the latest ops metrics.",
+        )
+
+        admin_view.save_model(request, skill, form=None, change=False)
+
+        self.assertTrue(GlobalAgentSkill.objects.filter(pk=skill.pk).exists())
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.admin_user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.GLOBAL_AGENT_SKILL_CREATED)
+        self.assertEqual(kwargs["source"], AnalyticsSource.WEB)
+        self.assertEqual(kwargs["properties"]["global_skill_id"], str(skill.id))
+        self.assertEqual(kwargs["properties"]["global_skill_name"], "ops-report")
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch"])
+        self.assertEqual(kwargs["properties"]["tool_count"], 1)
+        self.assertTrue(kwargs["properties"]["is_active"])
+
+    @patch("util.analytics.Analytics.track_event")
+    def test_global_agent_skill_admin_update_emits_analytics(self, mock_track_event):
+        admin_view = admin.site._registry[GlobalAgentSkill]
+        request = self.request_factory.post("/admin/api/globalagentskill/change/")
+        request.user = self.admin_user
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate operations reports",
+            tools=["sqlite_batch"],
+            instructions="Summarize the latest ops metrics.",
+        )
+        skill.instructions = "Summarize the latest ops metrics and blockers."
+        skill.tools = ["read_file", "sqlite_batch"]
+
+        admin_view.save_model(request, skill, form=None, change=True)
+
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.GLOBAL_AGENT_SKILL_UPDATED)
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["read_file", "sqlite_batch"])
+        self.assertEqual(kwargs["properties"]["tool_count"], 2)
+
+    @patch("util.analytics.Analytics.track_event")
+    def test_global_agent_skill_admin_delete_emits_analytics(self, mock_track_event):
+        admin_view = admin.site._registry[GlobalAgentSkill]
+        request = self.request_factory.post("/admin/api/globalagentskill/delete/")
+        request.user = self.admin_user
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate operations reports",
+            tools=["sqlite_batch"],
+            instructions="Summarize the latest ops metrics.",
+        )
+
+        admin_view.delete_model(request, skill)
+
+        self.assertFalse(GlobalAgentSkill.objects.filter(pk=skill.pk).exists())
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["event"], AnalyticsEvent.GLOBAL_AGENT_SKILL_DELETED)
+        self.assertEqual(kwargs["properties"]["global_skill_name"], "ops-report")
+
+    @patch("util.analytics.Analytics.track_event")
+    def test_global_agent_skill_admin_bulk_delete_emits_one_event_per_skill(self, mock_track_event):
+        admin_view = admin.site._registry[GlobalAgentSkill]
+        request = self.request_factory.post("/admin/api/globalagentskill/")
+        request.user = self.admin_user
+        first = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate operations reports",
+            tools=["sqlite_batch"],
+            instructions="Summarize the latest ops metrics.",
+        )
+        second = GlobalAgentSkill.objects.create(
+            name="file-review",
+            description="Review files consistently",
+            tools=["read_file"],
+            instructions="Read the file before summarizing it.",
+        )
+
+        admin_view.delete_queryset(
+            request,
+            GlobalAgentSkill.objects.filter(pk__in=[first.pk, second.pk]).order_by("name"),
+        )
+
+        self.assertFalse(GlobalAgentSkill.objects.filter(pk__in=[first.pk, second.pk]).exists())
+        self.assertEqual(mock_track_event.call_count, 2)
+        event_names = [call.kwargs["event"] for call in mock_track_event.call_args_list]
+        self.assertEqual(
+            event_names,
+            [
+                AnalyticsEvent.GLOBAL_AGENT_SKILL_DELETED,
+                AnalyticsEvent.GLOBAL_AGENT_SKILL_DELETED,
+            ],
+        )
+        deleted_names = [call.kwargs["properties"]["global_skill_name"] for call in mock_track_event.call_args_list]
+        self.assertEqual(deleted_names, ["file-review", "ops-report"])
 
     def test_trigger_processing_skips_expired_agents_when_requested(self):
         expired_agent = self._create_agent(
