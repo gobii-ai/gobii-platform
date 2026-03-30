@@ -16,8 +16,9 @@ DEFAULT_SEARCH_WEB_RESULT_COUNT = 5
 DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT = 5
 DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT = 30
 DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD = 0.97
+DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS = False
 
-_CACHE_KEY = "tool_settings:v3"
+_CACHE_KEY = "tool_settings:v4"
 _CACHE_TTL_SECONDS = 300
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ class ToolPlanSettings:
     search_engine_batch_query_limit: int = DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT
     brightdata_amazon_product_search_limit: int = DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT
     duplicate_similarity_threshold: float = DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
+    tool_search_auto_enable_apps: bool = DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS
 
     def hourly_limit_for_tool(self, tool_name: str) -> Optional[int]:
         """Return the hourly limit for the given tool or None if unlimited."""
@@ -70,6 +72,11 @@ def _serialise(configs) -> dict[str, dict[str, dict]]:
                 "brightdata_amazon_product_search_limit",
                 DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
             ),
+            "tool_search_auto_enable_apps": getattr(
+                config,
+                "tool_search_auto_enable_apps",
+                DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
+            ),
             "duplicate_similarity_threshold": getattr(
                 config,
                 "duplicate_similarity_threshold",
@@ -93,6 +100,7 @@ def _ensure_defaults_exist() -> None:
                 "search_web_result_count": DEFAULT_SEARCH_WEB_RESULT_COUNT,
                 "search_engine_batch_query_limit": DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
                 "brightdata_amazon_product_search_limit": DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
+                "tool_search_auto_enable_apps": DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
                 "duplicate_similarity_threshold": DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
             },
         )
@@ -110,6 +118,7 @@ def _ensure_defaults_exist() -> None:
                 "search_web_result_count": DEFAULT_SEARCH_WEB_RESULT_COUNT,
                 "search_engine_batch_query_limit": DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
                 "brightdata_amazon_product_search_limit": DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
+                "tool_search_auto_enable_apps": DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
                 "duplicate_similarity_threshold": DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
             },
         )
@@ -219,6 +228,11 @@ def get_tool_settings_for_plan_version(
         ),
         brightdata_amazon_product_search_limit=_normalize_brightdata_amazon_product_search_limit(
             config.get("brightdata_amazon_product_search_limit") if config else None
+        ),
+        tool_search_auto_enable_apps=bool(
+            config.get("tool_search_auto_enable_apps", DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS)
+            if config
+            else DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS
         ),
         duplicate_similarity_threshold=normalize_duplicate_similarity_threshold(
             config.get("duplicate_similarity_threshold") if config else None

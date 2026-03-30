@@ -23,6 +23,7 @@ from api.models import (
     MCPServerOAuthCredential,
     PersistentAgentMCPServer,
     PromptConfig,
+    ToolConfig,
     UserBilling,
     LLMProvider,
     ImageGenerationModelEndpoint,
@@ -54,6 +55,7 @@ from api.agent.tools.search_tools import (
     search_tools,
 )
 from api.services.prompt_settings import invalidate_prompt_settings_cache
+from api.services.tool_settings import invalidate_tool_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
 
 
@@ -1226,6 +1228,10 @@ class MCPToolFunctionsTests(TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
+        invalidate_prompt_settings_cache()
+        self.addCleanup(invalidate_prompt_settings_cache)
+        invalidate_tool_settings_cache()
+        self.addCleanup(invalidate_tool_settings_cache)
         User = get_user_model()
         self.user = User.objects.create_user(username='test@example.com')
         self.browser_agent = create_test_browser_agent(self.user)
@@ -1297,6 +1303,12 @@ class MCPToolFunctionsTests(TestCase):
         self.server_name = self.server_config.name
         # Ensure persistent LLM config exists for DB-only selection
         seed_persistent_basic(include_openrouter=False)
+
+    def _set_tool_search_auto_enable_apps(self, enabled: bool) -> None:
+        config, _ = ToolConfig.objects.get_or_create(plan_name=PlanNames.FREE)
+        config.tool_search_auto_enable_apps = enabled
+        config.save()
+        invalidate_tool_settings_cache()
         
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
@@ -1503,6 +1515,8 @@ class MCPToolFunctionsTests(TestCase):
         mock_run_completion,
         mock_enable_tools,
     ):
+        self._set_tool_search_auto_enable_apps(True)
+
         mock_search_apps.return_value = [
             SimpleNamespace(slug="slack", name="Slack"),
             SimpleNamespace(slug="trello", name="Trello"),
@@ -1536,6 +1550,58 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools", "enable_apps"])
         mock_enable_tools.assert_not_called()
 
+    @override_settings(PUBLIC_SITE_URL="https://gobii.ai")
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=True)
+    def test_search_tools_guides_manual_app_enablement_when_auto_enablement_disabled(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_search_apps,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        self._set_tool_search_auto_enable_apps(False)
+
+        mock_search_apps.return_value = [
+            SimpleNamespace(slug="slack", name="Slack"),
+        ]
+        mock_get_effective_pipedream_app_slugs_for_agent.return_value = []
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "Tell the user to enable Slack first."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "post to slack")
+
+        self.assertEqual(result["status"], "success")
+        system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Do not call enable_apps", system_message)
+        self.assertIn("Automatic Pipedream app enablement is disabled.", system_message)
+        self.assertIn('go to "Add Apps" here: https://gobii.ai/console/advanced/mcp-servers/', system_message)
+        self.assertIn('https://gobii.ai/console/advanced/mcp-servers/', user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools"])
+        mock_enable_tools.assert_not_called()
+
     @patch('api.agent.tools.search_tools.enable_pipedream_apps_for_agent')
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
@@ -1555,6 +1621,8 @@ class MCPToolFunctionsTests(TestCase):
         mock_enable_tools,
         mock_enable_pipedream_apps_for_agent,
     ):
+        self._set_tool_search_auto_enable_apps(True)
+
         mock_search_apps.return_value = [
             SimpleNamespace(slug="slack", name="Slack"),
         ]
