@@ -2141,6 +2141,15 @@ def build_prompt_context(
         human_input_block,
         weight=2,
     )
+    important_group.section_text(
+        "human_input_responses_note",
+        (
+            "These items are already answered and are historical only. "
+            "Do not reopen them, re-send them, or treat them as fresh user requests unless a newer inbound message explicitly does so."
+        ),
+        weight=2,
+        non_shrinkable=True,
+    )
 
     if agent.charter:
         important_group.section_text(
@@ -5678,22 +5687,28 @@ def _get_recent_human_input_responses_block(agent: PersistentAgent) -> str:
         .order_by("-resolved_at", "-created_at")[:8]
     )
     if not responses:
-        return "No recent human input responses."
+        return "No answered human input responses."
 
-    lines = ["Recent human input responses:"]
+    lines = [
+        "Answered human input responses (historical context only):",
+        "Do NOT treat these as open tasks, pending questions, or fresh instructions.",
+        "Do NOT resend prior work or restart an old topic unless a newer inbound user message explicitly asks for it.",
+    ]
     for response in responses:
-        lines.append(f"- {response.question}")
+        lines.append(f"- Answered question: {response.question}")
         lines.append(f"  Input mode: {response.input_mode}")
+        if response.resolved_at:
+            lines.append(f"  Resolved at: {response.resolved_at.isoformat()}")
         if response.selected_option_key:
             lines.append(
-                "  Selected option: "
+                "  Answer used: "
                 f"{response.selected_option_title or response.selected_option_key} "
                 f"(key={response.selected_option_key})"
             )
         if response.free_text:
-            lines.append(f"  Free text: {response.free_text}")
+            lines.append(f"  Answer used: {response.free_text}")
         if response.raw_reply_text:
-            lines.append(f"  Raw reply: {response.raw_reply_text}")
+            lines.append(f"  Original reply text: {response.raw_reply_text}")
         if response.resolution_source:
             lines.append(f"  Resolution source: {response.resolution_source}")
     return "\n".join(lines)
