@@ -1,5 +1,6 @@
 """Prompt and context building helpers for persistent agent event processing."""
 
+from collections import Counter
 import json
 import logging
 import math
@@ -3627,8 +3628,8 @@ def _build_sqlite_retry_warning(
 ) -> str:
     """Warn when recent sqlite_batch calls are repeatedly mining the same result."""
 
-    result_id_counts: dict[str, int] = {}
-    empty_counts: dict[str, int] = {}
+    result_id_counts: Counter[str] = Counter()
+    empty_counts: Counter[str] = Counter()
 
     for params, result_text in recent_calls:
         if not isinstance(params, dict):
@@ -3641,15 +3642,15 @@ def _build_sqlite_retry_warning(
             continue
         is_empty = bool(_SQLITE_EMPTY_RESULT_RE.search(result_text or ""))
         for result_id in result_ids:
-            result_id_counts[result_id] = result_id_counts.get(result_id, 0) + 1
+            result_id_counts[result_id] += 1
             if is_empty:
-                empty_counts[result_id] = empty_counts.get(result_id, 0) + 1
+                empty_counts[result_id] += 1
 
     if not result_id_counts:
         return ""
 
-    result_id, call_count = max(result_id_counts.items(), key=lambda item: item[1])
-    empty_count = empty_counts.get(result_id, 0)
+    result_id, call_count = result_id_counts.most_common(1)[0]
+    empty_count = empty_counts[result_id]
     if call_count < 4 or empty_count < 2:
         return ""
 
