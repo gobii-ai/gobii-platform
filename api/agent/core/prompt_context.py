@@ -1807,6 +1807,9 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     is_proprietary = bool(getattr(settings, "GOBII_PROPRIETARY_MODE", False)) or has_paid_plan
     if is_proprietary:
         capabilities_note = (
+            "DO NOT ANSWER USER QUESTIONS ABOUT BILLING."
+            f"Users can go to {billing_url} to view billing information."
+            "If they have questions, direct them to Gobii support."
             "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
         )
         lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
