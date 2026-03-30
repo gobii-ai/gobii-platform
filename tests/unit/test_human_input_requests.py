@@ -1376,7 +1376,8 @@ class HumanInputRequestTests(TestCase):
 
         block = _get_recent_human_input_responses_block(self.agent)
 
-        self.assertIn("Recent human input responses:", block)
+        self.assertIn("Answered human input responses (historical context only):", block)
+        self.assertIn("Do NOT treat these as open tasks", block)
         self.assertIn("What is the status?", block)
         self.assertIn("Ship it tomorrow.", block)
 
