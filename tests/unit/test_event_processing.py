@@ -2654,7 +2654,6 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         result = _execute_http_request(self.agent, params)
 
         self.assertEqual(result["status"], "ok")
-        self.assertIsNone(result["proxy_used"])
 
         call_args = mock_request.call_args
         self.assertNotIn("proxies", call_args[1])

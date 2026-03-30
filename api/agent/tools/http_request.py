@@ -591,7 +591,6 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         "status_code": resp.status_code,
         "headers": dict(resp.headers),
         "content": content_str,
-        "proxy_used": str(proxy_server) if proxy_server else None,
     }
     if download_requested:
         content_type_header = resp.headers.get("Content-Type") or ""
