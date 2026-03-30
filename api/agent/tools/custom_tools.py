@@ -1,3 +1,4 @@
+import ast
 import base64
 import contextlib
 import json
@@ -40,10 +41,8 @@ CUSTOM_TOOL_RESULT_MARKER = "__GOBII_CUSTOM_TOOL_RESULT__="
 DEFAULT_CUSTOM_TOOL_TIMEOUT_SECONDS = 300
 MAX_CUSTOM_TOOL_TIMEOUT_SECONDS = 900
 MAX_CUSTOM_TOOL_SOURCE_BYTES = 64 * 1024
-ENTRYPOINT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 _PARAMS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_PARAMS_B64"
-_ENTRYPOINT_ENV_KEY = "SANDBOX_CUSTOM_TOOL_ENTRYPOINT"
 _BRIDGE_URL_ENV_KEY = "SANDBOX_CUSTOM_TOOL_BRIDGE_URL"
 _TOKEN_ENV_KEY = "SANDBOX_CUSTOM_TOOL_TOKEN"
 _TOOL_NAME_ENV_KEY = "SANDBOX_CUSTOM_TOOL_NAME"
@@ -58,8 +57,6 @@ _GOBII_CTX_MODULE = textwrap.dedent(
     import os
     import subprocess
     import sys
-    import urllib.error
-    import urllib.request
 
     RESULT_MARKER = {CUSTOM_TOOL_RESULT_MARKER!r}
     CURL_STATUS_MARKER = "__GOBII_CURL_STATUS__:"
@@ -77,25 +74,6 @@ _GOBII_CTX_MODULE = textwrap.dedent(
             self.bridge_url = os.environ.get({_BRIDGE_URL_ENV_KEY!r}, "")
             self.token = os.environ.get({_TOKEN_ENV_KEY!r}, "")
             self.sqlite_db_path = os.environ.get({_SQLITE_DB_PATH_ENV_KEY!r}, "")
-
-        def _call_tool_via_urllib(self, body):
-            request = urllib.request.Request(
-                self.bridge_url,
-                data=body,
-                headers={{
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {{self.token}}",
-                }},
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=300) as response:
-                    return response.read().decode("utf-8")
-            except urllib.error.HTTPError as exc:
-                detail = exc.read().decode("utf-8", "replace")
-                raise RuntimeError(f"Tool bridge returned HTTP {{exc.code}}: {{detail[:500]}}") from exc
-            except urllib.error.URLError as exc:
-                raise RuntimeError(f"Tool bridge request failed: {{exc}}") from exc
 
         def _call_tool_via_curl(self, body):
             command = [
@@ -121,8 +99,8 @@ _GOBII_CTX_MODULE = textwrap.dedent(
                     timeout=300,
                     check=False,
                 )
-            except FileNotFoundError:
-                return self._call_tool_via_urllib(body)
+            except FileNotFoundError as exc:
+                raise RuntimeError("curl is required for ctx.call_tool().") from exc
             except subprocess.TimeoutExpired as exc:
                 raise RuntimeError("Tool bridge request timed out.") from exc
 
@@ -278,19 +256,6 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
     elif not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         return None
     return schema
-
-
-def _normalize_entrypoint(value: Any) -> Optional[str]:
-    if value in (None, ""):
-        return "run"
-    if not isinstance(value, str):
-        return None
-    entrypoint = value.strip()
-    if not entrypoint or not ENTRYPOINT_RE.match(entrypoint):
-        return None
-    return entrypoint
-
-
 def _normalize_timeout_seconds(value: Any) -> Optional[int]:
     if value in (None, ""):
         return DEFAULT_CUSTOM_TOOL_TIMEOUT_SECONDS
@@ -356,9 +321,53 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     if len(source_bytes) > MAX_CUSTOM_TOOL_SOURCE_BYTES:
         return f"Custom tool source must be {MAX_CUSTOM_TOOL_SOURCE_BYTES} bytes or smaller."
     try:
-        compile(source_text, source_path, "exec")
+        tree = ast.parse(source_text, filename=source_path)
     except SyntaxError as exc:
         return f"Custom tool source has a syntax error: {exc}"
+
+    has_run = any(isinstance(node, ast.FunctionDef) and node.name == "run" for node in tree.body)
+    if not has_run:
+        return "Custom tool source must define `def run(...):`."
+
+    imports_main = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "_gobii_ctx"
+        and any(alias.name == "main" and alias.asname is None for alias in node.names)
+        for node in tree.body
+    )
+    if not imports_main:
+        return "Custom tool source must import `main` with `from _gobii_ctx import main`."
+
+    has_main_guard = False
+    for node in tree.body:
+        if not isinstance(node, ast.If):
+            continue
+        if not (
+            isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "__name__"
+            and len(node.test.ops) == 1
+            and isinstance(node.test.ops[0], ast.Eq)
+            and len(node.test.comparators) == 1
+            and isinstance(node.test.comparators[0], ast.Constant)
+            and node.test.comparators[0].value == "__main__"
+        ):
+            continue
+        has_main_guard = any(
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Name)
+            and stmt.value.func.id == "main"
+            and len(stmt.value.args) == 1
+            and isinstance(stmt.value.args[0], ast.Name)
+            and stmt.value.args[0].id == "run"
+            and not stmt.value.keywords
+            for stmt in node.body
+        )
+        if has_main_guard:
+            break
+    if not has_main_guard:
+        return "Custom tool source must end with `if __name__ == '__main__': main(run)`."
     return None
 
 
@@ -461,7 +470,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Write results directly to SQLite via ctx.sqlite_db_path instead of returning large intermediate data. "
                 "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
                 "PROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
-                "For direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx) "
+                "For direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]) "
                 "or subprocess curl, and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
                 "For tool-to-tool calls, use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
                 "Provide `source_code` to write the file now, or point at an existing filespace `.py` file. "
@@ -489,10 +498,6 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                     "parameters_schema": {
                         "type": "object",
                         "description": "JSON schema for tool input params. Use {\"type\": \"object\", \"properties\": {}} if no params needed.",
-                    },
-                    "entrypoint": {
-                        "type": "string",
-                        "description": "Optional Python function name to call. Defaults to `run`.",
                     },
                     "timeout_seconds": {
                         "type": "integer",
@@ -529,9 +534,12 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
     if not source_path.endswith(".py"):
         return {"status": "error", "message": "source_path must point to a `.py` file."}
 
-    entrypoint = _normalize_entrypoint(params.get("entrypoint"))
-    if not entrypoint:
-        return {"status": "error", "message": "entrypoint must be a valid Python identifier."}
+    entrypoint_param = params.get("entrypoint")
+    if entrypoint_param not in (None, "", "run"):
+        return {
+            "status": "error",
+            "message": "entrypoint is no longer configurable. Custom tools must use `def run(...):` and `main(run)`.",
+        }
 
     parameters_schema = _normalize_parameters_schema(params.get("parameters_schema"))
     if parameters_schema is None:
@@ -598,7 +606,7 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
             "description": description,
             "source_path": source_path,
             "parameters_schema": parameters_schema,
-            "entrypoint": entrypoint,
+            "entrypoint": "run",
             "timeout_seconds": timeout_seconds,
         },
     )
@@ -629,7 +637,6 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         "tool_name": tool.tool_name,
         "name": tool.name,
         "source_path": tool.source_path,
-        "entrypoint": tool.entrypoint,
         "timeout_seconds": tool.timeout_seconds,
         "enabled": enable_result.get("enabled", []),
         "already_enabled": enable_result.get("already_enabled", []),
@@ -676,7 +683,6 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
     bridge_url = f"{base_url}{reverse('api:custom-tool-bridge-execute')}"
     env = {
         _PARAMS_ENV_KEY: _encode_env_json(params or {}),
-        _ENTRYPOINT_ENV_KEY: tool.entrypoint,
         _BRIDGE_URL_ENV_KEY: bridge_url,
         _TOKEN_ENV_KEY: build_custom_tool_bridge_token(agent, tool, parent_step_id=parent_step_id),
         _TOOL_NAME_ENV_KEY: tool.tool_name,
@@ -712,7 +718,7 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
     if parsed_result is None:
         return {
             "status": "error",
-            "message": "Custom tool did not return a result. Ensure the entrypoint returns JSON-serializable data.",
+            "message": "Custom tool did not return a result. Ensure the script ends with `if __name__ == '__main__': main(run)` and returns JSON-serializable data.",
             "stdout": cleaned_stdout,
             "stderr": result.get("stderr", ""),
         }
@@ -805,7 +811,7 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "Use the exact env var names shown in the secrets/env_var configuration. "
         "\nPROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
         "The proxy is SOCKS5. For direct outbound requests in your own code, "
-        "use SOCKS5-capable libraries (requests[socks], httpx) and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
+        "use SOCKS5-capable libraries (requests[socks], httpx[socks]) and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
         "subprocess curl honors these proxy env vars automatically. "
         "For tool-to-tool calls, always use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
         "\nSANDBOX TOOLS: rg, fd, jq, sqlite3, sed, awk, file, tar, unzip, fzf, yq, git are available via subprocess. "

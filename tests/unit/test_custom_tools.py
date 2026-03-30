@@ -102,7 +102,10 @@ class CustomToolsTests(TestCase):
                 "name": "Greeter",
                 "description": "Return a greeting.",
                 "source_path": "/tools/greeter.py",
-                "source_code": "def run(params, ctx):\n    return {'message': 'hi'}\n",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    return {'message': 'hi'}\n"
+                ),
                 "parameters_schema": {
                     "type": "object",
                     "properties": {
@@ -198,6 +201,7 @@ class CustomToolsTests(TestCase):
     def test_create_custom_tool_definition_mentions_direct_tool_and_sqlite_access(self):
         definition = get_create_custom_tool_tool()
         description = definition["function"]["description"]
+        properties = definition["function"]["parameters"]["properties"]
 
         self.assertIn("PEP 723", description)
         self.assertIn("from _gobii_ctx import main", description)
@@ -211,9 +215,46 @@ class CustomToolsTests(TestCase):
         self.assertIn("NO_PROXY", description)
         self.assertIn("SOCKS5", description)
         self.assertIn("requests[socks]", description)
-        self.assertIn("httpx", description)
+        self.assertIn("httpx[socks]", description)
         self.assertIn("curl", description)
         self.assertIn("tool-to-tool calls", description)
+        self.assertNotIn("entrypoint", properties)
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_non_run_entrypoint(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Greeter",
+                "description": "Return a greeting.",
+                "source_path": "/tools/greeter.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    return {'message': 'hi'}\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+                "entrypoint": "other",
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("entrypoint is no longer configurable", result["message"])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_source_without_main_run(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Greeter",
+                "description": "Return a greeting.",
+                "source_path": "/tools/greeter.py",
+                "source_code": "from _gobii_ctx import main\n\ndef run(params, ctx):\n    return {'message': 'hi'}\n",
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("main(run)", result["message"])
 
     @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2)
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
@@ -559,7 +600,7 @@ class CustomToolsTests(TestCase):
         self.assertIn("NO_PROXY", summary)
         self.assertIn("SOCKS5", summary)
         self.assertIn("requests[socks]", summary)
-        self.assertIn("httpx", summary)
+        self.assertIn("httpx[socks]", summary)
         self.assertIn("curl", summary)
         self.assertIn("ctx.call_tool()", summary)
         self.assertIn("internal bridge transport", summary)

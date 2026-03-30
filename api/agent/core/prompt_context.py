@@ -3002,7 +3002,7 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "Custom tools can import any pip package — declare deps with PEP 723 inline metadata and they are auto-installed via uv. "
         "Standard proxy env vars are already injected: `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, plus lowercase variants. "
         "All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
-        "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx). "
+        "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]). "
         "subprocess curl honors proxy env vars automatically. For tool-to-tool calls, use ctx.call_tool() as-is; it handles the internal bridge transport for you. "
         "Secrets (API keys, DB credentials, auth tokens) are available as env vars via `os.environ`. "
         "ALWAYS use secrets for sensitive values — never hardcode credentials. "
