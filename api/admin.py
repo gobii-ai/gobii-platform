@@ -1015,6 +1015,7 @@ class ToolConfigAdmin(admin.ModelAdmin):
         "search_engine_batch_query_limit",
         "brightdata_amazon_product_search_limit",
         "duplicate_similarity_threshold",
+        "tool_search_auto_enable_apps",
         "updated_at",
     )
     list_filter = ("plan_name",)
@@ -1038,6 +1039,10 @@ class ToolConfigAdmin(admin.ModelAdmin):
         (
             "Duplicates",
             {"fields": ("duplicate_similarity_threshold",)},
+        ),
+        (
+            "Tool search",
+            {"fields": ("tool_search_auto_enable_apps",)},
         ),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )

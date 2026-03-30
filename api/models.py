@@ -71,6 +71,7 @@ from api.services.tool_settings import (
     DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
     DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
     DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
+    DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
 )
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
@@ -1635,6 +1636,13 @@ class ToolConfig(models.Model):
         default=DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
         validators=[MinValueValidator(0.0), MaxValueValidator(1.0)],
         help_text="Similarity ratio required before blocking a potential duplicate outbound message.",
+    )
+    tool_search_auto_enable_apps = models.BooleanField(
+        default=DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
+        help_text=(
+            "Allow tool search to auto-enable matching Pipedream apps via enable_apps. "
+            "When disabled, agents are told to direct users to Add Apps instead."
+        ),
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

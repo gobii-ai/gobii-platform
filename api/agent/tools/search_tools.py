@@ -12,6 +12,8 @@ from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import litellm  # re-exported for tests that patch LiteLLM directly
+from django.conf import settings
+from django.urls import NoReverseMatch, reverse
 from litellm import drop_params
 from opentelemetry import trace
 
@@ -22,6 +24,7 @@ from ...services.pipedream_apps import (
     enable_pipedream_apps_for_agent,
     get_effective_pipedream_app_slugs_for_agent,
 )
+from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
@@ -49,6 +52,19 @@ def _has_active_pipedream_runtime() -> bool:
         name="pipedream",
         is_active=True,
     ).exists()
+
+
+def _build_console_url(route_name: str) -> str:
+    try:
+        path = reverse(route_name)
+    except NoReverseMatch:
+        logger.debug("search_tools: failed to reverse route %s", route_name, exc_info=True)
+        return ""
+
+    base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
+    if base_url:
+        return f"{base_url}{path}"
+    return path
 
 
 def _strip_description(text: str, limit: int = 180) -> str:
@@ -280,6 +296,7 @@ def _search_with_llm(
     enable_apps_callback: Optional[Callable[[PersistentAgent, List[str]], Dict[str, Any]]] = None,
     pipedream_app_catalog: Optional[Iterable[Any]] = None,
     enabled_app_slugs: Optional[Iterable[str]] = None,
+    auto_enable_apps: bool = True,
 ) -> ToolSearchResult:
     tools = list(catalog)
     app_catalog = list(pipedream_app_catalog or [])
@@ -329,6 +346,13 @@ def _search_with_llm(
         logger.exception("search_tools.%s: failed to log compact catalog preview", provider_name)
 
     app_lines = _build_app_lines(app_catalog, enabled_app_slugs=enabled_app_slugs)
+    enable_apps_manually_url = _build_console_url("console-mcp-servers")
+    manual_app_guidance = (
+        f'If a needed Pipedream app is not enabled yet and you require it, tell the user to go to "Add Apps" here: '
+        f"{enable_apps_manually_url} and search for the exact app slug.\n"
+        "Do this sparingly and only if you truly require the integration."
+        "You may already have the tools you need for integration via http_request or other methods."
+    )
 
     examples_text = _build_tool_examples(available_names)
     examples_block = f"## Examples\n\n{examples_text}\n\n" if examples_text else ""
@@ -344,22 +368,42 @@ def _search_with_llm(
     system_prompt = (
         "You select tools for research tasks. Be INCLUSIVE - enable all tools that might help.\n"
         "CRITICAL: Use EXACT tool names and app slugs from the lists below. Never invent or modify names.\n"
-        "If a needed Pipedream app is not enabled yet, call enable_apps with exact app slugs and stop there.\n"
-        "Do not call enable_tools in the same response as enable_apps.\n"
         "If no tools or apps match, do NOT call any tool.\n\n"
         f"{examples_block}"
         "## Format\n"
         "Call enable_tools with tool_names copied verbatim from the Available tools list.\n"
-        "Call enable_apps with app_slugs copied verbatim from the Available Pipedream apps list.\n"
-        "Example (placeholders, do not copy names):\n"
-        "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n\n"
         "## Rules\n"
         "- Only include tools that appear in Available tools.\n"
-        "- Only include app slugs that appear in Available Pipedream apps.\n"
         f"{image_generation_rules}"
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
+    if app_lines:
+        if auto_enable_apps and enable_apps_callback is not None:
+            system_prompt += (
+                "\n- Only include app slugs that appear in Available Pipedream apps.\n"
+                "Call enable_apps with app_slugs copied verbatim from the Available Pipedream apps list.\n"
+                "Do not call enable_tools in the same response as enable_apps.\n"
+                "If a needed Pipedream app is not enabled yet, call enable_apps with exact app slugs and stop there.\n"
+                "Do this sparingly and only if you truly require the integration."
+                "You may already have the tools you need for integration via http_request or other methods."
+                "Example (placeholders, do not copy names):\n"
+                "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
+                "app_slugs: [\"<APP_SLUG_FROM_LIST>\"]\n"
+            )
+        else:
+            system_prompt += (
+                "\n- Do not call enable_apps. Automatic Pipedream app enablement is disabled.\n"
+                f"{manual_app_guidance}"
+                "Only enable tools that are already available in Available tools.\n"
+                "Example (placeholders, do not copy names):\n"
+                "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
+            )
+    else:
+        system_prompt += (
+            "\nExample (placeholders, do not copy names):\n"
+            "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
+        )
     user_prompt = f"Query: {query}\n\nAvailable tools:\n" + "\n".join(tool_lines)
     if app_lines:
         user_prompt += (
@@ -367,7 +411,16 @@ def _search_with_llm(
             + "\n".join(app_lines)
             + "\n\nUse ONLY tool names and app slugs from the lists above."
         )
-        user_prompt += " If none match, do not call enable_tools or enable_apps."
+        if auto_enable_apps and enable_apps_callback is not None:
+            user_prompt += " If none match, do not call enable_tools or enable_apps."
+        else:
+            user_prompt += (
+                f'If a needed app is not enabled, you may the user to go to "Add Apps" '
+                f"here: {enable_apps_manually_url} and search for the exact app slug."
+                "Do this sparingly and only if you truly require the integration."
+                "You may already have the tools you need for integration via http_request or other methods."
+            )
+            user_prompt += " If none match, do not call enable_tools."
     else:
         user_prompt += "\n\nUse ONLY tool names from the list above."
         user_prompt += " If none match, do not call enable_tools."
@@ -428,7 +481,7 @@ def _search_with_llm(
                     },
                 }
                 tool_defs = [enable_tools_def]
-                if app_lines and enable_apps_callback is not None:
+                if app_lines and auto_enable_apps and enable_apps_callback is not None:
                     tool_defs.append(
                         {
                             "type": "function",
@@ -716,6 +769,10 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog
     pipedream_app_catalog: list[Any] = []
     enabled_app_slugs: list[str] = []
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    auto_enable_apps = True
+    if owner is not None:
+        auto_enable_apps = get_tool_settings_for_owner(owner).tool_search_auto_enable_apps
     if _has_active_pipedream_runtime():
         try:
             pipedream_app_catalog = PipedreamCatalogService().search_apps(query, limit=20)
@@ -739,11 +796,12 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
                 enable_pipedream_apps_for_agent,
                 available_app_slugs=[_tool_attr(app, "slug") for app in pipedream_app_catalog],
             )
-            if pipedream_app_catalog
+            if pipedream_app_catalog and auto_enable_apps
             else None
         ),
         pipedream_app_catalog=pipedream_app_catalog,
         enabled_app_slugs=enabled_app_slugs,
+        auto_enable_apps=auto_enable_apps,
     )
 
 
