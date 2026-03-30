@@ -138,6 +138,8 @@ SIGNED_FILES_URL_RE = re.compile(
 SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
+_SQLITE_RESULT_ID_RE = re.compile(r"""result_id\s*=\s*['"]([A-Za-z0-9_-]{4,64})['"]""")
+_SQLITE_EMPTY_RESULT_RE = re.compile(r"Query \d+ returned 0 rows\.", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -2351,6 +2353,15 @@ def build_prompt_context(
             non_shrinkable=True
         )
 
+    sqlite_retry_warning = _get_recent_sqlite_retry_warning(agent)
+    if sqlite_retry_warning:
+        critical_group.section_text(
+            "sqlite_retry_warning",
+            sqlite_retry_warning,
+            weight=5,
+            non_shrinkable=True,
+        )
+
     # Current datetime - small but critical for time-aware decisions
     timestamp_iso = datetime.now(timezone.utc).isoformat()
     critical_group.section_text(
@@ -3608,6 +3619,59 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         f"{urgency}Your previous {streak_label} had no tool calls. "
         f"Options: {patterns}"
     )
+
+
+def _build_sqlite_retry_warning(
+    recent_calls: Sequence[Tuple[dict[str, Any] | None, str]],
+) -> str:
+    """Warn when recent sqlite_batch calls are repeatedly mining the same result."""
+
+    result_id_counts: dict[str, int] = {}
+    empty_counts: dict[str, int] = {}
+
+    for params, result_text in recent_calls:
+        if not isinstance(params, dict):
+            continue
+        sql = str(params.get("sql") or "")
+        if not sql:
+            continue
+        result_ids = set(_SQLITE_RESULT_ID_RE.findall(sql))
+        if not result_ids:
+            continue
+        is_empty = bool(_SQLITE_EMPTY_RESULT_RE.search(result_text or ""))
+        for result_id in result_ids:
+            result_id_counts[result_id] = result_id_counts.get(result_id, 0) + 1
+            if is_empty:
+                empty_counts[result_id] = empty_counts.get(result_id, 0) + 1
+
+    if not result_id_counts:
+        return ""
+
+    result_id, call_count = max(result_id_counts.items(), key=lambda item: item[1])
+    empty_count = empty_counts.get(result_id, 0)
+    if call_count < 4 or empty_count < 2:
+        return ""
+
+    return (
+        f"Loop warning: you've already queried tool result {result_id} via sqlite_batch {call_count} times "
+        f"recently and {empty_count} of those probes returned 0 rows. Stop refining regex/CSV guesses on the same "
+        "payload. Either switch source/page, inspect a broader slice once, or report only the verified fields and "
+        "name the missing ones."
+    )
+
+
+def _get_recent_sqlite_retry_warning(agent: PersistentAgent) -> str:
+    """Return a targeted retry warning for recent unproductive sqlite_batch loops."""
+
+    recent_calls = list(
+        PersistentAgentToolCall.objects.filter(
+            step__agent=agent,
+            tool_name="sqlite_batch",
+        )
+        .order_by("-step__created_at")[:6]
+        .values_list("tool_params", "result")
+    )
+    return _build_sqlite_retry_warning(recent_calls)
 
 
 def _consume_system_prompt_messages(agent: PersistentAgent) -> str:

@@ -1559,6 +1559,18 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
     if not rows:
         return False, info
 
+    row_width_counts: Dict[int, int] = {}
+    for row in rows:
+        row_width_counts[len(row)] = row_width_counts.get(len(row), 0) + 1
+
+    common_width = max(row_width_counts, key=row_width_counts.get)
+    common_width_count = row_width_counts[common_width]
+    min_consistent_rows = 2 if len(rows) <= 3 else 3
+    if common_width < 2 or common_width_count < min_consistent_rows:
+        return False, info
+
+    rows = [row for row in rows if len(row) == common_width]
+
     header_row = rows[0]
     columns = [c.strip().strip('"\'') for c in header_row]
 

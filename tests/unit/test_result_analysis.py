@@ -258,6 +258,24 @@ code_block = True
         self.assertTrue(analysis.doc_structure.has_code_blocks)
         self.assertTrue(analysis.doc_structure.has_lists)
 
+    def test_rejects_markdownish_blob_as_csv(self):
+        text = """New York, NY Weather Forecast | AccuWeather
+
+[Go Back](/pwa)
+
+[Today](/today) [Daily](/daily) [Radar](/radar)
+
+Today's Weather
+Mon, Mar 30
+
+Hi: 67°
+Lo: 59°
+"""
+
+        analysis = analyze_text(text)
+
+        self.assertNotEqual(analysis.format, "csv")
+
     def test_detects_html_format(self):
         text = """<html>
 <head><title>Test</title></head>
