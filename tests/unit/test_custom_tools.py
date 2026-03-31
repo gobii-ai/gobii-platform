@@ -34,6 +34,7 @@ from api.models import (
     TaskCredit,
     UserQuota,
 )
+from api.services.sandbox_compute import LocalSandboxBackend
 
 
 @tag("batch_agent_tools")
@@ -71,6 +72,20 @@ class CustomToolsTests(TestCase):
         secret.save()
         return secret
 
+    @staticmethod
+    def _build_runnable_tool_source(run_body: str, *, imports: str = "") -> str:
+        sections = []
+        if imports:
+            sections.append(imports.rstrip())
+        sections.append("from _gobii_ctx import main")
+        sections.append("")
+        sections.append(run_body.rstrip())
+        sections.append("")
+        sections.append("if __name__ == '__main__':")
+        sections.append("    main(run)")
+        sections.append("")
+        return "\n".join(sections)
+
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
     def test_create_custom_tool_writes_source_and_enables_tool(self, mock_enable_tools, _mock_sandbox):
@@ -88,7 +103,10 @@ class CustomToolsTests(TestCase):
                 "name": "Greeter",
                 "description": "Return a greeting.",
                 "source_path": "/tools/greeter.py",
-                "source_code": "def run(params, ctx):\n    return {'message': 'hi'}\n",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    return {'message': 'hi'}\n"
+                ),
                 "parameters_schema": {
                     "type": "object",
                     "properties": {
@@ -184,30 +202,60 @@ class CustomToolsTests(TestCase):
     def test_create_custom_tool_definition_mentions_direct_tool_and_sqlite_access(self):
         definition = get_create_custom_tool_tool()
         description = definition["function"]["description"]
+        properties = definition["function"]["parameters"]["properties"]
 
-        self.assertIn("bulk data processing", description)
+        self.assertIn("PEP 723", description)
+        self.assertIn("from _gobii_ctx import main", description)
         self.assertIn("ctx.call_tool", description)
         self.assertIn("custom_*", description)
         self.assertIn("ctx.sqlite_db_path", description)
         self.assertIn("os.environ", description)
-        self.assertIn("env_var secrets", description)
         self.assertIn("HTTP_PROXY", description)
         self.assertIn("HTTPS_PROXY", description)
         self.assertIn("ALL_PROXY", description)
         self.assertIn("NO_PROXY", description)
         self.assertIn("SOCKS5", description)
-        self.assertIn("filespace contents are synced into the sandbox", description)
-        self.assertIn("subprocess", description)
-        self.assertIn("fd", description)
-        self.assertIn("jq", description)
-        self.assertIn("sqlite3", description)
-        self.assertIn("authenticated API sync into SQLite", description)
-        self.assertIn("DB-to-SQLite reconciliation", description)
-        self.assertIn("checkpointed multi-tool workers", description)
-        self.assertIn("dry-run/sample-first validation loops", description)
-        self.assertIn("sed", description)
-        self.assertIn("rg", description)
-        self.assertIn("fzf", description)
+        self.assertIn("requests[socks]", description)
+        self.assertIn("httpx[socks]", description)
+        self.assertIn("curl", description)
+        self.assertIn("tool-to-tool calls", description)
+        self.assertNotIn("entrypoint", properties)
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_non_run_entrypoint(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Greeter",
+                "description": "Return a greeting.",
+                "source_path": "/tools/greeter.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    return {'message': 'hi'}\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+                "entrypoint": "other",
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("entrypoint is no longer configurable", result["message"])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_source_without_main_run(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Greeter",
+                "description": "Return a greeting.",
+                "source_path": "/tools/greeter.py",
+                "source_code": "from _gobii_ctx import main\n\ndef run(params, ctx):\n    return {'message': 'hi'}\n",
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("main(run)", result["message"])
 
     @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2)
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
@@ -258,9 +306,13 @@ class CustomToolsTests(TestCase):
         _mock_bridge_url,
         _mock_sandbox,
     ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return {'value': params.get('value', 0) + 1}\n"
+        )
         write_result = write_bytes_to_dir(
             agent=self.agent,
-            content_bytes=b"def run(params, ctx):\n    return {'value': params.get('value', 0) + 1}\n",
+            content_bytes=source.encode("utf-8"),
             extension=".py",
             mime_type="text/x-python",
             path="/tools/increment.py",
@@ -294,10 +346,72 @@ class CustomToolsTests(TestCase):
         mock_service.run_custom_tool_command.assert_called_once()
         call = mock_service.run_custom_tool_command.call_args
         self.assertEqual(call.kwargs["timeout"], 123)
-        self.assertIn("SANDBOX_CUSTOM_TOOL_SOURCE_B64", call.kwargs["env"])
+        self.assertIn("SANDBOX_CUSTOM_TOOL_PARAMS_B64", call.kwargs["env"])
         self.assertEqual(call.kwargs["env"]["SANDBOX_CUSTOM_TOOL_SOURCE_PATH"], "/tools/increment.py")
         self.assertEqual(call.kwargs["sqlite_env_key"], "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH")
         self.assertTrue(call.kwargs["local_sqlite_db_path"])
+        self.assertIn('RUNTIME_CACHE_ROOT="${SANDBOX_RUNTIME_CACHE_ROOT:-/tmp}"', call.args[1])
+        self.assertIn('SOURCE_EXEC_PATH="${SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH:-/workspace$SANDBOX_CUSTOM_TOOL_SOURCE_PATH}"', call.args[1])
+        self.assertIn('UV_CACHE_DIR="${SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR:-$RUNTIME_CACHE_ROOT/uv-cache}"', call.args[1])
+        self.assertIn('UV_INSTALL_DIR="${SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR:-$RUNTIME_CACHE_ROOT/uv-bin}"', call.args[1])
+        self.assertIn('mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR"', call.args[1])
+        self.assertIn(
+            'curl -LsSf https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR" sh',
+            call.args[1],
+        )
+        self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
+        self.assertIn('uv run "$SOURCE_EXEC_PATH"', call.args[1])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_execute_custom_tool_uses_temp_uv_dirs_for_local_backend(
+        self,
+        mock_service_cls,
+        _mock_bridge_url,
+        _mock_sandbox,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return {'ok': True}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/local_temp_dirs.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Local Temp Dirs",
+            tool_name="custom_local_temp_dirs",
+            description="Use local temp uv dirs.",
+            source_path="/tools/local_temp_dirs.py",
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=30,
+        )
+
+        mock_service = MagicMock()
+        mock_service._backend = LocalSandboxBackend()
+        mock_service.run_custom_tool_command.return_value = {
+            "status": "ok",
+            "stdout": f"{CUSTOM_TOOL_RESULT_MARKER}{{\"result\": {{\"ok\": true}}}}\n",
+            "stderr": "",
+        }
+        mock_service_cls.return_value = mock_service
+
+        result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "ok")
+        env = mock_service.run_custom_tool_command.call_args.kwargs["env"]
+        self.assertIn("SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR", env)
+        self.assertIn("SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR", env)
+        self.assertNotIn("/workspace", env["SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR"])
+        self.assertNotIn("/workspace", env["SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR"])
 
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
@@ -312,8 +426,7 @@ class CustomToolsTests(TestCase):
         _mock_tool_enabled,
         _mock_bridge_url,
     ):
-        source = (
-            "import sqlite3\n\n"
+        source = self._build_runnable_tool_source(
             "def run(params, ctx):\n"
             "    conn = sqlite3.connect(ctx.sqlite_db_path)\n"
             "    try:\n"
@@ -323,6 +436,8 @@ class CustomToolsTests(TestCase):
             "    finally:\n"
             "        conn.close()\n"
             "    return {'stored': params['value']}\n"
+            ,
+            imports="import sqlite3",
         )
         write_result = write_bytes_to_dir(
             agent=self.agent,
@@ -371,10 +486,11 @@ class CustomToolsTests(TestCase):
         _mock_bridge_url,
     ):
         self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
-        source = (
-            "import os\n\n"
+        source = self._build_runnable_tool_source(
             "def run(params, ctx):\n"
             "    return {'value': os.environ.get(params['key'])}\n"
+            ,
+            imports="import os",
         )
         write_result = write_bytes_to_dir(
             agent=self.agent,
@@ -535,37 +651,24 @@ class CustomToolsTests(TestCase):
         summary = get_custom_tools_prompt_summary(self.agent, recent_limit=2)
 
         self.assertIn("Custom tools: 2 saved, 1 enabled.", summary)
-        self.assertIn("Dev loop:", summary)
+        self.assertIn("DEV LOOP:", summary)
         self.assertIn("file_str_replace", summary)
         self.assertIn("ctx.sqlite_db_path", summary)
         self.assertIn("os.environ", summary)
-        self.assertIn("env_var secrets", summary)
         self.assertIn("HTTP_PROXY", summary)
         self.assertIn("HTTPS_PROXY", summary)
         self.assertIn("ALL_PROXY", summary)
         self.assertIn("NO_PROXY", summary)
         self.assertIn("SOCKS5", summary)
-        self.assertIn("bulk data processing", summary)
-        self.assertIn("repetitive deterministic work", summary)
-        self.assertIn("other custom_* tools", summary)
-        self.assertIn("filespace contents are synced into the sandbox", summary)
-        self.assertIn("fd", summary)
-        self.assertIn("jq", summary)
+        self.assertIn("requests[socks]", summary)
+        self.assertIn("httpx[socks]", summary)
+        self.assertIn("curl", summary)
+        self.assertIn("ctx.call_tool()", summary)
+        self.assertIn("internal bridge transport", summary)
         self.assertIn("sqlite3", summary)
-        self.assertIn("sed", summary)
-        self.assertIn("Micro trajectories:", summary)
-        self.assertIn("Filespace indexing:", summary)
-        self.assertIn("Bulk export normalization:", summary)
-        self.assertIn("Authenticated API sync:", summary)
-        self.assertIn("DB reconciliation:", summary)
+        self.assertIn("Data sync to SQLite:", summary)
         self.assertIn("Checkpointed orchestration:", summary)
-        self.assertIn("Safe development loop:", summary)
-        self.assertIn("Safe mutation testing:", summary)
-        self.assertIn("Proxy-aware integration testing:", summary)
-        self.assertIn("fetch paginated records", summary)
-        self.assertIn("pull remote rows in batches", summary)
-        self.assertIn("dry_run flag", summary)
-        self.assertIn("managed HTTP(S)/SOCKS5 proxy", summary)
+        self.assertIn("Safe dev loop:", summary)
         self.assertIn("custom_alpha", summary)
         self.assertIn("custom_beta", summary)
 
