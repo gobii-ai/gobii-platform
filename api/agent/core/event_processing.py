@@ -4524,6 +4524,11 @@ def _run_agent_loop(
                     runtime_hints.get("allow_implied_send", True)
                 )
                 implied_send_allowed = prompt_allows_implied_send and selected_model_allows_implied_send
+                implied_send_disabled_reason = None
+                if not prompt_allows_implied_send:
+                    implied_send_disabled_reason = "Implied send disabled by prompt configuration."
+                elif not selected_model_allows_implied_send:
+                    implied_send_disabled_reason = "Implied send disabled for the selected model."
                 if message_text and not has_explicit_send:
                     # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                     # This is safer—agent won't keep running unexpectedly.
@@ -4554,7 +4559,7 @@ def _run_agent_loop(
                             will_continue_work=implied_will_continue,
                         )
                     else:
-                        implied_call, implied_error = None, "Implied send disabled for the selected model."
+                        implied_call, implied_error = None, implied_send_disabled_reason
                     if implied_call:
                         implied_send = True
                         implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
@@ -4571,20 +4576,28 @@ def _run_agent_loop(
                             agent.id,
                             implied_error or "unknown error",
                         )
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": (
-                                    "Message delivery requires explicit send tools when implied send is unavailable. "
-                                    "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
-                                    "recently active non-web communication channel from unified history/recent contacts."
-                                ),
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug("Failed to persist implied-send correction step", exc_info=True)
+                        if not implied_send_allowed:
+                            logger.info(
+                                "Agent %s: skipping implied-send correction step because implied send is disabled by configuration.",
+                                agent.id,
+                            )
+                            implied_error = None
+                            # Treat config-level opt-out as a normal choice rather than a delivery failure.
+                        else:
+                            try:
+                                step_kwargs = {
+                                    "agent": agent,
+                                    "description": (
+                                        "Message delivery requires explicit send tools when implied send is unavailable. "
+                                        "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
+                                        "recently active non-web communication channel from unified history/recent contacts."
+                                    ),
+                                }
+                                _attach_completion(step_kwargs)
+                                step = PersistentAgentStep.objects.create(**step_kwargs)
+                                _attach_prompt_archive(step)
+                            except Exception:
+                                logger.debug("Failed to persist implied-send correction step", exc_info=True)
                         # Don't continue here - still execute any other tool calls that were returned
 
                 reasoning_source = thinking_content

@@ -1015,7 +1015,7 @@ class ImpliedSendTests(TestCase):
             agent=self.agent,
             description__startswith="Message delivery requires explicit send tools",
         ).first()
-        self.assertIsNotNone(correction_step)
+        self.assertIsNone(correction_step)
 
     @patch("api.models.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None})
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
@@ -1106,7 +1106,7 @@ class ImpliedSendTests(TestCase):
             agent=self.agent,
             description__startswith="Message delivery requires explicit send tools",
         ).first()
-        self.assertIsNotNone(correction_step)
+        self.assertIsNone(correction_step)
 
 
 @tag("batch_event_processing")
