@@ -1,7 +1,5 @@
 """Central helpers for optional third-party integrations."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from django.conf import settings
 
@@ -36,6 +34,25 @@ def postmark_status() -> IntegrationStatus:
 
 def twilio_status() -> IntegrationStatus:
     return _status("TWILIO_ENABLED", "TWILIO_DISABLED_REASON")
+
+
+def pipedream_status() -> IntegrationStatus:
+    enabled = bool(
+        settings.PIPEDREAM_CLIENT_ID
+        and settings.PIPEDREAM_CLIENT_SECRET
+        and settings.PIPEDREAM_PROJECT_ID
+    )
+    return IntegrationStatus(
+        enabled=enabled,
+        reason=(
+            ""
+            if enabled
+            else (
+                "Pipedream integration is not configured. "
+                "Set PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, and PIPEDREAM_PROJECT_ID."
+            )
+        ),
+    )
 
 
 def ensure_stripe_enabled() -> None:

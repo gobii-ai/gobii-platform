@@ -12,7 +12,7 @@ from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, override_settings, tag
 from django.urls import reverse
 from waffle.testutils import override_flag
-from api.models import BrowserUseAgent, PersistentAgent, UserBilling, UserFlags
+from api.models import BrowserUseAgent, MCPServerConfig, PersistentAgent, UserBilling, UserFlags
 from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
     OAUTH_CHARTER_COOKIE,
@@ -185,6 +185,28 @@ class HomePageTests(TestCase):
     @patch("pages.views.get_homepage_integrations_payload", return_value={"enabled": False, "builtins": []})
     @tag("batch_pages")
     def test_home_page_hides_integrations_section_when_pipedream_is_disabled(self, _mock_integrations):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context.get("homepage_integrations_enabled"))
+        self.assertNotContains(response, "Search more integrations")
+
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="",
+        PIPEDREAM_CLIENT_SECRET="",
+        PIPEDREAM_PROJECT_ID="",
+    )
+    @tag("batch_pages")
+    def test_home_page_hides_integrations_when_pipedream_server_exists_but_config_is_missing(self):
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            display_name="Pipedream",
+            url="https://remote.mcp.pipedream.net",
+            is_active=True,
+            prefetch_apps=["slack"],
+        )
+
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)

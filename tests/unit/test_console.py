@@ -1192,6 +1192,32 @@ class ConsoleViewsTest(TestCase):
         )
 
     @tag("batch_console_agents")
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="",
+        PIPEDREAM_CLIENT_SECRET="",
+        PIPEDREAM_PROJECT_ID="",
+    )
+    def test_agent_chat_shell_hides_pipedream_data_attributes_when_unconfigured(self):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Pipedream Hidden Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Pipedream Hidden Agent",
+            charter="Hidden charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'data-pipedream-apps-url=')
+        self.assertNotContains(response, 'data-pipedream-app-search-url=')
+
+    @tag("batch_console_agents")
     def test_delete_persistent_agent_soft_deletes_and_preserves_browser_agent(self):
         """Deleting from console should soft-delete the persistent agent and keep browser rows."""
         from api.models import PersistentAgent, BrowserUseAgent
