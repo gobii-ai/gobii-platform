@@ -33,7 +33,7 @@ def seed_platform_servers(apps, schema_editor):
             'display_name': 'Bright Data',
             'description': 'Web scraping and data extraction tools with CAPTCHA bypass',
             'command': 'npx',
-            'command_args': ['-y', '@brightdata/mcp@2.5.0'],
+            'command_args': ['-y', '@brightdata/mcp@2.9.2'],
             'url': '',
             'prefetch_apps': [],
             'metadata': {'env_fallback': {'API_TOKEN': 'BRIGHT_DATA_TOKEN'}},
