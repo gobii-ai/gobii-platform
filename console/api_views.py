@@ -560,6 +560,8 @@ def _build_completion_params(
         params["supports_tool_choice"] = bool(getattr(endpoint, "supports_tool_choice", True))
     if hasattr(endpoint, "use_parallel_tool_calls"):
         params["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+    if hasattr(endpoint, "allow_implied_send"):
+        params["allow_implied_send"] = bool(getattr(endpoint, "allow_implied_send", True))
     if hasattr(endpoint, "supports_vision"):
         params["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
     if hasattr(endpoint, "supports_reasoning"):
@@ -3825,6 +3827,7 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_tool_choice=_coerce_bool(payload.get("supports_tool_choice", True)),
             use_parallel_tool_calls=_coerce_bool(payload.get("use_parallel_tool_calls", True)),
+            allow_implied_send=_coerce_bool(payload.get("allow_implied_send", True)),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
             supports_reasoning=_coerce_bool(payload.get("supports_reasoning", False)),
             reasoning_effort=reasoning_effort,
@@ -3865,6 +3868,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             endpoint.supports_tool_choice = _coerce_bool(payload.get("supports_tool_choice"))
         if "use_parallel_tool_calls" in payload:
             endpoint.use_parallel_tool_calls = _coerce_bool(payload.get("use_parallel_tool_calls"))
+        if "allow_implied_send" in payload:
+            endpoint.allow_implied_send = _coerce_bool(payload.get("allow_implied_send"))
         if "supports_vision" in payload:
             endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
         if "low_latency" in payload:

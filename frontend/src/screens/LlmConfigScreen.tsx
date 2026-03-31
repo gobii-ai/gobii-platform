@@ -183,6 +183,7 @@ type ProviderEndpointCard = {
   supports_image_to_image?: boolean
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
+  allow_implied_send?: boolean
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null
@@ -365,6 +366,7 @@ type EndpointFormValues = {
   max_input_tokens?: string
   supportsToolChoice?: boolean
   useParallelToolCalls?: boolean
+  allowImpliedSend?: boolean
   supportsVision?: boolean
   supportsImageToImage?: boolean
   supportsReasoning?: boolean
@@ -731,6 +733,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       supports_image_to_image: endpoint.supports_image_to_image,
       supports_tool_choice: endpoint.supports_tool_choice,
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
+      allow_implied_send: endpoint.allow_implied_send,
       supports_reasoning: endpoint.supports_reasoning,
       reasoning_effort: endpoint.reasoning_effort ?? null,
       openrouter_preset: endpoint.openrouter_preset ?? null,
@@ -1603,6 +1606,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [supportsImageToImage, setSupportsImageToImage] = useState(Boolean(endpoint.supports_image_to_image))
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
+  const [allowImpliedSend, setAllowImpliedSend] = useState(endpoint.allow_implied_send ?? true)
   const [supportsReasoning, setSupportsReasoning] = useState(Boolean(endpoint.supports_reasoning))
   const [reasoningEffort, setReasoningEffort] = useState(endpoint.reasoning_effort ?? '')
   const [openrouterPreset, setOpenrouterPreset] = useState(endpoint.openrouter_preset ?? '')
@@ -1619,6 +1623,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       supportsTemperature,
       supportsToolChoice: supportsToolChoice,
       useParallelToolCalls: parallelTools,
+      allowImpliedSend,
       supportsVision: supportsVision,
       supportsImageToImage,
       supportsReasoning,
@@ -1727,6 +1732,12 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
             Parallel calls
           </label>
         )}
+        {isPersistent && (
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={allowImpliedSend} onChange={(event) => setAllowImpliedSend(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+            Implied send
+          </label>
+        )}
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" checked={lowLatency} onChange={(event) => setLowLatency(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Low latency
@@ -1776,6 +1787,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
+  const [allowImpliedSend, setAllowImpliedSend] = useState(true)
   const [supportsReasoning, setSupportsReasoning] = useState(false)
   const [reasoningEffort, setReasoningEffort] = useState('')
   const [temperature, setTemperature] = useState('')
@@ -1807,6 +1819,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         supportsImageToImage,
         supportsToolChoice: supportsTools,
         useParallelToolCalls: parallelTools,
+        allowImpliedSend,
         temperature,
         supportsReasoning,
         reasoningEffort,
@@ -1921,6 +1934,12 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                   Parallel calls
                 </label>
               </>
+            )}
+            {type === 'persistent' && (
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={allowImpliedSend} onChange={(event) => setAllowImpliedSend(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+                Implied send
+              </label>
             )}
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={lowLatency} onChange={(event) => setLowLatency(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -2793,6 +2812,7 @@ export function LlmConfigScreen() {
       payload.supports_temperature = values.supportsTemperature ?? true
       payload.supports_tool_choice = values.supportsToolChoice ?? true
       payload.use_parallel_tool_calls = values.useParallelToolCalls ?? true
+      payload.allow_implied_send = values.allowImpliedSend ?? true
       payload.supports_vision = values.supportsVision ?? false
       payload.supports_reasoning = values.supportsReasoning ?? false
       payload.reasoning_effort = values.reasoningEffort ? values.reasoningEffort : null
@@ -2845,6 +2865,7 @@ export function LlmConfigScreen() {
     }
     if (kind === 'persistent' && values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (kind === 'persistent' && values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
+    if (kind === 'persistent' && values.allowImpliedSend !== undefined) payload.allow_implied_send = values.allowImpliedSend
     if (values.lowLatency !== undefined) payload.low_latency = values.lowLatency
     if (kind === 'persistent') {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning

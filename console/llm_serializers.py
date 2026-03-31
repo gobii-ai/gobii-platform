@@ -68,6 +68,7 @@ def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[st
             "supports_temperature": endpoint.supports_temperature,
             "supports_tool_choice": endpoint.supports_tool_choice,
             "use_parallel_tool_calls": endpoint.use_parallel_tool_calls,
+            "allow_implied_send": endpoint.allow_implied_send,
             "supports_vision": endpoint.supports_vision,
             "supports_reasoning": endpoint.supports_reasoning,
             "reasoning_effort": endpoint.reasoning_effort,

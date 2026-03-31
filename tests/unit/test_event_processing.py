@@ -982,6 +982,20 @@ class PromptContextBuilderTests(TestCase):
         content = system_message['content']
         self.assertIn("Implied Send", content)
 
+    def test_prompt_omits_implied_send_when_primary_model_disables_it(self):
+        start_web_session(self.agent, self.user)
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch(
+                 'api.agent.core.prompt_context.get_llm_config_with_failover',
+                 return_value=[('endpoint', 'openai/gpt-4o-mini', {'allow_implied_send': False})],
+             ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        self.assertIsNotNone(system_message)
+        self.assertNotIn("Implied Send", system_message['content'])
+
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""
         with patch(

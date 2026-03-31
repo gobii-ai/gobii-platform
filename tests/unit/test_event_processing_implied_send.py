@@ -978,6 +978,136 @@ class ImpliedSendTests(TestCase):
         ).first()
         self.assertIsNotNone(sleep_step, "Other tool calls should execute even when implied send fails")
 
+    @patch("api.models.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None})
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_respects_selected_model_opt_out(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+        _mock_task_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None, {"prompt_allows_implied_send": True})
+        start_web_session(self.agent, self.user)
+
+        resp = self._mock_completion("Model says hello")
+        resp.model_extra = {"gobii_runtime_hints": {"allow_implied_send": False}}
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Message delivery requires explicit send tools",
+        ).first()
+        self.assertIsNotNone(correction_step)
+
+    @patch("api.models.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None})
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_explicit_send_still_executes_when_implied_send_disabled(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+        _mock_task_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None, {"prompt_allows_implied_send": False})
+        start_web_session(self.agent, self.user)
+
+        msg = MagicMock()
+        msg.content = ""
+        msg.reasoning_content = None
+        send_tool_call = MagicMock()
+        send_tool_call.id = "call_send_123"
+        send_tool_call.function = MagicMock()
+        send_tool_call.function.name = "send_chat_message"
+        send_tool_call.function.arguments = json.dumps(
+            {
+                "to_address": build_web_user_address(self.user.id, self.agent.id),
+                "body": "Explicit send works",
+            }
+        )
+        msg.tool_calls = [send_tool_call]
+
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        resp.model_extra = {"gobii_runtime_hints": {"allow_implied_send": False}}
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+
+    @patch("api.models.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None})
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_prompt_side_opt_out_blocks_implied_send_even_if_selected_model_allows_it(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+        _mock_task_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None, {"prompt_allows_implied_send": False})
+        start_web_session(self.agent, self.user)
+
+        resp = self._mock_completion("Prompt-side opt-out should win")
+        resp.model_extra = {"gobii_runtime_hints": {"allow_implied_send": True}}
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Message delivery requires explicit send tools",
+        ).first()
+        self.assertIsNotNone(correction_step)
+
 
 @tag("batch_event_processing")
 class ContinuationSignalTests(TestCase):
