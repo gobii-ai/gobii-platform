@@ -451,7 +451,7 @@ class PipedreamCatalogService:
                 try:
                     results.append(futures[slug].result())
                 except PipedreamCatalogError:
-                    logger.warning("Failed to hydrate Pipedream app '%s'", slug, exc_info=True)
+                    logger.warning("Failed to hydrate Pipedream app '%s'", slug)
                     results.append(
                         PipedreamAppSummary(
                             slug=slug,
