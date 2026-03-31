@@ -1057,6 +1057,8 @@ export function AgentChatLayout({
             </div>
           ) : (
             <AgentComposer
+              agentId={activeAgentId ?? agentId ?? null}
+              agentName={agentName ?? null}
               onSubmit={onSendMessage}
               pendingHumanInputRequests={pendingHumanInputRequests}
               onRespondHumanInput={onRespondHumanInputRequest}

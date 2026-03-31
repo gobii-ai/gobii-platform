@@ -9,6 +9,8 @@ Running unit tests:
 Writing unit tests:
 - Ensure the test is tagged with a batch tag, e.g. `@tag('my_feature_batch')`
 - Ensure the tag is registered in ci.yml
+- Do not feel the need to write tests just for tertiary features like analytics. Focus on core functionality.
+- Do not add front-end tests unless specifically requested.
 
 Python:
 - Do NOT do annotations imports like `from __future__ import annotations`

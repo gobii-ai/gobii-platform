@@ -1,7 +1,7 @@
 from typing import Any, Dict, Optional
 
 from api.models import PersistentAgent
-from api.services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable
+from api.services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable, track_sandbox_unavailable
 
 
 def get_run_command_tool() -> Dict[str, Any]:
@@ -70,6 +70,7 @@ def execute_run_command(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
     try:
         service = SandboxComputeService()
     except SandboxComputeUnavailable as exc:
+        track_sandbox_unavailable(agent, request_source="run_command")
         return {"status": "error", "message": str(exc)}
 
     return service.run_command(

@@ -103,7 +103,40 @@ type HumanInputComposerBatchResponse = {
   responses: HumanInputComposerResponse[]
 }
 
+type HumanInputBatchAnalyticsProperties = {
+  agent_id: string
+  agent_name: string | null
+  batch_id: string
+  request_count: number
+  is_batch: boolean
+  active_conversation_channel: string | null
+  options_request_count: number
+  free_text_request_count: number
+  total_option_count: number
+}
+
+function buildHumanInputBatchAnalyticsProperties(
+  agentId: string,
+  agentName: string | null,
+  requests: PendingHumanInputRequest[],
+): HumanInputBatchAnalyticsProperties {
+  const optionsRequestCount = requests.filter((request) => request.options.length > 0).length
+  return {
+    agent_id: agentId,
+    agent_name: agentName,
+    batch_id: requests[0]?.batchId ?? '',
+    request_count: requests.length,
+    is_batch: requests.length > 1,
+    active_conversation_channel: requests[0]?.activeConversationChannel ?? null,
+    options_request_count: optionsRequestCount,
+    free_text_request_count: requests.length - optionsRequestCount,
+    total_option_count: requests.reduce((count, request) => count + request.options.length, 0),
+  }
+}
+
 type AgentComposerProps = {
+  agentId?: string | null
+  agentName?: string | null
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   pendingHumanInputRequests?: PendingHumanInputRequest[]
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
@@ -143,6 +176,8 @@ type AgentComposerProps = {
 }
 
 export const AgentComposer = memo(function AgentComposer({
+  agentId = null,
+  agentName = null,
   onSubmit,
   pendingHumanInputRequests = [],
   onRespondHumanInput,
@@ -201,6 +236,7 @@ export const AgentComposer = memo(function AgentComposer({
   const lastRotationTimeRef = useRef<number>(Date.now())
   const feedbackMessage = disabledReason || attachmentError || submitError
   const showSubmitErrorAlert = Boolean((attachmentError || submitError) && !disabledReason)
+  const seenHumanInputBatchAnalyticsRef = useRef<Set<string>>(new Set())
 
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
@@ -453,6 +489,31 @@ export const AgentComposer = memo(function AgentComposer({
     })
   }, [pendingHumanInputRequests])
 
+  useEffect(() => {
+    if (!agentId || !pendingHumanInputRequests.length) {
+      return
+    }
+
+    const requestsByBatch = new Map<string, PendingHumanInputRequest[]>()
+    pendingHumanInputRequests.forEach((request) => {
+      const requests = requestsByBatch.get(request.batchId) ?? []
+      requests.push(request)
+      requestsByBatch.set(request.batchId, requests)
+    })
+
+    requestsByBatch.forEach((requests, batchId) => {
+      const analyticsKey = `${agentId}:${batchId}`
+      if (seenHumanInputBatchAnalyticsRef.current.has(analyticsKey)) {
+        return
+      }
+      seenHumanInputBatchAnalyticsRef.current.add(analyticsKey)
+      track(
+        AnalyticsEvent.HUMAN_INPUT_PANEL_SHOWN,
+        buildHumanInputBatchAnalyticsProperties(agentId, agentName, requests),
+      )
+    })
+  }, [agentId, agentName, pendingHumanInputRequests])
+
   // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
   useEffect(() => {
     if (!autoFocus) return
@@ -686,8 +747,24 @@ export const AgentComposer = memo(function AgentComposer({
     if (!request) {
       return
     }
+    const optionIndex = request.options.findIndex((candidate) => candidate.key === optionKey)
+    if (agentId && optionIndex >= 0) {
+      const option = request.options[optionIndex]
+      track(AnalyticsEvent.HUMAN_INPUT_OPTION_SELECTED, {
+        agent_id: agentId,
+        batch_id: request.batchId,
+        request_id: request.id,
+        batch_position: request.batchPosition,
+        batch_size: request.batchSize,
+        option_key: option.key,
+        option_title: option.title,
+        option_index: optionIndex + 1,
+        option_count: request.options.length,
+        active_conversation_channel: request.activeConversationChannel ?? null,
+      })
+    }
     await submitHumanInputResponse(request, { requestId, selectedOptionKey: optionKey })
-  }, [pendingHumanInputRequests, submitHumanInputResponse])
+  }, [agentId, pendingHumanInputRequests, submitHumanInputResponse])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

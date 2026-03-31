@@ -90,6 +90,14 @@ export const AnalyticsEvent = {
   /** User dismissed an upsell message */
   UPSELL_MESSAGE_DISMISSED: 'Upsell Message Dismissed',
 
+  // ============================================
+  // Human Input Events
+  // ============================================
+  /** Human input batch became visible in the composer */
+  HUMAN_INPUT_PANEL_SHOWN: 'Human Input Panel Shown',
+  /** User selected an explicit option for a human input request */
+  HUMAN_INPUT_OPTION_SELECTED: 'Human Input Option Selected',
+
 
   // ============================================
   // CTA Click - for tracking clicks of CTAs; for our funnel/flow analytics
