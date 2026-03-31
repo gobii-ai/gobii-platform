@@ -125,11 +125,17 @@ def _workspace_size_bytes(agent_root: Path) -> int:
     return total
 
 
-def _ensure_capacity(agent_root: Path, new_bytes: int, *, existing_bytes: int = 0) -> Optional[Dict[str, Any]]:
+def _ensure_capacity(
+    agent_root: Path,
+    new_bytes: int,
+    *,
+    existing_bytes: int = 0,
+    current_bytes: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
     max_bytes = _workspace_max_bytes()
     if max_bytes <= 0:
         return None
-    current = _workspace_size_bytes(agent_root)
+    current = _workspace_size_bytes(agent_root) if current_bytes is None else max(current_bytes, 0)
     adjusted = max(current - max(existing_bytes, 0), 0)
     if adjusted + new_bytes > max_bytes:
         return {

@@ -35,6 +35,11 @@ _TRACE_ID_HEX_LEN = 32
 _TRACEPARENT_PARTS = 4
 
 
+def _safe_identity_segment(value: str, *, fallback: str = "default") -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]", "_", (value or "").strip())
+    return cleaned or fallback
+
+
 def _allowed_env_keys() -> set[str]:
     raw = os.environ.get("SANDBOX_COMPUTE_ALLOWED_ENV_KEYS", "")
     if not raw.strip():
@@ -70,7 +75,7 @@ def _runtime_cache_root() -> Path:
 
 
 def _runtime_cache_paths(identity: str) -> Dict[str, Path]:
-    cleaned = re.sub(r"[^a-zA-Z0-9._-]", "_", (identity or "").strip()) or "default"
+    cleaned = _safe_identity_segment(identity)
     base = _runtime_cache_root() / cleaned
     paths = {
         "base": base,
@@ -146,7 +151,9 @@ def _python_max_timeout_seconds() -> int:
 def _agent_workspace(agent_id: str) -> Path:
     root = _workspace_root()
     root.mkdir(parents=True, exist_ok=True)
-    return root
+    workspace = root / _safe_identity_segment(agent_id, fallback="agent")
+    workspace.mkdir(parents=True, exist_ok=True)
+    return workspace
 
 
 def _mcp_timeout_seconds() -> int:

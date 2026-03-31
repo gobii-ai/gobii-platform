@@ -2,7 +2,7 @@ import logging
 import time
 from typing import Any, Callable, Dict
 
-from logging_config import configure_logging
+from sandbox_server.logging_config import configure_logging
 from sandbox_server.mcp import _handle_discover_mcp_tools, _handle_mcp_request
 from sandbox_server.run import _handle_deploy_or_resume, _handle_run_command, _handle_terminate
 from sandbox_server.sync import _handle_sync_filespace
@@ -105,7 +105,7 @@ def application(environ: Dict[str, Any], start_response: Callable) -> list[bytes
         )
         return _json_response(
             start_response,
-            "200 OK",
+            "500 Internal Server Error",
             {"status": "error", "message": "Sandbox compute request failed."},
         )
 

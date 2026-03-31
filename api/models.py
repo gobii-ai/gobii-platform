@@ -1,5 +1,6 @@
 import hashlib, secrets, uuid, os, string, re, datetime, json
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import ulid
@@ -161,19 +162,8 @@ class IntelligenceTier(models.Model):
 def _get_default_intelligence_tier_id() -> uuid.UUID | None:
     # NOTE: This callable is referenced as a field default in historical migrations (e.g. 0257),
     # so it must remain compatible with schemas that predate the `is_default` column (added in 0286).
-    try:
-        with connection.cursor() as cursor:
-            table_names = set(connection.introspection.table_names(cursor))
-        table_name = IntelligenceTier._meta.db_table
-        if table_name not in table_names:
-            return None
-
-        with connection.cursor() as cursor:
-            columns = {
-                column.name
-                for column in connection.introspection.get_table_description(cursor, table_name)
-            }
-    except (InternalError, OperationalError, ProgrammingError):
+    table_exists, columns = _get_intelligence_tier_schema()
+    if not table_exists:
         return None
 
     if "is_default" in columns:
@@ -194,6 +184,25 @@ def _get_default_intelligence_tier_id() -> uuid.UUID | None:
         return None
 
 
+@lru_cache(maxsize=4)
+def _get_intelligence_tier_schema() -> tuple[bool, frozenset[str]]:
+    try:
+        with connection.cursor() as cursor:
+            table_names = set(connection.introspection.table_names(cursor))
+        table_name = IntelligenceTier._meta.db_table
+        if table_name not in table_names:
+            return False, frozenset()
+
+        with connection.cursor() as cursor:
+            columns = {
+                column.name
+                for column in connection.introspection.get_table_description(cursor, table_name)
+            }
+    except (InternalError, OperationalError, ProgrammingError):
+        return False, frozenset()
+    return True, frozenset(columns)
+
+
 def _apply_tier_multiplier(agent, amount):
     from api.agent.core import llm_config
 
@@ -203,6 +212,7 @@ def _apply_tier_multiplier(agent, amount):
 def _invalidate_intelligence_tier_caches() -> None:
     from api.agent.core import llm_config
 
+    _get_intelligence_tier_schema.cache_clear()
     llm_config.invalidate_llm_tier_multiplier_cache()
     llm_config.invalidate_llm_tier_rank_cache()
     llm_config.invalidate_llm_tier_default_cache()

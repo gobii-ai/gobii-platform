@@ -29,7 +29,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "127.0.0.1:${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -91,7 +91,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
       BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
+      REDIS_URL: redis://redis:6379/0
       XDG_DATA_HOME: /tmp/.chrome
       XDG_CONFIG_HOME: /tmp/.chrome
       XDG_CACHE_HOME: /tmp/.chrome
@@ -111,12 +111,12 @@ services:
 
   flower:
     image: mher/flower:2.0
-    command: celery flower --broker=redis://redis:${REDIS_PORT:-6379}/0 --port=${FLOWER_PORT:-5555}
+    command: celery flower --broker=redis://redis:6379/0 --port=${FLOWER_PORT:-5555}
     ports:
       - "${FLOWER_PORT:-5555}:5555"
     environment:
-      - CELERY_BROKER_URL=redis://redis:${REDIS_PORT:-6379}/0
-      - CELERY_RESULT_BACKEND=redis://redis:${REDIS_PORT:-6379}/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin}
     depends_on:
       - redis
@@ -147,9 +147,9 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
       BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      CELERY_BROKER_URL: redis://redis:${REDIS_PORT:-6379}/0
-      CELERY_RESULT_BACKEND: redis://redis:${REDIS_PORT:-6379}/0
-      REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       XDG_DATA_HOME: /tmp/.chrome
       XDG_CONFIG_HOME: /tmp/.chrome
       XDG_CACHE_HOME: /tmp/.chrome
@@ -189,9 +189,9 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
       BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      CELERY_BROKER_URL: redis://redis:${REDIS_PORT:-6379}/0
-      CELERY_RESULT_BACKEND: redis://redis:${REDIS_PORT:-6379}/0
-      REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       XDG_DATA_HOME: /tmp/.chrome
       XDG_CONFIG_HOME: /tmp/.chrome
       XDG_CACHE_HOME: /tmp/.chrome
