@@ -51,6 +51,8 @@ _NO_PROXY_ENV_KEYS = (
     "no_proxy",
 )
 _CUSTOM_TOOL_SQLITE_MIME_TYPE = "application/vnd.sqlite3"
+_ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR = "_sandbox_active_conversation_channel"
+_ACTIVE_CONVERSATION_CHANNEL_UNSET = object()
 
 
 def sandbox_compute_enabled() -> bool:
@@ -667,7 +669,7 @@ def _session_update_from_response(response: Dict[str, Any]) -> SandboxSessionUpd
 
 
 def _resolve_backend() -> SandboxComputeBackend:
-    backend_name = str(getattr(settings, "SANDBOX_COMPUTE_BACKEND", "") or "").lower()
+    backend_name = str(settings.SANDBOX_COMPUTE_BACKEND or "").lower()
     if backend_name in ("http", "remote"):
         return HttpSandboxBackend(
             getattr(settings, "SANDBOX_COMPUTE_API_URL", ""),
@@ -950,7 +952,7 @@ def _sandbox_backend_name(backend: Any) -> str | None:
 
 
 def _configured_sandbox_backend_name() -> str:
-    backend_name = str(getattr(settings, "SANDBOX_COMPUTE_BACKEND", "") or "").strip().lower()
+    backend_name = str(settings.SANDBOX_COMPUTE_BACKEND or "").strip().lower()
     if backend_name in {"", "local"}:
         return "local"
     if backend_name in {"http", "remote"}:
@@ -964,14 +966,20 @@ def _active_conversation_channel(agent: Optional[PersistentAgent]) -> str | None
     if agent is None:
         return None
 
+    cached_channel = getattr(agent, _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR, _ACTIVE_CONVERSATION_CHANNEL_UNSET)
+    if cached_channel is not _ACTIVE_CONVERSATION_CHANNEL_UNSET:
+        return cached_channel
+
     preferred = getattr(agent, "preferred_contact_endpoint", None)
     preferred_channel = getattr(preferred, "channel", None)
     if preferred_channel:
-        return str(preferred_channel)
+        cached_channel = str(preferred_channel)
+        setattr(agent, _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR, cached_channel)
+        return cached_channel
 
     try:
         latest_channel = agent.owned_conversations.order_by("-id").values_list("channel", flat=True).first()
-    except Exception:
+    except DatabaseError:
         logger.debug(
             "Failed to derive active conversation channel for sandbox analytics agent=%s",
             getattr(agent, "id", None),
@@ -979,9 +987,9 @@ def _active_conversation_channel(agent: Optional[PersistentAgent]) -> str | None
         )
         return None
 
-    if not latest_channel:
-        return None
-    return str(latest_channel)
+    cached_channel = str(latest_channel) if latest_channel else None
+    setattr(agent, _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR, cached_channel)
+    return cached_channel
 
 
 def _build_sandbox_analytics_properties(
