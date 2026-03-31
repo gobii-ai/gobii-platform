@@ -814,7 +814,7 @@ class UserPreference(models.Model):
             )
 
         try:
-        preference, _ = cls.objects.get_or_create(user=user)
+            preference, _ = cls.objects.get_or_create(user=user)
         except IntegrityError:
             # Concurrent first-write requests can both race to create the one-to-one
             # row. If another request won, load that row and continue applying the
