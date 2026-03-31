@@ -44,14 +44,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ORCHESTRATOR_MODELS = {
     LLMConfigForm.PROVIDER_OPENAI: "gpt-4.1",
-    LLMConfigForm.PROVIDER_OPENROUTER: "moonshotai/kimi-k2.5",
+    LLMConfigForm.PROVIDER_OPENROUTER: "deepseek/deepseek-v3.2",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/gpt-oss-120b",
 }
 
 DEFAULT_BROWSER_MODELS = {
     LLMConfigForm.PROVIDER_OPENAI: "gpt-4o-mini",
-    LLMConfigForm.PROVIDER_OPENROUTER: "moonshotai/kimi-k2.5",
+    LLMConfigForm.PROVIDER_OPENROUTER: "deepseek/deepseek-v3.2",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
 }
@@ -68,14 +68,14 @@ DEFAULT_PROVIDER_API_BASES = {
 
 ORCHESTRATOR_ENDPOINT_KEYS = {
     LLMConfigForm.PROVIDER_OPENAI: "openai_gpt4_1",
-    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_kimi_k25",
+    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_deepseek_32",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic_sonnet4",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_gpt_oss_120b",
 }
 
 BROWSER_ENDPOINT_KEYS = {
     LLMConfigForm.PROVIDER_OPENAI: "openai_gpt5_mini",
-    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_kimi_k25",
+    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_deepseek_32",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic_sonnet4",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_qwen3_235b",
 }
