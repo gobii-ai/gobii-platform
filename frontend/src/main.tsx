@@ -112,10 +112,13 @@ const handleEmbeddedClose = isEmbedded
   : undefined
 
 switch (appName) {
-  case 'agent-chat':
+  case 'agent-chat': {
     if (!agentId) {
       throw new Error('Agent identifier is required for the chat experience')
     }
+    const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
+    const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
+    const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
     screen = (
       <AgentChatPage
         agentId={agentId}
@@ -133,10 +136,13 @@ switch (appName) {
         isCollaborator={isCollaborator}
         viewerUserId={viewerUserId}
         viewerEmail={viewerEmail}
+        pipedreamAppsSettingsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
+        pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
         onClose={handleEmbeddedClose}
       />
     )
     break
+  }
   case 'agent-detail':
     const propsId = mountNode.dataset.propsJsonId
     const initialData = readJsonScript<import('./screens/AgentDetailScreen').AgentDetailScreenProps['initialData']>(propsId)
@@ -212,14 +218,12 @@ switch (appName) {
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
-    const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl
-    const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl
+    const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
+    const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
+    const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
     const allowCommands = mountNode.dataset.allowCommands === 'true'
     if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath) {
       throw new Error('MCP OAuth endpoints are required')
-    }
-    if (!pipedreamAppsUrl || !pipedreamAppSearchUrl) {
-      throw new Error('Pipedream app endpoints are required')
     }
 
     screen = (
@@ -230,8 +234,8 @@ switch (appName) {
         ownerScope={mountNode.dataset.ownerScope}
         ownerLabel={mountNode.dataset.ownerLabel}
         allowCommands={allowCommands}
-        pipedreamAppsUrl={pipedreamAppsUrl}
-        pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+        pipedreamAppsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
+        pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
         oauthStartUrl={oauthStartUrl}
         oauthMetadataUrl={oauthMetadataUrl}
         oauthCallbackPath={oauthCallbackPath}

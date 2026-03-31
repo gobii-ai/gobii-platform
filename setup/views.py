@@ -44,14 +44,14 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ORCHESTRATOR_MODELS = {
     LLMConfigForm.PROVIDER_OPENAI: "gpt-4.1",
-    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.6:exacto",
+    LLMConfigForm.PROVIDER_OPENROUTER: "deepseek/deepseek-v3.2",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/gpt-oss-120b",
 }
 
 DEFAULT_BROWSER_MODELS = {
     LLMConfigForm.PROVIDER_OPENAI: "gpt-4o-mini",
-    LLMConfigForm.PROVIDER_OPENROUTER: "z-ai/glm-4.6:exacto",
+    LLMConfigForm.PROVIDER_OPENROUTER: "deepseek/deepseek-v3.2",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
 }
@@ -68,14 +68,14 @@ DEFAULT_PROVIDER_API_BASES = {
 
 ORCHESTRATOR_ENDPOINT_KEYS = {
     LLMConfigForm.PROVIDER_OPENAI: "openai_gpt4_1",
-    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_glm_45",
+    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_deepseek_32",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic_sonnet4",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_gpt_oss_120b",
 }
 
 BROWSER_ENDPOINT_KEYS = {
     LLMConfigForm.PROVIDER_OPENAI: "openai_gpt5_mini",
-    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_glm_45",
+    LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_deepseek_32",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic_sonnet4",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_qwen3_235b",
 }
@@ -339,21 +339,16 @@ class SetupWizardView(View):
             provider.save()
 
             endpoint_key = ORCHESTRATOR_ENDPOINT_KEYS[provider_choice]
-            endpoint = PersistentModelEndpoint.objects.get(key=endpoint_key)
-            if model:
-                endpoint.litellm_model = model
-            endpoint.temperature_override = get_required_temperature_for_model(endpoint.litellm_model)
-            endpoint.supports_tool_choice = supports_tool_choice
-            endpoint.use_parallel_tool_calls = use_parallel_tools
-            endpoint.supports_vision = supports_vision
-            endpoint.enabled = True
-            # For persistent (LiteLLM) we only persist a base URL when explicitly provided
-            # or for custom providers. OpenRouter/other built-ins route by provider prefix.
-            if api_base:
-                endpoint.api_base = api_base
-            elif provider_choice == LLMConfigForm.PROVIDER_CUSTOM:
-                endpoint.api_base = api_base
-            endpoint.save()
+            endpoint = self._create_or_update_persistent_endpoint(
+                key_slug=endpoint_key,
+                provider=provider,
+                litellm_model=model,
+                api_base=api_base,
+                supports_tool_choice=supports_tool_choice,
+                use_parallel_tools=use_parallel_tools,
+                supports_vision=supports_vision,
+                update_api_base=bool(api_base),
+            )
 
         self._reset_persistent_tiers(endpoint)
         return provider, endpoint
@@ -481,6 +476,7 @@ class SetupWizardView(View):
         supports_tool_choice: bool,
         use_parallel_tools: bool,
         supports_vision: bool,
+        update_api_base: bool = True,
     ) -> PersistentModelEndpoint:
         endpoint, _ = PersistentModelEndpoint.objects.get_or_create(
             key=slugify(key_slug)[:96],
@@ -492,7 +488,8 @@ class SetupWizardView(View):
         endpoint.provider = provider
         endpoint.litellm_model = litellm_model
         endpoint.temperature_override = get_required_temperature_for_model(litellm_model)
-        endpoint.api_base = api_base
+        if update_api_base:
+            endpoint.api_base = api_base
         endpoint.supports_tool_choice = supports_tool_choice
         endpoint.use_parallel_tool_calls = use_parallel_tools
         endpoint.supports_vision = supports_vision

@@ -1,6 +1,7 @@
 """Reusable helpers for idempotent migration operations."""
 
 from django.db import migrations
+from django.db.migrations.operations.fields import AddField
 
 
 class SafeRemoveConstraint(migrations.RemoveConstraint):
@@ -80,4 +81,35 @@ class SafeAddIndex(migrations.AddIndex):
         schema_editor.remove_index(model, self.index)
 
 
-__all__ = ["SafeAddIndex", "SafeRemoveConstraint"]
+class SafeAddField(AddField):
+    """Add a field while gracefully handling pre-existing DB columns."""
+
+    def _column_exists(self, connection, model):
+        table = model._meta.db_table
+        column_name = model._meta.get_field(self.name).column.lower()
+        with connection.cursor() as cursor:
+            columns = connection.introspection.get_table_description(cursor, table)
+        return any(column.name.lower() == column_name for column in columns)
+
+    def database_forwards(self, app_label, schema_editor, from_state, to_state):
+        to_model = to_state.apps.get_model(app_label, self.model_name)
+        if not self.allow_migrate_model(schema_editor.connection.alias, to_model):
+            return
+
+        if self._column_exists(schema_editor.connection, to_model):
+            return
+
+        super().database_forwards(app_label, schema_editor, from_state, to_state)
+
+    def database_backwards(self, app_label, schema_editor, from_state, to_state):
+        from_model = from_state.apps.get_model(app_label, self.model_name)
+        if not self.allow_migrate_model(schema_editor.connection.alias, from_model):
+            return
+
+        if not self._column_exists(schema_editor.connection, from_model):
+            return
+
+        super().database_backwards(app_label, schema_editor, from_state, to_state)
+
+
+__all__ = ["SafeAddField", "SafeAddIndex", "SafeRemoveConstraint"]

@@ -50,6 +50,7 @@ from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     can_user_use_personal_agents_and_api,
 )
+from util.integrations import pipedream_status
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE as TIMELINE_DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE as TIMELINE_MAX_PAGE_SIZE,
@@ -1048,7 +1049,6 @@ class PipedreamConnectRedirectView(View):
 
     @tracer.start_as_current_span('PIPEDREAM JIT Connect')
     def get(self, request, agent_id, app_slug):
-        from django.conf import settings
         from django.contrib.auth.views import redirect_to_login
         from django.template.response import TemplateResponse
         from api.integrations.pipedream_connect import create_connect_session
@@ -1065,12 +1065,8 @@ class PipedreamConnectRedirectView(View):
                 login_url=settings.LOGIN_URL,
             )
 
-        # Check if Pipedream integration is configured
-        if not all([
-            getattr(settings, 'PIPEDREAM_CLIENT_ID', ''),
-            getattr(settings, 'PIPEDREAM_CLIENT_SECRET', ''),
-            getattr(settings, 'PIPEDREAM_PROJECT_ID', ''),
-        ]):
+        status = pipedream_status()
+        if not status.enabled:
             logger.warning("PD JIT Connect: Pipedream not configured")
             return TemplateResponse(
                 request,
@@ -1080,7 +1076,7 @@ class PipedreamConnectRedirectView(View):
                     'heading': 'Integration not available',
                     'icon_type': 'info',
                     'message': 'Third-party integrations are not configured on this Gobii instance.',
-                    'message_secondary': 'If you are self-hosting, please configure the Pipedream environment variables (PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, PIPEDREAM_PROJECT_ID).',
+                    'message_secondary': status.reason,
                     'show_retry': False,
                     'show_support': False,
                 },

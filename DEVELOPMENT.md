@@ -66,6 +66,8 @@ uv run python manage.py createsuperuser
 5. **Optional processes**
    - Celery beat: `uv run celery -A config beat --loglevel info --scheduler redbeat.RedBeatScheduler`
    - Object storage (MinIO UI) is available at http://localhost:9090 (`minioadmin`/`minioadmin` by default).
+   - Sandbox compute server starts by default with `docker compose -f docker-compose.dev.yaml up`.
+   - To make host-run Django use it, export `SANDBOX_COMPUTE_BACKEND=http SANDBOX_COMPUTE_API_URL=http://127.0.0.1:8080 SANDBOX_COMPUTE_API_TOKEN=dev-sandbox-token`.
    - Prefer running Django/Celery inside containers? `docker compose -f docker-compose.dev.yaml --profile containers up web` (add `--profile worker` or `--profile beat` as needed) will reuse the same backing services.
 
 Stop everything when finished with `Ctrl+C` in the Compose terminal (or run `docker compose -f docker-compose.dev.yaml down` in another shell if you prefer a clean exit).

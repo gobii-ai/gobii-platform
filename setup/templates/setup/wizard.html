@@ -5,6 +5,8 @@
   <meta charset="utf-8">
   <title>Gobii – First Run Setup</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-cookie-name" content="{{ settings.CSRF_COOKIE_NAME|default:'csrftoken' }}">
+  {% include "partials/_csrf_helpers.html" %}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
@@ -390,11 +392,6 @@
       setTestStatus(target, 'idle', 'Not tested yet.');
     }
 
-    function getCsrfToken() {
-      const match = document.cookie.match(/csrftoken=([^;]+)/);
-      return match ? decodeURIComponent(match[1]) : '';
-    }
-
     function buildTestPayload(target) {
       const form = document.getElementById('setup-form');
       if (!form) {
@@ -452,7 +449,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-CSRFToken': getCsrfToken(),
+            'X-CSRFToken': window.getCsrfTokenValue ? window.getCsrfTokenValue() : '',
           },
           credentials: 'same-origin',
           body: JSON.stringify(buildResult.payload),

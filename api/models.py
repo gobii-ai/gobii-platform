@@ -1,5 +1,6 @@
 import hashlib, secrets, uuid, os, string, re, datetime, json
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
+from functools import lru_cache
 from typing import Optional, Tuple
 
 import ulid
@@ -15,7 +16,7 @@ from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ValidationError
 from django.utils.text import get_valid_filename
-from django.db.utils import OperationalError, ProgrammingError
+from django.db.utils import InternalError, OperationalError, ProgrammingError
 
 from django.contrib.auth import get_user_model
 from django.db.models.signals import post_save, post_delete, pre_delete, pre_save
@@ -161,21 +162,45 @@ class IntelligenceTier(models.Model):
 def _get_default_intelligence_tier_id() -> uuid.UUID | None:
     # NOTE: This callable is referenced as a field default in historical migrations (e.g. 0257),
     # so it must remain compatible with schemas that predate the `is_default` column (added in 0286).
-    tier = None
-    try:
-        # A conditional unique constraint enforces at most one default tier.
-        tier = IntelligenceTier.objects.filter(is_default=True).only("id").first()
-    except (OperationalError, ProgrammingError):
-        # Older schemas won't have `is_default`; fall back to the legacy key-based default.
-        tier = None
+    table_exists, columns = _get_intelligence_tier_schema()
+    if not table_exists:
+        return None
 
-    if tier is None:
+    if "is_default" in columns:
         try:
-            tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
-        except (OperationalError, ProgrammingError):
-            tier = None
+            tier = IntelligenceTier.objects.filter(is_default=True).only("id").first()
+            if tier is not None:
+                return tier.id
+        except (InternalError, OperationalError, ProgrammingError):
+            pass
 
-    return tier.id if tier else None
+    if "key" not in columns:
+        return None
+
+    try:
+        tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
+        return tier.id if tier else None
+    except (InternalError, OperationalError, ProgrammingError):
+        return None
+
+
+@lru_cache(maxsize=4)
+def _get_intelligence_tier_schema() -> tuple[bool, frozenset[str]]:
+    try:
+        with connection.cursor() as cursor:
+            table_names = set(connection.introspection.table_names(cursor))
+        table_name = IntelligenceTier._meta.db_table
+        if table_name not in table_names:
+            return False, frozenset()
+
+        with connection.cursor() as cursor:
+            columns = {
+                column.name
+                for column in connection.introspection.get_table_description(cursor, table_name)
+            }
+    except (InternalError, OperationalError, ProgrammingError):
+        return False, frozenset()
+    return True, frozenset(columns)
 
 
 def _apply_tier_multiplier(agent, amount):
@@ -187,6 +212,7 @@ def _apply_tier_multiplier(agent, amount):
 def _invalidate_intelligence_tier_caches() -> None:
     from api.agent.core import llm_config
 
+    _get_intelligence_tier_schema.cache_clear()
     llm_config.invalidate_llm_tier_multiplier_cache()
     llm_config.invalidate_llm_tier_rank_cache()
     llm_config.invalidate_llm_tier_default_cache()

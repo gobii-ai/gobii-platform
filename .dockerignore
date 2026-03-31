@@ -58,6 +58,9 @@ Thumbs.db
 mediafiles/
 staticfiles/
 
+# Monorepo subprojects not needed in the main platform image
+sandbox_server/
+
 # IDEs
 .vscode/
 .idea/

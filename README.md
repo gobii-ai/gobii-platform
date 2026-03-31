@@ -218,6 +218,8 @@ For sandbox compute design references:
 - [Sandbox compute spec](docs/design/sandbox_pods_compute_spec.md)
 - [Sandbox compute ops notes](docs/design/sandbox-compute-ops.md)
 
+The sandbox compute server now lives in this monorepo under [sandbox_server/](sandbox_server/), with its own Dockerfile, tests, and image workflows.
+
 ## Launch in 5 Minutes
 
 1. **Prerequisites**: Docker Desktop (or compatible engine) with at least 12 GB RAM allocated.
@@ -247,6 +249,8 @@ Optional runtime profiles:
 - `docker compose --profile beat up` for scheduled trigger processing.
 - `docker compose --profile email up` for IMAP idlers and inbound email workflows.
 - `docker compose --profile obs up` for Flower + OTEL collector observability services.
+
+The monorepo sandbox compute server from [sandbox_server/](sandbox_server/) is part of the default Compose stack. Inside Compose, sandbox calls default to `http://sandbox-compute:8080`; if you run Django on your host instead of in a container, point it at `http://127.0.0.1:8080`.
 
 ## API Quick Start
 

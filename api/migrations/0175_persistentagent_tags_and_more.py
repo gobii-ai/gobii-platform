@@ -2,6 +2,8 @@
 
 from django.db import migrations, models
 
+from api.migrations._helpers import SafeAddField
+
 
 class Migration(migrations.Migration):
 
@@ -10,17 +12,17 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AddField(
+        SafeAddField(
             model_name='persistentagent',
             name='tags',
             field=models.JSONField(blank=True, default=list, help_text='List of descriptive tags generated from the charter to aid discovery.'),
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='persistentagent',
             name='tags_charter_hash',
             field=models.CharField(blank=True, help_text='SHA256 of the charter used to generate tags.', max_length=64),
         ),
-        migrations.AddField(
+        SafeAddField(
             model_name='persistentagent',
             name='tags_requested_hash',
             field=models.CharField(blank=True, help_text='SHA256 of the charter currently pending tag generation.', max_length=64),

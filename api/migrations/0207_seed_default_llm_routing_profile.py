@@ -14,6 +14,11 @@ This migration:
 from django.db import migrations
 
 
+def _table_exists(connection, table_name):
+    with connection.cursor() as cursor:
+        return table_name in connection.introspection.table_names(cursor)
+
+
 def seed_default_profile(apps, schema_editor):
     """Copy existing LLM config into a new 'default' routing profile."""
 
@@ -36,6 +41,10 @@ def seed_default_profile(apps, schema_editor):
     BrowserTierEndpoint = apps.get_model('api', 'BrowserTierEndpoint')
     EmbeddingsLLMTier = apps.get_model('api', 'EmbeddingsLLMTier')
     EmbeddingsTierEndpoint = apps.get_model('api', 'EmbeddingsTierEndpoint')
+    embeddings_tier_endpoint_table_exists = _table_exists(
+        schema_editor.connection,
+        EmbeddingsTierEndpoint._meta.db_table,
+    )
 
     # Check if any legacy config exists - if not, skip seeding
     has_persistent = PersistentTokenRange.objects.exists()
@@ -141,16 +150,17 @@ def seed_default_profile(apps, schema_editor):
         embeddings_tier_map[old_tier.id] = new_tier
 
     # Copy embeddings tier endpoints
-    for old_te in EmbeddingsTierEndpoint.objects.all():
-        new_tier = embeddings_tier_map.get(old_te.tier_id)
-        if not new_tier:
-            continue
+    if embeddings_tier_endpoint_table_exists:
+        for old_te in EmbeddingsTierEndpoint.objects.all():
+            new_tier = embeddings_tier_map.get(old_te.tier_id)
+            if not new_tier:
+                continue
 
-        ProfileEmbeddingsTierEndpoint.objects.create(
-            tier=new_tier,
-            endpoint_id=old_te.endpoint_id,
-            weight=old_te.weight,
-        )
+            ProfileEmbeddingsTierEndpoint.objects.create(
+                tier=new_tier,
+                endpoint_id=old_te.endpoint_id,
+                weight=old_te.weight,
+            )
 
 
 def reverse_seed(apps, schema_editor):

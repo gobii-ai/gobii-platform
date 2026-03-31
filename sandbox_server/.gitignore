@@ -1,0 +1,11 @@
+.env
+__pycache__/
+
+uv.lock
+
+**/.claude/settings.local.json
+
+.DS_Storeplatform/build/
+.DS_Store
+
+*.egg-info

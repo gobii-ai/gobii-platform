@@ -63,8 +63,6 @@ const ROSTER_REFRESH_INTERVAL_MS = 20_000
 const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
 const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
-const PIPEDREAM_APPS_SETTINGS_URL = '/console/api/mcp/pipedream/apps/'
-const PIPEDREAM_APP_SEARCH_URL = '/console/api/mcp/pipedream/apps/search/'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
@@ -628,6 +626,8 @@ export type AgentChatPageProps = {
   viewerEmail?: string | null
   canManageCollaborators?: boolean | null
   isCollaborator?: boolean | null
+  pipedreamAppsSettingsUrl?: string | null
+  pipedreamAppSearchUrl?: string | null
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
@@ -668,6 +668,8 @@ export function AgentChatPage({
   viewerEmail,
   canManageCollaborators,
   isCollaborator,
+  pipedreamAppsSettingsUrl = null,
+  pipedreamAppSearchUrl = null,
   onClose,
   onCreateAgent,
   onAgentCreated,
@@ -3317,8 +3319,8 @@ export function AgentChatPage({
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
         maxAttachmentBytes={maxChatUploadSizeBytes}
-        pipedreamAppsSettingsUrl={PIPEDREAM_APPS_SETTINGS_URL}
-        pipedreamAppSearchUrl={PIPEDREAM_APP_SEARCH_URL}
+        pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+        pipedreamAppSearchUrl={pipedreamAppSearchUrl}
         pendingHumanInputRequests={pendingHumanInputRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

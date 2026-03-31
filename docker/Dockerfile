@@ -44,8 +44,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Preinstall Bright Data MCP globally so containers do not fetch it on-the-fly.
 # Local dev (outside Docker) still uses npx to install on demand.
-RUN npm install -g @brightdata/mcp@2.5.0 && \
-    npm install -g exa-mcp-server && \
+RUN npm install -g @brightdata/mcp@2.9.3 && \
     npm cache clean --force
 
 # ────────────────────────────────────────────────
@@ -124,9 +123,9 @@ ENV STATIC_ROOT=/app/staticfiles \
 
 # ── Granular COPY from builder ──────────────────
 # Copy only what's needed at runtime. Excludes: frontend/, node_modules/,
-# .npm, tests/, __pycache__/, gobii_platform.egg-info/, static/ (source),
+# .npm, tests/, __pycache__/, gobii_platform.egg-info/,
 # docs/, scripts/, reports/, assets/, mediafiles/, .github/, .venv/,
-# prompts/, sandbox_compute_server/, src/ (empty / not tracked in git)
+# prompts/, sandbox_server/ (separate monorepo subproject), src/ (empty / not tracked in git)
 
 # Python application directories
 COPY --from=builder /app/api ./api
@@ -149,6 +148,10 @@ COPY --from=builder /app/vendor ./vendor
 
 # tests/ is required because it's listed in INSTALLED_APPS (Django app)
 COPY --from=builder /app/tests ./tests
+
+# Compose runs collectstatic from the runtime image into a fresh named volume,
+# so the project-level static source tree must exist here as an input.
+COPY --from=builder /app/static ./static
 
 # Root-level Python files
 COPY --from=builder /app/manage.py ./manage.py
