@@ -176,15 +176,18 @@ def _get_default_intelligence_tier_id() -> uuid.UUID | None:
     except (InternalError, OperationalError, ProgrammingError):
         return None
 
-    try:
-        if "is_default" in columns:
+    if "is_default" in columns:
+        try:
             tier = IntelligenceTier.objects.filter(is_default=True).only("id").first()
             if tier is not None:
                 return tier.id
+        except (InternalError, OperationalError, ProgrammingError):
+            pass
 
-        if "key" not in columns:
-            return None
+    if "key" not in columns:
+        return None
 
+    try:
         tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
         return tier.id if tier else None
     except (InternalError, OperationalError, ProgrammingError):
