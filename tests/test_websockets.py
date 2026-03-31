@@ -13,6 +13,15 @@ from config.asgi import application
 class EchoConsumerTests(SimpleTestCase):
     """Exercise the minimal authenticated echo consumer configured in ASGI."""
 
+    def test_agent_chat_session_rejects_anonymous_user_without_disconnect_error(self) -> None:
+        async def _run():
+            communicator = WebsocketCommunicator(application, "/ws/agents/chat/")
+            connected, _ = await communicator.connect()
+            self.assertFalse(connected)
+            await communicator.disconnect()
+
+        async_to_sync(_run)()
+
     def test_rejects_anonymous_user(self) -> None:
         async def _run():
             communicator = WebsocketCommunicator(application, "/ws/echo/")
