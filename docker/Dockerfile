@@ -125,7 +125,7 @@ ENV STATIC_ROOT=/app/staticfiles \
 # Copy only what's needed at runtime. Excludes: frontend/, node_modules/,
 # .npm, tests/, __pycache__/, gobii_platform.egg-info/,
 # docs/, scripts/, reports/, assets/, mediafiles/, .github/, .venv/,
-# prompts/, sandbox_compute_server/ (separate monorepo subproject), src/ (empty / not tracked in git)
+# prompts/, sandbox_server/ (separate monorepo subproject), src/ (empty / not tracked in git)
 
 # Python application directories
 COPY --from=builder /app/api ./api

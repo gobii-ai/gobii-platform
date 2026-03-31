@@ -45,17 +45,17 @@ class EnvAllowlistTrustedKeysTests(unittest.TestCase):
             {"returncode": 0, "stdout": "ok\n", "stderr": ""},
         )()
 
-        with patch("sandbox_compute_server.run._require_agent_id", return_value=("agent-1", None)), patch(
-            "sandbox_compute_server.run._agent_workspace",
+        with patch("sandbox_server.run._require_agent_id", return_value=("agent-1", None)), patch(
+            "sandbox_server.run._agent_workspace",
             return_value=Path("/tmp/workspace"),
-        ), patch("sandbox_compute_server.run._store_proxy_env"), patch(
-            "sandbox_compute_server.run._normalize_timeout",
+        ), patch("sandbox_server.run._store_proxy_env"), patch(
+            "sandbox_server.run._normalize_timeout",
             return_value=30,
         ), patch(
-            "sandbox_compute_server.run._sandbox_env",
+            "sandbox_server.run._sandbox_env",
             return_value={"PATH": "/usr/bin", "POSTGRES_CONNECTION_STRING": "postgres://example"},
         ) as sandbox_env_mock, patch(
-            "sandbox_compute_server.run.subprocess.run",
+            "sandbox_server.run.subprocess.run",
             return_value=completed,
         ):
             result = _handle_run_command(payload)

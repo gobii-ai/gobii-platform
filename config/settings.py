@@ -1192,12 +1192,38 @@ GOBII_RELEASE_ENV = env("GOBII_RELEASE_ENV", default="local")
 
 # ────────── Sandbox Compute ──────────
 SANDBOX_COMPUTE_ENABLED = env.bool("SANDBOX_COMPUTE_ENABLED", default=True)
+
+
+def _sandbox_compute_backend_default(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return "http" if IN_DOCKER else "local"
+
+
+def _sandbox_compute_api_url_default(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return "http://sandbox-compute:8080" if IN_DOCKER else ""
+
+
+def _sandbox_compute_api_token_default(enabled: bool) -> str:
+    if not enabled:
+        return ""
+    return "dev-sandbox-token" if IN_DOCKER else ""
+
+
 SANDBOX_COMPUTE_BACKEND = env(
     "SANDBOX_COMPUTE_BACKEND",
-    default=("local" if SANDBOX_COMPUTE_ENABLED else ""),
+    default=_sandbox_compute_backend_default(SANDBOX_COMPUTE_ENABLED),
 )
-SANDBOX_COMPUTE_API_URL = env("SANDBOX_COMPUTE_API_URL", default="")
-SANDBOX_COMPUTE_API_TOKEN = env("SANDBOX_COMPUTE_API_TOKEN", default="")
+SANDBOX_COMPUTE_API_URL = env(
+    "SANDBOX_COMPUTE_API_URL",
+    default=_sandbox_compute_api_url_default(SANDBOX_COMPUTE_ENABLED),
+)
+SANDBOX_COMPUTE_API_TOKEN = env(
+    "SANDBOX_COMPUTE_API_TOKEN",
+    default=_sandbox_compute_api_token_default(SANDBOX_COMPUTE_ENABLED),
+)
 SANDBOX_COMPUTE_K8S_API_URL = env("SANDBOX_COMPUTE_K8S_API_URL", default="")
 SANDBOX_COMPUTE_K8S_NAMESPACE = env("SANDBOX_COMPUTE_K8S_NAMESPACE", default="")
 SANDBOX_COMPUTE_K8S_TIMEOUT_SECONDS = env.int("SANDBOX_COMPUTE_K8S_TIMEOUT_SECONDS", default=30)

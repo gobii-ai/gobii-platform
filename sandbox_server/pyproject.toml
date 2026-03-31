@@ -21,4 +21,4 @@ dependencies = [
 py-modules = ["sandbox_utils", "logging_config"]
 
 [tool.setuptools.packages.find]
-include = ["sandbox_compute_server*"]
+include = ["server*"]
