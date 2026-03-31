@@ -46,6 +46,10 @@ from config.socialaccount_adapter import (
     OAUTH_CHARTER_COOKIE,
     restore_oauth_session_state,
 )
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
+    build_checkout_flow_metadata,
+)
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.dedicated_proxy_service import (
@@ -8792,6 +8796,13 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 }
             ]
 
+            checkout_metadata = build_checkout_flow_metadata(
+                {
+                    "org_id": str(org.id),
+                    "seat_requestor_id": str(request.user.id),
+                },
+                flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
+            )
             session = stripe.checkout.Session.create(
                 customer=customer.id,
                 api_key=stripe.api_key,
@@ -8801,10 +8812,8 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 excluded_payment_method_types=EXCLUDED_PAYMENT_METHOD_TYPES,
                 allow_promotion_codes=True,
                 line_items=line_items,
-                metadata={
-                    "org_id": str(org.id),
-                    "seat_requestor_id": str(request.user.id),
-                },
+                metadata=checkout_metadata,
+                subscription_data={"metadata": checkout_metadata},
             )
 
             _track_org_event_for_console(
@@ -10067,6 +10076,10 @@ def _start_addon_portal_session(subscription_id: str, customer_id: str, price_id
 
 def _start_addon_checkout_session(customer_id: str, price_id: str, quantity: int, success_url: str, cancel_url: str) -> str:
     """Fallback to Checkout when the subscription lacks the add-on item."""
+    checkout_metadata = build_checkout_flow_metadata(
+        None,
+        flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
+    )
     session = stripe.checkout.Session.create(
         api_key=stripe.api_key,
         customer=customer_id,
@@ -10075,6 +10088,8 @@ def _start_addon_checkout_session(customer_id: str, price_id: str, quantity: int
         mode="subscription",
         excluded_payment_method_types=EXCLUDED_PAYMENT_METHOD_TYPES,
         allow_promotion_codes=True,
+        metadata=checkout_metadata,
+        subscription_data={"metadata": checkout_metadata},
         line_items=[
             {
                 "price": price_id,

@@ -25,7 +25,12 @@ from constants.plans import PlanNames, PlanNamesChoices
 from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
 from api.services.trial_abuse import SIGNAL_SOURCE_SIGNUP
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+)
 from pages.signals import (
+    handle_checkout_session_event,
     handle_subscription_event,
     handle_user_signed_up,
     handle_invoice_payment_failed,
@@ -608,6 +613,86 @@ def _build_setup_intent_payload(
     if last_setup_error is not None:
         payload["last_setup_error"] = last_setup_error
     return payload
+
+
+@tag("batch_pages")
+class CheckoutSessionSignalTests(TestCase):
+    @patch("pages.signals.stripe.Customer.modify")
+    @patch("pages.signals.stripe.Customer.retrieve")
+    @patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test")
+    @patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True))
+    def test_checkout_session_completed_clears_matching_customer_checkout_context(
+        self,
+        _mock_status,
+        _mock_key,
+        mock_customer_retrieve,
+        mock_customer_modify,
+    ):
+        payload = {
+            "object": "checkout.session",
+            "id": "cs_trial_complete",
+            "customer": "cus_trial_complete",
+            "metadata": {"gobii_event_id": "startup-sub-123"},
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="checkout.session.completed",
+            event_id="evt_checkout_completed",
+        )
+        mock_customer_retrieve.return_value = {
+            "id": "cus_trial_complete",
+            "metadata": {
+                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "startup-sub-123",
+                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "trial",
+            },
+        }
+
+        handle_checkout_session_event(event)
+
+        mock_customer_retrieve.assert_called_once_with("cus_trial_complete", api_key="sk_test")
+        mock_customer_modify.assert_called_once_with(
+            "cus_trial_complete",
+            metadata={
+                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "",
+            },
+            api_key="sk_test",
+        )
+
+    @patch("pages.signals.stripe.Customer.modify")
+    @patch("pages.signals.stripe.Customer.retrieve")
+    @patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test")
+    @patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True))
+    def test_checkout_session_expired_does_not_clear_newer_customer_checkout_context(
+        self,
+        _mock_status,
+        _mock_key,
+        mock_customer_retrieve,
+        mock_customer_modify,
+    ):
+        payload = {
+            "object": "checkout.session",
+            "id": "cs_trial_expired",
+            "customer": "cus_trial_expired",
+            "metadata": {"gobii_event_id": "startup-sub-old"},
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="checkout.session.expired",
+            event_id="evt_checkout_expired",
+        )
+        mock_customer_retrieve.return_value = {
+            "id": "cus_trial_expired",
+            "metadata": {
+                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "startup-sub-new",
+                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "purchase",
+            },
+        }
+
+        handle_checkout_session_event(event)
+
+        mock_customer_retrieve.assert_called_once_with("cus_trial_expired", api_key="sk_test")
+        mock_customer_modify.assert_not_called()
 
 
 @tag("batch_pages")

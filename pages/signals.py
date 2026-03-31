@@ -42,6 +42,10 @@ import logging
 import stripe
 
 from billing.addons import AddonEntitlementService
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
+    clear_checkout_customer_metadata,
+)
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
     is_trial_cancel_scheduled,
@@ -926,6 +930,25 @@ def _coerce_metadata_dict(candidate: Any) -> dict[str, Any]:
                 except Exception:
                     continue
         return result
+
+
+def _clear_customer_checkout_context_if_matches(*, customer_id: str | None, expected_event_id: str | None) -> bool:
+    """Clear transient customer checkout metadata when the event matches the active checkout."""
+    if not customer_id or not expected_event_id:
+        return False
+
+    customer_payload = stripe.Customer.retrieve(customer_id, api_key=stripe.api_key)
+    customer_metadata = _coerce_metadata_dict(_get_stripe_data_value(customer_payload, "metadata"))
+    current_event_id = str(customer_metadata.get(STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY) or "").strip()
+    if current_event_id != expected_event_id:
+        return False
+
+    stripe.Customer.modify(
+        customer_id,
+        metadata=clear_checkout_customer_metadata(),
+        api_key=stripe.api_key,
+    )
+    return True
 
 
 def _extract_stripe_object_id(candidate: Any) -> str | None:
@@ -2036,6 +2059,49 @@ def handle_user_logged_out(sender, request, user, **kwargs):
         logger.info("Analytics tracking successful for logout.")
     except Exception:
         logger.exception("Analytics tracking failed during logout.")
+
+
+@djstripe_receiver(["checkout.session.completed", "checkout.session.expired"])
+def handle_checkout_session_event(event, **kwargs):
+    """Clear transient customer checkout metadata once the session reaches a terminal state."""
+    payload = _coerce_metadata_dict(getattr(event, "data", {}).get("object"))
+    if payload.get("object") != "checkout.session":
+        return
+
+    status = stripe_status()
+    if not status.enabled:
+        logger.info("Stripe disabled; ignoring checkout session webhook %s", payload.get("id"))
+        return
+
+    stripe_key = PaymentsHelper.get_stripe_key()
+    if not stripe_key:
+        logger.warning("Stripe key unavailable; ignoring checkout session webhook %s", payload.get("id"))
+        return
+
+    stripe.api_key = stripe_key
+
+    customer_id = _get_stripe_data_value(payload, "customer")
+    if isinstance(customer_id, Mapping):
+        customer_id = customer_id.get("id")
+    customer_id = str(customer_id or "").strip()
+
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    expected_event_id = str(metadata.get("gobii_event_id") or "").strip()
+    if not customer_id or not expected_event_id:
+        return
+
+    try:
+        _clear_customer_checkout_context_if_matches(
+            customer_id=customer_id,
+            expected_event_id=expected_event_id,
+        )
+    except stripe.error.StripeError as exc:
+        logger.warning(
+            "Failed to clear checkout customer context for customer %s after session %s: %s",
+            customer_id,
+            payload.get("id"),
+            exc,
+        )
 
 
 @djstripe_receiver(["invoice.payment_failed"])
