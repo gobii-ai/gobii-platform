@@ -15,18 +15,18 @@ class TransparentProxyRoutingTests(unittest.TestCase):
         }
 
         with patch.dict(
-            "sandbox_compute_server.mcp.os.environ",
+            "sandbox_server.mcp.os.environ",
             {
                 "HTTP_PROXY": "http://sandbox-egress:3128",
                 "http_proxy": "http://sandbox-egress:3128",
                 "ALL_PROXY": "socks5://sandbox-egress:1080",
             },
             clear=False,
-        ), patch("sandbox_compute_server.mcp._require_agent_id", return_value=("agent-1", None)), patch(
-            "sandbox_compute_server.mcp._agent_workspace",
+        ), patch("sandbox_server.mcp._require_agent_id", return_value=("agent-1", None)), patch(
+            "sandbox_server.mcp._agent_workspace",
             return_value=Path("/tmp/workspace"),
-        ), patch("sandbox_compute_server.mcp._store_proxy_env") as store_proxy_env_mock, patch(
-            "sandbox_compute_server.mcp._proxy_env_from_manifest",
+        ), patch("sandbox_server.mcp._store_proxy_env") as store_proxy_env_mock, patch(
+            "sandbox_server.mcp._proxy_env_from_manifest",
             return_value={"HTTP_PROXY": "http://proxy.internal:3128", "http_proxy": "http://proxy.internal:3128"},
         ):
             agent_id, error = _prepare_runtime_proxy_env(payload, runtime)
@@ -44,7 +44,7 @@ class TransparentProxyRoutingTests(unittest.TestCase):
         payload = {"agent_id": "agent-1"}
 
         with patch.dict(
-            "sandbox_compute_server.mcp.os.environ",
+            "sandbox_server.mcp.os.environ",
             {
                 "HTTP_PROXY": "http://sandbox-egress:3128",
                 "HTTPS_PROXY": "http://sandbox-egress:3128",
@@ -52,11 +52,11 @@ class TransparentProxyRoutingTests(unittest.TestCase):
                 "NO_PROXY": "localhost,127.0.0.1",
             },
             clear=False,
-        ), patch("sandbox_compute_server.mcp._require_agent_id", return_value=("agent-1", None)), patch(
-            "sandbox_compute_server.mcp._agent_workspace",
+        ), patch("sandbox_server.mcp._require_agent_id", return_value=("agent-1", None)), patch(
+            "sandbox_server.mcp._agent_workspace",
             return_value=Path("/tmp/workspace"),
-        ), patch("sandbox_compute_server.mcp._store_proxy_env") as store_proxy_env_mock, patch(
-            "sandbox_compute_server.mcp._proxy_env_from_manifest",
+        ), patch("sandbox_server.mcp._store_proxy_env") as store_proxy_env_mock, patch(
+            "sandbox_server.mcp._proxy_env_from_manifest",
             return_value={},
         ):
             agent_id, error = _prepare_runtime_proxy_env(payload, runtime)
@@ -82,7 +82,7 @@ class TransparentProxyRoutingTests(unittest.TestCase):
             },
         )()
 
-        with patch("sandbox_compute_server.sync.requests.get", return_value=response) as get_mock:
+        with patch("sandbox_server.sync.requests.get", return_value=response) as get_mock:
             content = _download_file("https://example.com/file.txt", expected_size=5)
 
         self.assertEqual(content, b"hello")

@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
 RUN pip install --upgrade pip uv
 
 COPY pyproject.toml README.md ./
-COPY sandbox_compute_server ./sandbox_compute_server
+COPY server ./sandbox_server
 COPY sandbox_utils.py logging_config.py ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
@@ -61,4 +61,4 @@ ENV HOME=/tmp \
 USER appuser
 
 EXPOSE 8080
-CMD ["gunicorn", "sandbox_compute_server:application", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "0"]
+CMD ["gunicorn", "sandbox_server:application", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "0"]

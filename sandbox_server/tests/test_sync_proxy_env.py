@@ -19,7 +19,7 @@ class SyncProxyEnvTests(unittest.TestCase):
             },
         )()
 
-        with patch("sandbox_compute_server.sync.requests.get", return_value=response) as get_mock:
+        with patch("sandbox_server.sync.requests.get", return_value=response) as get_mock:
             content = _download_file(
                 "https://example.com/file.txt",
                 expected_size=5,
@@ -60,20 +60,20 @@ class SyncProxyEnvTests(unittest.TestCase):
             "proxy_env": {"HTTP_PROXY": "socks5://proxy.internal:1080"},
         }
 
-        with patch("sandbox_compute_server.sync._agent_workspace", return_value=Path("/private/tmp/workspace")), patch(
-            "sandbox_compute_server.sync._store_proxy_env",
+        with patch("sandbox_server.sync._agent_workspace", return_value=Path("/private/tmp/workspace")), patch(
+            "sandbox_server.sync._store_proxy_env",
             return_value=True,
         ), patch(
-            "sandbox_compute_server.sync._proxy_env_from_manifest",
+            "sandbox_server.sync._proxy_env_from_manifest",
             return_value={"HTTP_PROXY": "socks5://proxy.internal:1080"},
         ), patch(
-            "sandbox_compute_server.sync._load_manifest",
+            "sandbox_server.sync._load_manifest",
             return_value={"files": {}, "deleted": {}},
         ), patch(
-            "sandbox_compute_server.sync._decode_content",
+            "sandbox_server.sync._decode_content",
             return_value=None,
         ), patch(
-            "sandbox_compute_server.sync._download_file",
+            "sandbox_server.sync._download_file",
             return_value=b"hello",
         ) as download_mock, patch(
             "pathlib.Path.mkdir"
@@ -84,7 +84,7 @@ class SyncProxyEnvTests(unittest.TestCase):
             "builtins.open",
             create=True,
         ), patch(
-            "sandbox_compute_server.sync._save_manifest"
+            "sandbox_server.sync._save_manifest"
         ):
             result = _handle_sync_filespace(payload)
 

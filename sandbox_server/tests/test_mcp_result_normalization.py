@@ -127,17 +127,17 @@ class MCPResultNormalizationTests(unittest.TestCase):
             "env": {},
             "headers": {},
         }
-        with patch("sandbox_compute_server.mcp._require_agent_id", return_value=("agent-1", None)), patch(
-            "sandbox_compute_server.mcp._agent_workspace",
+        with patch("sandbox_server.mcp._require_agent_id", return_value=("agent-1", None)), patch(
+            "sandbox_server.mcp._agent_workspace",
             return_value=Path("/tmp/workspace"),
-        ), patch("sandbox_compute_server.mcp._store_proxy_env"), patch(
-            "sandbox_compute_server.mcp._proxy_env_from_manifest",
+        ), patch("sandbox_server.mcp._store_proxy_env"), patch(
+            "sandbox_server.mcp._proxy_env_from_manifest",
             return_value=None,
         ), patch(
-            "sandbox_compute_server.mcp._parse_mcp_server_payload",
+            "sandbox_server.mcp._parse_mcp_server_payload",
             return_value=(runtime, None),
         ), patch(
-            "sandbox_compute_server.mcp._call_mcp_tool",
+            "sandbox_server.mcp._call_mcp_tool",
             new=AsyncMock(return_value=_MCPCallResult()),
         ):
             response = _handle_mcp_request(payload)

@@ -1,7 +1,7 @@
 # OSS-friendly docker compose: generates secrets automatically, then brings up services.
 
 x-app-sandbox-env: &app-sandbox-env
-  SANDBOX_COMPUTE_BACKEND: ${SANDBOX_COMPUTE_BACKEND:-local}
+  SANDBOX_COMPUTE_BACKEND: ${SANDBOX_COMPUTE_BACKEND:-http}
   SANDBOX_COMPUTE_API_URL: ${SANDBOX_COMPUTE_API_URL:-http://sandbox-compute:8080}
   SANDBOX_COMPUTE_API_TOKEN: ${SANDBOX_COMPUTE_API_TOKEN:-dev-sandbox-token}
 
@@ -67,7 +67,7 @@ services:
   sandbox-compute:
     platform: linux/amd64
     build:
-      context: sandbox_server
+      context: ./sandbox_server
       dockerfile: ./Dockerfile
     environment:
       SANDBOX_COMPUTE_API_TOKEN: ${SANDBOX_COMPUTE_API_TOKEN:-dev-sandbox-token}
@@ -85,7 +85,6 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
-    profiles: ["sandbox"]
 
   web:
     platform: linux/amd64
