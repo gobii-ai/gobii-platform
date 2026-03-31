@@ -31,6 +31,8 @@ type ConsoleSessionPayload = {
 
 type ImmersiveAppProps = {
   maxChatUploadSizeBytes?: number | null
+  pipedreamAppsSettingsUrl?: string | null
+  pipedreamAppSearchUrl?: string | null
 }
 
 function readLocation(): LocationSnapshot {
@@ -287,7 +289,11 @@ function navigateTo(path: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-export function ImmersiveApp({ maxChatUploadSizeBytes = null }: ImmersiveAppProps) {
+export function ImmersiveApp({
+  maxChatUploadSizeBytes = null,
+  pipedreamAppsSettingsUrl = null,
+  pipedreamAppSearchUrl = null,
+}: ImmersiveAppProps) {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
   const embed = useMemo(() => {
@@ -415,6 +421,8 @@ export function ImmersiveApp({ maxChatUploadSizeBytes = null }: ImmersiveAppProp
             maxChatUploadSizeBytes={maxChatUploadSizeBytes}
             viewerUserId={viewerUserId}
             viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
@@ -428,6 +436,8 @@ export function ImmersiveApp({ maxChatUploadSizeBytes = null }: ImmersiveAppProp
             maxChatUploadSizeBytes={maxChatUploadSizeBytes}
             viewerUserId={viewerUserId}
             viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}

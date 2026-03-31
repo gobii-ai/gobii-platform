@@ -162,6 +162,24 @@ class AppShellAuthenticationTests(TestCase):
         self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
         self.assertContains(response, 'id="gobii-frontend-root"')
 
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="test-client-id",
+        PIPEDREAM_CLIENT_SECRET="test-client-secret",
+        PIPEDREAM_PROJECT_ID="test-project-id",
+    )
+    def test_app_root_includes_pipedream_urls_when_integrations_are_configured(self):
+        response = self.client.get("/app")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(
+            response,
+            f'data-pipedream-apps-url="{reverse("console-pipedream-apps")}"',
+        )
+        self.assertContains(
+            response,
+            f'data-pipedream-app-search-url="{reverse("console-pipedream-app-search")}"',
+        )
+
     def test_authenticated_agents_detail_serves_shell(self):
         User = get_user_model()
         user = User.objects.create_user(
