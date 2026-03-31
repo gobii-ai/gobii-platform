@@ -3,6 +3,11 @@
 # backing services (Postgres, Redis, MinIO). Enable additional profiles for
 # containers such as `web` or `worker` when you need them.
 
+x-app-sandbox-env: &app-sandbox-env
+  SANDBOX_COMPUTE_BACKEND: ${SANDBOX_COMPUTE_BACKEND:-local}
+  SANDBOX_COMPUTE_API_URL: ${SANDBOX_COMPUTE_API_URL:-http://sandbox-compute:8080}
+  SANDBOX_COMPUTE_API_TOKEN: ${SANDBOX_COMPUTE_API_TOKEN:-dev-sandbox-token}
+
 services:
   db:
     image: postgres:16
@@ -44,12 +49,36 @@ services:
     volumes:
       - minio-data:/data
 
+  sandbox-compute:
+    platform: linux/amd64
+    build:
+      context: sandbox_server
+      dockerfile: ./Dockerfile
+    environment:
+      SANDBOX_COMPUTE_API_TOKEN: ${SANDBOX_COMPUTE_API_TOKEN:-dev-sandbox-token}
+      SANDBOX_WORKSPACE_ROOT: /workspace
+      SANDBOX_RUNTIME_CACHE_ROOT: /runtime-cache
+    volumes:
+      - sandbox-workspace-data:/workspace
+      - sandbox-runtime-cache:/runtime-cache
+    ports:
+      - "127.0.0.1:${SANDBOX_COMPUTE_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    profiles: ["sandbox"]
+
   web:
     platform: linux/amd64
     build:
       context: .
       dockerfile: ./docker/Dockerfile
     environment:
+      <<: *app-sandbox-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
       GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
       POSTGRES_HOST: db
@@ -105,6 +134,7 @@ services:
       dockerfile: ./docker/Dockerfile  # relative to platform directory
     command: celery -A config worker -l info
     environment:
+      <<: *app-sandbox-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
       GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
       POSTGRES_HOST: db
@@ -146,6 +176,7 @@ services:
     command: >-
       bash -lc "python manage.py sync_schedules && celery -A config beat --loglevel=info --scheduler=redbeat.RedBeatScheduler"
     environment:
+      <<: *app-sandbox-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
       GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
       POSTGRES_HOST: db
@@ -187,6 +218,7 @@ services:
     command: >-
       bash -lc "python manage.py run_imap_idlers"
     environment:
+      <<: *app-sandbox-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
       GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
       POSTGRES_HOST: db
@@ -225,6 +257,7 @@ services:
       dockerfile: ./docker/Dockerfile
     command: bash -lc "python manage.py migrate --noinput"
     environment:
+      <<: *app-sandbox-env
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-dev-insecure}
       GOBII_ENCRYPTION_KEY: ${GOBII_ENCRYPTION_KEY:-dev-insecure}
       POSTGRES_HOST: db
@@ -267,3 +300,5 @@ services:
 volumes:
   db-data:
   minio-data:
+  sandbox-workspace-data:
+  sandbox-runtime-cache:
