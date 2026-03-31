@@ -203,30 +203,41 @@ def _parse_mcp_server_payload(payload: Dict[str, Any]) -> Tuple[Optional[Dict[st
     }, None
 
 
-def _normalize_mcp_result(result: Any) -> Any:
+def _normalize_mcp_result(result: Any, _seen: Optional[set[int]] = None) -> Any:
     if result is None or isinstance(result, (str, int, float, bool)):
         return result
-    if isinstance(result, dict):
-        return {str(key): _normalize_mcp_result(value) for key, value in result.items()}
-    if isinstance(result, (list, tuple, set)):
-        return [_normalize_mcp_result(item) for item in result]
-    if hasattr(result, "model_dump"):
-        try:
-            return _normalize_mcp_result(result.model_dump(mode="json"))
-        except TypeError:
+    if _seen is None:
+        _seen = set()
+
+    result_id = id(result)
+    if result_id in _seen:
+        return "<circular-reference>"
+
+    _seen.add(result_id)
+    try:
+        if isinstance(result, dict):
+            return {str(key): _normalize_mcp_result(value, _seen) for key, value in result.items()}
+        if isinstance(result, (list, tuple, set)):
+            return [_normalize_mcp_result(item, _seen) for item in result]
+        if hasattr(result, "model_dump"):
             try:
-                return _normalize_mcp_result(result.model_dump())
+                return _normalize_mcp_result(result.model_dump(mode="json"), _seen)
+            except TypeError:
+                try:
+                    return _normalize_mcp_result(result.model_dump(), _seen)
+                except Exception:
+                    logger.debug("Failed to serialize MCP result via model_dump()", exc_info=True)
             except Exception:
                 logger.debug("Failed to serialize MCP result via model_dump()", exc_info=True)
-        except Exception:
-            logger.debug("Failed to serialize MCP result via model_dump()", exc_info=True)
-    if hasattr(result, "dict"):
-        try:
-            return _normalize_mcp_result(result.dict())
-        except Exception:
-            logger.debug("Failed to serialize MCP result via dict()", exc_info=True)
-    if hasattr(result, "__dict__"):
-        return _normalize_mcp_result(vars(result))
+        if hasattr(result, "dict"):
+            try:
+                return _normalize_mcp_result(result.dict(), _seen)
+            except Exception:
+                logger.debug("Failed to serialize MCP result via dict()", exc_info=True)
+        if hasattr(result, "__dict__"):
+            return _normalize_mcp_result(vars(result), _seen)
+    finally:
+        _seen.discard(result_id)
     return str(result)
 
 

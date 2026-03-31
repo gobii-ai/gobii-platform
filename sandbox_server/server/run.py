@@ -5,7 +5,7 @@ import sys
 import time
 from typing import Any, Dict, Optional, Tuple
 
-from sandbox_utils import normalize_timeout as _normalize_timeout
+from sandbox_server.sandbox_utils import normalize_timeout as _normalize_timeout
 from sandbox_server.config import (
     _agent_workspace,
     _python_default_timeout_seconds,

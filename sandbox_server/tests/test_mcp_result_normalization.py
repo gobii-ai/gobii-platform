@@ -20,6 +20,11 @@ class _MCPCallResult:
         }
 
 
+class _RecursiveNode:
+    def __init__(self):
+        self.self_ref = self
+
+
 class MCPResultNormalizationTests(unittest.TestCase):
     def test_parse_payload_injects_writable_stdio_cache_env(self):
         with patch.dict("os.environ", {"SANDBOX_RUNTIME_CACHE_ROOT": "/tmp/gobii-runtime-test"}, clear=False):
@@ -104,6 +109,11 @@ class MCPResultNormalizationTests(unittest.TestCase):
                 "mode": "json",
             },
         )
+        json.dumps(normalized)
+
+    def test_normalize_result_breaks_circular_references(self):
+        normalized = _normalize_mcp_result(_RecursiveNode())
+        self.assertEqual(normalized, {"self_ref": "<circular-reference>"})
         json.dumps(normalized)
 
     def test_handle_mcp_request_returns_json_safe_payload(self):

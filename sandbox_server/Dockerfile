@@ -38,7 +38,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
 RUN pip install --upgrade pip uv
 
 COPY pyproject.toml README.md ./
-COPY server ./sandbox_server
+COPY __init__.py ./__init__.py
+COPY server ./server
 COPY sandbox_utils.py logging_config.py ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \

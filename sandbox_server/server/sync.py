@@ -23,6 +23,7 @@ from sandbox_server.workspace import (
     _resolve_local_checksum,
     _safe_url_for_log,
     _trace_context,
+    _workspace_size_bytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -187,6 +188,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(entries, list):
             return {"status": "error", "message": "files must be a list."}
         pull_started_at = time.monotonic()
+        workspace_bytes = _workspace_size_bytes(agent_root)
         skipped = 0
         conflicts = 0
         downloaded_files = 0
@@ -206,11 +208,16 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             is_deleted = bool(entry.get("is_deleted"))
             if is_deleted:
                 deleted_entries += 1
-                if entry_updated_at is not None and full_path.exists():
+                existing_bytes = 0
+                local_mtime = None
+                if full_path.exists():
                     try:
-                        local_mtime = full_path.stat().st_mtime
+                        local_stat = full_path.stat()
+                        existing_bytes = local_stat.st_size
+                        local_mtime = local_stat.st_mtime
                     except OSError:
                         local_mtime = None
+                if entry_updated_at is not None and full_path.exists():
                     if local_mtime is not None and local_mtime > entry_updated_at:
                         conflicts += 1
                         skipped += 1
@@ -218,6 +225,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 try:
                     if full_path.exists():
                         full_path.unlink()
+                        workspace_bytes = max(workspace_bytes - existing_bytes, 0)
                 except OSError:
                     continue
                 manifest["files"].pop(normalized, None)
@@ -301,22 +309,26 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return {"status": "error", "message": message}
 
             existing_bytes = 0
+            local_mtime = None
             if full_path.exists():
                 try:
-                    existing_bytes = full_path.stat().st_size
-                except OSError:
-                    existing_bytes = 0
-            if entry_updated_at is not None and full_path.exists():
-                try:
-                    local_mtime = full_path.stat().st_mtime
+                    local_stat = full_path.stat()
+                    existing_bytes = local_stat.st_size
+                    local_mtime = local_stat.st_mtime
                 except OSError:
                     local_mtime = None
+            if entry_updated_at is not None and full_path.exists():
                 if local_mtime is not None and local_mtime > entry_updated_at:
                     conflicts += 1
                     skipped += 1
                     continue
 
-            capacity_error = _ensure_capacity(agent_root, len(content), existing_bytes=existing_bytes)
+            capacity_error = _ensure_capacity(
+                agent_root,
+                len(content),
+                existing_bytes=existing_bytes,
+                current_bytes=workspace_bytes,
+            )
             if capacity_error:
                 logger.warning(
                     (
@@ -345,6 +357,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             except OSError as exc:
                 logger.exception("Failed to write synced file agent=%s path=%s", agent_id, normalized)
                 return {"status": "error", "message": f"Failed to write {normalized}: {exc}"}
+            workspace_bytes = max(workspace_bytes - existing_bytes, 0) + len(content)
             written_checksum = remote_checksum or _checksum_bytes(content)
             manifest["files"][normalized] = {
                 "mtime": full_path.stat().st_mtime,

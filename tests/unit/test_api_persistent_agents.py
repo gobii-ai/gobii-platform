@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -84,6 +85,47 @@ class PersistentAgentModelTests(TestCase):
 
         with patch.object(IntelligenceTier.objects, "filter", side_effect=filter_side_effect):
             self.assertEqual(_get_default_intelligence_tier_id(), default_tier.id)
+
+    def test_get_default_intelligence_tier_id_caches_schema_introspection(self):
+        from django.db import connection
+        from django.db.models import Max
+
+        from api.models import (
+            DEFAULT_INTELLIGENCE_TIER_KEY,
+            IntelligenceTier,
+            _get_default_intelligence_tier_id,
+            _get_intelligence_tier_schema,
+        )
+
+        default_tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id", "rank").first()
+        if default_tier is None:
+            max_rank = IntelligenceTier.objects.aggregate(Max("rank")).get("rank__max") or 0
+            default_tier = IntelligenceTier.objects.create(
+                key=DEFAULT_INTELLIGENCE_TIER_KEY,
+                display_name="Standard",
+                rank=max_rank + 1,
+                credit_multiplier="1.00",
+            )
+
+        _get_intelligence_tier_schema.cache_clear()
+        table_name = IntelligenceTier._meta.db_table
+        columns = [
+            SimpleNamespace(name="id"),
+            SimpleNamespace(name="key"),
+            SimpleNamespace(name="is_default"),
+        ]
+
+        with patch.object(connection.introspection, "table_names", return_value=[table_name]) as table_names_mock, patch.object(
+            connection.introspection,
+            "get_table_description",
+            return_value=columns,
+        ) as describe_mock:
+            self.assertEqual(_get_default_intelligence_tier_id(), default_tier.id)
+            self.assertEqual(_get_default_intelligence_tier_id(), default_tier.id)
+
+        self.assertEqual(table_names_mock.call_count, 1)
+        self.assertEqual(describe_mock.call_count, 1)
+        _get_intelligence_tier_schema.cache_clear()
 
     def test_persistent_agent_blank_charter_allowed(self):
         """PersistentAgent should allow an empty charter during validation."""

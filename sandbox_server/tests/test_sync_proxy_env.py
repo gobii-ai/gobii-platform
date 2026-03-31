@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from sandbox_server.sync import _download_file, _handle_sync_filespace
@@ -94,6 +95,39 @@ class SyncProxyEnvTests(unittest.TestCase):
             5,
             {"HTTP_PROXY": "socks5://proxy.internal:1080"},
         )
+
+    def test_handle_sync_filespace_pull_scans_workspace_once_per_request(self):
+        payload = {
+            "agent_id": "agent-1",
+            "direction": "pull",
+            "files": [
+                {"path": "/one.txt", "content": "hello", "updated_at": "2026-03-24T12:00:00+00:00"},
+                {"path": "/two.txt", "content": "world", "updated_at": "2026-03-24T12:00:00+00:00"},
+            ],
+        }
+
+        with TemporaryDirectory() as tmp_dir, patch(
+            "sandbox_server.sync._agent_workspace",
+            return_value=Path(tmp_dir),
+        ), patch(
+            "sandbox_server.sync._store_proxy_env",
+            return_value=False,
+        ), patch(
+            "sandbox_server.sync._proxy_env_from_manifest",
+            return_value=None,
+        ), patch(
+            "sandbox_server.sync._load_manifest",
+            return_value={"files": {}, "deleted": {}},
+        ), patch(
+            "sandbox_server.sync._save_manifest"
+        ), patch(
+            "sandbox_server.sync._workspace_size_bytes",
+            return_value=0,
+        ) as workspace_size_mock:
+            result = _handle_sync_filespace(payload)
+
+        self.assertEqual(result["status"], "ok")
+        workspace_size_mock.assert_called_once()
 
 
 if __name__ == "__main__":
