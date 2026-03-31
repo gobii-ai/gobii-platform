@@ -23,6 +23,10 @@ from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from config.redis_client import get_redis_client
+from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+)
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from api.services.pipedream_apps import PipedreamCatalogError
@@ -1653,6 +1657,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1663,6 +1668,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        mock_customer_modify,
         mock_ensure,
         _mock_trial_eligible,
         _,
@@ -1694,10 +1700,22 @@ class CheckoutRedirectTests(TestCase):
             kwargs["payment_method_types"],
             PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
         )
+        self.assertEqual(kwargs["metadata"]["flow_type"], "trial")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_startup", "quantity": 1}],
+        )
+        customer_modify_args, customer_modify_kwargs = mock_customer_modify.call_args
+        self.assertEqual(customer_modify_args[0], "cus_trial")
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY],
+            "trial",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
+            kwargs["metadata"]["gobii_event_id"],
         )
 
     @tag("batch_pages")
@@ -1705,6 +1723,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions", return_value=[])
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1715,6 +1734,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        _mock_customer_modify,
         _mock_existing_subs,
         mock_ensure,
         mock_trial_eligibility,
@@ -1744,6 +1764,8 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
 
         kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(kwargs["metadata"]["flow_type"], "trial")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         mock_trial_eligibility.assert_not_called()
 
@@ -1751,6 +1773,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1761,6 +1784,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        _mock_customer_modify,
         mock_ensure,
         _mock_trial_eligible,
         _,
@@ -1807,6 +1831,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
@@ -1817,6 +1842,7 @@ class CheckoutRedirectTests(TestCase):
         mock_customer,
         mock_price_get,
         mock_session_create,
+        mock_customer_modify,
         mock_existing_subs,
         mock_ensure,
         _mock_trial_eligible,
@@ -1850,11 +1876,142 @@ class CheckoutRedirectTests(TestCase):
             kwargs["payment_method_types"],
             PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
         )
+        self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_scale", "quantity": 1}],
         )
+        customer_modify_args, customer_modify_kwargs = mock_customer_modify.call_args
+        self.assertEqual(customer_modify_args[0], "cus_scale_trial")
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY],
+            "purchase",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
+            kwargs["metadata"]["gobii_event_id"],
+        )
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views._is_individual_trial_eligible", return_value=True)
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.stripe.Customer.modify")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_startup_checkout_continues_when_customer_context_write_fails(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_customer_modify,
+        mock_ensure,
+        _mock_trial_eligible,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="trial_context_write_fail@test.com",
+            password="pw",
+            username="trial_context_write_fail_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            startup_additional_task_price_id="price_startup_meter",
+            startup_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_context_write_fail")
+        mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
+        mock_customer_modify.side_effect = page_views.stripe.error.APIConnectionError("boom")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
+        mock_ensure.return_value = (None, "absent")
+
+        resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
+        mock_customer_modify.assert_called_once()
+        mock_session_create.assert_called_once()
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views._is_individual_trial_eligible", return_value=False)
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.uuid.uuid4", return_value="cleanup-token")
+    @patch("pages.views.stripe.Customer.retrieve")
+    @patch("pages.views.stripe.Customer.modify")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_scale_checkout_creation_failure_clears_customer_context(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_customer_modify,
+        mock_customer_retrieve,
+        _mock_uuid4,
+        mock_existing_subs,
+        mock_ensure,
+        _mock_trial_eligible,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="scale_context_cleanup@test.com",
+            password="pw",
+            username="scale_context_cleanup_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="price_scale_meter",
+            scale_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale_context_cleanup")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_existing_subs.return_value = []
+        mock_ensure.return_value = (None, "absent")
+        mock_session_create.side_effect = page_views.stripe.error.InvalidRequestError(
+            "bad checkout session",
+            "line_items",
+        )
+        mock_customer_retrieve.return_value = {
+            "metadata": {
+                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "purchase",
+                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "scale-sub-cleanup-token",
+            }
+        }
+
+        with self.assertRaises(page_views.stripe.error.InvalidRequestError):
+            self.client.get("/subscribe/scale/")
+
+        self.assertEqual(mock_customer_modify.call_count, 2)
+        first_modify_args, first_modify_kwargs = mock_customer_modify.call_args_list[0]
+        self.assertEqual(first_modify_args[0], "cus_scale_context_cleanup")
+        self.assertEqual(
+            first_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY],
+            "purchase",
+        )
+        second_modify_args, second_modify_kwargs = mock_customer_modify.call_args_list[1]
+        self.assertEqual(second_modify_args[0], "cus_scale_context_cleanup")
+        self.assertEqual(
+            second_modify_kwargs["metadata"],
+            {
+                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "",
+            },
+        )
+        mock_customer_retrieve.assert_called_once()
 
 
 @tag("batch_pages")

@@ -103,6 +103,14 @@ class AnalyticsEvent(StrEnum):
     WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'
     WEB_CHAT_SESSION_ENDED = 'Web Chat Session Ended'
     WEB_CHAT_MESSAGE_SENT = 'Web Chat Message Sent'
+    HUMAN_INPUT_REQUEST_CREATED = 'Human Input Request Created'
+    HUMAN_INPUT_PANEL_SHOWN = 'Human Input Panel Shown'
+    HUMAN_INPUT_OPTION_SELECTED = 'Human Input Option Selected'
+    HUMAN_INPUT_RESPONSE_SUBMITTED = 'Human Input Response Submitted'
+    SANDBOX_SESSION_STARTED = 'Sandbox Session Started'
+    SANDBOX_EXECUTION_ROUTED = 'Sandbox Execution Routed'
+    SANDBOX_UNAVAILABLE = 'Sandbox Unavailable'
+    SANDBOX_SESSION_STOPPED = 'Sandbox Session Stopped'
 
     # Persistent Agent Events
     PERSISTENT_AGENT_CREATED = 'Persistent Agent Created'

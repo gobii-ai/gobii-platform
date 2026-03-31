@@ -2784,6 +2784,7 @@ class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
                 human_input_request,
                 selected_option_key=selected_option_key,
                 free_text=free_text,
+                actor_user_id=request.user.id,
             )
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
@@ -2836,7 +2837,11 @@ class AgentHumanInputRequestBatchResponseAPIView(LoginRequiredMixin, View):
             )
 
         try:
-            message = submit_human_input_responses_batch(agent, normalized_responses)
+            message = submit_human_input_responses_batch(
+                agent,
+                normalized_responses,
+                actor_user_id=request.user.id,
+            )
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 

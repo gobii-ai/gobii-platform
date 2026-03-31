@@ -20,6 +20,7 @@ from ...services.sandbox_compute import (
     SandboxComputeService,
     SandboxComputeUnavailable,
     sandbox_compute_enabled_for_agent,
+    track_sandbox_unavailable,
 )
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
@@ -1136,6 +1137,11 @@ def execute_enabled_tool(
                 try:
                     service = SandboxComputeService()
                 except SandboxComputeUnavailable as exc:
+                    track_sandbox_unavailable(
+                        agent,
+                        request_source="tool_request",
+                        tool_name=resolved_name,
+                    )
                     return {"status": "error", "message": str(exc)}
                 sandbox_result = service.tool_request(agent, resolved_name, params)
                 if (

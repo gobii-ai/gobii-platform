@@ -338,6 +338,8 @@ class ConsoleBillingUpdateApiTests(TestCase):
             EXCLUDED_PAYMENT_METHOD_TYPES,
         )
         self.assertNotIn("payment_method_types", kwargs)
+        self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
+        self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
         self.assertEqual(kwargs["line_items"], [{"price": "price_org_team", "quantity": 2}])
 
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)

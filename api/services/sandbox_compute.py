@@ -31,6 +31,7 @@ from api.services.sandbox_internal_paths import (
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
 from config.redis_client import get_redis_client
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from waffle import get_waffle_flag_model
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,8 @@ _NO_PROXY_ENV_KEYS = (
     "no_proxy",
 )
 _CUSTOM_TOOL_SQLITE_MIME_TYPE = "application/vnd.sqlite3"
+_ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR = "_sandbox_active_conversation_channel"
+_ACTIVE_CONVERSATION_CHANNEL_UNSET = object()
 
 
 def sandbox_compute_enabled() -> bool:
@@ -666,7 +669,7 @@ def _session_update_from_response(response: Dict[str, Any]) -> SandboxSessionUpd
 
 
 def _resolve_backend() -> SandboxComputeBackend:
-    backend_name = str(getattr(settings, "SANDBOX_COMPUTE_BACKEND", "") or "").lower()
+    backend_name = str(settings.SANDBOX_COMPUTE_BACKEND or "").lower()
     if backend_name in ("http", "remote"):
         return HttpSandboxBackend(
             getattr(settings, "SANDBOX_COMPUTE_API_URL", ""),
@@ -939,6 +942,179 @@ def _post_sync_queue_key(agent_id: str) -> str:
     return f"{_POST_SYNC_QUEUE_KEY_PREFIX}:{agent_id}"
 
 
+def _sandbox_backend_name(backend: Any) -> str | None:
+    if backend is None:
+        return None
+    if isinstance(backend, str):
+        return backend or None
+    backend_name = backend.__class__.__name__.removesuffix("SandboxBackend").lower()
+    return backend_name or None
+
+
+def _configured_sandbox_backend_name() -> str:
+    backend_name = str(settings.SANDBOX_COMPUTE_BACKEND or "").strip().lower()
+    if backend_name in {"", "local"}:
+        return "local"
+    if backend_name in {"http", "remote"}:
+        return "http"
+    if backend_name in {"kubernetes", "k8s"}:
+        return "kubernetes"
+    return backend_name
+
+
+def _active_conversation_channel(agent: Optional[PersistentAgent]) -> str | None:
+    if agent is None:
+        return None
+
+    cached_channel = getattr(agent, _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR, _ACTIVE_CONVERSATION_CHANNEL_UNSET)
+    if cached_channel is not _ACTIVE_CONVERSATION_CHANNEL_UNSET:
+        return cached_channel
+
+    preferred = getattr(agent, "preferred_contact_endpoint", None)
+    preferred_channel = getattr(preferred, "channel", None)
+    if preferred_channel:
+        cached_channel = str(preferred_channel)
+        setattr(agent, _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR, cached_channel)
+        return cached_channel
+
+    try:
+        latest_channel = agent.owned_conversations.order_by("-id").values_list("channel", flat=True).first()
+    except DatabaseError:
+        logger.debug(
+            "Failed to derive active conversation channel for sandbox analytics agent=%s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return None
+
+    cached_channel = str(latest_channel) if latest_channel else None
+    setattr(agent, _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR, cached_channel)
+    return cached_channel
+
+
+def _build_sandbox_analytics_properties(
+    agent: PersistentAgent,
+    *,
+    backend: Any = None,
+    session: Optional[AgentComputeSession] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name,
+        "backend": _sandbox_backend_name(backend),
+        "active_conversation_channel": _active_conversation_channel(agent),
+    }
+    if session is not None:
+        payload["session_id"] = str(session.pk)
+    if extra:
+        payload.update(extra)
+    return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
+
+
+def _track_sandbox_event(
+    *,
+    agent: Optional[PersistentAgent],
+    event: AnalyticsEvent,
+    backend: Any = None,
+    session: Optional[AgentComputeSession] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    user_id = getattr(agent, "user_id", None)
+    if agent is None or not user_id:
+        return
+
+    try:
+        Analytics.track_event(
+            user_id=str(user_id),
+            event=event,
+            source=AnalyticsSource.AGENT,
+            properties=_build_sandbox_analytics_properties(
+                agent,
+                backend=backend,
+                session=session,
+                extra=extra,
+            ),
+        )
+    except Exception:
+        logger.debug(
+            "Failed to emit sandbox analytics event=%s agent=%s",
+            event,
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+
+
+def _execution_result_status(result: Any) -> str:
+    if isinstance(result, dict) and str(result.get("status")).strip().lower() == "error":
+        return "error"
+    return "ok"
+
+
+def _error_type_from_result(result: Any) -> str | None:
+    if _execution_result_status(result) != "error" or not isinstance(result, dict):
+        return None
+
+    for key in ("error_type", "error_code"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _error_type_from_exception(exc: Exception) -> str:
+    return exc.__class__.__name__
+
+
+def _track_execution_event(
+    *,
+    agent: PersistentAgent,
+    backend: Any,
+    session: AgentComputeSession,
+    request_source: str,
+    result: Any,
+    sync_enqueued: bool,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
+    properties: Dict[str, Any] = {
+        "request_source": request_source,
+        "result_status": _execution_result_status(result),
+        "sync_enqueued": sync_enqueued,
+    }
+    error_type = _error_type_from_result(result)
+    if error_type:
+        properties["error_type"] = error_type
+    if extra:
+        properties.update(extra)
+    _track_sandbox_event(
+        agent=agent,
+        event=AnalyticsEvent.SANDBOX_EXECUTION_ROUTED,
+        backend=backend,
+        session=session,
+        extra=properties,
+    )
+
+
+def track_sandbox_unavailable(
+    agent: Optional[PersistentAgent],
+    *,
+    request_source: str,
+    tool_name: str | None = None,
+) -> None:
+    extra: Dict[str, Any] = {
+        "request_source": request_source,
+        "error_type": "unavailable",
+    }
+    if tool_name:
+        extra["tool_name"] = tool_name
+    _track_sandbox_event(
+        agent=agent,
+        event=AnalyticsEvent.SANDBOX_UNAVAILABLE,
+        backend=_configured_sandbox_backend_name(),
+        extra=extra,
+    )
+
+
 class SandboxComputeService:
     def __init__(self, backend: Optional[SandboxComputeBackend] = None):
         if not sandbox_compute_enabled():
@@ -972,6 +1148,7 @@ class SandboxComputeService:
             defaults={"state": AgentComputeSession.State.STOPPED},
         )
         _select_proxy_for_session(agent, session)
+        previous_state = session.state
         started = session.state != AgentComputeSession.State.RUNNING
         bootstrap_started_at = time.monotonic()
         if started:
@@ -1009,6 +1186,18 @@ class SandboxComputeService:
             logger.warning("Sandbox pull sync failed agent=%s result=%s", agent.id, sync_result)
         self._touch_session(session, source=source)
         if started:
+            _track_sandbox_event(
+                agent=agent,
+                event=AnalyticsEvent.SANDBOX_SESSION_STARTED,
+                backend=self._backend,
+                session=session,
+                extra={
+                    "start_mode": "created" if _created else "resumed",
+                    "previous_state": previous_state,
+                    "namespace": session.namespace or None,
+                    "pod_name_present": bool(session.pod_name),
+                },
+            )
             logger.info(
                 "Sandbox bootstrap complete agent=%s source=%s total_duration_ms=%s",
                 agent.id,
@@ -1186,19 +1375,47 @@ class SandboxComputeService:
         session = self._ensure_session(agent, source="run_command")
         merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, env)
         backend_env = merged_env if merged_env else (env if env else None)
-        result = self._backend.run_command(
-            agent,
-            session,
-            command,
-            cwd=cwd,
-            env=backend_env,
-            trusted_env_keys=trusted_secret_keys or None,
-            timeout=timeout,
-            interactive=interactive,
-        )
+        try:
+            result = self._backend.run_command(
+                agent,
+                session,
+                command,
+                cwd=cwd,
+                env=backend_env,
+                trusted_env_keys=trusted_secret_keys or None,
+                timeout=timeout,
+                interactive=interactive,
+            )
+        except Exception as exc:
+            _track_sandbox_event(
+                agent=agent,
+                event=AnalyticsEvent.SANDBOX_EXECUTION_ROUTED,
+                backend=self._backend,
+                session=session,
+                extra={
+                    "request_source": "run_command",
+                    "result_status": "error",
+                    "sync_enqueued": False,
+                    "command_present": True,
+                    "error_type": _error_type_from_exception(exc),
+                },
+            )
+            raise
+
+        sync_enqueued = False
         if isinstance(result, dict) and result.get("status") != "error":
             if _sync_on_run_command():
                 self._enqueue_post_sync_after_call(agent, source="run_command")
+                sync_enqueued = True
+        _track_execution_event(
+            agent=agent,
+            backend=self._backend,
+            session=session,
+            request_source="run_command",
+            result=result,
+            sync_enqueued=sync_enqueued,
+            extra={"command_present": True},
+        )
         return result
 
     def _sync_custom_tool_sqlite_pull(
@@ -1358,19 +1575,64 @@ class SandboxComputeService:
         session = self._ensure_session(agent, source="mcp_request")
         server_payload, _runtime = _build_mcp_server_payload(server_config_id, agent=agent)
         if not server_payload:
-            return {"status": "error", "message": "MCP server config not available."}
-        result = self._backend.mcp_request(
-            agent,
-            session,
-            server_config_id,
-            tool_name,
-            params,
-            full_tool_name=full_tool_name,
-            server_payload=server_payload,
-        )
+            result = {"status": "error", "message": "MCP server config not available."}
+            _track_execution_event(
+                agent=agent,
+                backend=self._backend,
+                session=session,
+                request_source="mcp_request",
+                result=result,
+                sync_enqueued=False,
+                extra={
+                    "mcp_server": str(server_config_id),
+                    "mcp_method": tool_name,
+                },
+            )
+            return result
+        try:
+            result = self._backend.mcp_request(
+                agent,
+                session,
+                server_config_id,
+                tool_name,
+                params,
+                full_tool_name=full_tool_name,
+                server_payload=server_payload,
+            )
+        except Exception as exc:
+            _track_sandbox_event(
+                agent=agent,
+                event=AnalyticsEvent.SANDBOX_EXECUTION_ROUTED,
+                backend=self._backend,
+                session=session,
+                extra={
+                    "request_source": "mcp_request",
+                    "result_status": "error",
+                    "sync_enqueued": False,
+                    "mcp_server": str(server_payload.get("name") or server_config_id),
+                    "mcp_method": tool_name,
+                    "error_type": _error_type_from_exception(exc),
+                },
+            )
+            raise
+
+        sync_enqueued = False
         if isinstance(result, dict) and result.get("status") != "error":
             if _sync_on_mcp_call():
                 self._enqueue_post_sync_after_call(agent, source="mcp_request")
+                sync_enqueued = True
+        _track_execution_event(
+            agent=agent,
+            backend=self._backend,
+            session=session,
+            request_source="mcp_request",
+            result=result,
+            sync_enqueued=sync_enqueued,
+            extra={
+                "mcp_server": str(server_payload.get("name") or server_config_id),
+                "mcp_method": tool_name,
+            },
+        )
         _log_tool_call("mcp_request", tool_name, params, agent_id=str(agent.id))
         return result
 
@@ -1387,15 +1649,43 @@ class SandboxComputeService:
                 params_payload["env"] = merged_env
             if trusted_secret_keys:
                 params_payload["trusted_env_keys"] = trusted_secret_keys
-        result = self._backend.tool_request(agent, session, tool_name, params_payload)
+        try:
+            result = self._backend.tool_request(agent, session, tool_name, params_payload)
+        except Exception as exc:
+            _track_sandbox_event(
+                agent=agent,
+                event=AnalyticsEvent.SANDBOX_EXECUTION_ROUTED,
+                backend=self._backend,
+                session=session,
+                extra={
+                    "request_source": "tool_request",
+                    "result_status": "error",
+                    "sync_enqueued": False,
+                    "tool_name": tool_name,
+                    "error_type": _error_type_from_exception(exc),
+                },
+            )
+            raise
+
+        sync_enqueued = False
         if isinstance(result, dict) and result.get("status") != "error":
             if _sync_on_tool_call():
                 self._enqueue_post_sync_after_call(agent, source="tool_request")
+                sync_enqueued = True
             export_path = result.get("export_path")
             if isinstance(export_path, str) and export_path.strip():
                 response = _build_filespace_export_response(agent, export_path)
                 if response.get("status") == "ok":
                     result = response
+        _track_execution_event(
+            agent=agent,
+            backend=self._backend,
+            session=session,
+            request_source="tool_request",
+            result=result,
+            sync_enqueued=sync_enqueued,
+            extra={"tool_name": tool_name},
+        )
         _log_tool_call("tool_request", tool_name, params, agent_id=str(agent.id))
         return result
 
@@ -1414,48 +1704,116 @@ class SandboxComputeService:
         session = AgentComputeSession.objects.filter(agent=agent).first()
         if not session:
             raise SandboxComputeUnavailable("Sandbox session not found.")
-        update = self._backend.terminate(agent, session, reason=reason, delete_workspace=False)
-        self._apply_session_update(session, update)
+        try:
+            update = self._backend.terminate(agent, session, reason=reason, delete_workspace=False)
+            self._apply_session_update(session, update)
+        except Exception as exc:
+            _track_sandbox_event(
+                agent=agent,
+                event=AnalyticsEvent.SANDBOX_SESSION_STOPPED,
+                backend=self._backend,
+                session=session,
+                extra={
+                    "stop_reason": "terminate",
+                    "result_status": "error",
+                    "delete_workspace": False,
+                    "final_state": session.state,
+                    "error_type": _error_type_from_exception(exc),
+                },
+            )
+            raise
+        _track_sandbox_event(
+            agent=agent,
+            event=AnalyticsEvent.SANDBOX_SESSION_STOPPED,
+            backend=self._backend,
+            session=session,
+            extra={
+                "stop_reason": "terminate",
+                "result_status": "ok",
+                "delete_workspace": False,
+                "final_state": session.state,
+            },
+        )
         return session
 
     def idle_stop_session(self, session: AgentComputeSession, *, reason: str = "idle_ttl") -> Dict[str, Any]:
         agent = session.agent
-        sync_result = self._sync_workspace_push(agent, session)
-        sync_failed = False
-        if sync_result and sync_result.get("status") != "ok":
-            retry_result = self._sync_workspace_push(agent, session)
-            if retry_result and retry_result.get("status") != "ok":
-                sync_failed = True
-            sync_result = retry_result
+        delete_workspace = False
+        try:
+            sync_result = self._sync_workspace_push(agent, session)
+            sync_failed = False
+            if sync_result and sync_result.get("status") != "ok":
+                retry_result = self._sync_workspace_push(agent, session)
+                if retry_result and retry_result.get("status") != "ok":
+                    sync_failed = True
+                sync_result = retry_result
 
-        snapshot_payload = self._backend.snapshot_workspace(agent, session, reason=reason)
-        snapshot = self._record_snapshot(agent, snapshot_payload or {})
-        snapshot_failed = bool(snapshot_payload and snapshot_payload.get("status") == "error")
-        delete_workspace = snapshot is not None and not sync_failed
+            snapshot_payload = self._backend.snapshot_workspace(agent, session, reason=reason)
+            snapshot = self._record_snapshot(agent, snapshot_payload or {})
+            snapshot_failed = bool(snapshot_payload and snapshot_payload.get("status") == "error")
+            delete_workspace = snapshot is not None and not sync_failed
 
-        update = self._backend.terminate(
-            agent,
-            session,
-            reason=reason,
-            delete_workspace=delete_workspace,
-        )
-        self._apply_session_update(session, update)
+            update = self._backend.terminate(
+                agent,
+                session,
+                reason=reason,
+                delete_workspace=delete_workspace,
+            )
+            self._apply_session_update(session, update)
 
-        if snapshot:
-            session.workspace_snapshot = snapshot
-        if sync_failed or snapshot_failed:
-            session.state = AgentComputeSession.State.ERROR
-        else:
-            session.state = AgentComputeSession.State.STOPPED
-        session.lease_expires_at = None
-        session.save(update_fields=["state", "workspace_snapshot", "lease_expires_at", "updated_at"])
+            if snapshot:
+                session.workspace_snapshot = snapshot
+            if sync_failed or snapshot_failed:
+                session.state = AgentComputeSession.State.ERROR
+            else:
+                session.state = AgentComputeSession.State.STOPPED
+            session.lease_expires_at = None
+            session.save(update_fields=["state", "workspace_snapshot", "lease_expires_at", "updated_at"])
+        except Exception as exc:
+            _track_sandbox_event(
+                agent=agent,
+                event=AnalyticsEvent.SANDBOX_SESSION_STOPPED,
+                backend=self._backend,
+                session=session,
+                extra={
+                    "stop_reason": "idle_stop",
+                    "result_status": "error",
+                    "delete_workspace": delete_workspace,
+                    "final_state": session.state,
+                    "error_type": _error_type_from_exception(exc),
+                },
+            )
+            raise
 
-        return {
+        result = {
             "status": "ok" if not (sync_failed or snapshot_failed) else "error",
             "sync_result": sync_result,
             "snapshot": snapshot_payload,
             "stopped": True,
         }
+        error_type = None
+        if sync_failed and snapshot_failed:
+            error_type = "sync_and_snapshot_failed"
+        elif sync_failed:
+            error_type = "sync_failed"
+        elif snapshot_failed:
+            error_type = "snapshot_failed"
+        properties = {
+            "stop_reason": "idle_stop",
+            "result_status": _execution_result_status(result),
+            "delete_workspace": delete_workspace,
+            "final_state": session.state,
+        }
+        if error_type:
+            properties["error_type"] = error_type
+        _track_sandbox_event(
+            agent=agent,
+            event=AnalyticsEvent.SANDBOX_SESSION_STOPPED,
+            backend=self._backend,
+            session=session,
+            extra=properties,
+        )
+        return result
 
     def discover_mcp_tools(
         self,
