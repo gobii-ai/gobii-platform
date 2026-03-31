@@ -325,6 +325,40 @@ class TestLLMFailover(TestCase):
         self.assertTrue(params.get("supports_reasoning"))
         self.assertEqual(params.get("reasoning_effort"), "high")
 
+    def test_allow_implied_send_hint_reflects_endpoint_setting(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+        PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='openai',
+            display_name='OpenAI',
+            enabled=True,
+            env_var_name='OPENAI_API_KEY',
+            browser_backend='OPENAI',
+        )
+        endpoint = PersistentModelEndpoint.objects.create(
+            key='openai_no_implied_send',
+            provider=provider,
+            enabled=True,
+            litellm_model='openai/gpt-4o-mini',
+            supports_tool_choice=True,
+            allow_implied_send=False,
+        )
+        token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
+        tier = PersistentLLMTier.objects.create(token_range=token_range, order=1)
+        PersistentTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=1.0)
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            configs = get_llm_config_with_failover(token_count=0)
+
+        self.assertTrue(configs)
+        _, _, params = configs[0]
+        self.assertFalse(params.get("allow_implied_send"))
+
     def test_temperature_param_dropped_when_unsupported(self):
         seed_persistent_basic(include_openrouter=False)
         PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')

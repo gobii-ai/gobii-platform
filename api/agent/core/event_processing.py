@@ -2420,6 +2420,7 @@ def _stream_completion_with_broadcast(
     tools: Optional[List[dict]],
     provider: Optional[str],
     stream_broadcaster: Optional[WebStreamBroadcaster],
+    stream_content: bool = True,
 ) -> Any:
     if stream_broadcaster:
         stream_broadcaster.start()
@@ -2440,11 +2441,13 @@ def _stream_completion_with_broadcast(
         for chunk in stream:
             reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
             if stream_broadcaster:
-                filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
+                filtered_delta = None
+                if stream_content:
+                    filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
                 stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
     finally:
         if stream_broadcaster:
-            trailing = content_filter.flush() if content_filter else None
+            trailing = content_filter.flush() if content_filter and stream_content else None
             if trailing:
                 stream_broadcaster.push_delta(None, trailing)
             stream_broadcaster.finish()
@@ -2460,6 +2463,45 @@ _GEMINI_CACHE_MANAGER = GeminiCachedContentManager()
 _GEMINI_CACHE_BLOCKLIST = GEMINI_CACHE_BLOCKLIST
 
 
+def _attach_completion_runtime_hints(response: Any, **hints: Any) -> None:
+    if response is None or not hints:
+        return
+
+    if isinstance(response, dict):
+        model_extra = response.setdefault("model_extra", {})
+    else:
+        model_extra = getattr(response, "model_extra", None)
+        if not isinstance(model_extra, dict):
+            model_extra = {}
+            try:
+                setattr(response, "model_extra", model_extra)
+            except Exception:
+                return
+
+    runtime_hints = model_extra.setdefault("gobii_runtime_hints", {})
+    if isinstance(runtime_hints, dict):
+        runtime_hints.update(hints)
+
+
+def _get_completion_runtime_hints(response: Any) -> dict[str, Any]:
+    if response is None:
+        return {}
+
+    if isinstance(response, dict):
+        model_extra = response.get("model_extra")
+    else:
+        model_extra = getattr(response, "model_extra", None)
+
+    if not isinstance(model_extra, dict):
+        return {}
+
+    runtime_hints = model_extra.get("gobii_runtime_hints")
+    if not isinstance(runtime_hints, dict):
+        return {}
+
+    return runtime_hints
+
+
 def _completion_with_failover(
     messages: List[dict],
     tools: List[dict],
@@ -2468,6 +2510,7 @@ def _completion_with_failover(
     safety_identifier: str = None,
     preferred_config: Optional[Tuple[str, str]] = None,
     stream_broadcaster: Optional[WebStreamBroadcaster] = None,
+    allow_streamed_content: bool = True,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -2480,6 +2523,7 @@ def _completion_with_failover(
         safety_identifier: Optional user ID for safety filtering
         preferred_config: Optional tuple of (provider, model) to try first
         stream_broadcaster: Optional broadcaster for streaming deltas to web UI
+        allow_streamed_content: Whether assistant message text is allowed to stream to the UI
         
     Returns:
         Tuple of (LiteLLM completion response or streaming aggregate, token usage dict)
@@ -2569,6 +2613,9 @@ def _completion_with_failover(
                     params["safety_identifier"] = str(safety_identifier)
 
                 if active_stream_broadcaster:
+                    stream_content = allow_streamed_content and bool(
+                        params_base.get("allow_implied_send", True)
+                    )
                     try:
                         response = _stream_completion_with_broadcast(
                             model=model,
@@ -2577,6 +2624,7 @@ def _completion_with_failover(
                             tools=request_tools_payload,
                             provider=provider,
                             stream_broadcaster=active_stream_broadcaster,
+                            stream_content=stream_content,
                         )
                     except Exception:
                         logger.warning(
@@ -2613,6 +2661,10 @@ def _completion_with_failover(
                     response,
                     model=model,
                     provider=provider,
+                )
+                _attach_completion_runtime_hints(
+                    response,
+                    allow_implied_send=bool(params_base.get("allow_implied_send", True)),
                 )
                 set_usage_span_attributes(llm_span, usage)
 
@@ -4183,7 +4235,8 @@ def _run_agent_loop(
                 skills_snapshot = seed_sqlite_skills(agent)
                 current_notice = continuation_notice
                 continuation_notice = None
-                history, fitted_token_count, prompt_archive_id = build_prompt_context(
+                routing_profile = get_current_eval_routing_profile()
+                prompt_context_result = build_prompt_context(
                     agent,
                     current_iteration=i + 1,
                     max_iterations=MAX_AGENT_LOOP_ITERATIONS,
@@ -4191,8 +4244,15 @@ def _run_agent_loop(
                     is_first_run=is_first_run,
                     daily_credit_state=daily_state,
                     continuation_notice=current_notice,
-                    routing_profile=get_current_eval_routing_profile(),
+                    routing_profile=routing_profile,
+                    include_metadata=True,
                 )
+                if len(prompt_context_result) == 4:
+                    history, fitted_token_count, prompt_archive_id, prompt_metadata = prompt_context_result
+                else:
+                    history, fitted_token_count, prompt_archive_id = prompt_context_result
+                    prompt_metadata = {}
+                prompt_allows_implied_send = bool(prompt_metadata.get("prompt_allows_implied_send", True))
                 prompt_archive_attached = False
 
                 def _attach_prompt_archive(step: PersistentAgentStep) -> None:
@@ -4238,7 +4298,7 @@ def _run_agent_loop(
                         token_count=fitted_token_count,
                         agent=agent,
                         is_first_loop=is_first_run,
-                        routing_profile=get_current_eval_routing_profile(),
+                        routing_profile=routing_profile,
                         prefer_low_latency=prefer_low_latency,
                     )
                 except LLMNotConfiguredError:
@@ -4273,6 +4333,7 @@ def _run_agent_loop(
                         safety_identifier=agent.user.id if agent.user else None,
                         preferred_config=preferred_config,
                         stream_broadcaster=stream_broadcaster,
+                        allow_streamed_content=prompt_allows_implied_send,
                     )
                     if heartbeat:
                         heartbeat.touch("llm_response")
@@ -4468,6 +4529,16 @@ def _run_agent_loop(
                 tool_calls = list(raw_tool_calls)
                 implied_stop_after_send = False  # Track if implied send should force stop
                 implied_send_message_text = ""
+                runtime_hints = _get_completion_runtime_hints(response)
+                selected_model_allows_implied_send = bool(
+                    runtime_hints.get("allow_implied_send", True)
+                )
+                implied_send_allowed = prompt_allows_implied_send and selected_model_allows_implied_send
+                implied_send_disabled_reason = None
+                if not prompt_allows_implied_send:
+                    implied_send_disabled_reason = "Implied send disabled by prompt configuration."
+                elif not selected_model_allows_implied_send:
+                    implied_send_disabled_reason = "Implied send disabled for the selected model."
                 if message_text and not has_explicit_send:
                     # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                     # This is safer—agent won't keep running unexpectedly.
@@ -4491,11 +4562,14 @@ def _run_agent_loop(
                             "Agent %s: implied send continuing due to open kanban work + continuation signal.",
                             agent.id,
                         )
-                    implied_call, implied_error = _build_implied_send_tool_call(
-                        agent,
-                        message_text,
-                        will_continue_work=implied_will_continue,
-                    )
+                    if implied_send_allowed:
+                        implied_call, implied_error = _build_implied_send_tool_call(
+                            agent,
+                            message_text,
+                            will_continue_work=implied_will_continue,
+                        )
+                    else:
+                        implied_call, implied_error = None, implied_send_disabled_reason
                     if implied_call:
                         implied_send = True
                         implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
@@ -4512,20 +4586,28 @@ def _run_agent_loop(
                             agent.id,
                             implied_error or "unknown error",
                         )
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": (
-                                    "Message delivery requires explicit send tools when no active web chat session. "
-                                    "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
-                                    "recently active non-web communication channel from unified history/recent contacts."
-                                ),
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug("Failed to persist implied-send correction step", exc_info=True)
+                        if not implied_send_allowed:
+                            logger.info(
+                                "Agent %s: skipping implied-send correction step because implied send is disabled by configuration.",
+                                agent.id,
+                            )
+                            implied_error = None
+                            # Treat config-level opt-out as a normal choice rather than a delivery failure.
+                        else:
+                            try:
+                                step_kwargs = {
+                                    "agent": agent,
+                                    "description": (
+                                        "Message delivery requires explicit send tools when implied send is unavailable. "
+                                        "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most "
+                                        "recently active non-web communication channel from unified history/recent contacts."
+                                    ),
+                                }
+                                _attach_completion(step_kwargs)
+                                step = PersistentAgentStep.objects.create(**step_kwargs)
+                                _attach_prompt_archive(step)
+                            except Exception:
+                                logger.debug("Failed to persist implied-send correction step", exc_info=True)
                         # Don't continue here - still execute any other tool calls that were returned
 
                 reasoning_source = thinking_content

@@ -822,6 +822,7 @@ def get_llm_config() -> Tuple[str, dict]:
         if k not in (
             "supports_tool_choice",
             "use_parallel_tool_calls",
+            "allow_implied_send",
             "supports_vision",
             "supports_reasoning",
             "reasoning_effort",
@@ -994,6 +995,7 @@ def _build_weighted_failover_configs(
         params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
         params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
         params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+        params_with_hints["allow_implied_send"] = bool(getattr(endpoint, "allow_implied_send", True))
         params_with_hints["supports_reasoning"] = supports_reasoning
         params_with_hints["low_latency"] = bool(getattr(endpoint, "low_latency", False))
         if supports_reasoning and reasoning_effort:
@@ -1422,6 +1424,7 @@ def _prepare_summarization_params(model: str, params_with_hints: Dict[str, Any])
         if key not in (
             "supports_tool_choice",
             "use_parallel_tool_calls",
+            "allow_implied_send",
             "supports_vision",
             "supports_temperature",
             "supports_reasoning",

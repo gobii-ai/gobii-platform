@@ -36,6 +36,18 @@ class RunCompletionReasoningTests(TestCase):
         self.assertNotIn("supports_reasoning", kwargs)
 
     @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_allow_implied_send_hint_is_not_forwarded(self, mock_completion):
+        run_completion(
+            model="mock-model",
+            messages=[],
+            params={"allow_implied_send": False},
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertNotIn("allow_implied_send", kwargs)
+
+    @tag("batch_event_llm")
     @override_settings(LITELLM_TIMEOUT_SECONDS=321)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_timeout_defaults_to_settings_value(self, mock_completion):

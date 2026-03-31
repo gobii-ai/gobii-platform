@@ -4632,11 +4632,12 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "supports_temperature",
         "supports_tool_choice",
         "use_parallel_tool_calls",
+        "allow_implied_send",
         "supports_vision",
         "supports_reasoning",
         "reasoning_effort",
     )
-    list_filter = ("enabled", "low_latency", "provider", "supports_vision", "supports_reasoning")
+    list_filter = ("enabled", "low_latency", "provider", "allow_implied_send", "supports_vision", "supports_reasoning")
     search_fields = ("key", "litellm_model")
     fields = (
         "key",
@@ -4651,6 +4652,7 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "supports_temperature",
         "supports_tool_choice",
         "use_parallel_tool_calls",
+        "allow_implied_send",
         "supports_vision",
         "supports_reasoning",
         "reasoning_effort",

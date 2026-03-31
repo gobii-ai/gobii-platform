@@ -13,6 +13,7 @@ from api.models import (
     ImageGenerationModelEndpoint,
     ImageGenerationTierEndpoint,
     LLMProvider,
+    PersistentModelEndpoint,
 )
 from console.llm_serializers import build_llm_overview
 
@@ -285,3 +286,46 @@ class ConsoleLlmAuxModelApiTests(TestCase):
             avatar_tier_id,
         )
         self.assertEqual(move_avatar_resp.status_code, 400, move_avatar_resp.content)
+
+    def test_persistent_endpoint_allow_implied_send_is_exposed_and_mutable(self):
+        endpoint = PersistentModelEndpoint.objects.create(
+            provider=self.provider,
+            key="persistent-default",
+            litellm_model="openai/gpt-4o-mini",
+            enabled=True,
+        )
+        self.assertTrue(endpoint.allow_implied_send)
+
+        create_resp = self._json_post(
+            "console_llm_persistent_endpoints",
+            {
+                "provider_id": str(self.provider.id),
+                "key": "persistent-no-implied-send",
+                "model": "openai/gpt-4.1-mini",
+                "allow_implied_send": False,
+            },
+        )
+        self.assertEqual(create_resp.status_code, 200, create_resp.content)
+        endpoint_id = create_resp.json()["endpoint_id"]
+
+        created = PersistentModelEndpoint.objects.get(id=endpoint_id)
+        self.assertFalse(created.allow_implied_send)
+
+        patch_resp = self._json_patch(
+            "console_llm_persistent_endpoint_detail",
+            {"allow_implied_send": True},
+            endpoint_id,
+        )
+        self.assertEqual(patch_resp.status_code, 200, patch_resp.content)
+        created.refresh_from_db()
+        self.assertTrue(created.allow_implied_send)
+
+        overview = build_llm_overview()
+        endpoint_payload = next(
+            entry
+            for provider in overview["providers"]
+            if provider["id"] == str(self.provider.id)
+            for entry in provider["endpoints"]
+            if entry["id"] == str(created.id)
+        )
+        self.assertTrue(endpoint_payload["allow_implied_send"])

@@ -13,6 +13,7 @@ _HINT_KEYS = (
     "supports_temperature",
     "supports_tool_choice",
     "use_parallel_tool_calls",
+    "allow_implied_send",
     "supports_vision",
     "supports_reasoning",
     "reasoning_effort",
@@ -255,7 +256,7 @@ def run_completion(
 ):
     """Invoke ``litellm.completion`` with shared parameter handling.
 
-    - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, ``supports_vision``, and ``supports_reasoning``).
+    - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, ``allow_implied_send``, ``supports_vision``, and ``supports_reasoning``).
     - Adds ``tool_choice`` when tools are provided and supported.
     - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
       supplied an explicit hint.
