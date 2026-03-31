@@ -2948,6 +2948,10 @@ class PersistentModelEndpoint(models.Model):
     )
     supports_tool_choice = models.BooleanField(default=True)
     use_parallel_tool_calls = models.BooleanField(default=True)
+    allow_implied_send = models.BooleanField(
+        default=True,
+        help_text="Controls whether plain text can auto-route to the active web chat recipient for this model.",
+    )
     supports_vision = models.BooleanField(
         default=False,
         help_text="Indicates the model can process image or multimodal inputs",

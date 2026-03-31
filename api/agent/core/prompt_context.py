@@ -138,6 +138,13 @@ SIGNED_FILES_URL_RE = re.compile(
 )
 SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
+
+
+def _config_allows_implied_send(params_with_hints: Mapping[str, Any] | None) -> bool:
+    if not isinstance(params_with_hints, Mapping):
+        return True
+    return bool(params_with_hints.get("allow_implied_send", True))
+
 SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
 _SQLITE_RESULT_ID_RE = re.compile(r"""result_id\s*=\s*['"]([A-Za-z0-9_-]{4,64})['"]""")
 _SQLITE_EMPTY_RESULT_RE = re.compile(r"Query \d+ returned 0 rows\.", re.IGNORECASE)
@@ -1951,7 +1958,8 @@ def build_prompt_context(
     daily_credit_state: Optional[dict] = None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
-) -> tuple[List[dict], int, Optional[UUID]]:
+    include_metadata: bool = False,
+) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
 
@@ -1964,12 +1972,16 @@ def build_prompt_context(
         daily_credit_state: Pre-computed daily credit state (optional).
         continuation_notice: Optional system note to inject for follow-up loops.
         routing_profile: LLMRoutingProfile instance for eval routing (optional).
+        include_metadata: When true, include prompt capability metadata in the return value.
 
     Returns:
         Tuple of (messages, fitted_token_count, prompt_archive_id) where
         fitted_token_count is the actual token count after promptree fitting for
         accurate LLM selection and prompt_archive_id references the metadata row
         for the stored prompt archive (or ``None`` if archiving failed).
+
+        When ``include_metadata`` is true, a fourth item is returned containing
+        prompt capability flags used by the orchestration loop.
     """
     max_iterations = _resolve_max_iterations(max_iterations)
 
@@ -2016,7 +2028,13 @@ def build_prompt_context(
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
     proactive_context = _get_recent_proactive_context(agent)
-    implied_send_context = _get_implied_send_context(agent)
+    prompt_allows_implied_send = _config_allows_implied_send(
+        failover_configs[0][2] if failover_configs else None
+    )
+    implied_send_context = _get_implied_send_context(
+        agent,
+        allow_implied_send=prompt_allows_implied_send,
+    )
     implied_send_active = implied_send_context is not None
     system_prompt = _get_system_instruction(
         agent,
@@ -2473,7 +2491,7 @@ def build_prompt_context(
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"Prompt sections for agent {agent.id}:\n{prompt.report()}")
 
-    return (
+    result = (
         [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -2481,6 +2499,14 @@ def build_prompt_context(
         tokens_after,
         archive_id,
     )
+    if include_metadata:
+        return (
+            *result,
+            {
+                "prompt_allows_implied_send": prompt_allows_implied_send,
+            },
+        )
+    return result
 
 
 def _build_user_display_name(user: Any) -> str | None:
@@ -3456,7 +3482,11 @@ def _get_implied_send_status(agent: PersistentAgent) -> tuple[bool, str | None]:
     return False, None
 
 
-def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
+def _get_implied_send_context(
+    agent: PersistentAgent,
+    *,
+    allow_implied_send: bool = True,
+) -> dict | None:
     """
     Get the full context for implied send routing.
 
@@ -3464,6 +3494,9 @@ def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
         dict with keys: channel, to_address, tool_name, display_name, tool_example
         or None if no implied send target available.
     """
+    if not allow_implied_send:
+        return None
+
     # Priority 1: Deliverable web chat session
     try:
         for session in get_deliverable_web_sessions(agent):
