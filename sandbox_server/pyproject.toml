@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sandbox-compute-server"
+version = "1.7.0"
+description = "Minimal HTTP supervisor for Gobii sandbox compute pods."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "requests==2.32.4",
+    "PySocks==1.7.1",
+    "weasyprint>=62.0",
+    "gunicorn==23.0.0",
+    "fastmcp==2.11.3",
+    "mcp==1.13.1",
+]
+
+[tool.setuptools]
+py-modules = ["sandbox_utils", "logging_config"]
+
+[tool.setuptools.packages.find]
+include = ["sandbox_compute_server*"]

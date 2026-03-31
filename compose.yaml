@@ -1,5 +1,10 @@
 # OSS-friendly docker compose: generates secrets automatically, then brings up services.
 
+x-app-sandbox-env: &app-sandbox-env
+  SANDBOX_COMPUTE_BACKEND: ${SANDBOX_COMPUTE_BACKEND:-local}
+  SANDBOX_COMPUTE_API_URL: ${SANDBOX_COMPUTE_API_URL:-http://sandbox-compute:8080}
+  SANDBOX_COMPUTE_API_TOKEN: ${SANDBOX_COMPUTE_API_TOKEN:-dev-sandbox-token}
+
 services:
   bootstrap-env:
     image: python:3.13-slim
@@ -59,11 +64,36 @@ services:
       start_period: 3s
     restart: unless-stopped
 
+  sandbox-compute:
+    platform: linux/amd64
+    build:
+      context: sandbox_server
+      dockerfile: ./Dockerfile
+    environment:
+      SANDBOX_COMPUTE_API_TOKEN: ${SANDBOX_COMPUTE_API_TOKEN:-dev-sandbox-token}
+      SANDBOX_WORKSPACE_ROOT: /workspace
+      SANDBOX_RUNTIME_CACHE_ROOT: /runtime-cache
+    volumes:
+      - sandbox-workspace-data:/workspace
+      - sandbox-runtime-cache:/runtime-cache
+    ports:
+      - "127.0.0.1:${SANDBOX_COMPUTE_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+    profiles: ["sandbox"]
+
   web:
     platform: linux/amd64
     build:
       context: .
       dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
@@ -96,6 +126,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
@@ -119,6 +151,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
@@ -143,6 +177,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
@@ -181,6 +217,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
@@ -199,6 +237,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
@@ -256,3 +296,5 @@ volumes:
   static-data:
   minio-data:
   runtime-config:
+  sandbox-workspace-data:
+  sandbox-runtime-cache:
