@@ -7,6 +7,7 @@ Simplified multi-query executor aligned with sqlite_query.
 import json
 import logging
 import os
+import platform
 import re
 import sqlite3
 import subprocess
@@ -151,6 +152,11 @@ def _apply_resource_limits(limits: _SqliteBatchLimits) -> None:
             logger.debug("Failed to set sqlite_batch CPU limit", exc_info=True)
 
     if limits.memory_mb > 0:
+        if _should_skip_memory_limits_for_virtualapple_emulation():
+            logger.info(
+                "Skipping sqlite_batch memory rlimits under VirtualApple x86_64 emulation"
+            )
+            return
         memory_bytes = int(limits.memory_mb * 1024 * 1024)
         for limit_name in ("RLIMIT_AS", "RLIMIT_DATA"):
             if hasattr(resource, limit_name):
@@ -162,6 +168,20 @@ def _apply_resource_limits(limits: _SqliteBatchLimits) -> None:
                         limit_name,
                         exc_info=True,
                     )
+
+
+def _should_skip_memory_limits_for_virtualapple_emulation() -> bool:
+    machine = platform.machine().lower()
+    if machine not in {"x86_64", "amd64"}:
+        return False
+
+    try:
+        with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as cpuinfo_file:
+            cpuinfo = cpuinfo_file.read(4096)
+    except OSError:
+        return False
+
+    return "VirtualApple" in cpuinfo
 
 
 def _get_db_size_mb(db_path: str) -> float:

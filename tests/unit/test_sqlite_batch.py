@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import tempfile
+from unittest.mock import mock_open, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
@@ -9,6 +10,7 @@ from django.utils import timezone
 
 from api.agent.tools.sqlite_batch import (
     execute_sqlite_batch,
+    _apply_resource_limits,
     _apply_all_sql_fixes,
     _autocorrect_ambiguous_column,
     _autocorrect_cte_typos,
@@ -24,6 +26,8 @@ from api.agent.tools.sqlite_batch import (
     _fix_singular_plural_columns,
     _fix_singular_plural_tables,
     _is_typo,
+    _SqliteBatchLimits,
+    _should_skip_memory_limits_for_virtualapple_emulation,
     _strip_markdown_fences,
     _strip_trailing_tool_params,
 )
@@ -264,6 +268,46 @@ class SqliteBatchToolTests(TestCase):
             out = execute_sqlite_batch(self.agent, {"queries": "SELECT 1"})
             self.assertEqual(out.get("status"), "error")
             self.assertIn("timed out", out.get("message", "").lower())
+
+    @patch("api.agent.tools.sqlite_batch.platform.machine", return_value="x86_64")
+    @patch("builtins.open", new_callable=mock_open, read_data="vendor_id\t: VirtualApple\n")
+    def test_detects_virtualapple_emulation_for_memory_limit_skip(self, _mock_file, _mock_machine):
+        self.assertTrue(_should_skip_memory_limits_for_virtualapple_emulation())
+
+    @patch("api.agent.tools.sqlite_batch.platform.machine", return_value="x86_64")
+    @patch("builtins.open", new_callable=mock_open, read_data="vendor_id\t: GenuineIntel\n")
+    def test_does_not_skip_memory_limits_on_standard_x86_64(self, _mock_file, _mock_machine):
+        self.assertFalse(_should_skip_memory_limits_for_virtualapple_emulation())
+
+    @patch("api.agent.tools.sqlite_batch.platform.machine", return_value="aarch64")
+    def test_does_not_skip_memory_limits_on_non_x86(self, _mock_machine):
+        self.assertFalse(_should_skip_memory_limits_for_virtualapple_emulation())
+
+    @patch("api.agent.tools.sqlite_batch.platform.machine", return_value="x86_64")
+    @patch("builtins.open", new_callable=mock_open, read_data="vendor_id\t: VirtualApple\n")
+    @patch("api.agent.tools.sqlite_batch.resource")
+    def test_apply_resource_limits_skips_memory_rlimits_under_virtualapple_emulation(
+        self,
+        mock_resource,
+        _mock_file,
+        _mock_machine,
+    ):
+        mock_resource.RLIMIT_CPU = 0
+        mock_resource.RLIMIT_AS = 1
+        mock_resource.RLIMIT_DATA = 2
+
+        limits = _SqliteBatchLimits(
+            wall_timeout_seconds=30.0,
+            cpu_seconds=30,
+            memory_mb=256,
+            query_timeout_seconds=30.0,
+        )
+
+        with patch.object(mock_resource, "setrlimit") as mock_setrlimit:
+            _apply_resource_limits(limits)
+
+        self.assertEqual(mock_setrlimit.call_count, 1)
+        mock_setrlimit.assert_called_once_with(mock_resource.RLIMIT_CPU, (30, 30))
 
     # -------------------------------------------------------------------------
     # Auto-correction tests
