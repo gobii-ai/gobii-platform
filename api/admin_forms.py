@@ -1,6 +1,10 @@
 # admin_forms.py  (optional file)
 from django import forms
 from django.forms import ModelForm
+from billing.checkout_configuration import (
+    DEFAULT_STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION,
+    STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION_CHOICES,
+)
 from .models import CommsChannel, AgentEmailAccount, LLMProvider, StripeConfig, MCPServerConfig
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -375,6 +379,19 @@ class LLMProviderForm(ModelForm):
 class StripeConfigForm(ModelForm):
     """Admin form for managing Stripe configuration secrets."""
 
+    checkout_billing_address_collection = forms.ChoiceField(
+        label="Billing address collection",
+        required=False,
+        choices=STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION_CHOICES,
+        initial=DEFAULT_STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION,
+        help_text="How Stripe Checkout should collect billing addresses.",
+    )
+    checkout_name_collection_individual_enabled = forms.BooleanField(
+        label="Collect individual name",
+        required=False,
+        initial=False,
+        help_text="Enable Stripe Checkout individual name collection.",
+    )
     webhook_secret = forms.CharField(
         label="Stripe webhook signing secret",
         required=False,
@@ -611,6 +628,12 @@ class StripeConfigForm(ModelForm):
                         return text
                 return ""
 
+            self.fields["checkout_billing_address_collection"].initial = (
+                instance.checkout_billing_address_collection
+            )
+            self.fields["checkout_name_collection_individual_enabled"].initial = (
+                instance.checkout_name_collection_individual_enabled
+            )
             self.fields["startup_product_id"].initial = instance.startup_product_id
             self.fields["startup_price_id"].initial = instance.startup_price_id
             self.fields["startup_trial_days"].initial = instance.startup_trial_days
@@ -731,6 +754,8 @@ class StripeConfigForm(ModelForm):
                 setter_method(secret_value.strip())
 
         simple_fields = [
+            "checkout_billing_address_collection",
+            "checkout_name_collection_individual_enabled",
             "startup_product_id",
             "startup_price_id",
             "startup_trial_days",
@@ -787,6 +812,8 @@ class StripeConfigForm(ModelForm):
             "org_team_task_meter_event_name",
         ]
         for field_name in simple_fields:
+            if field_name not in self.changed_data:
+                continue
             raw_value = self.cleaned_data.get(field_name)
             if raw_value is None:
                 cleaned_value = None

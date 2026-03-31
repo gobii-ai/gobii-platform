@@ -204,12 +204,18 @@ class OrganizationInvitesTest(TestCase):
             ).exists()
         )
 
-    @patch("config.stripe_config._load_from_database", return_value=None)
+    @patch("console.views.get_stripe_settings")
     @patch("console.views.stripe.checkout.Session.create")
     @patch("console.views.get_or_create_stripe_customer")
-    def test_seat_checkout_redirects_to_stripe(self, mock_customer, mock_session, _load_from_db):
+    def test_seat_checkout_redirects_to_stripe(self, mock_customer, mock_session, mock_get_stripe_settings):
         mock_customer.return_value = MagicMock(id="cus_test")
         mock_session.return_value = MagicMock(url="https://stripe.test/checkout")
+        mock_get_stripe_settings.return_value = MagicMock(
+            org_team_price_id="price_org_team",
+            org_team_additional_task_price_id="",
+            checkout_billing_address_collection="required",
+            checkout_name_collection_individual_enabled=True,
+        )
 
         self.client.force_login(self.inviter)
         billing = self.org.billing
@@ -217,7 +223,6 @@ class OrganizationInvitesTest(TestCase):
         billing.save(update_fields=["purchased_seats"])
 
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
-        stripe_settings = get_stripe_settings(force_reload=True)
         resp = self.client.post(url, {"seats": 1})
 
         self.assertEqual(resp.status_code, 302)
@@ -230,12 +235,16 @@ class OrganizationInvitesTest(TestCase):
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
         )
+        self.assertEqual(kwargs["billing_address_collection"], "required")
+        self.assertEqual(
+            kwargs["name_collection"],
+            {"individual": {"enabled": True}},
+        )
         self.assertNotIn("payment_method_types", kwargs)
-        self.assertEqual(line_items[0]["price"], stripe_settings.org_team_price_id)
+        self.assertEqual(line_items[0]["price"], "price_org_team")
         self.assertEqual(line_items[0]["quantity"], 1)
         self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
         self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
-        overage_price = stripe_settings.org_team_additional_task_price_id
         self.assertEqual(len(line_items), 1)
 
     def test_seat_checkout_requires_membership(self):
@@ -867,9 +876,18 @@ class OrganizationInvitesTest(TestCase):
 
 @tag("batch_organizations")
 class OrganizationBillingCheckoutHelpersTest(TestCase):
+    @patch("console.views.get_stripe_settings")
     @patch("console.views.stripe.checkout.Session.create")
-    def test_start_addon_checkout_session_excludes_disabled_payment_methods(self, mock_session_create):
+    def test_start_addon_checkout_session_excludes_disabled_payment_methods(
+        self,
+        mock_session_create,
+        mock_get_stripe_settings,
+    ):
         mock_session_create.return_value = MagicMock(url="https://stripe.test/addon-checkout")
+        mock_get_stripe_settings.return_value = MagicMock(
+            checkout_billing_address_collection="required",
+            checkout_name_collection_individual_enabled=True,
+        )
 
         with patch.object(console_views.stripe, "api_key", "sk_test_checkout"):
             checkout_url = console_views._start_addon_checkout_session(
@@ -885,6 +903,11 @@ class OrganizationBillingCheckoutHelpersTest(TestCase):
         self.assertEqual(
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertEqual(kwargs["billing_address_collection"], "required")
+        self.assertEqual(
+            kwargs["name_collection"],
+            {"individual": {"enabled": True}},
         )
         self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")

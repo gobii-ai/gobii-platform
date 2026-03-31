@@ -157,6 +157,15 @@ class StripeConfigAdmin(admin.ModelAdmin):
     fieldsets = (
         (None, {"fields": ("release_env", "live_mode")}),
         (
+            "Checkout",
+            {
+                "fields": (
+                    "checkout_billing_address_collection",
+                    "checkout_name_collection_individual_enabled",
+                )
+            },
+        ),
+        (
             "Secrets",
             {
                 "fields": (

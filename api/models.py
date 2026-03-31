@@ -73,6 +73,11 @@ from api.services.tool_settings import (
     DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
     DEFAULT_TOOL_SEARCH_AUTO_ENABLE_APPS,
 )
+from billing.checkout_configuration import (
+    DEFAULT_STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION,
+    normalize_stripe_checkout_billing_address_collection,
+    normalize_stripe_checkout_name_collection_individual_enabled,
+)
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
 from email.utils import parseaddr
@@ -4660,6 +4665,41 @@ class StripeConfig(models.Model):
 
     def set_webhook_secret(self, value: str | None) -> None:
         self.set_value("webhook_secret", value, is_secret=True)
+
+    @property
+    def checkout_billing_address_collection(self) -> str:
+        return normalize_stripe_checkout_billing_address_collection(
+            self.get_value("checkout_billing_address_collection"),
+            default=DEFAULT_STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION,
+        )
+
+    @checkout_billing_address_collection.setter
+    def checkout_billing_address_collection(self, value: str | None) -> None:
+        if value is None:
+            self.set_value("checkout_billing_address_collection", None)
+            return
+        self.set_value(
+            "checkout_billing_address_collection",
+            normalize_stripe_checkout_billing_address_collection(value),
+        )
+
+    @property
+    def checkout_name_collection_individual_enabled(self) -> bool:
+        return normalize_stripe_checkout_name_collection_individual_enabled(
+            self.get_value("checkout_name_collection_individual_enabled")
+        )
+
+    @checkout_name_collection_individual_enabled.setter
+    def checkout_name_collection_individual_enabled(self, value: bool | str | None) -> None:
+        if value is None:
+            self.set_value("checkout_name_collection_individual_enabled", None)
+            return
+        self.set_value(
+            "checkout_name_collection_individual_enabled",
+            "true"
+            if normalize_stripe_checkout_name_collection_individual_enabled(value)
+            else "false",
+        )
 
     @property
     def startup_price_id(self) -> str:

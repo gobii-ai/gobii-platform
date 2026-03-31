@@ -313,7 +313,11 @@ class ConsoleBillingUpdateApiTests(TestCase):
         _mock_assign_key,
     ):
         mock_stripe_status.return_value = SimpleNamespace(enabled=True)
-        mock_get_stripe_settings.return_value = SimpleNamespace(org_team_price_id="price_org_team")
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            org_team_price_id="price_org_team",
+            checkout_billing_address_collection="required",
+            checkout_name_collection_individual_enabled=True,
+        )
         mock_session_create.return_value = SimpleNamespace(url="https://stripe.test/org-seat-checkout")
 
         resp = self.client.post(
@@ -336,6 +340,11 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertEqual(
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertEqual(kwargs["billing_address_collection"], "required")
+        self.assertEqual(
+            kwargs["name_collection"],
+            {"individual": {"enabled": True}},
         )
         self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")

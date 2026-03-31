@@ -29,6 +29,7 @@ from config.socialaccount_adapter import (
     OAUTH_CHARTER_SESSION_KEYS,
     serialize_oauth_charter_cookie_payload,
 )
+from billing.checkout_configuration import build_checkout_session_collection_kwargs
 from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
@@ -1827,6 +1828,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-startup-{customer.id}-{event_id}",
+            **build_checkout_session_collection_kwargs(stripe_settings),
         }
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
@@ -2001,6 +2003,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-scale-{customer.id}-{event_id}",
+            **build_checkout_session_collection_kwargs(stripe_settings),
         }
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:

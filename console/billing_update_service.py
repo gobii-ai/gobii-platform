@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from billing.addons import AddonEntitlementService
+from billing.checkout_configuration import build_checkout_session_collection_kwargs
 from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     build_checkout_flow_metadata,
@@ -541,6 +542,7 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                         line_items=[{"price": seat_price_id, "quantity": seats_target_int}],
                         metadata=checkout_metadata,
                         subscription_data={"metadata": checkout_metadata},
+                        **build_checkout_session_collection_kwargs(stripe_settings),
                     )
                     response_dict["redirectUrl"] = session.url
                 except stripe.error.StripeError as exc:

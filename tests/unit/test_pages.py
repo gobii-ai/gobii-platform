@@ -1662,6 +1662,8 @@ class CheckoutRedirectTests(TestCase):
             startup_price_id="price_startup",
             startup_additional_task_price_id="price_startup_meter",
             startup_trial_days=7,
+            checkout_billing_address_collection="required",
+            checkout_name_collection_individual_enabled=True,
         )
         mock_customer.return_value = SimpleNamespace(id="cus_trial")
         mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
@@ -1681,6 +1683,11 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+        self.assertEqual(kwargs["billing_address_collection"], "required")
+        self.assertEqual(
+            kwargs["name_collection"],
+            {"individual": {"enabled": True}},
+        )
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_startup", "quantity": 1}],

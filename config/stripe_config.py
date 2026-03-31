@@ -2,6 +2,11 @@
 import environ
 import json
 
+from billing.checkout_configuration import (
+    DEFAULT_STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION,
+    normalize_stripe_checkout_billing_address_collection,
+    normalize_stripe_checkout_name_collection_individual_enabled,
+)
 from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Optional
@@ -25,6 +30,8 @@ class StripeSettings:
     live_secret_key: Optional[str]
     test_secret_key: Optional[str]
     webhook_secret: Optional[str]
+    checkout_billing_address_collection: str
+    checkout_name_collection_individual_enabled: bool
     startup_price_id: str
     startup_trial_days: int
     startup_additional_task_price_id: str
@@ -116,6 +123,17 @@ def _env_defaults() -> StripeSettings:
         live_secret_key=getattr(settings, "STRIPE_LIVE_SECRET_KEY", None),
         test_secret_key=getattr(settings, "STRIPE_TEST_SECRET_KEY", None),
         webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
+        checkout_billing_address_collection=normalize_stripe_checkout_billing_address_collection(
+            env(
+                "STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION",
+                default=DEFAULT_STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION,
+            )
+        ),
+        checkout_name_collection_individual_enabled=(
+            normalize_stripe_checkout_name_collection_individual_enabled(
+                env("STRIPE_CHECKOUT_NAME_COLLECTION_INDIVIDUAL_ENABLED", default=False)
+            )
+        ),
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
         startup_trial_days=env.int("STRIPE_STARTUP_TRIAL_DAYS", default=0),
         startup_task_pack_product_id=env("STRIPE_STARTUP_TASK_PACK_PRODUCT_ID", default="prod_dummy_startup_task_pack_product"),
@@ -257,6 +275,18 @@ def _load_from_database() -> Optional[StripeSettings]:
 
     startup_trial_days = _parse_int(getattr(config, "startup_trial_days", None))
     scale_trial_days = _parse_int(getattr(config, "scale_trial_days", None))
+    checkout_billing_address_collection = env_defaults.checkout_billing_address_collection
+    if config.has_value("checkout_billing_address_collection"):
+        checkout_billing_address_collection = normalize_stripe_checkout_billing_address_collection(
+            config.get_value("checkout_billing_address_collection")
+        )
+    checkout_name_collection_individual_enabled = env_defaults.checkout_name_collection_individual_enabled
+    if config.has_value("checkout_name_collection_individual_enabled"):
+        checkout_name_collection_individual_enabled = (
+            normalize_stripe_checkout_name_collection_individual_enabled(
+                config.get_value("checkout_name_collection_individual_enabled")
+            )
+        )
 
     try:
         org_team_contact_cap_product_id = config.org_team_contact_cap_product_id or ""
@@ -358,6 +388,8 @@ def _load_from_database() -> Optional[StripeSettings]:
         release_env=config.release_env,
         live_mode=bool(config.live_mode),
         webhook_secret=webhook_secret,
+        checkout_billing_address_collection=checkout_billing_address_collection,
+        checkout_name_collection_individual_enabled=checkout_name_collection_individual_enabled,
         startup_price_id=config.startup_price_id or "",
         startup_trial_days=startup_trial_days,
         startup_task_pack_product_id=config.startup_task_pack_product_id or "",

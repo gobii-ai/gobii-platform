@@ -1,3 +1,6 @@
+import os
+from unittest.mock import patch
+
 from django.conf import settings
 from django.test import TestCase, tag
 
@@ -137,6 +140,85 @@ class StripeConfigHelperTests(TestCase):
         self.assertTrue(secret_entry.is_secret)
         self.assertTrue(secret_entry.value_encrypted)
         self.assertEqual(config.webhook_secret, "whsec_123")
+
+    def test_get_stripe_settings_uses_env_checkout_defaults_when_db_entries_are_missing(self):
+        StripeConfig.objects.create(
+            release_env=settings.GOBII_RELEASE_ENV,
+            live_mode=False,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION": "required",
+                "STRIPE_CHECKOUT_NAME_COLLECTION_INDIVIDUAL_ENABLED": "true",
+            },
+            clear=False,
+        ):
+            invalidate_stripe_settings_cache()
+            stripe_settings = get_stripe_settings(force_reload=True)
+
+        self.assertEqual(stripe_settings.checkout_billing_address_collection, "required")
+        self.assertTrue(stripe_settings.checkout_name_collection_individual_enabled)
+
+    def test_stripe_config_form_saves_checkout_collection_fields(self):
+        config = StripeConfig.objects.create(
+            release_env=settings.GOBII_RELEASE_ENV,
+            live_mode=False,
+        )
+
+        form_data = {
+            "release_env": settings.GOBII_RELEASE_ENV,
+            "live_mode": "on",
+            "checkout_billing_address_collection": "required",
+            "checkout_name_collection_individual_enabled": "on",
+            "webhook_secret": "",
+            "clear_webhook_secret": "",
+        }
+
+        form = StripeConfigForm(data=form_data, instance=config)
+        self.assertTrue(form.is_valid(), form.errors)
+        form.save()
+
+        config.refresh_from_db()
+        self.assertEqual(config.checkout_billing_address_collection, "required")
+        self.assertTrue(config.checkout_name_collection_individual_enabled)
+
+    def test_stripe_config_form_preserves_checkout_env_defaults_when_unchanged(self):
+        config = StripeConfig.objects.create(
+            release_env=settings.GOBII_RELEASE_ENV,
+            live_mode=False,
+        )
+
+        form_data = {
+            "release_env": settings.GOBII_RELEASE_ENV,
+            "live_mode": "on",
+            "checkout_billing_address_collection": "auto",
+            "webhook_secret": "",
+            "clear_webhook_secret": "",
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "STRIPE_CHECKOUT_BILLING_ADDRESS_COLLECTION": "required",
+                "STRIPE_CHECKOUT_NAME_COLLECTION_INDIVIDUAL_ENABLED": "true",
+            },
+            clear=False,
+        ):
+            form = StripeConfigForm(data=form_data, instance=config)
+            self.assertTrue(form.is_valid(), form.errors)
+            form.save()
+
+            config.refresh_from_db()
+            self.assertFalse(config.has_value("checkout_billing_address_collection"))
+            self.assertFalse(config.has_value("checkout_name_collection_individual_enabled"))
+
+            invalidate_stripe_settings_cache()
+            stripe_settings = get_stripe_settings(force_reload=True)
+
+        self.assertEqual(stripe_settings.checkout_billing_address_collection, "required")
+        self.assertTrue(stripe_settings.checkout_name_collection_individual_enabled)
 
     def test_stripe_config_form_saves_dedicated_ip_fields(self):
         config = StripeConfig.objects.create(
