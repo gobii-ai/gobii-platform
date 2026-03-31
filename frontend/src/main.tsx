@@ -110,15 +110,15 @@ const handleEmbeddedClose = isEmbedded
       }
     }
   : undefined
+const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
+const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
+const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
 
 switch (appName) {
   case 'agent-chat': {
     if (!agentId) {
       throw new Error('Agent identifier is required for the chat experience')
     }
-    const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
-    const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
-    const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
     screen = (
       <AgentChatPage
         agentId={agentId}
@@ -218,9 +218,6 @@ switch (appName) {
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
-    const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
-    const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
-    const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
     const allowCommands = mountNode.dataset.allowCommands === 'true'
     if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath) {
       throw new Error('MCP OAuth endpoints are required')
@@ -280,7 +277,13 @@ switch (appName) {
     )
     break
   case 'immersive-app':
-    screen = <ImmersiveApp maxChatUploadSizeBytes={maxChatUploadSizeBytes} />
+    screen = (
+      <ImmersiveApp
+        maxChatUploadSizeBytes={maxChatUploadSizeBytes}
+        pipedreamAppsSettingsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
+        pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
+      />
+    )
     break
   default:
     throw new Error(`Unsupported console React app: ${appName}`)

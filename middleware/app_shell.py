@@ -9,6 +9,7 @@ from django.urls import reverse
 
 from api.services.system_settings import get_max_file_size
 from config.vite import ViteManifestError, get_vite_asset
+from util.integrations import pipedream_status
 from util.fish_collateral import is_fish_collateral_enabled
 
 APP_PATH_PREFIX = "/app"
@@ -181,6 +182,14 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
         if max_chat_upload_size_bytes
         else ""
     )
+    pipedream_attrs = ""
+    if pipedream_status().enabled:
+        pipedream_apps_url = reverse("console-pipedream-apps")
+        pipedream_app_search_url = reverse("console-pipedream-app-search")
+        pipedream_attrs = (
+            f' data-pipedream-apps-url="{pipedream_apps_url}"'
+            f' data-pipedream-app-search-url="{pipedream_app_search_url}"'
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -203,7 +212,7 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
   {vite_tags}
 </head>
 <body class="min-h-screen bg-white">
-  <div id="gobii-frontend-root" data-app="immersive-app" data-fish-collateral-enabled="{fish_collateral_data_attr}"{max_chat_upload_size_attr}></div>
+  <div id="gobii-frontend-root" data-app="immersive-app" data-fish-collateral-enabled="{fish_collateral_data_attr}"{max_chat_upload_size_attr}{pipedream_attrs}></div>
 </body>
 </html>"""
 
