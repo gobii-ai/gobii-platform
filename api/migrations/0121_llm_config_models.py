@@ -6,14 +6,6 @@ import uuid
 def seed_llm_defaults(apps, schema_editor):
     # Import models via historical apps registry
     LLMProvider = apps.get_model('api', 'LLMProvider')
-    PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
-    PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
-    PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
-    PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
-    BrowserModelEndpoint = apps.get_model('api', 'BrowserModelEndpoint')
-    BrowserLLMPolicy = apps.get_model('api', 'BrowserLLMPolicy')
-    BrowserLLMTier = apps.get_model('api', 'BrowserLLMTier')
-    BrowserTierEndpoint = apps.get_model('api', 'BrowserTierEndpoint')
 
     # Create providers (enabled by default; no admin keys seeded)
     providers = {}
@@ -38,109 +30,6 @@ def seed_llm_defaults(apps, schema_editor):
     ensure_provider('google', 'Google Vertex AI', 'GOOGLE_API_KEY', 'GOOGLE', vertex_project='browser-use-458714', vertex_location='us-east4')
     ensure_provider('openrouter', 'OpenRouter', 'OPENROUTER_API_KEY', 'OPENAI_COMPAT')
     ensure_provider('fireworks', 'Fireworks', 'FIREWORKS_AI_API_KEY', 'OPENAI_COMPAT')
-
-    # Persistent endpoints (LiteLLM)
-    pe = {}
-    def add_persistent_endpoint(key, provider_key, litellm_model, temperature_override=None, supports_tool_choice=True):
-        ep, _ = PersistentModelEndpoint.objects.get_or_create(
-            key=key,
-            defaults=dict(
-                provider=providers[provider_key],
-                enabled=True,
-                litellm_model=litellm_model,
-                temperature_override=temperature_override,
-                supports_tool_choice=supports_tool_choice,
-            ),
-        )
-        pe[key] = ep
-        return ep
-
-    add_persistent_endpoint('openai_gpt4_1', 'openai', 'openai/gpt-4.1')
-    add_persistent_endpoint('openai_gpt5', 'openai', 'openai/gpt-5', temperature_override=1)
-    add_persistent_endpoint('anthropic_sonnet4', 'anthropic', 'anthropic/claude-sonnet-4-20250514')
-    add_persistent_endpoint('google_gemini_25_pro', 'google', 'vertex_ai/gemini-2.5-pro')
-    add_persistent_endpoint('openrouter_glm_45', 'openrouter', 'openrouter/z-ai/glm-4.5')
-    add_persistent_endpoint('fireworks_qwen3_235b', 'fireworks', 'fireworks_ai/accounts/fireworks/models/qwen3-235b-a22b-instruct-2507', supports_tool_choice=False)
-    add_persistent_endpoint('fireworks_gpt_oss_120b', 'fireworks', 'fireworks_ai/accounts/fireworks/models/gpt-oss-120b')
-
-    # Browser endpoints
-    be = {}
-    def add_browser_endpoint(key, provider_key, browser_model, browser_base_url=''):
-        ep, _ = BrowserModelEndpoint.objects.get_or_create(
-            key=key,
-            defaults=dict(
-                provider=providers[provider_key],
-                enabled=True,
-                browser_model=browser_model,
-                browser_base_url=browser_base_url,
-            ),
-        )
-        be[key] = ep
-        return ep
-
-    add_browser_endpoint('openai_gpt5_mini', 'openai', 'gpt-5-mini')
-    add_browser_endpoint('anthropic_sonnet4', 'anthropic', 'claude-sonnet-4-20250514')
-    add_browser_endpoint('google_gemini_25_pro', 'google', 'gemini-2.5-pro')
-    add_browser_endpoint('openrouter_glm_45', 'openrouter', 'z-ai/glm-4.5', 'https://openrouter.ai/api/v1')
-    add_browser_endpoint('fireworks_qwen3_235b', 'fireworks', 'accounts/fireworks/models/qwen3-235b-a22b-instruct-2507', 'https://api.fireworks.ai/inference/v1')
-
-    # Browser policy and tiers
-    policy, _ = BrowserLLMPolicy.objects.get_or_create(name='Default', defaults=dict(is_active=True))
-
-    t1 = BrowserLLMTier.objects.create(policy=policy, order=1, description='Tier 1')
-    BrowserTierEndpoint.objects.create(tier=t1, endpoint=be['openai_gpt5_mini'], weight=0.8)
-    BrowserTierEndpoint.objects.create(tier=t1, endpoint=be['anthropic_sonnet4'], weight=0.2)
-
-    t2 = BrowserLLMTier.objects.create(policy=policy, order=2, description='Tier 2')
-    BrowserTierEndpoint.objects.create(tier=t2, endpoint=be['google_gemini_25_pro'], weight=1.0)
-
-    t3 = BrowserLLMTier.objects.create(policy=policy, order=3, description='Tier 3')
-    BrowserTierEndpoint.objects.create(tier=t3, endpoint=be['fireworks_qwen3_235b'], weight=0.5)
-    BrowserTierEndpoint.objects.create(tier=t3, endpoint=be['openrouter_glm_45'], weight=0.5)
-
-    t4 = BrowserLLMTier.objects.create(policy=policy, order=4, description='Tier 4')
-    BrowserTierEndpoint.objects.create(tier=t4, endpoint=be['anthropic_sonnet4'], weight=1.0)
-
-    # Persistent token ranges and tiers
-    small = PersistentTokenRange.objects.create(name='small', min_tokens=0, max_tokens=7500)
-    medium = PersistentTokenRange.objects.create(name='medium', min_tokens=7500, max_tokens=20000)
-    large = PersistentTokenRange.objects.create(name='large', min_tokens=20000, max_tokens=None)
-
-    # small tiers
-    s1 = PersistentLLMTier.objects.create(token_range=small, order=1, description='Tier 1')
-    PersistentTierEndpoint.objects.create(tier=s1, endpoint=pe['openai_gpt5'], weight=0.9)
-    PersistentTierEndpoint.objects.create(tier=s1, endpoint=pe['google_gemini_25_pro'], weight=0.1)
-    s2 = PersistentLLMTier.objects.create(token_range=small, order=2, description='Tier 2')
-    PersistentTierEndpoint.objects.create(tier=s2, endpoint=pe['google_gemini_25_pro'], weight=1.0)
-    s3 = PersistentLLMTier.objects.create(token_range=small, order=3, description='Tier 3')
-    PersistentTierEndpoint.objects.create(tier=s3, endpoint=pe['anthropic_sonnet4'], weight=0.5)
-    PersistentTierEndpoint.objects.create(tier=s3, endpoint=pe['openrouter_glm_45'], weight=0.5)
-
-    # medium tiers
-    m1 = PersistentLLMTier.objects.create(token_range=medium, order=1, description='Tier 1')
-    PersistentTierEndpoint.objects.create(tier=m1, endpoint=pe['openrouter_glm_45'], weight=0.70)
-    PersistentTierEndpoint.objects.create(tier=m1, endpoint=pe['google_gemini_25_pro'], weight=0.10)
-    PersistentTierEndpoint.objects.create(tier=m1, endpoint=pe['openai_gpt5'], weight=0.10)
-    PersistentTierEndpoint.objects.create(tier=m1, endpoint=pe['fireworks_gpt_oss_120b'], weight=0.10)
-    m2 = PersistentLLMTier.objects.create(token_range=medium, order=2, description='Tier 2')
-    PersistentTierEndpoint.objects.create(tier=m2, endpoint=pe['openrouter_glm_45'], weight=0.34)
-    PersistentTierEndpoint.objects.create(tier=m2, endpoint=pe['openai_gpt5'], weight=0.33)
-    PersistentTierEndpoint.objects.create(tier=m2, endpoint=pe['anthropic_sonnet4'], weight=0.33)
-    m3 = PersistentLLMTier.objects.create(token_range=medium, order=3, description='Tier 3')
-    PersistentTierEndpoint.objects.create(tier=m3, endpoint=pe['openai_gpt5'], weight=1.0)
-
-    # large tiers
-    l1 = PersistentLLMTier.objects.create(token_range=large, order=1, description='Tier 1')
-    PersistentTierEndpoint.objects.create(tier=l1, endpoint=pe['openrouter_glm_45'], weight=0.70)
-    PersistentTierEndpoint.objects.create(tier=l1, endpoint=pe['google_gemini_25_pro'], weight=0.10)
-    PersistentTierEndpoint.objects.create(tier=l1, endpoint=pe['openai_gpt5'], weight=0.10)
-    PersistentTierEndpoint.objects.create(tier=l1, endpoint=pe['fireworks_gpt_oss_120b'], weight=0.10)
-    l2 = PersistentLLMTier.objects.create(token_range=large, order=2, description='Tier 2')
-    PersistentTierEndpoint.objects.create(tier=l2, endpoint=pe['openai_gpt5'], weight=1.0)
-    l3 = PersistentLLMTier.objects.create(token_range=large, order=3, description='Tier 3')
-    PersistentTierEndpoint.objects.create(tier=l3, endpoint=pe['anthropic_sonnet4'], weight=1.0)
-    l4 = PersistentLLMTier.objects.create(token_range=large, order=4, description='Tier 4')
-    PersistentTierEndpoint.objects.create(tier=l4, endpoint=pe['fireworks_qwen3_235b'], weight=1.0)
 
 
 class Migration(migrations.Migration):

@@ -108,6 +108,13 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
 class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
     """Realtime channel for persistent agent updates with a session-level connection."""
 
+    user = None
+    session = None
+    agent_id: str | None = None
+    group_name: str | None = None
+    user_group_name: str | None = None
+    profile_group_name: str | None = None
+
     async def connect(self):
         user = self.scope.get("user")
         session = self.scope.get("session")
