@@ -33,6 +33,10 @@ export function setTimelineQueryClient(client: QueryClient) {
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
 
 type ProcessingUpdateInput = boolean | Partial<ProcessingSnapshot> | null | undefined
+type InsightsFetchInFlight = {
+  agentId: string
+  promise: Promise<void>
+}
 
 function coerceProcessingSnapshot(snapshot: Partial<ProcessingSnapshot> | null | undefined): ProcessingSnapshot {
   if (!snapshot) {
@@ -299,6 +303,7 @@ export type AgentChatState = {
   insights: InsightEvent[]
   currentInsightIndex: number
   insightsFetchedAt: number | null
+  insightsFetchInFlight: InsightsFetchInFlight | null
   insightRotationTimer: ReturnType<typeof setTimeout> | null
   insightProcessingStartedAt: number | null
   dismissedInsightIds: Set<string>
@@ -359,6 +364,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   insights: [],
   currentInsightIndex: 0,
   insightsFetchedAt: null,
+  insightsFetchInFlight: null,
   insightRotationTimer: null,
   insightProcessingStartedAt: null,
   dismissedInsightIds: new Set(),
@@ -407,6 +413,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         insights: [],
         currentInsightIndex: 0,
         insightsFetchedAt: null,
+        insightsFetchInFlight: null,
         insightRotationTimer: null,
         insightProcessingStartedAt: null,
         dismissedInsightIds: new Set(),
@@ -786,16 +793,42 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       return
     }
 
+    const inFlight = get().insightsFetchInFlight
+    if (inFlight && inFlight.agentId === agentId) {
+      return inFlight.promise
+    }
+
+    const requestStartedAt = now
+    let requestPromise: Promise<void> | null = null
+    requestPromise = (async () => {
     try {
       const response = await fetchAgentInsights(agentId)
+        if (get().agentId !== agentId) {
+          return
+        }
       set({
         insights: response.insights,
-        insightsFetchedAt: now,
+          insightsFetchedAt: requestStartedAt,
         currentInsightIndex: 0,
       })
     } catch (error) {
       console.error('Failed to fetch insights:', error)
+      } finally {
+        const currentInFlight = get().insightsFetchInFlight
+        if (currentInFlight && currentInFlight.agentId === agentId && currentInFlight.promise === requestPromise) {
+          set({ insightsFetchInFlight: null })
     }
+      }
+    })()
+
+    set({
+      insightsFetchInFlight: {
+        agentId,
+        promise: requestPromise,
+      },
+    })
+
+    return requestPromise
   },
 
   startInsightRotation() {
