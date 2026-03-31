@@ -20,8 +20,8 @@ type McpServersScreenProps = {
   ownerScope?: string
   ownerLabel?: string
   allowCommands?: boolean
-  pipedreamAppsUrl: string
-  pipedreamAppSearchUrl: string
+  pipedreamAppsUrl?: string | null
+  pipedreamAppSearchUrl?: string | null
   oauthStartUrl: string
   oauthMetadataUrl: string
   oauthCallbackPath: string
@@ -36,8 +36,8 @@ export function McpServersScreen({
   ownerScope,
   ownerLabel,
   allowCommands = false,
-  pipedreamAppsUrl,
-  pipedreamAppSearchUrl,
+  pipedreamAppsUrl = null,
+  pipedreamAppSearchUrl = null,
   oauthStartUrl,
   oauthMetadataUrl,
   oauthCallbackPath,
@@ -192,12 +192,14 @@ export function McpServersScreen({
           {errorBanner}
         </div>
       )}
-      <PipedreamAppsPanel
-        settingsUrl={pipedreamAppsUrl}
-        searchUrl={pipedreamAppSearchUrl}
-        onSuccess={handleSuccess}
-        onError={handleError}
-      />
+      {pipedreamAppsUrl && pipedreamAppSearchUrl ? (
+        <PipedreamAppsPanel
+          settingsUrl={pipedreamAppsUrl}
+          searchUrl={pipedreamAppSearchUrl}
+          onSuccess={handleSuccess}
+          onError={handleError}
+        />
+      ) : null}
       <div className="gobii-card-base">
         <div className="px-6 py-4 border-b border-gray-200/70 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>

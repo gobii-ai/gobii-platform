@@ -4,7 +4,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
@@ -356,6 +356,35 @@ class MCPServerCrudAPITests(TestCase):
 
 
 @tag("batch_console_mcp_servers")
+class MCPServerManagementPageTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="mcp-page-user",
+            email="mcp-page@example.com",
+            password="test-pass-123",
+        )
+        self.client.force_login(self.user)
+
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="",
+        PIPEDREAM_CLIENT_SECRET="",
+        PIPEDREAM_PROJECT_ID="",
+    )
+    def test_management_page_hides_pipedream_data_attributes_when_unconfigured(self):
+        response = self.client.get(reverse("console-mcp-servers"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-app="mcp-servers"')
+        self.assertNotContains(response, 'data-pipedream-apps-url=')
+        self.assertNotContains(response, 'data-pipedream-app-search-url=')
+
+
+@tag("batch_console_mcp_servers")
+@override_settings(
+    PIPEDREAM_CLIENT_ID="test-client-id",
+    PIPEDREAM_CLIENT_SECRET="test-client-secret",
+    PIPEDREAM_PROJECT_ID="test-project-id",
+)
 class PipedreamAppsAPITests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(
@@ -539,6 +568,19 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(payload["owner_scope"], "organization")
         self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["notion"])
 
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="",
+        PIPEDREAM_CLIENT_SECRET="",
+        PIPEDREAM_PROJECT_ID="",
+    )
+    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    def test_get_returns_disabled_error_when_pipedream_is_unconfigured(self, mock_get_apps):
+        response = self.client.get(self.settings_url)
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Pipedream integration is not configured", response.json()["error"])
+        mock_get_apps.assert_not_called()
+
     @patch("console.api_views.PipedreamCatalogService.get_apps")
     @patch("console.api_views.get_mcp_manager")
     def test_patch_updates_org_scope_apps(self, mock_get_mcp_manager, mock_get_apps):
@@ -584,6 +626,23 @@ class PipedreamAppsAPITests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="",
+        PIPEDREAM_CLIENT_SECRET="",
+        PIPEDREAM_PROJECT_ID="",
+    )
+    @patch("console.api_views.get_mcp_manager")
+    def test_patch_returns_disabled_error_when_pipedream_is_unconfigured(self, mock_get_mcp_manager):
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({"selected_app_slugs": ["trello"]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Pipedream integration is not configured", response.json()["error"])
+        mock_get_mcp_manager.assert_not_called()
+
     @patch("console.api_views.PipedreamCatalogService.search_apps")
     def test_search_returns_results(self, mock_search_apps):
         mock_search_apps.return_value = [
@@ -602,6 +661,19 @@ class PipedreamAppsAPITests(TestCase):
         response = self.client.get(self.search_url, {"q": "trello"})
 
         self.assertEqual(response.status_code, 502)
+
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="",
+        PIPEDREAM_CLIENT_SECRET="",
+        PIPEDREAM_PROJECT_ID="",
+    )
+    @patch("console.api_views.PipedreamCatalogService.search_apps")
+    def test_search_returns_disabled_error_when_pipedream_is_unconfigured(self, mock_search_apps):
+        response = self.client.get(self.search_url, {"q": "trello"})
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Pipedream integration is not configured", response.json()["error"])
+        mock_search_apps.assert_not_called()
 
 
 @tag("batch_console_mcp_servers")

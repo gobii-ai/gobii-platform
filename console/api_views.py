@@ -212,7 +212,7 @@ from api.services.system_settings import (
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from tasks.services import TaskCreditService
-from util.integrations import stripe_status
+from util.integrations import pipedream_status, stripe_status
 from util.subscription_helper import (
     get_active_subscription,
     get_stripe_customer,
@@ -5848,6 +5848,9 @@ class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "patch"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        status = pipedream_status()
+        if not status.enabled:
+            return JsonResponse({"error": status.reason}, status=503)
         owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
         state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
         try:
@@ -5857,6 +5860,9 @@ class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse(payload)
 
     def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        status = pipedream_status()
+        if not status.enabled:
+            return JsonResponse({"error": status.reason}, status=503)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -5894,6 +5900,9 @@ class PipedreamAppSearchAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        status = pipedream_status()
+        if not status.enabled:
+            return JsonResponse({"error": status.reason}, status=503)
         _resolve_mcp_owner(request)
         query = str(request.GET.get("q") or "").strip()
         if not query:

@@ -138,7 +138,11 @@ from tasks.services import TaskCreditService
 from billing.addons import AddonEntitlementService
 from util import sms
 from util.payments_helper import PaymentsHelper
-from util.integrations import stripe_status, IntegrationDisabledError
+from util.integrations import (
+    IntegrationDisabledError,
+    pipedream_status,
+    stripe_status,
+)
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     clear_trial_onboarding_intent,
@@ -5865,6 +5869,7 @@ class MCPServerManagementView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateVie
                 'owner_scope': self.owner_scope,
                 'owner_label': self.get_owner_label(),
                 'allow_mcp_commands': flag_is_active(self.request, SANDBOX_COMPUTE_WAFFLE_FLAG),
+                'pipedream_integrations_enabled': pipedream_status().enabled,
             }
         )
         return context
@@ -5982,6 +5987,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["agent_email"] = agent_email_ep.address if agent_email_ep else ""
         context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
         context["max_chat_upload_size_bytes"] = get_max_file_size()
+        context["pipedream_integrations_enabled"] = pipedream_status().enabled
         return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only

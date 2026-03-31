@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from pages.homepage_cache import (
@@ -144,6 +144,17 @@ class HomepageIntegrationsCacheTests(TestCase):
 
     @patch("pages.homepage_cache._platform_pipedream_server_is_active", return_value=False)
     def test_build_payload_returns_disabled_when_platform_server_is_inactive(self, _mock_is_active):
+        result = _build_homepage_integrations_payload()
+
+        self.assertEqual(result, {"enabled": False, "builtins": []})
+
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="",
+        PIPEDREAM_CLIENT_SECRET="",
+        PIPEDREAM_PROJECT_ID="",
+    )
+    @patch("pages.homepage_cache._platform_pipedream_server_is_active", return_value=True)
+    def test_build_payload_returns_disabled_when_pipedream_is_not_configured(self, _mock_is_active):
         result = _build_homepage_integrations_payload()
 
         self.assertEqual(result, {"enabled": False, "builtins": []})
