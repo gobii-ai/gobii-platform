@@ -18,7 +18,7 @@ dependencies = [
   "django-environ~=0.12.0",
   "django-htmx~=1.27.0",
   "django-storages~=1.14.6",
-  "django==6.0",
+  "django==6.0.3",
   "djangorestframework~=3.16.1",
   "celery-redbeat~=2.3.2",
   "django-anymail[postmark]>=14.0",
