@@ -231,9 +231,9 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       BRIGHT_DATA_TOKEN: ${BRIGHT_DATA_TOKEN:-}
       BRIGHT_DATA_WEB_UNLOCKER_ZONE: ${BRIGHT_DATA_WEB_UNLOCKER_ZONE:-}
-      CELERY_BROKER_URL: redis://redis:${REDIS_PORT:-6379}/0
-      CELERY_RESULT_BACKEND: redis://redis:${REDIS_PORT:-6379}/0
-      REDIS_URL: redis://redis:${REDIS_PORT:-6379}/0
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
       IMAP_IDLE_ENABLED: "true"
       XDG_DATA_HOME: /tmp/.chrome
       XDG_CONFIG_HOME: /tmp/.chrome

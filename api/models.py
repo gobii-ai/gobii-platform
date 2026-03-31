@@ -813,7 +813,16 @@ class UserPreference(models.Model):
                 cls.PREFERENCE_DEFINITIONS[key],
             )
 
-        preference, _ = cls.objects.get_or_create(user=user)
+        try:
+            preference, _ = cls.objects.get_or_create(user=user)
+        except IntegrityError:
+            # Concurrent first-write requests can both race to create the one-to-one
+            # row. If another request won, load that row and continue applying the
+            # validated updates instead of surfacing a duplicate-key failure.
+            try:
+                preference = cls.objects.get(user=user)
+            except cls.DoesNotExist:
+                preference, _ = cls.objects.get_or_create(user=user)
         stored = preference.preferences if isinstance(preference.preferences, dict) else {}
         known_stored: dict[str, object] = {}
         for key, definition in cls.PREFERENCE_DEFINITIONS.items():

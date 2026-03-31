@@ -1,5 +1,6 @@
 from typing import Callable
 
+from django.db.utils import InterfaceError, OperationalError
 from django.http import HttpRequest, HttpResponse
 
 # OpenTelemetry imports
@@ -26,8 +27,19 @@ class UserIdBaggageMiddleware:  # pragma: no cover
     def __call__(self, request: HttpRequest) -> HttpResponse:
         user = getattr(request, "user", None)
 
-        if user is None or not user.is_authenticated:
-            # If the request has no user, we can't set any baggage
+        if user is None:
+            return self.get_response(request)
+
+        try:
+            is_authenticated = bool(user.is_authenticated)
+        except (OperationalError, InterfaceError):
+            # Auth/session resolution can touch the database. If a transient DB
+            # connection failure happens here, skip best-effort baggage injection
+            # instead of failing the whole request before the view runs.
+            return self.get_response(request)
+
+        if not is_authenticated:
+            # If the request has no authenticated user, we can't set any baggage
             return self.get_response(request)
 
         # Per the user’s requirement, we always pass ``user.id`` – it will be
