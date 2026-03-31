@@ -313,6 +313,28 @@ class ConsoleUserPreferencesApiTests(TestCase):
             "America/Los_Angeles",
         )
 
+    def test_update_known_preferences_retries_create_if_row_disappears_after_integrity_error(self):
+        replacement = UserPreference.objects.create(user=self.user, preferences={})
+
+        with patch.object(
+            UserPreference.objects,
+            "get_or_create",
+            side_effect=[IntegrityError("duplicate key"), (replacement, False)],
+        ), patch.object(UserPreference.objects, "get", side_effect=UserPreference.DoesNotExist):
+            resolved = UserPreference.update_known_preferences(
+                self.user,
+                {UserPreference.KEY_USER_TIMEZONE: "America/Los_Angeles"},
+            )
+
+        self.assertEqual(
+            resolved.get(UserPreference.KEY_USER_TIMEZONE),
+            "America/Los_Angeles",
+        )
+        self.assertEqual(
+            replacement.preferences.get(UserPreference.KEY_USER_TIMEZONE),
+            "America/Los_Angeles",
+        )
+
     def test_console_session_returns_user_identity_without_chat_mode_fields(self):
         response = self.client.get(reverse("console_session"))
         self.assertEqual(response.status_code, 200)

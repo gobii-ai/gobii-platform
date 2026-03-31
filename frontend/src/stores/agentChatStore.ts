@@ -800,26 +800,27 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     const requestStartedAt = now
     let requestPromise: Promise<void> | null = null
-    requestPromise = (async () => {
-    try {
-      const response = await fetchAgentInsights(agentId)
-      if (get().agentId !== agentId) {
-        return
-      }
-      set({
-        insights: response.insights,
-        insightsFetchedAt: requestStartedAt,
-        currentInsightIndex: 0,
-      })
-    } catch (error) {
-      console.error('Failed to fetch insights:', error)
-    } finally {
-      const currentInFlight = get().insightsFetchInFlight
-      if (currentInFlight && currentInFlight.agentId === agentId && currentInFlight.promise === requestPromise) {
-        set({ insightsFetchInFlight: null })
+    const runFetchInsights = async () => {
+      try {
+        const response = await fetchAgentInsights(agentId)
+        if (get().agentId !== agentId) {
+          return
+        }
+        set({
+          insights: response.insights,
+          insightsFetchedAt: requestStartedAt,
+          currentInsightIndex: 0,
+        })
+      } catch (error) {
+        console.error('Failed to fetch insights:', error)
+      } finally {
+        const currentInFlight = get().insightsFetchInFlight
+        if (currentInFlight && currentInFlight.agentId === agentId && currentInFlight.promise === requestPromise) {
+          set({ insightsFetchInFlight: null })
+        }
       }
     }
-    })()
+    requestPromise = runFetchInsights()
 
     set({
       insightsFetchInFlight: {

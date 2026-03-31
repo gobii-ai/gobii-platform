@@ -819,7 +819,10 @@ class UserPreference(models.Model):
             # Concurrent first-write requests can both race to create the one-to-one
             # row. If another request won, load that row and continue applying the
             # validated updates instead of surfacing a duplicate-key failure.
-            preference = cls.objects.get(user=user)
+            try:
+                preference = cls.objects.get(user=user)
+            except cls.DoesNotExist:
+                preference, _ = cls.objects.get_or_create(user=user)
         stored = preference.preferences if isinstance(preference.preferences, dict) else {}
         known_stored: dict[str, object] = {}
         for key, definition in cls.PREFERENCE_DEFINITIONS.items():
