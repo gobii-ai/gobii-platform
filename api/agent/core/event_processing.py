@@ -2420,6 +2420,7 @@ def _stream_completion_with_broadcast(
     tools: Optional[List[dict]],
     provider: Optional[str],
     stream_broadcaster: Optional[WebStreamBroadcaster],
+    stream_content: bool = True,
 ) -> Any:
     if stream_broadcaster:
         stream_broadcaster.start()
@@ -2440,11 +2441,13 @@ def _stream_completion_with_broadcast(
         for chunk in stream:
             reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
             if stream_broadcaster:
-                filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
+                filtered_delta = None
+                if stream_content:
+                    filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
                 stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
     finally:
         if stream_broadcaster:
-            trailing = content_filter.flush() if content_filter else None
+            trailing = content_filter.flush() if content_filter and stream_content else None
             if trailing:
                 stream_broadcaster.push_delta(None, trailing)
             stream_broadcaster.finish()
@@ -2507,6 +2510,7 @@ def _completion_with_failover(
     safety_identifier: str = None,
     preferred_config: Optional[Tuple[str, str]] = None,
     stream_broadcaster: Optional[WebStreamBroadcaster] = None,
+    allow_streamed_content: bool = True,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -2519,6 +2523,7 @@ def _completion_with_failover(
         safety_identifier: Optional user ID for safety filtering
         preferred_config: Optional tuple of (provider, model) to try first
         stream_broadcaster: Optional broadcaster for streaming deltas to web UI
+        allow_streamed_content: Whether assistant message text is allowed to stream to the UI
         
     Returns:
         Tuple of (LiteLLM completion response or streaming aggregate, token usage dict)
@@ -2608,6 +2613,9 @@ def _completion_with_failover(
                     params["safety_identifier"] = str(safety_identifier)
 
                 if active_stream_broadcaster:
+                    stream_content = allow_streamed_content and bool(
+                        params_base.get("allow_implied_send", True)
+                    )
                     try:
                         response = _stream_completion_with_broadcast(
                             model=model,
@@ -2616,6 +2624,7 @@ def _completion_with_failover(
                             tools=request_tools_payload,
                             provider=provider,
                             stream_broadcaster=active_stream_broadcaster,
+                            stream_content=stream_content,
                         )
                     except Exception:
                         logger.warning(
@@ -4324,6 +4333,7 @@ def _run_agent_loop(
                         safety_identifier=agent.user.id if agent.user else None,
                         preferred_config=preferred_config,
                         stream_broadcaster=stream_broadcaster,
+                        allow_streamed_content=prompt_allows_implied_send,
                     )
                     if heartbeat:
                         heartbeat.touch("llm_response")

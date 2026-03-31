@@ -115,6 +115,73 @@ class TestEventProcessingLLMSelection(TestCase):
         self.assertFalse(response.model_extra["gobii_runtime_hints"]["allow_implied_send"])
 
     @patch('api.agent.core.event_processing.run_completion')
+    def test_completion_with_failover_suppresses_streamed_content_when_selected_model_disables_implied_send(self, mock_run_completion):
+        stream_chunks = iter([
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "reasoning_content": "Thinking",
+                            "content": "Hidden reply",
+                        }
+                    }
+                ]
+            },
+            {"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ])
+        mock_run_completion.return_value = stream_chunks
+        broadcaster = Mock()
+
+        response, _ = _completion_with_failover(
+            [{"role": "user", "content": "hello"}],
+            [],
+            failover_configs=[("openai", "openai/gpt-4.1", {"allow_implied_send": False})],
+            agent_id="agent-1",
+            stream_broadcaster=broadcaster,
+        )
+
+        self.assertEqual(response.choices[0].message.content, "Hidden reply")
+        self.assertEqual(response.choices[0].message.reasoning_content, "Thinking")
+        broadcaster.start.assert_called_once()
+        broadcaster.finish.assert_called_once()
+        broadcaster.push_delta.assert_any_call("Thinking", None)
+        for call in broadcaster.push_delta.call_args_list:
+            self.assertNotIn("Hidden reply", call.args)
+
+    @patch('api.agent.core.event_processing.run_completion')
+    def test_completion_with_failover_suppresses_streamed_content_when_prompt_disables_implied_send(self, mock_run_completion):
+        stream_chunks = iter([
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "reasoning_content": "Thinking",
+                            "content": "Hidden reply",
+                        }
+                    }
+                ]
+            },
+            {"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        ])
+        mock_run_completion.return_value = stream_chunks
+        broadcaster = Mock()
+
+        response, _ = _completion_with_failover(
+            [{"role": "user", "content": "hello"}],
+            [],
+            failover_configs=[("openai", "openai/gpt-4.1", {"allow_implied_send": True})],
+            agent_id="agent-1",
+            stream_broadcaster=broadcaster,
+            allow_streamed_content=False,
+        )
+
+        self.assertEqual(response.choices[0].message.content, "Hidden reply")
+        self.assertEqual(response.choices[0].message.reasoning_content, "Thinking")
+        broadcaster.push_delta.assert_any_call("Thinking", None)
+        for call in broadcaster.push_delta.call_args_list:
+            self.assertNotIn("Hidden reply", call.args)
+
+    @patch('api.agent.core.event_processing.run_completion')
     def test_completion_with_failover_prefers_explicit_provider(self, mock_run_completion):
         """Preferred provider should be attempted before standard ordering."""
         failover_configs = [
