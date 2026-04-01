@@ -35,6 +35,7 @@ from pages.signals import (
     handle_user_signed_up,
     handle_invoice_payment_failed,
     handle_setup_intent_setup_failed,
+    handle_setup_intent_succeeded,
     handle_invoice_payment_succeeded,
 )
 from util.analytics import AnalyticsEvent
@@ -1128,6 +1129,58 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(grant_kwargs["invoice_id"], payload["latest_invoice"])
         self.assertEqual(grant_kwargs["credit_override"], Decimal("8800"))
         self.assertEqual(grant_kwargs["expiration_date"], current_period_end)
+        self.mock_capi.assert_not_called()
+
+    @tag("batch_pages")
+    def test_subscription_update_plan_change_survives_identify_failure(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(billing_reason=None, invoice_id="in_upgrade_500")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        self.billing.subscription = PlanNamesChoices.STARTUP.value
+        self.billing.save(update_fields=["subscription"])
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=15, subscriber=fresh_user)
+        sub.status = "trialing"
+        sub.stripe_data["latest_invoice"] = payload["latest_invoice"]
+        sub.stripe_data["default_payment_method"] = "pm_new"
+        sub.stripe_data["items"]["data"][0]["price"]["product"] = "prod_scale"
+        sub.stripe_data["items"]["data"][0]["price"]["id"] = "price_scale"
+        sub.stripe_data["items"]["data"][0]["price"]["unit_amount"] = 25000
+        sub.stripe_data["items"]["data"][0]["price"]["unit_amount_decimal"] = "25000"
+        sub.stripe_data.pop("billing_reason", None)
+        sub.billing_reason = None
+
+        invoice_payload = {
+            "id": payload["latest_invoice"],
+            "object": "invoice",
+            "billing_reason": "subscription_update",
+        }
+        invoice_obj = SimpleNamespace(billing_reason="subscription_update", stripe_data=invoice_payload)
+        as_of = timezone.make_aware(datetime(2025, 9, 25, 8, 0, 0), timezone=dt_timezone.utc)
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch(
+                "pages.signals.get_plan_by_product_id",
+                return_value={"id": PlanNamesChoices.SCALE.value, "monthly_task_credits": 10000},
+            ), \
+            patch("pages.signals.timezone.now", return_value=as_of), \
+            patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.Analytics.identify", side_effect=RuntimeError("analytics down")), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.logger.exception") as mock_logger_exception:
+
+            handle_subscription_event(event)
+
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.billing.subscription, PlanNamesChoices.SCALE.value)
+        mock_grant.assert_called_once()
+        mock_track_event.assert_not_called()
+        self.assertTrue(any("Failed to update subscription analytics" in str(call.args[0]) for call in mock_logger_exception.call_args_list))
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
@@ -2969,6 +3022,79 @@ class PaymentSetupIntentFailedSignalTests(TestCase):
         mock_identify.assert_not_called()
         mock_track_event.assert_not_called()
         mock_track_anonymous.assert_not_called()
+
+
+@tag("batch_pages")
+class PaymentSetupIntentSucceededSignalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="setup-success-user",
+            email="setup-success@example.com",
+            password="pw",
+        )
+
+    def test_setup_intent_succeeded_updates_active_subscription_default_payment_method(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_success",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_new",
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_success",
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
+        )
+        updated_subscription = {"id": "sub_user_success", "default_payment_method": "pm_setup_new"}
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_setup_user"),
+            ), \
+            patch("pages.signals.get_active_subscription", return_value=subscription), \
+            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
+            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
+
+            handle_setup_intent_succeeded(event)
+
+        mock_modify.assert_called_once_with(
+            "sub_user_success",
+            default_payment_method="pm_setup_new",
+            idempotency_key="setup-intent-default-payment-method-seti_user_success-sub_user_success",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
+
+    def test_setup_intent_succeeded_skips_when_subscription_already_uses_payment_method(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_current",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_current",
+            stripe_data={"default_payment_method": "pm_setup_current"},
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_setup_user"),
+            ), \
+            patch("pages.signals.get_active_subscription", return_value=subscription), \
+            patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
+            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
+
+            handle_setup_intent_succeeded(event)
+
+        mock_modify.assert_not_called()
+        mock_sync.assert_not_called()
 
 
 @tag("batch_pages")
