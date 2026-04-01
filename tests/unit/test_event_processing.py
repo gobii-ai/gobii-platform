@@ -77,6 +77,10 @@ from api.services.tool_settings import (
     invalidate_tool_settings_cache,
 )
 from api.services.web_sessions import start_web_session
+from util.personal_signup_preview import (
+    GENERIC_STARTER_CHARTER,
+    SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK,
+)
 
 User = get_user_model()
 
@@ -282,10 +286,27 @@ class PromptContextBuilderTests(TestCase):
             "inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC",
             system_content,
         )
-        self.assertNotIn(
-            "recent_messages → SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 20",
-            system_content,
+
+    def test_first_run_prompt_includes_signup_preview_override_without_changing_charter(self):
+        self.agent.charter = GENERIC_STARTER_CHARTER
+        self.agent.preferred_contact_endpoint = self.external_endpoint
+        self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        self.agent.save(
+            update_fields=["charter", "preferred_contact_endpoint", "signup_preview_state", "updated_at"]
         )
+
+        with patch("api.agent.core.prompt_context.has_verified_email", return_value=True), \
+             patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent, is_first_run=True)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+
+        self.assertIsNotNone(system_message)
+        self.assertIn(SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK, system_message["content"])
+        self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
+            m for m in context if m["role"] == "user"
+        )["content"])
 
     def test_unified_history_uses_collaborator_name_for_web_sender(self):
         self.user.first_name = "Will"

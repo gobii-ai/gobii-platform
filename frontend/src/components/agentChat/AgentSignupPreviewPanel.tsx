@@ -14,10 +14,10 @@ export function AgentSignupPreviewPanel({
   onUpgrade,
 }: AgentSignupPreviewPanelProps) {
   const isPaused = status === 'awaiting_signup_completion'
-  const title = isPaused ? 'Keep your preview going' : 'Your preview agent is working'
+  const title = isPaused ? 'Keep your agent going' : 'Your agent is working'
   const body = isPaused
-    ? 'Your agent sent its first reply. Start a plan to unlock the rest of the conversation and continue processing.'
-    : 'Your agent can send its first reply during signup preview. After that, processing pauses until you start a plan.'
+    ? 'Start a plan to continue working.'
+    : 'Start a plan to talk to your agent.'
 
   return (
     <section className="px-4 pb-4 pt-3 sm:px-6 lg:px-10">

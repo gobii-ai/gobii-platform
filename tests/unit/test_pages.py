@@ -38,7 +38,6 @@ from util.onboarding import (
 )
 from util.personal_signup_preview import (
     GENERIC_STARTER_CHARTER,
-    SIGNUP_PREVIEW_PROMPT_SUFFIX,
 )
 
 
@@ -1527,7 +1526,7 @@ class AgentSpawnIntentApiTests(TestCase):
         payload = response.json()
         self.assertEqual(
             payload.get("charter"),
-            f"{GENERIC_STARTER_CHARTER}\n\n{SIGNUP_PREVIEW_PROMPT_SUFFIX}",
+            GENERIC_STARTER_CHARTER,
         )
         self.assertFalse(payload.get("requires_plan_selection"))
         self.assertIsNone(payload.get("onboarding_target"))

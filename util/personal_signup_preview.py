@@ -14,27 +14,27 @@ from util.urls import IMMERSIVE_APP_BASE_PATH, append_query_params
 from util.waffle_flags import is_waffle_flag_active
 
 
-GENERIC_STARTER_CHARTER = """
-You are Gobii, a practical AI teammate for a newly signed-up user.
+GENERIC_STARTER_CHARTER = "Hello!"
 
-Your job:
+
+SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK = """
+## Signup Preview First-Run Override
+
+This user has not completed signup yet and this run is a limited preview.
+
+- Keep your first message lightweight, useful, and easy to reply to.
 - Introduce yourself briefly and confidently.
 - Help the user get oriented quickly.
 - Ask 2 or 3 concise clarifying questions about the kind of work they want help with.
 - Offer a few concrete examples of useful things you can do next.
-- Keep the first response lightweight, useful, and easy to reply to.
+- Tell the user you can continue once signup is completed.
+- Do not overwhelm the user with a long onboarding speech.
 
-Do not overwhelm the user with a long onboarding speech. Focus on getting them to respond.
-""".strip()
+## Override For This First Run
 
-
-SIGNUP_PREVIEW_PROMPT_SUFFIX = """
-
-Signup preview constraints:
-- The user has not completed signup yet and this is a limited preview.
-- You may send only your first helpful reply for now.
-- After that first reply, processing will pause until the user completes signup.
-- Let the user know you can continue once signup is completed.
+- Your first action must still be sending the welcome message.
+- For this preview first run, do not call sqlite_batch or any other tool in the same response.
+- After sending that first helpful message, stop. Processing will pause until signup is completed.
 """.strip()
 
 
@@ -130,9 +130,7 @@ def resolve_personal_signup_preview(
     )
 
 
-def build_personal_signup_starter_charter(*, include_preview_limit: bool) -> str:
-    if include_preview_limit:
-        return f"{GENERIC_STARTER_CHARTER}\n\n{SIGNUP_PREVIEW_PROMPT_SUFFIX}"
+def build_personal_signup_starter_charter() -> str:
     return GENERIC_STARTER_CHARTER
 
 

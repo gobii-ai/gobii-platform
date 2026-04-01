@@ -369,9 +369,7 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             saved_charter=saved_charter,
             pending_onboarding=pending_onboarding,
         ):
-            saved_charter = build_personal_signup_starter_charter(
-                include_preview_limit=preview_config.processing_limit_enabled,
-            )
+            saved_charter = build_personal_signup_starter_charter()
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:
