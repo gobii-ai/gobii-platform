@@ -7,16 +7,31 @@ type InsightEventCardProps = {
   insight: InsightEvent
   onDismiss?: (insightId: string) => void
   onCollaborate?: () => void
+  collaborateDisabled?: boolean
+  collaborateDisabledReason?: string | null
 }
 
-export function InsightEventCard({ insight, onDismiss, onCollaborate }: InsightEventCardProps) {
+export function InsightEventCard({
+  insight,
+  onDismiss,
+  onCollaborate,
+  collaborateDisabled = false,
+  collaborateDisabledReason = null,
+}: InsightEventCardProps) {
   switch (insight.insightType) {
     case 'time_saved':
       return <TimeSavedInsight insight={insight} onDismiss={onDismiss} />
     case 'burn_rate':
       return <BurnRateInsight insight={insight} onDismiss={onDismiss} />
     case 'agent_setup':
-      return <AgentSetupInsight insight={insight} onCollaborate={onCollaborate} />
+      return (
+        <AgentSetupInsight
+          insight={insight}
+          onCollaborate={onCollaborate}
+          collaborateDisabled={collaborateDisabled}
+          collaborateDisabledReason={collaborateDisabledReason}
+        />
+      )
     default:
       // Fallback for unknown types - shouldn't happen but TypeScript safety
       return null

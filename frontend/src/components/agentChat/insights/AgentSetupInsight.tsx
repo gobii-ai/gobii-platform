@@ -70,6 +70,8 @@ declare global {
 type AgentSetupInsightProps = {
   insight: InsightEvent
   onCollaborate?: () => void
+  collaborateDisabled?: boolean
+  collaborateDisabledReason?: string | null
 }
 
 function describeError(error: unknown): string {
@@ -131,7 +133,12 @@ function formatPhoneE164(raw: string, region: string): string {
   }
 }
 
-export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightProps) {
+export function AgentSetupInsight({
+  insight,
+  onCollaborate,
+  collaborateDisabled = false,
+  collaborateDisabledReason = null,
+}: AgentSetupInsightProps) {
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
   const region = useMemo(() => getDefaultRegion(), [])
@@ -876,6 +883,8 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
                 type="button"
                 className="collab-row__btn collab-row__btn--green"
                 onClick={onCollaborate}
+                disabled={collaborateDisabled}
+                title={collaborateDisabledReason || 'Invite collaborators to this agent'}
               >
                 <UserPlus size={14} />
                 <span>Add people</span>

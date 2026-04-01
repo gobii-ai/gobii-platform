@@ -29,8 +29,12 @@ type AgentChatBannerProps = {
   processingActive?: boolean
   dailyCreditsStatus?: DailyCreditsStatus | null
   onSettingsOpen?: () => void
+  settingsDisabled?: boolean
+  settingsDisabledReason?: string | null
   onClose?: () => void
   onShare?: () => void
+  shareDisabled?: boolean
+  shareDisabledReason?: string | null
   sidebarCollapsed?: boolean
   children?: ReactNode
 }
@@ -64,8 +68,12 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   processingActive = false,
   dailyCreditsStatus,
   onSettingsOpen,
+  settingsDisabled = false,
+  settingsDisabledReason = null,
   onClose,
   onShare,
+  shareDisabled = false,
+  shareDisabledReason = null,
   sidebarCollapsed = true,
   children,
 }: AgentChatBannerProps) {
@@ -167,6 +175,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     : 'Open agent settings'
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false)
   const showMobileOverflow = showShareButton || showAuditButton || showSettingsButton
+  const shareLabel = shareDisabledReason || 'Invite collaborators'
+  const resolvedSettingsLabel = settingsDisabledReason || settingsLabel
 
   const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
 
@@ -269,7 +279,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               type="button"
               className="banner-share banner-desktop-only"
               onClick={onShare}
-              aria-label="Invite collaborators"
+              aria-label={shareLabel}
+              title={shareLabel}
+              disabled={shareDisabled}
             >
               <UserPlus size={14} strokeWidth={2} />
               <span className="banner-share-label">Collaborate</span>
@@ -309,6 +321,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                               onShare?.()
                               setOverflowMenuOpen(false)
                             }}
+                            disabled={shareDisabled}
+                            title={shareLabel}
                           >
                             <span className="banner-overflow-item-icon" aria-hidden="true">
                               <UserPlus size={14} />
@@ -342,6 +356,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                               onSettingsOpen?.()
                               setOverflowMenuOpen(false)
                             }}
+                            disabled={settingsDisabled}
+                            title={resolvedSettingsLabel}
                           >
                             <span className="banner-overflow-item-icon" aria-hidden="true">
                               <Settings size={14} />
@@ -363,7 +379,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               type="button"
               className={`banner-settings banner-desktop-only ${hardLimitReached ? 'banner-settings--alert' : ''}`}
               onClick={onSettingsOpen}
-              aria-label={settingsLabel}
+              aria-label={resolvedSettingsLabel}
+              title={resolvedSettingsLabel}
+              disabled={settingsDisabled}
             >
               <Settings size={16} />
               {showAttentionDot ? (

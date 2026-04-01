@@ -795,6 +795,10 @@ export function AgentChatLayout({
     window.localStorage.setItem(highPriorityDismissKey, 'true')
     setHighPriorityDismissed(true)
   }, [highPriorityBannerDismissible, highPriorityDismissKey])
+  const previewActionsDisabled = signupPreviewState !== 'none'
+  const previewActionsDisabledReason = previewActionsDisabled
+    ? 'Finish signup to manage settings and collaborate.'
+    : null
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
@@ -835,8 +839,12 @@ export function AgentChatLayout({
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
+          settingsDisabled={previewActionsDisabled}
+          settingsDisabledReason={previewActionsDisabledReason}
           onClose={onClose}
           onShare={onShare}
+          shareDisabled={previewActionsDisabled}
+          shareDisabledReason={previewActionsDisabledReason}
 	          sidebarCollapsed={sidebarCollapsed}
 	        >
             {showHighPriorityBanner && highPriorityBanner ? (
@@ -1091,6 +1099,8 @@ export function AgentChatLayout({
               onPauseChange={onPauseChange}
               isInsightsPaused={isInsightsPaused}
               onCollaborate={onShare}
+              collaborateDisabled={previewActionsDisabled}
+              collaborateDisabledReason={previewActionsDisabledReason}
               hideInsightsPanel={hideInsightsPanel}
               intelligenceConfig={llmIntelligence}
               intelligenceTier={currentLlmTier}
