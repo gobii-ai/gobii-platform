@@ -976,7 +976,9 @@ export function AgentChatLayout({
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}
-                {pendingHumanInputRequests.length === 0 && (starterPromptsLoading || starterPrompts.length > 0) ? (
+                {pendingHumanInputRequests.length === 0
+                && signupPreviewState === 'none'
+                && (starterPromptsLoading || starterPrompts.length > 0) ? (
                   <StarterPromptSuggestions
                     prompts={starterPrompts}
                     loading={starterPromptsLoading}
