@@ -244,7 +244,11 @@ class AgentChatAPITests(TestCase):
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
     )
     @tag("batch_agent_chat")
-    def test_quick_create_allows_signup_preview_creation_when_processing_limit_flag_enabled(self):
+    @patch("console.agent_creation.Analytics.track_event")
+    def test_quick_create_allows_signup_preview_creation_when_processing_limit_flag_enabled(
+        self,
+        mock_track_event,
+    ):
         fresh_user = get_user_model().objects.create_user(
             username="preview-user",
             email="preview@example.com",
@@ -256,12 +260,14 @@ class AgentChatAPITests(TestCase):
             override_flag("personal_agent_signup_preview_processing_limit", active=True),
             patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
             patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+            patch("console.agent_creation.process_agent_events_task.delay"),
         ):
-            response = preview_client.post(
-                "/console/api/agents/create/",
-                data=json.dumps({"message": "Create from immersive app"}),
-                content_type="application/json",
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                response = preview_client.post(
+                    "/console/api/agents/create/",
+                    data=json.dumps({"message": "Create from immersive app"}),
+                    content_type="application/json",
+                )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -270,6 +276,8 @@ class AgentChatAPITests(TestCase):
             created_agent.signup_preview_state,
             PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
         )
+        event_names = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
+        self.assertIn(AnalyticsEvent.SIGNUP_PREVIEW_AGENT_CREATED, event_names)
 
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
@@ -313,7 +321,8 @@ class AgentChatAPITests(TestCase):
         )
 
     @tag("batch_agent_chat")
-    def test_first_outbound_message_transitions_signup_preview_to_completion_wait(self):
+    @patch("api.services.signup_preview.Analytics.track_event")
+    def test_first_outbound_message_transitions_signup_preview_to_completion_wait(self, mock_track_event):
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
         self.agent.save(update_fields=["signup_preview_state", "updated_at"])
 
@@ -329,6 +338,15 @@ class AgentChatAPITests(TestCase):
         self.agent.refresh_from_db()
         self.assertEqual(
             self.agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["event"],
+            AnalyticsEvent.SIGNUP_PREVIEW_PAUSED_AFTER_FIRST_REPLY,
+        )
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"]["signup_preview_state"],
             PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
         )
 

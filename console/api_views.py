@@ -2738,7 +2738,11 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         request: HttpRequest,
         agent: PersistentAgent,
     ) -> PersistentAgent:
-        resume_signup_preview_agent_if_eligible(agent, request.user)
+        resume_signup_preview_agent_if_eligible(
+            agent,
+            request.user,
+            resume_source="timeline",
+        )
         return agent
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):

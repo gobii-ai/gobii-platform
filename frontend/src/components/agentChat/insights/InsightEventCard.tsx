@@ -9,6 +9,7 @@ type InsightEventCardProps = {
   onCollaborate?: () => void
   collaborateDisabled?: boolean
   collaborateDisabledReason?: string | null
+  onBlockedCollaborate?: (location: 'insight_card') => void
 }
 
 export function InsightEventCard({
@@ -17,6 +18,7 @@ export function InsightEventCard({
   onCollaborate,
   collaborateDisabled = false,
   collaborateDisabledReason = null,
+  onBlockedCollaborate,
 }: InsightEventCardProps) {
   switch (insight.insightType) {
     case 'time_saved':
@@ -30,6 +32,7 @@ export function InsightEventCard({
           onCollaborate={onCollaborate}
           collaborateDisabled={collaborateDisabled}
           collaborateDisabledReason={collaborateDisabledReason}
+          onBlockedCollaborate={onBlockedCollaborate}
         />
       )
     default:

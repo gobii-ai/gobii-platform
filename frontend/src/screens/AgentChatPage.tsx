@@ -64,6 +64,7 @@ const ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS = 4_000
 const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
+const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -526,6 +527,7 @@ type AgentNotFoundStateProps = {
   deleted?: boolean
   onCreateAgent: () => void
   createAgentDisabledReason?: string | null
+  onBlockedCreateAgent?: () => void
 }
 
 function AgentNotFoundState({
@@ -533,8 +535,18 @@ function AgentNotFoundState({
   deleted = false,
   onCreateAgent,
   createAgentDisabledReason = null,
+  onBlockedCreateAgent,
 }: AgentNotFoundStateProps) {
   const createAgentDisabled = Boolean(createAgentDisabledReason)
+  const trackableCreateAgentDisabled = createAgentDisabled && Boolean(onBlockedCreateAgent)
+  const handleCreateAgentClick = useCallback(() => {
+    if (createAgentDisabled && onBlockedCreateAgent) {
+      onBlockedCreateAgent()
+      return
+    }
+    onCreateAgent()
+  }, [createAgentDisabled, onBlockedCreateAgent, onCreateAgent])
+
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
       <div className="mb-6 flex size-16 items-center justify-center rounded-full bg-amber-100 text-amber-600">
@@ -552,8 +564,9 @@ function AgentNotFoundState({
       </p>
       <button
         type="button"
-        onClick={onCreateAgent}
-        disabled={createAgentDisabled}
+        onClick={handleCreateAgentClick}
+        disabled={createAgentDisabled && !trackableCreateAgentDisabled}
+        aria-disabled={createAgentDisabled ? 'true' : undefined}
         title={createAgentDisabledReason ?? undefined}
         className={`group inline-flex items-center justify-center gap-x-2 rounded-lg px-6 py-3 font-semibold text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
           createAgentDisabled
@@ -575,14 +588,25 @@ type AgentSelectStateProps = {
   hasAgents: boolean
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
+  onBlockedCreateAgent?: () => void
 }
 
 function AgentSelectState({
   hasAgents,
   onCreateAgent,
   createAgentDisabledReason = null,
+  onBlockedCreateAgent,
 }: AgentSelectStateProps) {
   const createAgentDisabled = Boolean(createAgentDisabledReason)
+  const trackableCreateAgentDisabled = createAgentDisabled && Boolean(onBlockedCreateAgent)
+  const handleCreateAgentClick = useCallback(() => {
+    if (createAgentDisabled && onBlockedCreateAgent) {
+      onBlockedCreateAgent()
+      return
+    }
+    onCreateAgent?.()
+  }, [createAgentDisabled, onBlockedCreateAgent, onCreateAgent])
+
   return (
     <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Agent workspace</p>
@@ -597,8 +621,9 @@ function AgentSelectState({
       {!hasAgents && onCreateAgent ? (
         <button
           type="button"
-          onClick={onCreateAgent}
-          disabled={createAgentDisabled}
+          onClick={handleCreateAgentClick}
+          disabled={createAgentDisabled && !trackableCreateAgentDisabled}
+          aria-disabled={createAgentDisabled ? 'true' : undefined}
           title={createAgentDisabledReason ?? undefined}
           className={`group mt-2 inline-flex items-center justify-center gap-x-2 rounded-lg px-6 py-3 font-semibold text-white transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
             createAgentDisabled
@@ -710,6 +735,7 @@ export function AgentChatPage({
     charterOverride?: string | null
     selectedPipedreamAppSlugs?: string[]
   } | null>(null)
+  const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
 
   const handleContextSwitched = useCallback(
@@ -1943,6 +1969,15 @@ export function AgentChatPage({
     && personalSignupPreviewAvailable
     && effectiveSignupPreviewState !== 'none'
   )
+  const previewActionState = useMemo<SignupPreviewState>(() => {
+    if (effectiveSignupPreviewState !== 'none') {
+      return effectiveSignupPreviewState
+    }
+    return (
+      rosterAgents.find((agent) => (agent.signupPreviewState ?? 'none') !== 'none')?.signupPreviewState
+      ?? 'none'
+    )
+  }, [effectiveSignupPreviewState, rosterAgents])
   useEffect(() => {
     if (!activeAgentId || !activeRosterMeta?.email) {
       return
@@ -2445,14 +2480,41 @@ export function AgentChatPage({
   const sendMessageDisabledReason = !isNewAgent && selectedAgentBillingStatus?.delinquent
     ? resolveSendMessageDisabledMessage()
     : null
+  const previewCreateAgentBlocked = !currentContextBillingStatus?.delinquent && personalSignupPreviewAvailable
   const createAgentDisabledReason = currentContextBillingStatus?.delinquent
     ? resolveCreateAgentDisabledMessage(
       currentContextBillingStatus.reason,
       currentContextBillingStatus.actionable,
     )
-    : personalSignupPreviewAvailable
+    : previewCreateAgentBlocked
       ? 'Finish signup to create another agent. Your preview can continue once you start a plan.'
       : null
+
+  const trackSignupPreviewActionBlocked = useCallback((
+    action: 'new_agent' | 'settings' | 'collaborate',
+    location: 'sidebar' | 'empty_state' | 'not_found' | 'banner_desktop' | 'banner_mobile' | 'insight_card',
+  ) => {
+    track(AnalyticsEvent.SIGNUP_PREVIEW_ACTION_BLOCKED, {
+      action,
+      location,
+      agentId: activeAgentId ?? undefined,
+      signupPreviewState: previewActionState,
+    })
+  }, [activeAgentId, previewActionState])
+
+  const handleBlockedCreateAgent = useCallback((location: 'sidebar' | 'empty_state' | 'not_found') => {
+    trackSignupPreviewActionBlocked('new_agent', location)
+  }, [trackSignupPreviewActionBlocked])
+
+  const handleBlockedSettingsClick = useCallback((location: 'banner_desktop' | 'banner_mobile') => {
+    trackSignupPreviewActionBlocked('settings', location)
+  }, [trackSignupPreviewActionBlocked])
+
+  const handleBlockedCollaborateClick = useCallback((
+    location: 'banner_desktop' | 'banner_mobile' | 'insight_card',
+  ) => {
+    trackSignupPreviewActionBlocked('collaborate', location)
+  }, [trackSignupPreviewActionBlocked])
 
   const handleSelectAgent = useCallback(
     (agent: AgentRosterEntry) => {
@@ -2542,6 +2604,22 @@ export function AgentChatPage({
     const checkoutUrl = appendReturnTo(checkoutPath, returnToPath)
     window.open(checkoutUrl, '_top')
   }, [ensureAuthenticated, onboardingTarget, requiresTrialPlanSelection, upgradeModalSource])
+
+  useEffect(() => {
+    if (!showSignupPreviewPanel || !activeAgentId) {
+      return
+    }
+    if (previewEnteredAgentIdsRef.current.has(activeAgentId)) {
+      return
+    }
+    previewEnteredAgentIdsRef.current.add(activeAgentId)
+    track(AnalyticsEvent.SIGNUP_PREVIEW_ENTERED, {
+      agentId: activeAgentId,
+      signupPreviewState: effectiveSignupPreviewState,
+      panelMode: effectiveSignupPreviewState === 'awaiting_signup_completion' ? 'paused' : 'working',
+      source: SIGNUP_PREVIEW_PANEL_SOURCE,
+    })
+  }, [activeAgentId, effectiveSignupPreviewState, showSignupPreviewPanel])
 
   const createNewAgent = useCallback(
     async (
@@ -3251,6 +3329,7 @@ export function AgentChatPage({
             hasAgents={rosterAgents.length > 0}
             onCreateAgent={handleCreateAgent}
             createAgentDisabledReason={createAgentDisabledReason}
+            onBlockedCreateAgent={previewCreateAgentBlocked ? () => handleBlockedCreateAgent('empty_state') : undefined}
           />
         </div>
       </div>,
@@ -3265,6 +3344,7 @@ export function AgentChatPage({
         hasOtherAgents={rosterAgents.length > 0}
         onCreateAgent={handleCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
+        onBlockedCreateAgent={previewCreateAgentBlocked ? () => handleBlockedCreateAgent('not_found') : undefined}
       />,
     )
   }
@@ -3330,6 +3410,7 @@ export function AgentChatPage({
         onToggleAgentFavorite={handleToggleAgentFavorite}
         onCreateAgent={handleCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
+        onBlockedCreateAgent={previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined}
         agentRosterSortMode={agentRosterSortMode}
         onAgentRosterSortModeChange={handleAgentRosterSortModeChange}
         onInsightsPanelExpandedPreferenceChange={handleInsightsPanelExpandedPreferenceChange}
@@ -3367,6 +3448,8 @@ export function AgentChatPage({
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
+        onBlockedSettingsClick={handleBlockedSettingsClick}
+        onBlockedCollaborate={handleBlockedCollaborateClick}
         onUpgrade={handleUpgrade}
         composerError={sendMessageError ?? createAgentError?.message ?? null}
         composerErrorShowUpgrade={sendMessageError ? false : Boolean(createAgentError?.showUpgradeCta)}

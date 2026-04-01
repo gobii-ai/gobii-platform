@@ -161,6 +161,7 @@ type AgentComposerProps = {
   onCollaborate?: () => void
   collaborateDisabled?: boolean
   collaborateDisabledReason?: string | null
+  onBlockedCollaborate?: (location: 'insight_card') => void
   hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
   intelligenceTier?: string | null
@@ -202,6 +203,7 @@ export const AgentComposer = memo(function AgentComposer({
   onCollaborate,
   collaborateDisabled = false,
   collaborateDisabledReason = null,
+  onBlockedCollaborate,
   hideInsightsPanel = false,
   intelligenceConfig = null,
   intelligenceTier = null,
@@ -999,6 +1001,7 @@ export const AgentComposer = memo(function AgentComposer({
                       onCollaborate={onCollaborate}
                       collaborateDisabled={collaborateDisabled}
                       collaborateDisabledReason={collaborateDisabledReason}
+                      onBlockedCollaborate={onBlockedCollaborate}
                     />
                   ) : null}
                 </div>

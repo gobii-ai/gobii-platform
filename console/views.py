@@ -6003,7 +6003,11 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
     allow_delinquent_personal_chat = True
 
     def _resume_signup_preview_if_eligible(self, agent: PersistentAgent) -> PersistentAgent:
-        resume_signup_preview_agent_if_eligible(agent, self.request.user)
+        resume_signup_preview_agent_if_eligible(
+            agent,
+            self.request.user,
+            resume_source="chat_shell",
+        )
         return agent
 
     def get_context_data(self, **kwargs):

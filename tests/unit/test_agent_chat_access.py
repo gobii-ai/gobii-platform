@@ -25,6 +25,7 @@ from api.services.signup_preview import (
     resume_signup_preview_agents_for_user_if_eligible,
 )
 from console.agent_chat.access import resolve_agent
+from util.analytics import AnalyticsEvent
 from util.trial_enforcement import can_user_access_personal_agent_chat
 
 
@@ -299,8 +300,10 @@ class AgentChatAccessTests(TestCase):
     @patch("api.services.signup_preview.reconcile_user_plan_from_stripe", return_value={"id": "startup"})
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.services.signup_preview.Analytics.track_event")
     def test_resume_signup_preview_agents_for_user_clears_waiting_agents_without_requeue(
         self,
+        mock_track_event,
         _mock_personal_access,
         mock_process_delay,
         _mock_reconcile_user_plan,
@@ -321,12 +324,23 @@ class AgentChatAccessTests(TestCase):
             PersistentAgent.SignupPreviewState.NONE,
         )
         mock_process_delay.assert_not_called()
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["event"],
+            AnalyticsEvent.SIGNUP_PREVIEW_RESUMED_AFTER_PLAN,
+        )
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"]["resume_source"],
+            "unknown",
+        )
 
     @patch("api.services.signup_preview.reconcile_user_plan_from_stripe", return_value={"id": "startup"})
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("api.services.signup_preview.Analytics.track_event")
     def test_resume_signup_preview_agents_for_user_requeues_followup_agents(
         self,
+        mock_track_event,
         _mock_personal_access,
         mock_process_delay,
         _mock_reconcile_user_plan,
@@ -348,6 +362,78 @@ class AgentChatAccessTests(TestCase):
             PersistentAgent.SignupPreviewState.NONE,
         )
         mock_process_delay.assert_called_once_with(str(self.personal_agent.id))
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertTrue(mock_track_event.call_args.kwargs["properties"]["has_followup_message"])
+
+    @patch("api.services.signup_preview.reconcile_user_plan_from_stripe", return_value={"id": "startup"})
+    @patch("api.services.signup_preview.Analytics.track_event")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    def test_resume_signup_preview_agents_for_user_tracks_webhook_source_once(
+        self,
+        _mock_personal_access,
+        mock_track_event,
+        _mock_reconcile_user_plan,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            result = resume_signup_preview_agents_for_user_if_eligible(
+                self.user,
+                resume_source="webhook",
+                plan_before="free",
+                plan_after="startup",
+            )
+
+        self.assertEqual(result.resumed_agent_ids, (str(self.personal_agent.id),))
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"]["resume_source"],
+            "webhook",
+        )
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"]["plan_before"],
+            "free",
+        )
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"]["plan_after"],
+            "startup",
+        )
+
+    @patch("api.services.signup_preview.reconcile_user_plan_from_stripe", return_value={"id": "startup"})
+    @patch("api.services.signup_preview.Analytics.track_event")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    def test_resume_signup_preview_fallback_does_not_double_count_after_webhook_resume(
+        self,
+        _mock_personal_access,
+        mock_track_event,
+        _mock_reconcile_user_plan,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            webhook_result = resume_signup_preview_agents_for_user_if_eligible(
+                self.user,
+                resume_source="webhook",
+            )
+            fallback_result = resume_signup_preview_agent_if_eligible(
+                self.personal_agent,
+                self.user,
+                resume_source="chat_shell",
+            )
+
+        self.assertEqual(webhook_result.resumed_agent_ids, (str(self.personal_agent.id),))
+        self.assertEqual(fallback_result.resumed_agent_ids, ())
+        self.assertEqual(mock_track_event.call_count, 1)
+        self.assertEqual(
+            mock_track_event.call_args.kwargs["properties"]["resume_source"],
+            "webhook",
+        )
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     @patch("util.trial_enforcement.get_active_subscription", return_value=None)

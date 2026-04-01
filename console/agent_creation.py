@@ -451,6 +451,17 @@ def create_persistent_agent_from_charter(
                 properties=props.copy(),
             )
         )
+        if preview_creation_allowed:
+            preview_props = props.copy()
+            preview_props["signup_preview_state"] = persistent_agent.signup_preview_state
+            transaction.on_commit(
+                lambda: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.SIGNUP_PREVIEW_AGENT_CREATED,
+                    source=AnalyticsSource.WEB,
+                    properties=preview_props.copy(),
+                )
+            )
         if props.get("organization"):
             transaction.on_commit(
                 lambda: Analytics.track_event(

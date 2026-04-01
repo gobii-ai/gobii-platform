@@ -72,6 +72,7 @@ type AgentSetupInsightProps = {
   onCollaborate?: () => void
   collaborateDisabled?: boolean
   collaborateDisabledReason?: string | null
+  onBlockedCollaborate?: (location: 'insight_card') => void
 }
 
 function describeError(error: unknown): string {
@@ -138,6 +139,7 @@ export function AgentSetupInsight({
   onCollaborate,
   collaborateDisabled = false,
   collaborateDisabledReason = null,
+  onBlockedCollaborate,
 }: AgentSetupInsightProps) {
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
@@ -169,6 +171,13 @@ export function AgentSetupInsight({
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(metadata.organization.currentOrg?.id ?? null)
   const [orgError, setOrgError] = useState<string | null>(null)
   const [orgBusy, setOrgBusy] = useState(false)
+  const handleCollaborateClick = useCallback(() => {
+    if (collaborateDisabled && onBlockedCollaborate) {
+      onBlockedCollaborate('insight_card')
+      return
+    }
+    onCollaborate?.()
+  }, [collaborateDisabled, onBlockedCollaborate, onCollaborate])
 
   useEffect(() => {
     setPhone(metadata.sms.userPhone ?? null)
@@ -882,8 +891,9 @@ export function AgentSetupInsight({
               <button
                 type="button"
                 className="collab-row__btn collab-row__btn--green"
-                onClick={onCollaborate}
-                disabled={collaborateDisabled}
+                onClick={handleCollaborateClick}
+                disabled={collaborateDisabled && !onBlockedCollaborate}
+                aria-disabled={collaborateDisabled ? 'true' : undefined}
                 title={collaborateDisabledReason || 'Invite collaborators to this agent'}
               >
                 <UserPlus size={14} />

@@ -789,7 +789,13 @@ class SubscriptionSignalTests(TestCase):
 
             handle_subscription_event(event)
 
-        mock_resume_preview.assert_called_once_with(fresh_user, reconcile_plan=False)
+        mock_resume_preview.assert_called_once_with(
+            fresh_user,
+            reconcile_plan=False,
+            resume_source="webhook",
+            plan_before=PlanNamesChoices.FREE.value,
+            plan_after=PlanNamesChoices.STARTUP.value,
+        )
 
     @tag("batch_pages")
     @override_settings(CAPI_LTV_MULTIPLE=2.0, CAPI_START_TRIAL_CONV_RATE=0.5)

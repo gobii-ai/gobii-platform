@@ -97,6 +97,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
+  onBlockedCreateAgent?: (location: 'sidebar') => void
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
@@ -140,6 +141,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
+  onBlockedSettingsClick?: (location: 'banner_desktop' | 'banner_mobile') => void
+  onBlockedCollaborate?: (location: 'banner_desktop' | 'banner_mobile' | 'insight_card') => void
   onSendMessage?: (
     body: string,
     attachments?: File[],
@@ -163,7 +166,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onInsightIndexChange?: (index: number) => void
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
-  onUpgrade?: (plan: PlanTier) => void
+  onUpgrade?: (plan: PlanTier, source?: string) => void
   llmIntelligence?: LlmIntelligenceConfig | null
   currentLlmTier?: string | null
   onLlmTierChange?: (tier: string) => Promise<boolean>
@@ -222,6 +225,7 @@ export function AgentChatLayout({
   onToggleAgentFavorite,
   onCreateAgent,
   createAgentDisabledReason = null,
+  onBlockedCreateAgent,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
   onInsightsPanelExpandedPreferenceChange,
@@ -270,6 +274,8 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onShare,
+  onBlockedSettingsClick,
+  onBlockedCollaborate,
   onSendMessage,
   onComposerFocus,
   autoScrollPinned = true,
@@ -817,6 +823,7 @@ export function AgentChatLayout({
         onToggleAgentFavorite={onToggleAgentFavorite}
         onCreateAgent={onCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
+        onBlockedCreateAgent={onBlockedCreateAgent}
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
@@ -841,10 +848,12 @@ export function AgentChatLayout({
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
           settingsDisabled={previewActionsDisabled}
           settingsDisabledReason={previewActionsDisabledReason}
+          onBlockedSettingsClick={onBlockedSettingsClick}
           onClose={onClose}
           onShare={onShare}
           shareDisabled={previewActionsDisabled}
           shareDisabledReason={previewActionsDisabledReason}
+          onBlockedShareClick={onBlockedCollaborate}
 	          sidebarCollapsed={sidebarCollapsed}
 	        >
             {showHighPriorityBanner && highPriorityBanner ? (
@@ -1101,6 +1110,7 @@ export function AgentChatLayout({
               onCollaborate={onShare}
               collaborateDisabled={previewActionsDisabled}
               collaborateDisabledReason={previewActionsDisabledReason}
+              onBlockedCollaborate={onBlockedCollaborate}
               hideInsightsPanel={hideInsightsPanel}
               intelligenceConfig={llmIntelligence}
               intelligenceTier={currentLlmTier}

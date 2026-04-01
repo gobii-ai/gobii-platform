@@ -3248,6 +3248,9 @@ def handle_subscription_event(event, **kwargs):
                     resume_signup_preview_agents_for_user_if_eligible(
                         owner,
                         reconcile_plan=False,
+                        resume_source="webhook",
+                        plan_before=prior_plan_value,
+                        plan_after=plan_value,
                     )
                 except Exception:
                     logger.exception(

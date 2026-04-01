@@ -4,6 +4,7 @@ from django.db import transaction
 
 from api.models import PersistentAgent, PersistentAgentMessage
 from util.subscription_helper import reconcile_user_plan_from_stripe
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 
 
@@ -129,11 +130,58 @@ def _enqueue_signup_preview_resume_processing(agent_ids: list[str]) -> None:
     transaction.on_commit(_enqueue)
 
 
+def _track_signup_preview_resumed_agents(
+    user,
+    agents: list[PersistentAgent],
+    requeued_agent_ids: set[str],
+    *,
+    resume_source: str,
+    plan_before: str | None,
+    plan_after: str | None,
+) -> None:
+    user_id = getattr(user, "id", None)
+    if user_id is None or not agents:
+        return
+
+    tracked_agents = [
+        {
+            "agent_id": str(agent.id),
+            "signup_preview_state": agent.signup_preview_state,
+            "has_followup_message": str(agent.id) in requeued_agent_ids,
+        }
+        for agent in agents
+    ]
+
+    def _track() -> None:
+        for item in tracked_agents:
+            properties = {
+                "agent_id": item["agent_id"],
+                "signup_preview_state": item["signup_preview_state"],
+                "resume_source": resume_source,
+                "has_followup_message": item["has_followup_message"],
+            }
+            if plan_before:
+                properties["plan_before"] = plan_before
+            if plan_after:
+                properties["plan_after"] = plan_after
+            Analytics.track_event(
+                user_id=user_id,
+                event=AnalyticsEvent.SIGNUP_PREVIEW_RESUMED_AFTER_PLAN,
+                source=AnalyticsSource.WEB,
+                properties=properties,
+            )
+
+    transaction.on_commit(_track)
+
+
 def _resume_signup_preview_agents_if_user_eligible(
     agent_queryset,
     user,
     *,
     reconcile_plan: bool,
+    resume_source: str,
+    plan_before: str | None,
+    plan_after: str | None,
 ) -> SignupPreviewResumeResult:
     if getattr(user, "id", None) is None:
         return SignupPreviewResumeResult()
@@ -155,6 +203,7 @@ def _resume_signup_preview_agents_if_user_eligible(
         for agent in agents
         if has_followup_user_message_after_signup_preview_reply(agent)
     ]
+    requeue_id_set = set(requeue_ids)
 
     updated = PersistentAgent.objects.filter(id__in=resumed_ids).exclude(
         signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
@@ -165,6 +214,14 @@ def _resume_signup_preview_agents_if_user_eligible(
         return SignupPreviewResumeResult()
 
     _enqueue_signup_preview_resume_processing(requeue_ids)
+    _track_signup_preview_resumed_agents(
+        user,
+        agents,
+        requeue_id_set,
+        resume_source=resume_source,
+        plan_before=plan_before,
+        plan_after=plan_after,
+    )
     return SignupPreviewResumeResult(
         resumed_agent_ids=tuple(resumed_ids),
         requeued_agent_ids=tuple(requeue_ids),
@@ -181,7 +238,7 @@ def is_signup_preview_processing_paused(agent: PersistentAgent | None) -> bool:
 
 
 def transition_agent_to_signup_preview_waiting(agent_id) -> bool:
-    return bool(
+    transitioned = bool(
         PersistentAgent.objects.filter(
             id=agent_id,
             signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
@@ -189,11 +246,35 @@ def transition_agent_to_signup_preview_waiting(agent_id) -> bool:
             signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
         )
     )
+    if not transitioned:
+        return False
+
+    agent = PersistentAgent.objects.filter(id=agent_id).only("id", "user_id", "signup_preview_state").first()
+    if agent is None or agent.user_id is None:
+        return True
+
+    transaction.on_commit(
+        lambda: Analytics.track_event(
+            user_id=agent.user_id,
+            event=AnalyticsEvent.SIGNUP_PREVIEW_PAUSED_AFTER_FIRST_REPLY,
+            source=AnalyticsSource.WEB,
+            properties={
+                "agent_id": str(agent.id),
+                "signup_preview_state": agent.signup_preview_state,
+                "source": "first_reply",
+            },
+        )
+    )
+    return True
 
 
 def resume_signup_preview_agent_if_eligible(
     agent: PersistentAgent,
     user,
+    *,
+    resume_source: str = "unknown",
+    plan_before: str | None = None,
+    plan_after: str | None = None,
 ) -> SignupPreviewResumeResult:
     if agent.organization_id is not None:
         return SignupPreviewResumeResult()
@@ -211,6 +292,9 @@ def resume_signup_preview_agent_if_eligible(
         ),
         user,
         reconcile_plan=True,
+        resume_source=resume_source,
+        plan_before=plan_before,
+        plan_after=plan_after,
     )
     if not result.includes(agent):
         return SignupPreviewResumeResult()
@@ -223,6 +307,9 @@ def resume_signup_preview_agents_for_user_if_eligible(
     user,
     *,
     reconcile_plan: bool = True,
+    resume_source: str = "unknown",
+    plan_before: str | None = None,
+    plan_after: str | None = None,
 ) -> SignupPreviewResumeResult:
     if getattr(user, "id", None) is None:
         return SignupPreviewResumeResult()
@@ -235,4 +322,7 @@ def resume_signup_preview_agents_for_user_if_eligible(
         ),
         user,
         reconcile_plan=reconcile_plan,
+        resume_source=resume_source,
+        plan_before=plan_before,
+        plan_after=plan_after,
     )

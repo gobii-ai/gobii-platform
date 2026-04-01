@@ -23,6 +23,7 @@ type ChatSidebarProps = {
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
+  onBlockedCreateAgent?: (location: 'sidebar') => void
   rosterSortMode?: AgentRosterSortMode
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
@@ -41,6 +42,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onToggleAgentFavorite,
   onCreateAgent,
   createAgentDisabledReason = null,
+  onBlockedCreateAgent,
   rosterSortMode = 'recent',
   onRosterSortModeChange,
   contextSwitcher,
@@ -122,16 +124,21 @@ export const ChatSidebar = memo(function ChatSidebar({
     [isMobile, onSelectAgent],
   )
 
+  const hasAgents = agents.length > 0
+  const showSortToggle = agents.length >= 2
+  const createAgentDisabled = Boolean(createAgentDisabledReason)
+  const trackableCreateAgentDisabled = createAgentDisabled && Boolean(onBlockedCreateAgent)
+
   const handleCreateAgent = useCallback(() => {
+    if (createAgentDisabled && onBlockedCreateAgent) {
+      onBlockedCreateAgent('sidebar')
+      return
+    }
     onCreateAgent?.()
     if (isMobile) {
       setDrawerOpen(false)
     }
-  }, [isMobile, onCreateAgent])
-
-  const hasAgents = agents.length > 0
-  const showSortToggle = agents.length >= 2
-  const createAgentDisabled = Boolean(createAgentDisabledReason)
+  }, [createAgentDisabled, isMobile, onBlockedCreateAgent, onCreateAgent])
 
   const fishCollateralEnabled = useMemo(() => {
     if (typeof document === 'undefined') {
@@ -219,7 +226,8 @@ export const ChatSidebar = memo(function ChatSidebar({
                 type="button"
                 className="chat-sidebar-create-btn chat-sidebar-create-btn--drawer"
                 onClick={handleCreateAgent}
-                disabled={createAgentDisabled}
+                disabled={createAgentDisabled && !trackableCreateAgentDisabled}
+                aria-disabled={createAgentDisabled ? 'true' : undefined}
                 aria-label="New agent"
                 title={createAgentDisabledReason ?? undefined}
               >
@@ -371,7 +379,8 @@ export const ChatSidebar = memo(function ChatSidebar({
                 type="button"
                 className="chat-sidebar-create-btn"
                 onClick={handleCreateAgent}
-                disabled={createAgentDisabled}
+                disabled={createAgentDisabled && !trackableCreateAgentDisabled}
+                aria-disabled={createAgentDisabled ? 'true' : undefined}
                 aria-label="New agent"
                 data-collapsed={collapsed}
                 title={createAgentDisabledReason ?? undefined}

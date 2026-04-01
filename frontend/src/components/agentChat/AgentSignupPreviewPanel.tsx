@@ -5,7 +5,7 @@ import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 type AgentSignupPreviewPanelProps = {
   status: SignupPreviewState
   currentPlan: PlanTier | null
-  onUpgrade?: (plan: PlanTier) => void
+  onUpgrade?: (plan: PlanTier, source?: string) => void
 }
 
 export function AgentSignupPreviewPanel({
@@ -30,9 +30,9 @@ export function AgentSignupPreviewPanel({
           <div className="max-h-[min(40dvh,22rem)] overflow-y-auto overscroll-contain rounded-[1.15rem] bg-white/70 px-1 py-1 backdrop-blur-sm [-webkit-overflow-scrolling:touch] [touch-action:pan-y] sm:max-h-none sm:overflow-visible sm:px-1.5 sm:py-1.5">
             <SubscriptionUpgradePlans
               currentPlan={currentPlan}
-              onUpgrade={(plan) => onUpgrade?.(plan)}
+              onUpgrade={(plan) => onUpgrade?.(plan, 'signup_preview_panel')}
               variant="inline"
-              source="trial_onboarding"
+              source="signup_preview_panel"
               collapseFeaturesByDefault
             />
           </div>
