@@ -112,6 +112,7 @@
               const submitButton = loginForm?.querySelector('[data-turnstile-submit]');
               const statusMessage = loginForm?.querySelector('[data-turnstile-status]');
               const widget = loginForm?.querySelector('.cf-turnstile');
+              const tokenInput = () => loginForm?.querySelector('[name="cf-turnstile-response"]');
 
               const setSubmitEnabled = (enabled) => {
                 if (!submitButton) {
@@ -129,6 +130,11 @@
                 }
                 statusMessage.textContent = message;
                 statusMessage.classList.toggle('hidden', !message);
+              };
+
+              const hasFreshToken = () => {
+                const token = tokenInput()?.value;
+                return Boolean(token && token.trim());
               };
 
               const resetWidget = () => {
@@ -154,6 +160,15 @@
                 setStatusMessage('Verification failed. Please try again.');
                 resetWidget();
               };
+
+              loginForm?.addEventListener('submit', (event) => {
+                if (hasFreshToken()) {
+                  return;
+                }
+                event.preventDefault();
+                setSubmitEnabled(false);
+                setStatusMessage('Please complete verification before signing in.');
+              });
 
               setSubmitEnabled(false);
             })();
