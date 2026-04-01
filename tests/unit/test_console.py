@@ -1008,11 +1008,13 @@ class ConsoleViewsTest(TestCase):
     @tag("batch_console_agents")
     @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=False)
     @patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False)
     @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
     def test_agent_chat_shell_exposes_signup_preview_data_attributes(
         self,
         _mock_personal_chat_access,
+        _mock_resume_personal_access,
         _mock_preview_allowed,
         mock_get_stripe_settings,
         _mock_trial_eligible,
