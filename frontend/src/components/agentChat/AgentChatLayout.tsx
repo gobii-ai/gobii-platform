@@ -20,6 +20,7 @@ import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
+import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
@@ -33,6 +34,7 @@ import type {
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import type { SignupPreviewState } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
 import {
   isContinuationUpgradeModalSource,
@@ -175,6 +177,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
+  showSignupPreviewPanel?: boolean
+  signupPreviewState?: SignupPreviewState
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
@@ -295,6 +299,8 @@ export function AgentChatLayout({
   composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
+  showSignupPreviewPanel = false,
+  signupPreviewState = 'none',
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
@@ -1055,6 +1061,12 @@ export function AgentChatLayout({
                 </div>
               </div>
             </div>
+          ) : showSignupPreviewPanel ? (
+            <AgentSignupPreviewPanel
+              status={signupPreviewState}
+              currentPlan={subscriptionPlan}
+              onUpgrade={onUpgrade}
+            />
           ) : (
             <AgentComposer
               agentId={activeAgentId ?? agentId ?? null}

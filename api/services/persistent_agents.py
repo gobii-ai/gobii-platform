@@ -89,6 +89,7 @@ class PersistentAgentProvisioningService:
         preferred_contact_endpoint=None,
         template_code: str | None = None,
         preferred_llm_tier: IntelligenceTier | None = None,
+        signup_preview_state: str | None = None,
     ) -> ProvisioningResult:
         """Create a new persistent agent and its backing browser agent."""
         agent_name = name or cls.generate_unique_name(user)
@@ -145,6 +146,8 @@ class PersistentAgentProvisioningService:
                 persistent_agent.life_state = life_state
             if whitelist_policy:
                 persistent_agent.whitelist_policy = whitelist_policy
+            if signup_preview_state:
+                persistent_agent.signup_preview_state = signup_preview_state
 
             try:
                 persistent_agent.full_clean()

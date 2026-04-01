@@ -169,6 +169,7 @@ from api.services.owner_execution_pause import (
     get_owner_execution_pause_state,
     resolve_agent_owner,
 )
+from api.services.signup_preview import is_signup_preview_processing_paused
 from api.services.web_sessions import (
     get_deliverable_web_sessions,
     has_active_web_session,
@@ -1812,6 +1813,24 @@ def _execute_prepared_tool_batch(
                     parallel_safe=False,
                 )
                 execution_outcomes.append(outcome)
+                if prepared.tool_name in MESSAGE_TOOL_NAMES:
+                    try:
+                        agent.refresh_from_db(fields=["signup_preview_state"])
+                    except Exception:
+                        logger.debug(
+                            "Failed to refresh signup preview state after %s for agent %s",
+                            prepared.tool_name,
+                            agent.id,
+                            exc_info=True,
+                        )
+                    else:
+                        if is_signup_preview_processing_paused(agent):
+                            logger.info(
+                                "Agent %s: stopping serial tool batch after first preview reply.",
+                                agent.id,
+                            )
+                            abort_after_execution = True
+                            break
                 if outcome.updated_tools is not None:
                     before_count = len(available_tools)
                     available_tools = outcome.updated_tools
@@ -3772,6 +3791,22 @@ def _process_agent_events_locked(
         span.set_attribute("persistent_agent.is_active", False)
         return agent
 
+    if is_signup_preview_processing_paused(agent):
+        clear_processing_work_state(agent.id)
+        _close_active_cycle_for_skipped_agent(
+            agent.id,
+            budget_id=getattr(budget_ctx, "budget_id", None),
+            span=span,
+            check_context="signup_preview_waiting_for_completion",
+        )
+        logger.info(
+            "Persistent agent %s is paused awaiting signup completion; skipping processing.",
+            persistent_agent_id,
+        )
+        span.add_event("Agent processing skipped - signup preview awaiting completion")
+        span.set_attribute("persistent_agent.signup_preview_state", agent.signup_preview_state)
+        return agent
+
     # Broadcast processing state at start of processing (when lock is acquired)
     try:
         from console.agent_chat.signals import _broadcast_processing
@@ -4772,6 +4807,21 @@ def _run_agent_loop(
                 executed_non_message_action = finalized_batch.executed_non_message_action
 
                 if prepared_batch.abort_after_execution or executed_batch.abort_after_execution:
+                    try:
+                        agent.refresh_from_db(fields=["signup_preview_state"])
+                    except Exception:
+                        logger.debug(
+                            "Failed to refresh signup preview state before abort for agent %s",
+                            agent.id,
+                            exc_info=True,
+                        )
+                    else:
+                        if is_signup_preview_processing_paused(agent):
+                            logger.info(
+                                "Agent %s: pausing processing after signup preview reply.",
+                                agent.id,
+                            )
+                            _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
 
                 if _apply_runtime_updates():

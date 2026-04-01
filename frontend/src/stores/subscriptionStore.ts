@@ -47,6 +47,8 @@ type SubscriptionState = {
   ctaPickAPlan: boolean
   ctaContinueAgentBtn: boolean
   ctaNoChargeDuringTrial: boolean
+  personalSignupPreviewAvailable: boolean
+  personalSignupPreviewProcessingAvailable: boolean
   trialDaysByPlan: TrialDaysByPlan
   trialEligible: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
@@ -57,6 +59,8 @@ type SubscriptionState = {
   setCtaPickAPlan: (ctaPickAPlan: boolean) => void
   setCtaContinueAgentBtn: (ctaContinueAgentBtn: boolean) => void
   setCtaNoChargeDuringTrial: (ctaNoChargeDuringTrial: boolean) => void
+  setPersonalSignupPreviewAvailable: (personalSignupPreviewAvailable: boolean) => void
+  setPersonalSignupPreviewProcessingAvailable: (personalSignupPreviewProcessingAvailable: boolean) => void
   setTrialDaysByPlan: (trialDaysByPlan: TrialDaysByPlan) => void
   setTrialEligible: (trialEligible: boolean) => void
   openUpgradeModal: (source?: UpgradeModalSource, options?: UpgradeModalOptions) => void
@@ -77,6 +81,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   ctaPickAPlan: false,
   ctaContinueAgentBtn: false,
   ctaNoChargeDuringTrial: false,
+  personalSignupPreviewAvailable: false,
+  personalSignupPreviewProcessingAvailable: false,
   trialDaysByPlan: { startup: 0, scale: 0 },
   trialEligible: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
@@ -87,6 +93,9 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   setCtaPickAPlan: (ctaPickAPlan) => set({ ctaPickAPlan }),
   setCtaContinueAgentBtn: (ctaContinueAgentBtn) => set({ ctaContinueAgentBtn }),
   setCtaNoChargeDuringTrial: (ctaNoChargeDuringTrial) => set({ ctaNoChargeDuringTrial }),
+  setPersonalSignupPreviewAvailable: (personalSignupPreviewAvailable) => set({ personalSignupPreviewAvailable }),
+  setPersonalSignupPreviewProcessingAvailable: (personalSignupPreviewProcessingAvailable) =>
+    set({ personalSignupPreviewProcessingAvailable }),
   setTrialDaysByPlan: (trialDaysByPlan) => set({ trialDaysByPlan }),
   setTrialEligible: (trialEligible) => set({ trialEligible }),
   openUpgradeModal: (source = 'unknown', options = {}) => set((state) => {
@@ -129,6 +138,8 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
         ctaPickAPlan: normalizeBoolean(data?.cta_pick_a_plan),
         ctaContinueAgentBtn: normalizeBoolean(data?.cta_continue_agent_btn),
         ctaNoChargeDuringTrial: normalizeBoolean(data?.cta_no_charge_during_trial),
+        personalSignupPreviewAvailable: normalizeBoolean(data?.personal_signup_preview_available),
+        personalSignupPreviewProcessingAvailable: normalizeBoolean(data?.personal_signup_preview_processing_available),
         trialDaysByPlan: normalizeTrialDaysByPlan(data),
         trialEligible: normalizeBoolean(data?.trial_eligible),
         isLoading: false,
@@ -153,6 +164,8 @@ type UserPlanPayload = {
   cta_pick_a_plan?: boolean | string | null
   cta_continue_agent_btn?: boolean | string | null
   cta_no_charge_during_trial?: boolean | string | null
+  personal_signup_preview_available?: boolean | string | null
+  personal_signup_preview_processing_available?: boolean | string | null
   startup_trial_days?: number | string | null
   scale_trial_days?: number | string | null
   trial_eligible?: boolean | string | null
@@ -167,6 +180,8 @@ type UserPlanResponse = {
   ctaPickAPlan: boolean
   ctaContinueAgentBtn: boolean
   ctaNoChargeDuringTrial: boolean
+  personalSignupPreviewAvailable: boolean
+  personalSignupPreviewProcessingAvailable: boolean
   trialDaysByPlan: TrialDaysByPlan
   trialEligible: boolean
   authenticated: boolean
@@ -183,6 +198,8 @@ type HydratedSubscriptionState = Pick<
   | 'ctaPickAPlan'
   | 'ctaContinueAgentBtn'
   | 'ctaNoChargeDuringTrial'
+  | 'personalSignupPreviewAvailable'
+  | 'personalSignupPreviewProcessingAvailable'
   | 'trialDaysByPlan'
   | 'trialEligible'
 >
@@ -248,6 +265,8 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         ctaPickAPlan: false,
         ctaContinueAgentBtn: false,
         ctaNoChargeDuringTrial: false,
+        personalSignupPreviewAvailable: false,
+        personalSignupPreviewProcessingAvailable: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
         trialEligible: false,
         authenticated: false,
@@ -263,6 +282,8 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       ctaPickAPlan: normalizeBoolean(data?.cta_pick_a_plan),
       ctaContinueAgentBtn: normalizeBoolean(data?.cta_continue_agent_btn),
       ctaNoChargeDuringTrial: normalizeBoolean(data?.cta_no_charge_during_trial),
+      personalSignupPreviewAvailable: normalizeBoolean(data?.personal_signup_preview_available),
+      personalSignupPreviewProcessingAvailable: normalizeBoolean(data?.personal_signup_preview_processing_available),
       trialDaysByPlan: normalizeTrialDaysByPlan(data),
       trialEligible: normalizeBoolean(data?.trial_eligible),
       authenticated: true,
@@ -278,6 +299,8 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         ctaPickAPlan: false,
         ctaContinueAgentBtn: false,
         ctaNoChargeDuringTrial: false,
+        personalSignupPreviewAvailable: false,
+        personalSignupPreviewProcessingAvailable: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
         trialEligible: false,
         authenticated: false,
@@ -292,6 +315,8 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       ctaPickAPlan: false,
       ctaContinueAgentBtn: false,
       ctaNoChargeDuringTrial: false,
+      personalSignupPreviewAvailable: false,
+      personalSignupPreviewProcessingAvailable: false,
       trialDaysByPlan: { startup: 0, scale: 0 },
       trialEligible: false,
       authenticated: true,
@@ -313,6 +338,8 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   const ctaPickAPlanAttr = mountElement.dataset.ctaPickAPlan
   const ctaContinueAgentBtnAttr = mountElement.dataset.ctaContinueAgentBtn
   const ctaNoChargeDuringTrialAttr = mountElement.dataset.ctaNoChargeDuringTrial
+  const personalSignupPreviewAvailableAttr = mountElement.dataset.personalSignupPreviewAvailable
+  const personalSignupPreviewProcessingAvailableAttr = mountElement.dataset.personalSignupPreviewProcessingAvailable
   const planAttr = mountElement.dataset.userPlan
   const trialEligibleAttr = mountElement.dataset.trialEligible
   const trialDaysByPlan: TrialDaysByPlan = {
@@ -331,6 +358,12 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   useSubscriptionStore.getState().setCtaPickAPlan(normalizeBoolean(ctaPickAPlanAttr))
   useSubscriptionStore.getState().setCtaContinueAgentBtn(normalizeBoolean(ctaContinueAgentBtnAttr))
   useSubscriptionStore.getState().setCtaNoChargeDuringTrial(normalizeBoolean(ctaNoChargeDuringTrialAttr))
+  useSubscriptionStore.getState().setPersonalSignupPreviewAvailable(
+    normalizeBoolean(personalSignupPreviewAvailableAttr),
+  )
+  useSubscriptionStore.getState().setPersonalSignupPreviewProcessingAvailable(
+    normalizeBoolean(personalSignupPreviewProcessingAvailableAttr),
+  )
 
   // If we have both data attributes, use them directly
   if (
@@ -348,6 +381,8 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       ctaPickAPlan: normalizeBoolean(ctaPickAPlanAttr),
       ctaContinueAgentBtn: normalizeBoolean(ctaContinueAgentBtnAttr),
       ctaNoChargeDuringTrial: normalizeBoolean(ctaNoChargeDuringTrialAttr),
+      personalSignupPreviewAvailable: normalizeBoolean(personalSignupPreviewAvailableAttr),
+      personalSignupPreviewProcessingAvailable: normalizeBoolean(personalSignupPreviewProcessingAvailableAttr),
       trialDaysByPlan,
       trialEligible: normalizeBoolean(trialEligibleAttr),
     }))
@@ -365,6 +400,8 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     ctaPickAPlan,
     ctaContinueAgentBtn,
     ctaNoChargeDuringTrial,
+    personalSignupPreviewAvailable,
+    personalSignupPreviewProcessingAvailable,
     trialDaysByPlan: apiTrialDaysByPlan,
     trialEligible,
   }) => {
@@ -377,6 +414,8 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       ctaPickAPlan,
       ctaContinueAgentBtn,
       ctaNoChargeDuringTrial,
+      personalSignupPreviewAvailable,
+      personalSignupPreviewProcessingAvailable,
       trialDaysByPlan: apiTrialDaysByPlan,
       trialEligible,
     }))

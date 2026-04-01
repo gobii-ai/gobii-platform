@@ -34,6 +34,20 @@ CTA_CONTINUE_AGENT_BTN = "cta_continue_agent_btn"
 # Controls whether pricing trial CTA helper text emphasizes no charge during the trial.
 CTA_NO_CHARGE_DURING_TRIAL = "cta_no_charge_during_trial"
 
+# Controls whether personal no-plan users get a built-in starter charter when
+# entering immersive new-agent flow without saved draft state.
+PERSONAL_AGENT_SIGNUP_STARTER_CHARTER = "personal_agent_signup_starter_charter"
+
+# Controls whether personal no-plan users see the signup preview UI in immersive
+# chat instead of the pricing modal / standard composer flow.
+PERSONAL_AGENT_SIGNUP_PREVIEW_UI = "personal_agent_signup_preview_ui"
+
+# Controls whether proprietary personal no-plan users can create a limited
+# preview agent that pauses after its first reply until signup is completed.
+PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT = (
+    "personal_agent_signup_preview_processing_limit"
+)
+
 # Controls whether UserTrialEligibility decisions block trial CTAs and checkout trial periods.
 USER_TRIAL_ELIGIBILITY_ENFORCEMENT = "user_trial_eligibility_enforcement"
 

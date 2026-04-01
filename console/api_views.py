@@ -121,6 +121,10 @@ from util.onboarding import (
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
+from util.personal_signup_preview import (
+    build_personal_signup_starter_charter,
+    resolve_personal_signup_preview,
+)
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     TrialRequiredValidationError,
@@ -354,6 +358,20 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             restored_cookie = restore_oauth_session_state(request, overwrite_existing=False)
 
         pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
+        resolved_context = build_console_context(request)
+        saved_charter = request.session.get("agent_charter")
+        preview_config = resolve_personal_signup_preview(
+            request.user,
+            request=request,
+            current_context_type=resolved_context.current_context.type,
+        )
+        if preview_config.should_synthesize_starter_charter(
+            saved_charter=saved_charter,
+            pending_onboarding=pending_onboarding,
+        ):
+            saved_charter = build_personal_signup_starter_charter(
+                include_preview_limit=preview_config.processing_limit_enabled,
+            )
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:
@@ -361,7 +379,7 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
 
         payload = {
-            "charter": request.session.get("agent_charter"),
+            "charter": saved_charter,
             "charter_override": request.session.get("agent_charter_override"),
             "preferred_llm_tier": preferred_llm_tier,
             "selected_pipedream_app_slugs": request.session.get(
@@ -2291,6 +2309,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "sms": get_primary_sms(agent),
                 "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
                 "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
+                "signup_preview_state": agent.signup_preview_state,
             }
             for agent in agents
         ]
@@ -2744,6 +2763,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_color_hex": agent.get_display_color(),
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_url(),
+            "signup_preview_state": agent.signup_preview_state,
             "pending_human_input_requests": list_pending_human_input_requests(agent),
         }
         return JsonResponse(payload)
@@ -5556,6 +5576,7 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
             {
                 "processing_active": snapshot.active,
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
+                "signup_preview_state": agent.signup_preview_state,
             }
         )
 

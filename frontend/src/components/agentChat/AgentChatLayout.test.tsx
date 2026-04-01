@@ -86,6 +86,12 @@ vi.mock('../common/SubscriptionUpgradePlans', () => ({
   SubscriptionUpgradePlans: () => null,
 }))
 
+vi.mock('./AgentSignupPreviewPanel', () => ({
+  AgentSignupPreviewPanel: ({ status }: { status: string }) => (
+    <div data-testid="signup-preview-panel" data-status={status} />
+  ),
+}))
+
 vi.mock('../common/SubscriptionUpgradeModal', () => ({
   SubscriptionUpgradeModal: ({
     source,
@@ -116,6 +122,8 @@ function buildInitialSubscriptionState() {
     ctaPickAPlan: true,
     ctaContinueAgentBtn: false,
     ctaNoChargeDuringTrial: true,
+    personalSignupPreviewAvailable: false,
+    personalSignupPreviewProcessingAvailable: false,
     trialDaysByPlan: { startup: 7, scale: 7 },
     trialEligible: true,
     ensureAuthenticated: vi.fn(async () => true),
@@ -183,5 +191,21 @@ describe('AgentChatLayout upgrade modal gating', () => {
     await waitFor(() => {
       expect(useSubscriptionStore.getState().isUpgradeModalOpen).toBe(false)
     })
+  })
+
+  it('renders the signup preview panel instead of the composer when requested', () => {
+    render(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        events={[]}
+        showSignupPreviewPanel
+        signupPreviewState="awaiting_signup_completion"
+      />,
+    )
+
+    expect(screen.getByTestId('signup-preview-panel')).toHaveAttribute(
+      'data-status',
+      'awaiting_signup_completion',
+    )
   })
 })

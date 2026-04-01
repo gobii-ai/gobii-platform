@@ -2,6 +2,7 @@ from django.core.exceptions import PermissionDenied
 from django.db.models import QuerySet
 
 from api.models import OrganizationMembership, PersistentAgent, AgentCollaborator
+from api.services.signup_preview import user_can_access_signup_preview_agent
 from console.context_helpers import ConsoleContext, resolve_console_context
 from console.context_overrides import get_context_override
 from console.role_constants import MEMBER_MANAGE_ROLES
@@ -24,6 +25,8 @@ def _is_blocked_personal_owner(
     *,
     allow_delinquent_personal_chat: bool = False,
 ) -> bool:
+    if user_can_access_signup_preview_agent(agent, user):
+        return False
     return bool(
         agent.organization_id is None
         and agent.user_id == user.id
@@ -44,12 +47,14 @@ def agent_queryset_for(
     qs = PersistentAgent.objects.non_eval().alive().select_related("browser_use_agent")
     if context.type == "organization":
         return qs.filter(organization_id=context.id)
-    if not _can_access_personal_agent(
+    access_allowed = _can_access_personal_agent(
         user,
         allow_delinquent_personal_chat=allow_delinquent_personal_chat,
-    ):
-        return qs.none()
-    return qs.filter(user=user, organization__isnull=True)
+    )
+    personal_qs = qs.filter(user=user, organization__isnull=True)
+    if access_allowed:
+        return personal_qs
+    return personal_qs.exclude(signup_preview_state=PersistentAgent.SignupPreviewState.NONE)
 
 def shared_agent_queryset_for(user) -> QuerySet:
     return (

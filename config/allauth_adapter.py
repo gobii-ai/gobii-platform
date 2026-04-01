@@ -20,6 +20,7 @@ from api.services.system_settings import (
     get_account_allow_social_signup,
 )
 from util.onboarding import set_trial_onboarding_requires_plan_selection
+from util.personal_signup_preview import get_personal_signup_preview_signup_redirect_url
 
 try:
     from MailChecker import MailChecker as _MailChecker
@@ -131,6 +132,15 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
             messages.error(request, "Social login is currently disabled.")
             raise ImmediateHttpResponse(HttpResponseRedirect(reverse("account_login")))
         return None
+
+    def get_signup_redirect_url(self, request):
+        preview_redirect_url = get_personal_signup_preview_signup_redirect_url(
+            request,
+            user=request.user,
+        )
+        if preview_redirect_url:
+            return preview_redirect_url
+        return super().get_signup_redirect_url(request)
 
     def get_reset_password_from_key_url(self, key: str) -> str:
         path = reverse("account_reset_password_bridge_start", kwargs={"key": key})

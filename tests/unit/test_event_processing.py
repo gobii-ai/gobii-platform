@@ -18,9 +18,13 @@ import zstandard as zstd
 from allauth.account.models import EmailAddress
 
 from api.agent.core.event_processing import (
+    _execute_prepared_tool_batch,
     _gate_send_chat_tool_for_delivery,
     build_prompt_context,
     _get_completed_process_run_count,
+    _PreparedToolBatch,
+    _PreparedToolExecution,
+    _ToolExecutionOutcome,
     _run_agent_loop,
 )
 from api.agent.core.processing_flags import PendingDrainSettings
@@ -2851,6 +2855,75 @@ class EventProcessingRuntimeGuardTests(TestCase):
             countdown=10,
         )
         self.assertEqual(usage.get("total_tokens"), 0)
+
+    @patch("api.agent.core.event_processing._execute_prepared_tool_call")
+    def test_execute_prepared_tool_batch_stops_after_signup_preview_reply(
+        self,
+        mock_execute_prepared_tool_call,
+    ):
+        first_call = _PreparedToolExecution(
+            idx=0,
+            tool_name="send_chat_message",
+            tool_params={"body": "Preview reply"},
+            exec_params={"body": "Preview reply"},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-1",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:send_chat_message",
+        )
+        second_call = _PreparedToolExecution(
+            idx=1,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "select 1"},
+            exec_params={"sql": "select 1"},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-2",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:sqlite_batch",
+        )
+        prepared_batch = _PreparedToolBatch(
+            prepared_calls=[first_call, second_call],
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=False,
+            parallel_ineligible_reason="unsafe_tool:send_chat_message",
+        )
+
+        def _execute_side_effect(agent, prepared, **_kwargs):
+            if prepared.tool_name == "send_chat_message":
+                PersistentAgent.objects.filter(id=agent.id).update(
+                    signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+                )
+            return _ToolExecutionOutcome(
+                prepared=prepared,
+                result={"status": "ok"},
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            )
+
+        mock_execute_prepared_tool_call.side_effect = _execute_side_effect
+
+        executed_batch = _execute_prepared_tool_batch(
+            self.agent,
+            prepared_batch,
+            budget_ctx=None,
+            eval_run_id=None,
+            tools=[],
+            heartbeat=None,
+            lock_extender=None,
+        )
+
+        self.assertTrue(executed_batch.abort_after_execution)
+        self.assertEqual(mock_execute_prepared_tool_call.call_count, 1)
 
 
 @tag("batch_event_processing")

@@ -36,6 +36,10 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_API_KEYS,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
+from util.personal_signup_preview import (
+    GENERIC_STARTER_CHARTER,
+    SIGNUP_PREVIEW_PROMPT_SUFFIX,
+)
 
 
 @tag("batch_pages")
@@ -1501,6 +1505,32 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_spawn_intent_uses_starter_charter_for_proprietary_personal_preview(self):
+        user = get_user_model().objects.create_user(
+            email="spawn-intent-preview@test.com",
+            password="pw",
+            username="spawn_intent_preview_user",
+        )
+        self.client.force_login(user)
+
+        with (
+            override_flag("personal_agent_signup_starter_charter", active=True),
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+            patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+        ):
+            response = self.client.get(reverse("console_agent_spawn_intent"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            payload.get("charter"),
+            f"{GENERIC_STARTER_CHARTER}\n\n{SIGNUP_PREVIEW_PROMPT_SUFFIX}",
+        )
+        self.assertFalse(payload.get("requires_plan_selection"))
+        self.assertIsNone(payload.get("onboarding_target"))
 
     @tag("batch_pages")
     def test_spawn_intent_restores_onboarding_fields_from_oauth_cookie(self):

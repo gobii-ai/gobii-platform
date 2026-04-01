@@ -1,0 +1,159 @@
+from dataclasses import dataclass
+
+from django.conf import settings
+from django.http import HttpRequest
+
+from constants.feature_flags import (
+    PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT,
+    PERSONAL_AGENT_SIGNUP_PREVIEW_UI,
+    PERSONAL_AGENT_SIGNUP_STARTER_CHARTER,
+)
+from util.onboarding import get_trial_onboarding_state
+from util.trial_enforcement import can_user_use_personal_agents_and_api
+from util.urls import IMMERSIVE_APP_BASE_PATH, append_query_params
+from util.waffle_flags import is_waffle_flag_active
+
+
+GENERIC_STARTER_CHARTER = """
+You are Gobii, a practical AI teammate for a newly signed-up user.
+
+Your job:
+- Introduce yourself briefly and confidently.
+- Help the user get oriented quickly.
+- Ask 2 or 3 concise clarifying questions about the kind of work they want help with.
+- Offer a few concrete examples of useful things you can do next.
+- Keep the first response lightweight, useful, and easy to reply to.
+
+Do not overwhelm the user with a long onboarding speech. Focus on getting them to respond.
+""".strip()
+
+
+SIGNUP_PREVIEW_PROMPT_SUFFIX = """
+
+Signup preview constraints:
+- The user has not completed signup yet and this is a limited preview.
+- You may send only your first helpful reply for now.
+- After that first reply, processing will pause until the user completes signup.
+- Let the user know you can continue once signup is completed.
+""".strip()
+
+
+@dataclass(frozen=True)
+class PersonalSignupPreviewConfig:
+    current_context_is_personal: bool
+    eligible_user: bool
+    starter_charter_flag_enabled: bool
+    ui_flag_enabled: bool
+    processing_limit_flag_enabled: bool
+
+    @property
+    def current_context_is_eligible(self) -> bool:
+        return self.current_context_is_personal and self.eligible_user
+
+    @property
+    def starter_charter_enabled(self) -> bool:
+        return self.current_context_is_eligible and self.starter_charter_flag_enabled
+
+    @property
+    def ui_enabled(self) -> bool:
+        return self.current_context_is_eligible and self.ui_flag_enabled
+
+    @property
+    def processing_limit_enabled(self) -> bool:
+        return self.current_context_is_eligible and self.processing_limit_flag_enabled
+
+    def should_synthesize_starter_charter(
+        self,
+        *,
+        saved_charter: str | None,
+        pending_onboarding: bool,
+    ) -> bool:
+        return bool(
+            self.starter_charter_enabled
+            and not (saved_charter or "").strip()
+            and not pending_onboarding
+        )
+
+
+def is_personal_signup_preview_feature_enabled(
+    flag_name: str,
+    request: HttpRequest | None = None,
+) -> bool:
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return False
+    return is_waffle_flag_active(flag_name, request, default=False)
+
+
+def is_personal_signup_starter_charter_enabled(request: HttpRequest | None = None) -> bool:
+    return is_personal_signup_preview_feature_enabled(
+        PERSONAL_AGENT_SIGNUP_STARTER_CHARTER,
+        request,
+    )
+
+
+def is_personal_signup_preview_ui_enabled(request: HttpRequest | None = None) -> bool:
+    return is_personal_signup_preview_feature_enabled(
+        PERSONAL_AGENT_SIGNUP_PREVIEW_UI,
+        request,
+    )
+
+
+def is_personal_signup_preview_processing_limit_enabled(
+    request: HttpRequest | None = None,
+) -> bool:
+    return is_personal_signup_preview_feature_enabled(
+        PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT,
+        request,
+    )
+
+
+def can_use_personal_signup_preview(user) -> bool:
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return False
+    if not user or not getattr(user, "pk", None):
+        return False
+    return not can_user_use_personal_agents_and_api(user)
+
+
+def resolve_personal_signup_preview(
+    user,
+    *,
+    request: HttpRequest | None = None,
+    current_context_type: str | None = None,
+) -> PersonalSignupPreviewConfig:
+    return PersonalSignupPreviewConfig(
+        current_context_is_personal=current_context_type == "personal",
+        eligible_user=can_use_personal_signup_preview(user),
+        starter_charter_flag_enabled=is_personal_signup_starter_charter_enabled(request),
+        ui_flag_enabled=is_personal_signup_preview_ui_enabled(request),
+        processing_limit_flag_enabled=is_personal_signup_preview_processing_limit_enabled(request),
+    )
+
+
+def build_personal_signup_starter_charter(*, include_preview_limit: bool) -> str:
+    if include_preview_limit:
+        return f"{GENERIC_STARTER_CHARTER}\n\n{SIGNUP_PREVIEW_PROMPT_SUFFIX}"
+    return GENERIC_STARTER_CHARTER
+
+
+def get_personal_signup_preview_signup_redirect_url(
+    request: HttpRequest,
+    *,
+    user,
+) -> str | None:
+    preview_config = resolve_personal_signup_preview(
+        user,
+        request=request,
+        current_context_type="personal",
+    )
+    pending_onboarding, _, _ = get_trial_onboarding_state(request)
+    saved_charter = request.session.get("agent_charter")
+    if not preview_config.should_synthesize_starter_charter(
+        saved_charter=saved_charter,
+        pending_onboarding=pending_onboarding,
+    ):
+        return None
+    return append_query_params(
+        f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+        {"spawn": "1"},
+    )

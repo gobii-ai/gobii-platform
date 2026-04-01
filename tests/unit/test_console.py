@@ -821,6 +821,62 @@ class ConsoleViewsTest(TestCase):
         payload = response.json()
         self.assertFalse(payload.get("trial_eligible"))
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_console_agents")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
+    @patch("console.views.get_stripe_settings")
+    @patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False)
+    def test_user_plan_api_includes_signup_preview_flag_state(
+        self,
+        _mock_preview_allowed,
+        mock_get_stripe_settings,
+        _mock_trial_eligible,
+    ):
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="personal_agent_signup_preview_ui",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        Flag.objects.update_or_create(
+            name="personal_agent_signup_preview_processing_limit",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        Flag.objects.update_or_create(
+            name="personal_agent_signup_starter_charter",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=14,
+            scale_trial_days=30,
+        )
+
+        response = self.client.get(reverse("get_user_plan"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload.get("personal_signup_preview_available"))
+        self.assertTrue(payload.get("personal_signup_preview_processing_available"))
+        self.assertTrue(payload.get("personal_signup_starter_charter_enabled"))
+
     @tag("batch_console_agents")
     @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
     def test_checkout_trial_eligibility_bypasses_service_when_enforcement_flag_disabled(
@@ -957,6 +1013,69 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-cta-start-free-trial="true"')
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_console_agents")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
+    @patch("console.views.get_stripe_settings")
+    @patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False)
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    def test_agent_chat_shell_exposes_signup_preview_data_attributes(
+        self,
+        _mock_personal_chat_access,
+        _mock_preview_allowed,
+        mock_get_stripe_settings,
+        _mock_trial_eligible,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="personal_agent_signup_preview_ui",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        Flag.objects.update_or_create(
+            name="personal_agent_signup_preview_processing_limit",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=9,
+            scale_trial_days=18,
+        )
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Signup Preview Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Signup Preview Agent",
+            charter="Signup preview charter",
+            browser_use_agent=browser_agent,
+            signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-personal-signup-preview-available="true"')
+        self.assertContains(response, 'data-personal-signup-preview-processing-available="true"')
+        self.assertContains(
+            response,
+            'data-agent-signup-preview-state="awaiting_signup_completion"',
+        )
 
     @tag("batch_console_agents")
     @patch("console.views.get_stripe_settings")

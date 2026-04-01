@@ -39,6 +39,7 @@ const {
     agentColorHex: null,
     agentName: null,
     agentAvatarUrl: null,
+    signupPreviewState: 'none',
     hasUnseenActivity: false,
     processingActive: false,
     processingStartedAt: null,
@@ -316,6 +317,8 @@ function buildInitialSubscriptionState() {
     ctaPickAPlan: true,
     ctaContinueAgentBtn: false,
     ctaNoChargeDuringTrial: true,
+    personalSignupPreviewAvailable: false,
+    personalSignupPreviewProcessingAvailable: false,
     trialDaysByPlan: { startup: 14, scale: 14 },
     trialEligible: true,
     ensureAuthenticated: ensureAuthenticatedMock,
@@ -377,6 +380,34 @@ describe('AgentChatPage trial onboarding', () => {
         'standard',
         null,
         ['slack'],
+      )
+    })
+    expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()
+  })
+
+  it('keeps the pricing modal closed during signup preview auto-submit', async () => {
+    useSubscriptionStore.setState({
+      ...buildInitialSubscriptionState(),
+      personalSignupPreviewAvailable: true,
+      personalSignupPreviewProcessingAvailable: true,
+    })
+    fetchAgentSpawnIntentMock.mockResolvedValue({
+      charter: 'Help me get started',
+      charter_override: null,
+      preferred_llm_tier: null,
+      selected_pipedream_app_slugs: [],
+      onboarding_target: null,
+      requires_plan_selection: false,
+    })
+
+    renderAgentChatPage()
+
+    await waitFor(() => {
+      expect(createAgentMock).toHaveBeenCalledWith(
+        'Help me get started',
+        'standard',
+        null,
+        [],
       )
     })
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()

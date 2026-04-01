@@ -5,6 +5,7 @@ import type {
   ProcessingSnapshot,
   TimelineEvent,
 } from '../types/agentChat'
+import type { SignupPreviewState } from '../types/agentRoster'
 import type { InsightsResponse } from '../types/insight'
 import { jsonFetch } from './http'
 
@@ -31,6 +32,7 @@ export type TimelineResponse = {
   agent_color_hex?: string | null
   agent_name?: string | null
   agent_avatar_url?: string | null
+  signup_preview_state?: SignupPreviewState | null
   pending_human_input_requests?: PendingHumanInputRequest[]
 }
 
@@ -266,6 +268,7 @@ export async function respondToHumanInputRequestsBatch(
 export type ProcessingStatusResponse = {
   processing_active: boolean
   processing_snapshot?: ProcessingSnapshot
+  signup_preview_state?: SignupPreviewState | null
 }
 
 export async function fetchProcessingStatus(agentId: string): Promise<ProcessingStatusResponse> {

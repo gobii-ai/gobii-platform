@@ -174,6 +174,33 @@ class AgentChatAccessTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    @patch("console.views.process_agent_events_task.delay")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    def test_chat_shell_resumes_signup_preview_agent_after_plan_completion(
+        self,
+        _mock_personal_chat_access,
+        _mock_personal_access,
+        mock_process_delay,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(
+                reverse("agent_chat_shell", kwargs={"pk": self.personal_agent.id})
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.personal_agent.refresh_from_db()
+        self.assertEqual(
+            self.personal_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.NONE,
+        )
+        mock_process_delay.assert_called_once_with(str(self.personal_agent.id))
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     @patch("util.trial_enforcement.get_active_subscription", return_value=None)
     def test_resolve_agent_allows_personal_owner_with_past_due_subscription_outside_current_context(
@@ -223,6 +250,49 @@ class AgentChatAccessTests(TestCase):
         self.assertFalse(billing_status.get("delinquent"))
         self.assertFalse(billing_status.get("actionable"))
         self.assertIsNone(billing_status.get("reason"))
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_resolve_agent_allows_active_signup_preview_agent_without_plan(self):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        agent = resolve_agent(
+            self.user,
+            self.client.session,
+            str(self.personal_agent.id),
+            allow_delinquent_personal_chat=True,
+        )
+
+        self.assertEqual(agent.id, self.personal_agent.id)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_roster_includes_active_signup_preview_agent_without_plan(self):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        roster_ids = {entry["id"] for entry in payload.get("agents", [])}
+        self.assertIn(str(self.personal_agent.id), roster_ids)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_timeline_allows_active_signup_preview_agent_without_plan(self):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        response = self.client.get(
+            reverse("console_agent_timeline", kwargs={"agent_id": self.personal_agent.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
 
     @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
     def test_chat_access_ignores_historical_past_due_subscription(self, _mock_normal_access):

@@ -42,7 +42,7 @@ import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
-import type { AgentRosterEntry, AgentRosterSortMode } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, SignupPreviewState } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
@@ -452,6 +452,13 @@ type AgentSwitchMeta = {
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
   processingActive?: boolean
+  signupPreviewState?: SignupPreviewState | null
+}
+
+function normalizeSignupPreviewState(value: unknown): SignupPreviewState {
+  return value === 'awaiting_first_reply_pause' || value === 'awaiting_signup_completion'
+    ? value
+    : 'none'
 }
 
 function deriveConnectionIndicator({
@@ -691,6 +698,7 @@ export function AgentChatPage({
     ensureAuthenticated,
     upgradeModalSource,
     openUpgradeModal,
+    personalSignupPreviewAvailable,
   } = useSubscriptionStore()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
@@ -777,12 +785,14 @@ export function AgentChatPage({
       : null
     const name = initialPageResponse.agent_name ?? null
     const avatar = initialPageResponse.agent_avatar_url ?? null
-    if (color || name || avatar) {
+    const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
+    if (color || name || avatar || signupPreviewState !== 'none') {
       store.updateAgentIdentity({
         agentId: activeAgentId,
         ...(color ? { agentColorHex: color } : {}),
         ...(name ? { agentName: name } : {}),
         ...(avatar ? { agentAvatarUrl: avatar } : {}),
+        signupPreviewState,
       })
     }
   }, [initialPageResponse, activeAgentId])
@@ -793,6 +803,7 @@ export function AgentChatPage({
   const agentColorHex = useAgentChatStore((state) => state.agentColorHex)
   const storedAgentName = useAgentChatStore((state) => state.agentName)
   const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
+  const signupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
   const sendMessage = useAgentChatStore((state) => state.sendMessage)
   const receiveRealtimeEvent = useAgentChatStore((state) => state.receiveRealtimeEvent)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
@@ -997,7 +1008,16 @@ export function AgentChatPage({
       const hasShortDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'short_description')
       const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
       const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
-      if (!hasName && !hasColor && !hasAvatar && !hasShortDescription && !hasMiniDescription && !hasProcessingActive) {
+      const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(rawPayload, 'signup_preview_state')
+      if (
+        !hasName
+        && !hasColor
+        && !hasAvatar
+        && !hasShortDescription
+        && !hasMiniDescription
+        && !hasProcessingActive
+        && !hasSignupPreviewState
+      ) {
         return
       }
       if (hasAvatar) {
@@ -1069,6 +1089,13 @@ export function AgentChatPage({
               const nextProcessingActive = Boolean(rawPayload.processing_active)
               if (nextProcessingActive !== next.processingActive) {
                 next.processingActive = nextProcessingActive
+                changed = true
+              }
+            }
+            if (hasSignupPreviewState) {
+              const nextSignupPreviewState = normalizeSignupPreviewState(rawPayload.signup_preview_state)
+              if (nextSignupPreviewState !== (next.signupPreviewState ?? 'none')) {
+                next.signupPreviewState = nextSignupPreviewState
                 changed = true
               }
             }
@@ -1397,29 +1424,6 @@ export function AgentChatPage({
   useEffect(() => {
     setCollaboratorInviteOpen(false)
   }, [activeAgentId])
-
-  useEffect(() => {
-    if (!agentContextReady) return
-    if (!activeAgentId) return
-    const pendingMeta = pendingAgentMetaRef.current
-    const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
-    pendingAgentMetaRef.current = null
-    setAgentId(activeAgentId, {
-      agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
-      agentName: resolvedPendingMeta?.agentName ?? agentName,
-      agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
-      processingActive: resolvedPendingMeta?.processingActive,
-    })
-    void fetchInsights()
-  }, [
-    activeAgentId,
-    agentAvatarUrl,
-    agentColor,
-    agentName,
-    fetchInsights,
-    setAgentId,
-    agentContextReady,
-  ])
 
   // IntersectionObserver-based bottom detection - simpler and more reliable than scroll math
   const bottomSentinelRef = useRef<HTMLElement | null>(null)
@@ -1883,6 +1887,31 @@ export function AgentChatPage({
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
   )
+  useEffect(() => {
+    if (!agentContextReady) return
+    if (!activeAgentId) return
+    const pendingMeta = pendingAgentMetaRef.current
+    const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
+    const activeRosterSignupPreviewState = activeRosterMeta?.signupPreviewState ?? 'none'
+    pendingAgentMetaRef.current = null
+    setAgentId(activeAgentId, {
+      agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
+      agentName: resolvedPendingMeta?.agentName ?? agentName,
+      agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
+      processingActive: resolvedPendingMeta?.processingActive,
+      signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
+    })
+    void fetchInsights()
+  }, [
+    activeAgentId,
+    activeRosterMeta?.signupPreviewState,
+    agentAvatarUrl,
+    agentColor,
+    agentName,
+    fetchInsights,
+    setAgentId,
+    agentContextReady,
+  ])
   const storeAgentName = isStoreSynced ? storedAgentName : null
   const storeResolvedAvatarUrl = isStoreSynced ? storedAgentAvatarUrl : null
   const storeAgentColor = isStoreSynced ? agentColorHex : null
@@ -1896,6 +1925,12 @@ export function AgentChatPage({
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
+  const showSignupPreviewPanel = (
+    !isNewAgent
+    && !resolvedIsOrgOwned
+    && personalSignupPreviewAvailable
+    && signupPreviewState !== 'none'
+  )
   const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
   useEffect(() => {
     if (!activeAgentId || !activeRosterMeta?.email) {
@@ -2404,7 +2439,9 @@ export function AgentChatPage({
       currentContextBillingStatus.reason,
       currentContextBillingStatus.actionable,
     )
-    : null
+    : personalSignupPreviewAvailable
+      ? 'Finish signup to create another agent. Your preview can continue once you start a plan.'
+      : null
 
   const handleSelectAgent = useCallback(
     (agent: AgentRosterEntry) => {
@@ -2417,6 +2454,7 @@ export function AgentChatPage({
         agentColorHex: agent.displayColorHex,
         agentAvatarUrl: agent.avatarUrl,
         processingActive: agent.processingActive,
+        signupPreviewState: agent.signupPreviewState ?? 'none',
       }
       setSwitchingAgentId(agent.id)
       setActiveAgentId(agent.id)
@@ -2523,10 +2561,12 @@ export function AgentChatPage({
           miniDescription: '',
           shortDescription: '',
           email: createdAgentEmail,
+          signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
         }
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
           agentName: createdAgentName,
+          signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
         }
         trackPendingAvatarRefresh(result.agent_id)
         if (createdAgentEmail) {
@@ -2568,6 +2608,7 @@ export function AgentChatPage({
       isProprietaryMode,
       onAgentCreated,
       openUpgradeModal,
+      personalSignupPreviewAvailable,
       queryClient,
       setPendingAgentEmails,
       trackPendingAvatarRefresh,
@@ -2836,6 +2877,7 @@ export function AgentChatPage({
       !isNewAgent
       || !createAgentDisabledReason
       || requiresTrialPlanSelection
+      || personalSignupPreviewAvailable
       || typeof window === 'undefined'
     ) {
       return
@@ -2846,7 +2888,7 @@ export function AgentChatPage({
     const selectionUrl = `/app/agents${window.location.search}${window.location.hash}`
     window.history.replaceState({}, '', selectionUrl)
     window.dispatchEvent(new PopStateEvent('popstate'))
-  }, [createAgentDisabledReason, isNewAgent, requiresTrialPlanSelection])
+  }, [createAgentDisabledReason, isNewAgent, personalSignupPreviewAvailable, requiresTrialPlanSelection])
 
   const closeGate = useCallback(() => {
     pendingCreateRef.current = null
@@ -3314,10 +3356,13 @@ export function AgentChatPage({
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
+        onUpgrade={handleUpgrade}
         composerError={sendMessageError ?? createAgentError?.message ?? null}
         composerErrorShowUpgrade={sendMessageError ? false : Boolean(createAgentError?.showUpgradeCta)}
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
+        showSignupPreviewPanel={showSignupPreviewPanel}
+        signupPreviewState={signupPreviewState}
         maxAttachmentBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
@@ -3354,7 +3399,6 @@ export function AgentChatPage({
         onInsightIndexChange={setCurrentInsightIndex}
         onPauseChange={setInsightsPaused}
         isInsightsPaused={insightsPaused}
-        onUpgrade={handleUpgrade}
         llmIntelligence={llmIntelligence}
         currentLlmTier={resolvedIntelligenceTier}
         onLlmTierChange={handleIntelligenceChange}

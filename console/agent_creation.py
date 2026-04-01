@@ -34,6 +34,7 @@ from api.services.persistent_agents import (
     PersistentAgentProvisioningService,
     ensure_default_agent_email_endpoint,
 )
+from api.services.signup_preview import get_signup_preview_creation_state
 from api.pipedream_app_utils import normalize_app_slugs
 from api.services.pipedream_apps import get_owner_selected_app_slugs, set_owner_selected_app_slugs
 from console.context_helpers import build_console_context
@@ -41,6 +42,9 @@ from marketing_events.custom_events import ConfiguredCustomEvent, emit_configure
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import clear_trial_onboarding_intent
+from util.personal_signup_preview import (
+    resolve_personal_signup_preview,
+)
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import get_owner_plan
 from util.trial_enforcement import (
@@ -134,6 +138,11 @@ def create_persistent_agent_from_charter(
     selected_template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
 
     resolved_context = build_console_context(request)
+    preview_config = resolve_personal_signup_preview(
+        request.user,
+        request=request,
+        current_context_type=resolved_context.current_context.type,
+    )
     organization = None
     if resolved_context.current_context.type == "organization":
         membership = resolved_context.current_membership
@@ -167,7 +176,11 @@ def create_persistent_agent_from_charter(
             raise ValidationError(message_text)
 
     if organization is None and not can_user_use_personal_agents_and_api(request.user):
-        raise TrialRequiredValidationError(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
+        preview_creation_allowed = preview_config.processing_limit_enabled
+        if not preview_creation_allowed:
+            raise TrialRequiredValidationError(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
+    else:
+        preview_creation_allowed = False
 
     if email_enabled and not contact_email:
         raise ValidationError("Please provide an email address for agent contact.")
@@ -206,6 +219,7 @@ def create_persistent_agent_from_charter(
                 template_code=template_code,
                 charter=charter_text,
                 preferred_llm_tier=preferred_llm_tier,
+                signup_preview_state=get_signup_preview_creation_state(preview_creation_allowed),
             )
         except PersistentAgentProvisioningError as exc:
             error_payload = exc.args[0] if exc.args else "Unable to create agent."

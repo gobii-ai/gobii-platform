@@ -14,6 +14,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
+from waffle.testutils import override_flag
 
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
@@ -236,6 +237,51 @@ class AgentChatAPITests(TestCase):
             TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
         self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
+    )
+    @tag("batch_agent_chat")
+    def test_quick_create_allows_signup_preview_creation_when_processing_limit_flag_enabled(self):
+        with (
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+            patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
+            patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+        ):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps({"message": "Create from immersive app"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertEqual(
+            created_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
+        )
+
+    @tag("batch_agent_chat")
+    def test_first_outbound_message_transitions_signup_preview_to_completion_wait(self):
+        self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        self.agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                is_outbound=True,
+                from_endpoint=self.agent_endpoint,
+                conversation=self.conversation,
+                body="Here's the first preview reply.",
+                owner_agent=self.agent,
+            )
+
+        self.agent.refresh_from_db()
+        self.assertEqual(
+            self.agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
 
     @tag("batch_agent_chat")
     def test_quick_create_ignores_unsupported_tier_selection(self):
