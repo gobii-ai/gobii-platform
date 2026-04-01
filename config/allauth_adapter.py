@@ -20,7 +20,10 @@ from api.services.system_settings import (
     get_account_allow_social_signup,
 )
 from util.onboarding import set_trial_onboarding_requires_plan_selection
-from util.personal_signup_preview import get_personal_signup_preview_signup_redirect_url
+from util.personal_signup_preview import (
+    get_personal_signup_preview_signup_redirect_url,
+    resolve_personal_signup_preview,
+)
 
 try:
     from MailChecker import MailChecker as _MailChecker
@@ -116,9 +119,14 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
             return response
 
         if signup:
+            preview_config = resolve_personal_signup_preview(
+                user,
+                request=request,
+                current_context_type="personal",
+            )
             set_trial_onboarding_requires_plan_selection(
                 request,
-                required=True,
+                required=not preview_config.modal_override_enabled,
             )
 
         if signup:

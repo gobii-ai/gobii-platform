@@ -234,6 +234,42 @@ class TrialOnboardingAdapterTests(TestCase):
         self.assertTrue(request.session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
     @tag("batch_email_blocklist")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False)
+    def test_pre_login_keeps_plan_selection_false_for_signup_preview_flow(
+        self,
+        _mock_can_user_use_personal_agents_and_api,
+    ) -> None:
+        adapter = GobiiAccountAdapter()
+        request = self._build_request()
+        request.session[TRIAL_ONBOARDING_PENDING_SESSION_KEY] = True
+        request.session[TRIAL_ONBOARDING_TARGET_SESSION_KEY] = TRIAL_ONBOARDING_TARGET_AGENT_UI
+        request.session[TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY] = False
+        request.session.save()
+
+        user = get_user_model().objects.create_user(
+            email="signup-preview-flow@test.com",
+            username="signup_preview_flow_user",
+            password="pw",
+        )
+
+        with (
+            override_flag("personal_agent_signup_preview_ui", active=True),
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+        ):
+            adapter.pre_login(
+                request,
+                user,
+                email_verification=None,
+                signal_kwargs={},
+                email=user.email,
+                signup=True,
+                redirect_url=None,
+            )
+
+        self.assertFalse(request.session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
+
+    @tag("batch_email_blocklist")
     def test_pre_login_keeps_plan_selection_false_for_existing_login(self) -> None:
         adapter = GobiiAccountAdapter()
         request = self._build_request()

@@ -373,6 +373,10 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             pending_onboarding=pending_onboarding,
         ):
             saved_charter = build_personal_signup_starter_charter()
+        if preview_config.modal_override_enabled:
+            pending_onboarding = False
+            onboarding_target = None
+            requires_plan_selection = False
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:

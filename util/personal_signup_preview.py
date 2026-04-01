@@ -62,6 +62,10 @@ class PersonalSignupPreviewConfig:
     def processing_limit_enabled(self) -> bool:
         return self.current_context_is_eligible and self.processing_limit_flag_enabled
 
+    @property
+    def modal_override_enabled(self) -> bool:
+        return self.ui_enabled and self.processing_limit_enabled
+
     def should_synthesize_starter_charter(
         self,
         *,
