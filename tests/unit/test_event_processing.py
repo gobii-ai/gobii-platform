@@ -994,7 +994,17 @@ class PromptContextBuilderTests(TestCase):
 
         system_message = next((m for m in context if m['role'] == 'system'), None)
         self.assertIsNotNone(system_message)
-        self.assertNotIn("Implied Send", system_message['content'])
+        content = system_message['content']
+        self.assertNotIn("Implied Send", content)
+        self.assertNotIn("send_<channel>", content)
+        self.assertIn(
+            "Text-only replies are not delivered when implied send is unavailable",
+            content,
+        )
+        self.assertNotIn(
+            "Text-only replies are not delivered without an active web chat session",
+            content,
+        )
 
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""

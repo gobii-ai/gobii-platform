@@ -3876,16 +3876,18 @@ def _get_system_instruction(
         tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** "
         stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
-    # Comprehensive examples showing stop vs continue, charter/schedule updates
-    # Key: be eager to update charter and schedule whenever user hints at preferences or timing
-    # reply() = implicit send (active web chat) or explicit send_email/send_chat_message (no active chat)
-    reply = "'Message'" if implied_send_active else "send_email('Message')"
-    reply_short = "reply" if implied_send_active else "send_email(reply)"
+    # Comprehensive examples showing stop vs continue, charter/schedule updates.
+    # Keep explicit-send examples channel-agnostic when implied send is unavailable.
+    reply = (
+        "'Message'"
+        if implied_send_active
+        else "use the right explicit send tool (`send_chat_message`, `send_email`, `send_sms`, or `send_agent_message`) with 'Message'"
+    )
     fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
     text_only_guidance = (
         "- Text-only replies stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n\n"
         if implied_send_active
-        else "- Text-only replies are not delivered without an active web chat session—use explicit send tools.\n\n"
+        else "- Text-only replies are not delivered when implied send is unavailable—use explicit send tools.\n\n"
     )
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
