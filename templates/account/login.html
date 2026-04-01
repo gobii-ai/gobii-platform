@@ -113,6 +113,7 @@
               const statusMessage = loginForm?.querySelector('[data-turnstile-status]');
               const widget = loginForm?.querySelector('.cf-turnstile');
               const tokenInput = () => loginForm?.querySelector('[name="cf-turnstile-response"]');
+              let submitPending = false;
 
               const setSubmitEnabled = (enabled) => {
                 if (!submitButton) {
@@ -137,6 +138,14 @@
                 return Boolean(token && token.trim());
               };
 
+              const submitWhenReady = () => {
+                if (!submitPending || !loginForm || !hasFreshToken()) {
+                  return;
+                }
+                submitPending = false;
+                loginForm.requestSubmit(submitButton || undefined);
+              };
+
               const resetWidget = () => {
                 if (!widget || !window.turnstile?.reset) {
                   return;
@@ -147,15 +156,18 @@
               window.gobiiLoginTurnstileSuccess = () => {
                 setSubmitEnabled(true);
                 setStatusMessage('');
+                submitWhenReady();
               };
 
               window.gobiiLoginTurnstileExpired = () => {
+                submitPending = false;
                 setSubmitEnabled(false);
                 setStatusMessage('Verification expired. Please try again.');
                 resetWidget();
               };
 
               window.gobiiLoginTurnstileError = () => {
+                submitPending = false;
                 setSubmitEnabled(false);
                 setStatusMessage('Verification failed. Please try again.');
                 resetWidget();
@@ -166,8 +178,9 @@
                   return;
                 }
                 event.preventDefault();
+                submitPending = true;
                 setSubmitEnabled(false);
-                setStatusMessage('Please complete verification before signing in.');
+                setStatusMessage('Completing verification...');
               });
 
               setSubmitEnabled(false);
