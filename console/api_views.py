@@ -120,13 +120,13 @@ from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
-    get_trial_onboarding_state,
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
 from util.personal_signup_preview import (
     build_personal_signup_starter_charter,
     resolve_personal_signup_preview,
+    resolve_personal_signup_preview_onboarding_state,
 )
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
@@ -360,7 +360,6 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
         if "agent_charter" not in request.session:
             restored_cookie = restore_oauth_session_state(request, overwrite_existing=False)
 
-        pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
         resolved_context = build_console_context(request)
         saved_charter = request.session.get("agent_charter")
         preview_config = resolve_personal_signup_preview(
@@ -368,15 +367,15 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             request=request,
             current_context_type=resolved_context.current_context.type,
         )
+        onboarding_state = resolve_personal_signup_preview_onboarding_state(
+            request,
+            preview_config=preview_config,
+        )
         if preview_config.should_synthesize_starter_charter(
             saved_charter=saved_charter,
-            pending_onboarding=pending_onboarding,
+            pending_onboarding=onboarding_state.pending,
         ):
             saved_charter = build_personal_signup_starter_charter()
-        if preview_config.modal_override_enabled:
-            pending_onboarding = False
-            onboarding_target = None
-            requires_plan_selection = False
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:
@@ -391,8 +390,10 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
                 AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
             )
             or [],
-            "onboarding_target": onboarding_target if pending_onboarding else None,
-            "requires_plan_selection": bool(pending_onboarding and requires_plan_selection),
+            "onboarding_target": onboarding_state.target if onboarding_state.pending else None,
+            "requires_plan_selection": bool(
+                onboarding_state.pending and onboarding_state.requires_plan_selection
+            ),
         }
         response = JsonResponse(payload)
         if restored_cookie:

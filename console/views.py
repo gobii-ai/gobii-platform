@@ -2169,7 +2169,6 @@ def get_user_plan_api(request):
     preview_config = _get_personal_signup_preview_config(request, resolved_context=resolved_context)
     personal_signup_preview_available = preview_config.ui_enabled
     personal_signup_preview_processing_available = preview_config.processing_limit_enabled
-    personal_signup_starter_charter_enabled = preview_config.starter_charter_enabled
 
     try:
         plan = reconcile_user_plan_from_stripe(request.user)
@@ -2194,7 +2193,6 @@ def get_user_plan_api(request):
             'cta_no_charge_during_trial': cta_no_charge_during_trial,
             'personal_signup_preview_available': personal_signup_preview_available,
             'personal_signup_preview_processing_available': personal_signup_preview_processing_available,
-            'personal_signup_starter_charter_enabled': personal_signup_starter_charter_enabled,
         })
     except Exception as e:
         return JsonResponse({
@@ -2211,7 +2209,6 @@ def get_user_plan_api(request):
             'cta_no_charge_during_trial': cta_no_charge_during_trial,
             'personal_signup_preview_available': personal_signup_preview_available,
             'personal_signup_preview_processing_available': personal_signup_preview_processing_available,
-            'personal_signup_starter_charter_enabled': personal_signup_starter_charter_enabled,
             'error': str(e),
         })
 

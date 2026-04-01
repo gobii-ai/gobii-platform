@@ -126,7 +126,7 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
             )
             set_trial_onboarding_requires_plan_selection(
                 request,
-                required=not preview_config.modal_override_enabled,
+                required=not preview_config.suppresses_legacy_plan_modal,
             )
 
         if signup:

@@ -8,7 +8,7 @@ from constants.feature_flags import (
     PERSONAL_AGENT_SIGNUP_PREVIEW_UI,
     PERSONAL_AGENT_SIGNUP_STARTER_CHARTER,
 )
-from util.onboarding import get_trial_onboarding_state
+from util.onboarding import clear_trial_onboarding_intent, get_trial_onboarding_state
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from util.urls import IMMERSIVE_APP_BASE_PATH, append_query_params
 from util.waffle_flags import is_waffle_flag_active
@@ -63,7 +63,7 @@ class PersonalSignupPreviewConfig:
         return self.current_context_is_eligible and self.processing_limit_flag_enabled
 
     @property
-    def modal_override_enabled(self) -> bool:
+    def suppresses_legacy_plan_modal(self) -> bool:
         return self.ui_enabled and self.processing_limit_enabled
 
     def should_synthesize_starter_charter(
@@ -77,6 +77,13 @@ class PersonalSignupPreviewConfig:
             and not (saved_charter or "").strip()
             and not pending_onboarding
         )
+
+
+@dataclass(frozen=True)
+class PersonalSignupPreviewOnboardingState:
+    pending: bool
+    target: str | None
+    requires_plan_selection: bool
 
 
 def is_personal_signup_preview_feature_enabled(
@@ -138,6 +145,26 @@ def build_personal_signup_starter_charter() -> str:
     return GENERIC_STARTER_CHARTER
 
 
+def resolve_personal_signup_preview_onboarding_state(
+    request: HttpRequest,
+    *,
+    preview_config: PersonalSignupPreviewConfig,
+) -> PersonalSignupPreviewOnboardingState:
+    pending, target, requires_plan_selection = get_trial_onboarding_state(request)
+    if preview_config.suppresses_legacy_plan_modal:
+        clear_trial_onboarding_intent(request)
+        return PersonalSignupPreviewOnboardingState(
+            pending=False,
+            target=None,
+            requires_plan_selection=False,
+        )
+    return PersonalSignupPreviewOnboardingState(
+        pending=pending,
+        target=target,
+        requires_plan_selection=requires_plan_selection,
+    )
+
+
 def get_personal_signup_preview_signup_redirect_url(
     request: HttpRequest,
     *,
@@ -148,11 +175,14 @@ def get_personal_signup_preview_signup_redirect_url(
         request=request,
         current_context_type="personal",
     )
-    pending_onboarding, _, _ = get_trial_onboarding_state(request)
+    onboarding_state = resolve_personal_signup_preview_onboarding_state(
+        request,
+        preview_config=preview_config,
+    )
     saved_charter = request.session.get("agent_charter")
     if not preview_config.should_synthesize_starter_charter(
         saved_charter=saved_charter,
-        pending_onboarding=pending_onboarding,
+        pending_onboarding=onboarding_state.pending,
     ):
         return None
     return append_query_params(

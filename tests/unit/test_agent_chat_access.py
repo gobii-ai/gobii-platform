@@ -286,9 +286,9 @@ class AgentChatAccessTests(TestCase):
             "api.services.signup_preview.can_user_use_personal_agents_and_api",
             side_effect=_can_use,
         ):
-            resumed = resume_signup_preview_agent_if_eligible(self.personal_agent, self.user)
+            result = resume_signup_preview_agent_if_eligible(self.personal_agent, self.user)
 
-        self.assertTrue(resumed)
+        self.assertTrue(result.includes(self.personal_agent))
         mock_reconcile_user_plan.assert_called_once_with(self.user)
         self.personal_agent.refresh_from_db()
         self.assertEqual(
@@ -311,9 +311,10 @@ class AgentChatAccessTests(TestCase):
         self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
 
         with self.captureOnCommitCallbacks(execute=True):
-            resumed_ids = resume_signup_preview_agents_for_user_if_eligible(self.user)
+            result = resume_signup_preview_agents_for_user_if_eligible(self.user)
 
-        self.assertEqual(resumed_ids, [str(self.personal_agent.id)])
+        self.assertEqual(result.resumed_agent_ids, (str(self.personal_agent.id),))
+        self.assertEqual(result.requeued_agent_ids, ())
         self.personal_agent.refresh_from_db()
         self.assertEqual(
             self.personal_agent.signup_preview_state,
@@ -337,9 +338,10 @@ class AgentChatAccessTests(TestCase):
         self._seed_signup_preview_followup_messages(self.personal_agent)
 
         with self.captureOnCommitCallbacks(execute=True):
-            resumed_ids = resume_signup_preview_agents_for_user_if_eligible(self.user)
+            result = resume_signup_preview_agents_for_user_if_eligible(self.user)
 
-        self.assertEqual(resumed_ids, [str(self.personal_agent.id)])
+        self.assertEqual(result.resumed_agent_ids, (str(self.personal_agent.id),))
+        self.assertEqual(result.requeued_agent_ids, (str(self.personal_agent.id),))
         self.personal_agent.refresh_from_db()
         self.assertEqual(
             self.personal_agent.signup_preview_state,

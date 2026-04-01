@@ -854,16 +854,6 @@ class ConsoleViewsTest(TestCase):
                 "authenticated": False,
             },
         )
-        Flag.objects.update_or_create(
-            name="personal_agent_signup_starter_charter",
-            defaults={
-                "everyone": True,
-                "percent": 0,
-                "superusers": False,
-                "staff": False,
-                "authenticated": False,
-            },
-        )
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=14,
             scale_trial_days=30,
@@ -875,7 +865,7 @@ class ConsoleViewsTest(TestCase):
         payload = response.json()
         self.assertTrue(payload.get("personal_signup_preview_available"))
         self.assertTrue(payload.get("personal_signup_preview_processing_available"))
-        self.assertTrue(payload.get("personal_signup_starter_charter_enabled"))
+        self.assertNotIn("personal_signup_starter_charter_enabled", payload)
 
     @tag("batch_console_agents")
     @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))

@@ -1560,6 +1560,10 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertEqual(payload.get("charter"), "Draft charter")
         self.assertFalse(payload.get("requires_plan_selection"))
         self.assertIsNone(payload.get("onboarding_target"))
+        session = self.client.session
+        self.assertNotIn(TRIAL_ONBOARDING_PENDING_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_TARGET_SESSION_KEY, session)
+        self.assertNotIn(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, session)
 
     @tag("batch_pages")
     def test_spawn_intent_restores_onboarding_fields_from_oauth_cookie(self):

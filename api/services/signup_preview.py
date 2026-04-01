@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from django.db import transaction
 
 from api.models import PersistentAgent, PersistentAgentMessage
@@ -11,6 +13,21 @@ ACTIVE_SIGNUP_PREVIEW_STATES = frozenset(
         PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
     }
 )
+
+
+@dataclass(frozen=True)
+class SignupPreviewResumeResult:
+    resumed_agent_ids: tuple[str, ...] = ()
+    requeued_agent_ids: tuple[str, ...] = ()
+
+    @property
+    def resumed_any(self) -> bool:
+        return bool(self.resumed_agent_ids)
+
+    def includes(self, agent: PersistentAgent | None) -> bool:
+        if agent is None:
+            return False
+        return str(agent.id) in self.resumed_agent_ids
 
 
 def get_signup_preview_creation_state(preview_creation_allowed: bool) -> str | None:
@@ -106,20 +123,20 @@ def _resume_signup_preview_agents_if_user_eligible(
     user,
     *,
     reconcile_plan: bool,
-) -> list[str]:
+) -> SignupPreviewResumeResult:
     if getattr(user, "id", None) is None:
-        return []
+        return SignupPreviewResumeResult()
 
     if reconcile_plan:
         reconcile_user_plan_from_stripe(user)
 
     clear_personal_agent_access_cache(user)
     if not can_user_use_personal_agents_and_api(user):
-        return []
+        return SignupPreviewResumeResult()
 
     agents = list(agent_queryset)
     if not agents:
-        return []
+        return SignupPreviewResumeResult()
 
     resumed_ids = [str(agent.id) for agent in agents]
     requeue_ids = [
@@ -134,10 +151,13 @@ def _resume_signup_preview_agents_if_user_eligible(
         signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
     )
     if not updated:
-        return []
+        return SignupPreviewResumeResult()
 
     _enqueue_signup_preview_resume_processing(requeue_ids)
-    return resumed_ids
+    return SignupPreviewResumeResult(
+        resumed_agent_ids=tuple(resumed_ids),
+        requeued_agent_ids=tuple(requeue_ids),
+    )
 
 
 def is_signup_preview_processing_paused(agent: PersistentAgent | None) -> bool:
@@ -160,15 +180,18 @@ def transition_agent_to_signup_preview_waiting(agent_id) -> bool:
     )
 
 
-def resume_signup_preview_agent_if_eligible(agent: PersistentAgent, user) -> bool:
+def resume_signup_preview_agent_if_eligible(
+    agent: PersistentAgent,
+    user,
+) -> SignupPreviewResumeResult:
     if agent.organization_id is not None:
-        return False
+        return SignupPreviewResumeResult()
     if agent.user_id != getattr(user, "id", None):
-        return False
+        return SignupPreviewResumeResult()
     if not is_signup_preview_state_active(agent):
-        return False
+        return SignupPreviewResumeResult()
 
-    resumed_ids = _resume_signup_preview_agents_if_user_eligible(
+    result = _resume_signup_preview_agents_if_user_eligible(
         PersistentAgent.objects.filter(
             id=agent.id,
             user_id=user.id,
@@ -178,20 +201,20 @@ def resume_signup_preview_agent_if_eligible(agent: PersistentAgent, user) -> boo
         user,
         reconcile_plan=True,
     )
-    if str(agent.id) not in resumed_ids:
-        return False
+    if not result.includes(agent):
+        return SignupPreviewResumeResult()
 
     agent.signup_preview_state = PersistentAgent.SignupPreviewState.NONE
-    return True
+    return result
 
 
 def resume_signup_preview_agents_for_user_if_eligible(
     user,
     *,
     reconcile_plan: bool = True,
-) -> list[str]:
+) -> SignupPreviewResumeResult:
     if getattr(user, "id", None) is None:
-        return []
+        return SignupPreviewResumeResult()
 
     return _resume_signup_preview_agents_if_user_eligible(
         PersistentAgent.objects.filter(
