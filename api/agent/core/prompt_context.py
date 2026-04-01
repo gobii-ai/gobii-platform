@@ -3878,8 +3878,11 @@ def _get_system_instruction(
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates.
     # Keep explicit-send examples channel-agnostic when implied send is unavailable.
-    reply = "'Message'" if implied_send_active else "send_<channel>('Message')"
-    reply_short = "reply" if implied_send_active else "send_<channel>(reply)"
+    reply = (
+        "'Message'"
+        if implied_send_active
+        else "use the right explicit send tool (`send_chat_message`, `send_email`, `send_sms`, or `send_agent_message`) with 'Message'"
+    )
     fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
     text_only_guidance = (
         "- Text-only replies stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n\n"
