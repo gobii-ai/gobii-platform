@@ -1180,7 +1180,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(self.user.billing.subscription, PlanNamesChoices.SCALE.value)
         mock_grant.assert_called_once()
         mock_track_event.assert_not_called()
-        self.assertTrue(any("Failed to update subscription analytics" in str(call.args[0]) for call in mock_logger_exception.call_args_list))
+        self.assertTrue(any("Failed to identify subscription analytics state" in str(call.args[0]) for call in mock_logger_exception.call_args_list))
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
@@ -3064,6 +3064,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             "sub_user_success",
             default_payment_method="pm_setup_new",
             idempotency_key="setup-intent-default-payment-method-seti_user_success-sub_user_success",
+            api_key="sk_test",
         )
         mock_sync.assert_called_once_with(updated_subscription)
 

@@ -2494,6 +2494,7 @@ def handle_setup_intent_succeeded(event, **kwargs):
                 subscription.id,
                 default_payment_method=payment_method_id,
                 idempotency_key=f"setup-intent-default-payment-method-{payload.get('id', '')}-{subscription.id}",
+                api_key=stripe_key,
             )
         except stripe.error.StripeError:
             span.add_event("subscription_update_failed")
@@ -3377,98 +3378,98 @@ def handle_subscription_event(event, **kwargs):
                         'plan': plan_value,
                         'is_trial': sub.status == "trialing",
                     })
+                except Exception:
+                    logger.exception(
+                        "Failed to identify subscription analytics state for user %s during webhook",
+                        getattr(owner, "id", None),
+                    )
 
-                    event_properties = {
-                        'plan': plan_value,
-                    }
-                    if invoice_id:
-                        event_properties['stripe.invoice_id'] = invoice_id
+                event_properties = {
+                    'plan': plan_value,
+                }
+                if invoice_id:
+                    event_properties['stripe.invoice_id'] = invoice_id
 
-                    analytics_event = None
-                    if billing_reason == 'subscription_create':
-                        analytics_event = AnalyticsEvent.SUBSCRIPTION_CREATED
-                    elif billing_reason == 'subscription_cycle':
-                        analytics_event = AnalyticsEvent.SUBSCRIPTION_RENEWED
+                analytics_event = None
+                if billing_reason == 'subscription_create':
+                    analytics_event = AnalyticsEvent.SUBSCRIPTION_CREATED
+                elif billing_reason == 'subscription_cycle':
+                    analytics_event = AnalyticsEvent.SUBSCRIPTION_RENEWED
 
-                    suppress_marketing_event = False
+                suppress_marketing_event = False
+                if (
+                    analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED
+                    and event_type != "customer.subscription.created"
+                ):
+                    suppress_marketing_event = True
+
+                if analytics_event:
+                    Analytics.track_event(
+                        user_id=owner.id,
+                        event=analytics_event,
+                        source=AnalyticsSource.WEB,
+                        properties=event_properties,
+                    )
                     if (
                         analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED
-                        and event_type != "customer.subscription.created"
+                        and sub.status == "trialing"
+                        and event_type == "customer.subscription.created"
                     ):
-                        suppress_marketing_event = True
-
-                    if analytics_event:
-                        Analytics.track_event(
-                            user_id=owner.id,
-                            event=analytics_event,
-                            source=AnalyticsSource.WEB,
-                            properties=event_properties,
-                        )
-                        if (
-                            analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED
-                            and sub.status == "trialing"
-                            and event_type == "customer.subscription.created"
-                        ):
-                            trial_properties = {
-                                "plan": plan_value,
-                                "subscription_id": subscription_id,
-                            }
-                            if invoice_id:
-                                trial_properties["stripe.invoice_id"] = invoice_id
-                            Analytics.track_event(
-                                user_id=owner.id,
-                                event=AnalyticsEvent.BILLING_TRIAL_STARTED,
-                                source=AnalyticsSource.WEB,
-                                properties=trial_properties,
-                            )
-                        marketing_properties = {
+                        trial_properties = {
                             "plan": plan_value,
                             "subscription_id": subscription_id,
                         }
-                        if analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED:
-                            event_id_override = subscription_metadata.get("gobii_event_id")
-                            if isinstance(event_id_override, str) and event_id_override.strip():
-                                marketing_properties["event_id"] = event_id_override.strip()
+                        if invoice_id:
+                            trial_properties["stripe.invoice_id"] = invoice_id
+                        Analytics.track_event(
+                            user_id=owner.id,
+                            event=AnalyticsEvent.BILLING_TRIAL_STARTED,
+                            source=AnalyticsSource.WEB,
+                            properties=trial_properties,
+                        )
+                    marketing_properties = {
+                        "plan": plan_value,
+                        "subscription_id": subscription_id,
+                    }
+                    if analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED:
+                        event_id_override = subscription_metadata.get("gobii_event_id")
+                        if isinstance(event_id_override, str) and event_id_override.strip():
+                            marketing_properties["event_id"] = event_id_override.strip()
 
-                        if sub.status == "trialing":
-                            value, currency = _calculate_subscription_value(licensed_item)
-                            predicted_ltv, conversion_value = calculate_start_trial_values(
-                                value,
-                                ltv_multiple=settings.CAPI_LTV_MULTIPLE,
-                                conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
-                            )
-                            if predicted_ltv is not None:
-                                marketing_properties["predicted_ltv"] = predicted_ltv
-                            if conversion_value is not None:
-                                marketing_properties["value"] = conversion_value
-                            marketing_properties["currency"] = "USD"
+                    if sub.status == "trialing":
+                        value, currency = _calculate_subscription_value(licensed_item)
+                        predicted_ltv, conversion_value = calculate_start_trial_values(
+                            value,
+                            ltv_multiple=settings.CAPI_LTV_MULTIPLE,
+                            conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+                        )
+                        if predicted_ltv is not None:
+                            marketing_properties["predicted_ltv"] = predicted_ltv
+                        if conversion_value is not None:
+                            marketing_properties["value"] = conversion_value
+                        marketing_properties["currency"] = "USD"
 
-                        marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
+                    marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
 
-                        if not suppress_marketing_event:
-                            try:
-                                if analytics_event != AnalyticsEvent.SUBSCRIPTION_RENEWED and sub.status == "trialing":
-                                    checkout_source_url = subscription_metadata.get("checkout_source_url")
-                                    if checkout_source_url:
-                                        marketing_context["page"] = {"url": checkout_source_url}
-                                    capi(
-                                        user=owner,
-                                        event_name="StartTrial",
-                                        properties=marketing_properties,
-                                        request=None,
-                                        context=marketing_context,
-                                    )
-                                # Subscribe event is sent on first payment (invoice.payment_succeeded).
-                            except Exception:
-                                logger.exception(
-                                    "Failed to enqueue marketing subscription event for user %s",
-                                    getattr(owner, "id", None),
+                    if not suppress_marketing_event:
+                        try:
+                            if analytics_event != AnalyticsEvent.SUBSCRIPTION_RENEWED and sub.status == "trialing":
+                                checkout_source_url = subscription_metadata.get("checkout_source_url")
+                                if checkout_source_url:
+                                    marketing_context["page"] = {"url": checkout_source_url}
+                                capi(
+                                    user=owner,
+                                    event_name="StartTrial",
+                                    properties=marketing_properties,
+                                    request=None,
+                                    context=marketing_context,
                                 )
-                except Exception:
-                    logger.exception(
-                        "Failed to update subscription analytics for user %s during webhook",
-                        getattr(owner, "id", None),
-                    )
+                            # Subscribe event is sent on first payment (invoice.payment_succeeded).
+                        except Exception:
+                            logger.exception(
+                                "Failed to enqueue marketing subscription event for user %s",
+                                getattr(owner, "id", None),
+                            )
             else:
                 seats = 0
                 try:
