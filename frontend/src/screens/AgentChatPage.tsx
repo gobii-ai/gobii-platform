@@ -1925,13 +1925,24 @@ export function AgentChatPage({
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
+  const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
+  const effectiveSignupPreviewState = useMemo<SignupPreviewState>(() => {
+    if (
+      signupPreviewState === 'awaiting_first_reply_pause'
+      && !initialLoading
+      && !timelineProcessingActive
+      && (!timelineAwaitingResponse || hasAgentReply)
+    ) {
+      return 'awaiting_signup_completion'
+    }
+    return signupPreviewState
+  }, [hasAgentReply, initialLoading, signupPreviewState, timelineAwaitingResponse, timelineProcessingActive])
   const showSignupPreviewPanel = (
     !isNewAgent
     && !resolvedIsOrgOwned
     && personalSignupPreviewAvailable
-    && signupPreviewState !== 'none'
+    && effectiveSignupPreviewState !== 'none'
   )
-  const hasAgentReply = useMemo(() => hasAgentResponse(timelineEvents), [timelineEvents])
   useEffect(() => {
     if (!activeAgentId || !activeRosterMeta?.email) {
       return
@@ -3362,7 +3373,7 @@ export function AgentChatPage({
         composerDisabled={Boolean(sendMessageDisabledReason)}
         composerDisabledReason={sendMessageDisabledReason}
         showSignupPreviewPanel={showSignupPreviewPanel}
-        signupPreviewState={signupPreviewState}
+        signupPreviewState={effectiveSignupPreviewState}
         maxAttachmentBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}

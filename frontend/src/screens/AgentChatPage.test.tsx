@@ -11,8 +11,10 @@ const {
   fetchAgentSpawnIntentMock,
   ensureAuthenticatedMock,
   rosterContext,
+  rosterState,
   llmIntelligence,
   agentChatStoreState,
+  timelineState,
 } = vi.hoisted(() => ({
   createAgentMock: vi.fn(),
   updateAgentMock: vi.fn(),
@@ -23,6 +25,9 @@ const {
     id: 'user-1',
     name: 'Test User',
   } as const,
+  rosterState: {
+    agents: [] as unknown[],
+  },
   llmIntelligence: {
     systemDefaultTier: 'standard',
     maxAllowedTier: 'standard',
@@ -69,6 +74,13 @@ const {
     autoScrollPinSuppressedUntil: null,
     updateProcessing: vi.fn(),
     updateAgentIdentity: vi.fn(),
+  },
+  timelineState: {
+    data: undefined as unknown,
+    flatEvents: [] as unknown[],
+    initialPageResponse: null as unknown,
+    isLoading: false,
+    error: null as unknown,
   },
 }))
 
@@ -130,7 +142,13 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
   >('../stores/subscriptionStore')
 
   return {
-    AgentChatLayout: ({ spawnIntentLoading }: { spawnIntentLoading?: boolean }) => {
+    AgentChatLayout: ({
+      spawnIntentLoading,
+      signupPreviewState,
+    }: {
+      spawnIntentLoading?: boolean
+      signupPreviewState?: string
+    }) => {
       const {
         isUpgradeModalOpen,
         upgradeModalSource,
@@ -139,6 +157,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       return (
         <div>
           <div data-testid="spawn-intent-loading">{String(Boolean(spawnIntentLoading))}</div>
+          <div data-testid="signup-preview-state">{signupPreviewState ?? ''}</div>
           {isUpgradeModalOpen ? (
             <div
               data-testid="upgrade-modal"
@@ -184,7 +203,7 @@ vi.mock('../hooks/useAgentRoster', () => ({
   useAgentRoster: vi.fn(() => ({
     data: {
       context: rosterContext,
-      agents: [],
+      agents: rosterState.agents,
       agentRosterSortMode: 'recent',
       favoriteAgentIds: [],
       insightsPanelExpanded: null,
@@ -255,18 +274,18 @@ vi.mock('../stores/agentChatStore', () => {
 
 vi.mock('../hooks/useAgentTimeline', () => ({
   useAgentTimeline: vi.fn(() => ({
-    data: undefined,
+    data: timelineState.data,
     hasPreviousPage: false,
     hasNextPage: false,
     isFetchingPreviousPage: false,
     isFetchingNextPage: false,
     fetchPreviousPage: vi.fn(),
     fetchNextPage: vi.fn(),
-    isLoading: false,
-    error: null,
+    isLoading: timelineState.isLoading,
+    error: timelineState.error,
   })),
-  flattenTimelinePages: vi.fn(() => []),
-  getInitialPageResponse: vi.fn(() => null),
+  flattenTimelinePages: vi.fn(() => timelineState.flatEvents),
+  getInitialPageResponse: vi.fn(() => timelineState.initialPageResponse),
 }))
 
 vi.mock('../hooks/useTimelineCacheInjector', () => ({
@@ -283,7 +302,7 @@ vi.mock('../hooks/usePageLifecycle', () => ({
   usePageLifecycle: vi.fn(),
 }))
 
-function renderAgentChatPage() {
+function renderAgentChatPage({ agentId = null }: { agentId?: string | null } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -295,7 +314,7 @@ function renderAgentChatPage() {
   return render(
     <QueryClientProvider client={queryClient}>
       <AgentChatPage
-        agentId={null}
+        agentId={agentId}
         viewerUserId={1}
         viewerEmail="user@example.com"
       />
@@ -338,6 +357,14 @@ describe('AgentChatPage trial onboarding', () => {
     fetchAgentSpawnIntentMock.mockReset()
     ensureAuthenticatedMock.mockClear()
     useSubscriptionStore.setState(buildInitialSubscriptionState())
+    timelineState.data = undefined
+    timelineState.flatEvents = []
+    timelineState.initialPageResponse = null
+    timelineState.isLoading = false
+    timelineState.error = null
+    rosterState.agents = []
+    agentChatStoreState.signupPreviewState = 'none'
+    agentChatStoreState.processingActive = false
   })
 
   afterEach(() => {
@@ -411,5 +438,48 @@ describe('AgentChatPage trial onboarding', () => {
       )
     })
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()
+  })
+
+  it('treats signup preview as paused once processing is idle after refresh', async () => {
+    useSubscriptionStore.setState({
+      ...buildInitialSubscriptionState(),
+      personalSignupPreviewAvailable: true,
+    })
+    agentChatStoreState.signupPreviewState = 'awaiting_first_reply_pause'
+    agentChatStoreState.processingActive = false
+    agentChatStoreState.awaitingResponse = false
+    rosterState.agents = [
+      {
+        id: 'agent-1',
+        name: 'Test Agent',
+        avatarUrl: null,
+        displayColorHex: null,
+        isActive: true,
+        processingActive: false,
+        miniDescription: '',
+        shortDescription: '',
+        auditUrl: null,
+        isOrgOwned: false,
+        isCollaborator: false,
+        canManageAgent: true,
+        canManageCollaborators: true,
+        preferredLlmTier: null,
+        email: null,
+        sms: null,
+        lastInteractionAt: null,
+        signupPreviewState: 'awaiting_first_reply_pause',
+      },
+    ]
+    timelineState.flatEvents = []
+    timelineState.isLoading = false
+
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('signup-preview-state')).toHaveTextContent(
+        'awaiting_signup_completion',
+      )
+    })
   })
 })
