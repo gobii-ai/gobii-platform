@@ -86,112 +86,118 @@
 </div>
 
 <script>
-const CONSOLE_CONTEXT_STORAGE_KEYS = {
-  type: 'gobii:console:context-type',
-  id: 'gobii:console:context-id',
-  name: 'gobii:console:context-name'
-};
-
-function writeConsoleContext(type, id, name) {
-  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
-  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
-  localStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
-  try {
-    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
-    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
-    sessionStorage.setItem(CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
-  } catch (error) {
-    console.warn('Unable to update session console context storage.', error);
-  }
-}
-
-window.writeConsoleContext = writeConsoleContext;
-
-function readInitialConsoleContext() {
-  try {
-    const sessionType = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.type);
-    const sessionId = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.id);
-    const sessionName = sessionStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.name);
-    if (sessionType && sessionId) {
-      return { type: sessionType, id: sessionId, name: sessionName || '' };
-    }
-  } catch (error) {
-    console.warn('Unable to read session console context storage.', error);
+(function initConsoleContextSwitcher() {
+  if (!window.CONSOLE_CONTEXT_STORAGE_KEYS) {
+    window.CONSOLE_CONTEXT_STORAGE_KEYS = {
+      type: 'gobii:console:context-type',
+      id: 'gobii:console:context-id',
+      name: 'gobii:console:context-name'
+    };
   }
 
-  return {
-    type: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.type) || localStorage.getItem('contextType') || '{{ current_context.type|default:"personal" }}',
-    id: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.id) || localStorage.getItem('contextId') || '{{ current_context.id|default:user.id }}',
-    name: localStorage.getItem(CONSOLE_CONTEXT_STORAGE_KEYS.name) || localStorage.getItem('contextName') || '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}'
-  };
-}
-
-function contextSwitcher() {
-  return {
-    open: false,
-    currentContext: readInitialConsoleContext(),
-
-    init() {
-      // Sync localStorage with server session context if they differ
-      const serverType = '{{ current_context.type|default:"personal" }}';
-      const serverId = '{{ current_context.id|default:user.id }}';
-      const serverName = '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}';
-
-      if (this.currentContext.type !== serverType || this.currentContext.id !== serverId) {
-        writeConsoleContext(serverType, serverId, serverName);
-        this.currentContext = { type: serverType, id: serverId, name: serverName };
-      }
-    },
-    
-    async switchContext(type, id, name) {
-      // Save to browser storage for immediate UI updates
-      writeConsoleContext(type, id, name);
-      
-      // Update current context
-      this.currentContext = { type, id, name };
-      
-      // Close dropdown
-      this.open = false;
-      
-      // Save to server session
+  if (!window.writeConsoleContext) {
+    window.writeConsoleContext = function writeConsoleContext(type, id, name) {
+      localStorage.setItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
+      localStorage.setItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
+      localStorage.setItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
       try {
-        const response = await fetch('{% url "switch_context" %}', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': getCsrfTokenValue()
-          },
-          body: JSON.stringify({ type, id, name })
-        });
-        
-        if (response.ok) {
-          // If currently on an agent detail page, redirect to the agents list
-          const isAgentDetail = /\/console\/agents\/[^/]+\/$/.test(window.location.pathname);
-          if (isAgentDetail) {
-            window.location = '{% url "agents" %}';
-            return;
-          }
+        sessionStorage.setItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.type, type);
+        sessionStorage.setItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.id, id);
+        sessionStorage.setItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.name, name);
+      } catch (error) {
+        console.warn('Unable to update session console context storage.', error);
+      }
+    };
+  }
 
-          // If currently on an organization detail page, redirect to the selected org
-          const isOrgDetail = /^\/console\/organizations\/[^/]+\/$/.test(window.location.pathname);
-          if (isOrgDetail && type === 'organization') {
-            window.location = `/console/organizations/${id}/`;
-            return;
-          }
-
-          // Default: reload current page to reflect context change
-          window.location.reload();
-        } else {
-          console.error('Failed to switch context');
-          // On failure, reload to show current (unchanged) context
-          window.location.reload();
+  if (!window.readInitialConsoleContext) {
+    window.readInitialConsoleContext = function readInitialConsoleContext() {
+      try {
+        const sessionType = sessionStorage.getItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.type);
+        const sessionId = sessionStorage.getItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.id);
+        const sessionName = sessionStorage.getItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.name);
+        if (sessionType && sessionId) {
+          return { type: sessionType, id: sessionId, name: sessionName || '' };
         }
       } catch (error) {
-        console.error('Error switching context:', error);
-        window.location.reload();
+        console.warn('Unable to read session console context storage.', error);
       }
-    }
+
+      return {
+        type: localStorage.getItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.type) || localStorage.getItem('contextType') || '{{ current_context.type|default:"personal" }}',
+        id: localStorage.getItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.id) || localStorage.getItem('contextId') || '{{ current_context.id|default:user.id }}',
+        name: localStorage.getItem(window.CONSOLE_CONTEXT_STORAGE_KEYS.name) || localStorage.getItem('contextName') || '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}'
+      };
+    };
   }
-}
+
+  window.contextSwitcher = function contextSwitcher() {
+    return {
+      open: false,
+      currentContext: window.readInitialConsoleContext(),
+
+      init() {
+        // Sync localStorage with server session context if they differ
+        const serverType = '{{ current_context.type|default:"personal" }}';
+        const serverId = '{{ current_context.id|default:user.id }}';
+        const serverName = '{{ current_context.name|default:user.get_full_name|default:user.username|escapejs }}';
+
+        if (this.currentContext.type !== serverType || this.currentContext.id !== serverId) {
+          window.writeConsoleContext(serverType, serverId, serverName);
+          this.currentContext = { type: serverType, id: serverId, name: serverName };
+        }
+      },
+
+      async switchContext(type, id, name) {
+        // Save to browser storage for immediate UI updates
+        window.writeConsoleContext(type, id, name);
+
+        // Update current context
+        this.currentContext = { type, id, name };
+
+        // Close dropdown
+        this.open = false;
+
+        // Save to server session
+        try {
+          const response = await fetch('{% url "switch_context" %}', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCsrfTokenValue()
+            },
+            body: JSON.stringify({ type, id, name })
+          });
+
+          if (response.ok) {
+            // If currently on an agent detail page, redirect to the agents list
+            const isAgentDetail = /\/console\/agents\/[^/]+\/$/.test(window.location.pathname);
+            if (isAgentDetail) {
+              window.location = '{% url "agents" %}';
+              return;
+            }
+
+            // If currently on an organization detail page, redirect to the selected org
+            const isOrgDetail = /^\/console\/organizations\/[^/]+\/$/.test(window.location.pathname);
+            if (isOrgDetail && type === 'organization') {
+              window.location = `/console/organizations/${id}/`;
+              return;
+            }
+
+            // Default: reload current page to reflect context change
+            window.location.reload();
+          } else {
+            console.error('Failed to switch context');
+            // On failure, reload to show current (unchanged) context
+            window.location.reload();
+          }
+        } catch (error) {
+          console.error('Error switching context:', error);
+          window.location.reload();
+        }
+      }
+    };
+  };
+})();
 </script>
 {% endflag %}
