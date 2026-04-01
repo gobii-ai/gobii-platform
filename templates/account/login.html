@@ -109,28 +109,30 @@
           <script>
             (() => {
               const loginForm = document.currentScript.closest('form');
-              const submitButton = loginForm?.querySelector('[data-turnstile-submit]');
-              const statusMessage = loginForm?.querySelector('[data-turnstile-status]');
-              const widget = loginForm?.querySelector('.cf-turnstile');
+              const submitButton = () => loginForm?.querySelector('[data-turnstile-submit]');
+              const statusMessage = () => loginForm?.querySelector('[data-turnstile-status]');
+              const widget = () => loginForm?.querySelector('.cf-turnstile');
               const tokenInput = () => loginForm?.querySelector('[name="cf-turnstile-response"]');
               let submitPending = false;
 
               const setSubmitEnabled = (enabled) => {
-                if (!submitButton) {
+                const button = submitButton();
+                if (!button) {
                   return;
                 }
-                submitButton.disabled = !enabled;
-                submitButton.classList.toggle('opacity-60', !enabled);
-                submitButton.classList.toggle('cursor-not-allowed', !enabled);
-                submitButton.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+                button.disabled = !enabled;
+                button.classList.toggle('opacity-60', !enabled);
+                button.classList.toggle('cursor-not-allowed', !enabled);
+                button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
               };
 
               const setStatusMessage = (message) => {
-                if (!statusMessage) {
+                const messageNode = statusMessage();
+                if (!messageNode) {
                   return;
                 }
-                statusMessage.textContent = message;
-                statusMessage.classList.toggle('hidden', !message);
+                messageNode.textContent = message;
+                messageNode.classList.toggle('hidden', !message);
               };
 
               const hasFreshToken = () => {
@@ -143,14 +145,15 @@
                   return;
                 }
                 submitPending = false;
-                loginForm.requestSubmit(submitButton || undefined);
+                loginForm.requestSubmit(submitButton() || undefined);
               };
 
               const resetWidget = () => {
-                if (!widget || !window.turnstile?.reset) {
+                const turnstileWidget = widget();
+                if (!turnstileWidget || !window.turnstile?.reset) {
                   return;
                 }
-                window.turnstile.reset(widget);
+                window.turnstile.reset(turnstileWidget);
               };
 
               window.gobiiLoginTurnstileSuccess = () => {
