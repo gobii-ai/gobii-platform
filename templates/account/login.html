@@ -106,7 +106,91 @@
       {# Cloudflare Turnstile widget (enabled only when configured) #}
       {% if settings.TURNSTILE_ENABLED and form.turnstile %}
         <div class="mt-4 flex flex-col items-center">
+          <script>
+            (() => {
+              const loginForm = document.currentScript.closest('form');
+              const submitButton = () => loginForm?.querySelector('[data-turnstile-submit]');
+              const statusMessage = () => loginForm?.querySelector('[data-turnstile-status]');
+              const widget = () => loginForm?.querySelector('.cf-turnstile');
+              const tokenInput = () => loginForm?.querySelector('[name="cf-turnstile-response"]');
+              let submitPending = false;
+
+              const setSubmitEnabled = (enabled) => {
+                const button = submitButton();
+                if (!button) {
+                  return;
+                }
+                button.disabled = !enabled;
+                button.classList.toggle('opacity-60', !enabled);
+                button.classList.toggle('cursor-not-allowed', !enabled);
+                button.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+              };
+
+              const setStatusMessage = (message) => {
+                const messageNode = statusMessage();
+                if (!messageNode) {
+                  return;
+                }
+                messageNode.textContent = message;
+                messageNode.classList.toggle('hidden', !message);
+              };
+
+              const hasFreshToken = () => {
+                const token = tokenInput()?.value;
+                return Boolean(token && token.trim());
+              };
+
+              const submitWhenReady = () => {
+                if (!submitPending || !loginForm || !hasFreshToken()) {
+                  return;
+                }
+                submitPending = false;
+                loginForm.requestSubmit(submitButton() || undefined);
+              };
+
+              const resetWidget = () => {
+                const turnstileWidget = widget();
+                if (!turnstileWidget || !window.turnstile?.reset) {
+                  return;
+                }
+                window.turnstile.reset(turnstileWidget);
+              };
+
+              window.gobiiLoginTurnstileSuccess = () => {
+                setSubmitEnabled(true);
+                setStatusMessage('');
+                submitWhenReady();
+              };
+
+              window.gobiiLoginTurnstileExpired = () => {
+                submitPending = false;
+                setSubmitEnabled(false);
+                setStatusMessage('Verification expired. Please try again.');
+                resetWidget();
+              };
+
+              window.gobiiLoginTurnstileError = () => {
+                submitPending = false;
+                setSubmitEnabled(false);
+                setStatusMessage('Verification failed. Please try again.');
+                resetWidget();
+              };
+
+              loginForm?.addEventListener('submit', (event) => {
+                if (hasFreshToken()) {
+                  return;
+                }
+                event.preventDefault();
+                submitPending = true;
+                setSubmitEnabled(false);
+                setStatusMessage('Completing verification...');
+              });
+
+              setSubmitEnabled(false);
+            })();
+          </script>
           {{ form.turnstile }}
+          <p data-turnstile-status class="mt-2 hidden text-center text-sm text-red-600"></p>
           {% if form.turnstile.errors %}
             <div class="mt-2 text-center">
               {% for error in form.turnstile.errors %}
@@ -118,8 +202,10 @@
       {% endif %}
 
       <button type="submit"
+              data-turnstile-submit
+              {% if settings.TURNSTILE_ENABLED and form.turnstile %}disabled aria-disabled="true"{% endif %}
               class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white
-                     shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2
+                     shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2
                      focus:ring-blue-500 focus:ring-offset-2">Sign in</button>
       {% if settings.GOBII_PROPRIETARY_MODE %}
       <p class="mt-4 text-xs text-gray-500 text-center">
