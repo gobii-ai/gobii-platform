@@ -74,6 +74,7 @@ from api.services.dedicated_proxy_service import (
 )
 from api.services.owner_execution_pause import resume_owner_execution
 from api.services.referral_service import ReferralService
+from api.services.signup_preview import resume_signup_preview_agents_for_user_if_eligible
 from api.services.trial_abuse import (
     SIGNUP_GA_CLIENT_COOKIE_NAME,
     SIGNAL_SOURCE_LOGIN,
@@ -3243,6 +3244,16 @@ def handle_subscription_event(event, **kwargs):
             if owner_type == "user":
                 prior_plan_value = plan_before_cancellation
                 mark_user_billing_with_plan(owner, plan_value, update_anchor=False, plan_version=plan_version)
+                try:
+                    resume_signup_preview_agents_for_user_if_eligible(
+                        owner,
+                        reconcile_plan=False,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to resume signup preview agents for user %s after subscription update",
+                        getattr(owner, "id", None),
+                    )
                 plan_changed_for_user = (
                     event_type == "customer.subscription.updated"
                     and bool(prior_plan_value)

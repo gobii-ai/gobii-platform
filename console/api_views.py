@@ -105,6 +105,9 @@ from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
 from api.agent.tasks import process_agent_events_task
 from api.services.system_settings import get_max_file_size
+from api.services.signup_preview import (
+    resume_signup_preview_agent_if_eligible,
+)
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
@@ -2725,6 +2728,14 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
 class AgentTimelineAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
+    def _resume_signup_preview_if_eligible(
+        self,
+        request: HttpRequest,
+        agent: PersistentAgent,
+    ) -> PersistentAgent:
+        resume_signup_preview_agent_if_eligible(agent, request.user)
+        return agent
+
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         direction_raw = (request.GET.get("direction") or "initial").lower()
         direction: TimelineDirection
@@ -2737,6 +2748,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
+        agent = self._resume_signup_preview_if_eligible(request, agent)
 
         cursor = request.GET.get("cursor") or None
         try:

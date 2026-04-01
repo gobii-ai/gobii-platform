@@ -1,4 +1,7 @@
+from django.db import transaction
+
 from api.models import PersistentAgent, PersistentAgentMessage
+from util.subscription_helper import reconcile_user_plan_from_stripe
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 
 
@@ -53,6 +56,90 @@ def can_bypass_task_credit_for_signup_preview(agent: PersistentAgent | None) -> 
     return is_signup_preview_first_reply_window(agent)
 
 
+def has_followup_user_message_after_signup_preview_reply(
+    agent: PersistentAgent | None,
+) -> bool:
+    if agent is None:
+        return False
+
+    first_outbound_at = (
+        PersistentAgentMessage.objects
+        .filter(owner_agent=agent, is_outbound=True)
+        .order_by("timestamp")
+        .values_list("timestamp", flat=True)
+        .first()
+    )
+    if first_outbound_at is None:
+        return False
+
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=False,
+        timestamp__gt=first_outbound_at,
+    ).exists()
+
+
+def clear_personal_agent_access_cache(user) -> None:
+    for attr in (
+        "_personal_agents_and_api_access_allowed",
+        "_personal_agent_chat_access_allowed",
+    ):
+        if hasattr(user, attr):
+            delattr(user, attr)
+
+
+def _enqueue_signup_preview_resume_processing(agent_ids: list[str]) -> None:
+    if not agent_ids:
+        return
+
+    def _enqueue() -> None:
+        from api.agent.tasks import process_agent_events_task
+
+        for agent_id in agent_ids:
+            process_agent_events_task.delay(agent_id)
+
+    transaction.on_commit(_enqueue)
+
+
+def _resume_signup_preview_agents_if_user_eligible(
+    agent_queryset,
+    user,
+    *,
+    reconcile_plan: bool,
+) -> list[str]:
+    if getattr(user, "id", None) is None:
+        return []
+
+    if reconcile_plan:
+        reconcile_user_plan_from_stripe(user)
+
+    clear_personal_agent_access_cache(user)
+    if not can_user_use_personal_agents_and_api(user):
+        return []
+
+    agents = list(agent_queryset)
+    if not agents:
+        return []
+
+    resumed_ids = [str(agent.id) for agent in agents]
+    requeue_ids = [
+        str(agent.id)
+        for agent in agents
+        if has_followup_user_message_after_signup_preview_reply(agent)
+    ]
+
+    updated = PersistentAgent.objects.filter(id__in=resumed_ids).exclude(
+        signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
+    ).update(
+        signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
+    )
+    if not updated:
+        return []
+
+    _enqueue_signup_preview_resume_processing(requeue_ids)
+    return resumed_ids
+
+
 def is_signup_preview_processing_paused(agent: PersistentAgent | None) -> bool:
     if agent is None:
         return False
@@ -80,16 +167,38 @@ def resume_signup_preview_agent_if_eligible(agent: PersistentAgent, user) -> boo
         return False
     if not is_signup_preview_state_active(agent):
         return False
-    if not can_user_use_personal_agents_and_api(user):
-        return False
 
-    updated = PersistentAgent.objects.filter(id=agent.id).exclude(
-        signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
-    ).update(
-        signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
+    resumed_ids = _resume_signup_preview_agents_if_user_eligible(
+        PersistentAgent.objects.filter(
+            id=agent.id,
+            user_id=user.id,
+            organization__isnull=True,
+            signup_preview_state__in=ACTIVE_SIGNUP_PREVIEW_STATES,
+        ),
+        user,
+        reconcile_plan=True,
     )
-    if not updated:
+    if str(agent.id) not in resumed_ids:
         return False
 
     agent.signup_preview_state = PersistentAgent.SignupPreviewState.NONE
     return True
+
+
+def resume_signup_preview_agents_for_user_if_eligible(
+    user,
+    *,
+    reconcile_plan: bool = True,
+) -> list[str]:
+    if getattr(user, "id", None) is None:
+        return []
+
+    return _resume_signup_preview_agents_if_user_eligible(
+        PersistentAgent.objects.filter(
+            user_id=user.id,
+            organization__isnull=True,
+            signup_preview_state__in=ACTIVE_SIGNUP_PREVIEW_STATES,
+        ),
+        user,
+        reconcile_plan=reconcile_plan,
+    )

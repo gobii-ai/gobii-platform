@@ -10,13 +10,20 @@ from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    CommsChannel,
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentMessage,
     UserFlags,
     UserPreference,
 )
 from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
+from api.services.signup_preview import (
+    resume_signup_preview_agent_if_eligible,
+    resume_signup_preview_agents_for_user_if_eligible,
+)
 from console.agent_chat.access import resolve_agent
 from util.trial_enforcement import can_user_access_personal_agent_chat
 
@@ -62,6 +69,38 @@ class AgentChatAccessTests(TestCase):
             name=name,
             charter="",
             browser_use_agent=browser_agent,
+        )
+
+    def _seed_signup_preview_followup_messages(self, agent: PersistentAgent):
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=f"web://agent/{agent.id}",
+        )
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=f"web://user/{self.user.id}/agent/{agent.id}",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=user_endpoint,
+            to_endpoint=agent_endpoint,
+            is_outbound=False,
+            body="Hello!",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            is_outbound=True,
+            body="Preview reply",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=user_endpoint,
+            to_endpoint=agent_endpoint,
+            is_outbound=False,
+            body="just chat",
         )
 
     def _set_personal_context(self):
@@ -174,14 +213,12 @@ class AgentChatAccessTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
-    @patch("console.views.process_agent_events_task.delay")
     @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
     @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
     def test_chat_shell_resumes_signup_preview_agent_after_plan_completion(
         self,
         _mock_personal_chat_access,
         _mock_personal_access,
-        mock_process_delay,
     ):
         self.personal_agent.signup_preview_state = (
             PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
@@ -194,6 +231,115 @@ class AgentChatAccessTests(TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.personal_agent.refresh_from_db()
+        self.assertEqual(
+            self.personal_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.NONE,
+        )
+
+    @patch("console.views.process_agent_events_task.delay")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    def test_chat_shell_requeues_when_followup_message_exists_after_preview_reply(
+        self,
+        _mock_personal_chat_access,
+        _mock_personal_access,
+        mock_process_delay,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+        self._seed_signup_preview_followup_messages(self.personal_agent)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(
+                reverse("agent_chat_shell", kwargs={"pk": self.personal_agent.id})
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.personal_agent.refresh_from_db()
+        self.assertEqual(
+            self.personal_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.NONE,
+        )
+        mock_process_delay.assert_called_once_with(str(self.personal_agent.id))
+
+    @patch("api.services.signup_preview.reconcile_user_plan_from_stripe", return_value={"id": "startup"})
+    def test_resume_signup_preview_agent_ignores_stale_cached_personal_access(
+        self,
+        mock_reconcile_user_plan,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+        self.user._personal_agents_and_api_access_allowed = False
+
+        def _can_use(user):
+            cached = getattr(user, "_personal_agents_and_api_access_allowed", None)
+            if cached is not None:
+                return bool(cached)
+            return True
+
+        with patch(
+            "api.services.signup_preview.can_user_use_personal_agents_and_api",
+            side_effect=_can_use,
+        ):
+            resumed = resume_signup_preview_agent_if_eligible(self.personal_agent, self.user)
+
+        self.assertTrue(resumed)
+        mock_reconcile_user_plan.assert_called_once_with(self.user)
+        self.personal_agent.refresh_from_db()
+        self.assertEqual(
+            self.personal_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.NONE,
+        )
+
+    @patch("api.services.signup_preview.reconcile_user_plan_from_stripe", return_value={"id": "startup"})
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    def test_resume_signup_preview_agents_for_user_clears_waiting_agents_without_requeue(
+        self,
+        _mock_personal_access,
+        mock_process_delay,
+        _mock_reconcile_user_plan,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resumed_ids = resume_signup_preview_agents_for_user_if_eligible(self.user)
+
+        self.assertEqual(resumed_ids, [str(self.personal_agent.id)])
+        self.personal_agent.refresh_from_db()
+        self.assertEqual(
+            self.personal_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.NONE,
+        )
+        mock_process_delay.assert_not_called()
+
+    @patch("api.services.signup_preview.reconcile_user_plan_from_stripe", return_value={"id": "startup"})
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    def test_resume_signup_preview_agents_for_user_requeues_followup_agents(
+        self,
+        _mock_personal_access,
+        mock_process_delay,
+        _mock_reconcile_user_plan,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+        self._seed_signup_preview_followup_messages(self.personal_agent)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            resumed_ids = resume_signup_preview_agents_for_user_if_eligible(self.user)
+
+        self.assertEqual(resumed_ids, [str(self.personal_agent.id)])
         self.personal_agent.refresh_from_db()
         self.assertEqual(
             self.personal_agent.signup_preview_state,
@@ -293,6 +439,54 @@ class AgentChatAccessTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    def test_timeline_resumes_signup_preview_agent_after_plan_completion(
+        self,
+        _mock_personal_access,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(
+                reverse("console_agent_timeline", kwargs={"agent_id": self.personal_agent.id})
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.personal_agent.refresh_from_db()
+        self.assertEqual(
+            self.personal_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.NONE,
+        )
+
+    @patch("console.api_views.process_agent_events_task.delay")
+    @patch("api.services.signup_preview.can_user_use_personal_agents_and_api", return_value=True)
+    def test_timeline_requeues_when_followup_message_exists_after_preview_reply(
+        self,
+        _mock_personal_access,
+        mock_process_delay,
+    ):
+        self.personal_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        )
+        self.personal_agent.save(update_fields=["signup_preview_state", "updated_at"])
+        self._seed_signup_preview_followup_messages(self.personal_agent)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(
+                reverse("console_agent_timeline", kwargs={"agent_id": self.personal_agent.id})
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.personal_agent.refresh_from_db()
+        self.assertEqual(
+            self.personal_agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.NONE,
+        )
+        mock_process_delay.assert_called_once_with(str(self.personal_agent.id))
 
     @patch("util.trial_enforcement.can_user_use_personal_agents_and_api", return_value=False)
     def test_chat_access_ignores_historical_past_due_subscription(self, _mock_normal_access):
