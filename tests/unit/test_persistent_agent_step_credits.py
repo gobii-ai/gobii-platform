@@ -179,3 +179,26 @@ class PersistentAgentStepCreditsTests(TestCase):
         self.assertEqual(credit.credits_used, before_used)
         self.assertIsNone(second_step.task_credit)
         self.assertIsNone(second_step.credits_cost)
+
+    def test_signup_preview_first_reply_step_does_not_consume_credits(self):
+        self.agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        )
+        self.agent.save(update_fields=["signup_preview_state", "updated_at"])
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent, llm_model="gpt-4")
+
+        with patch("api.models.TaskCreditService.check_and_consume_credit_for_owner") as consume_mock:
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Preview reasoning",
+                completion=completion,
+            )
+
+        step.refresh_from_db()
+        completion.refresh_from_db()
+
+        consume_mock.assert_not_called()
+        self.assertIsNone(step.task_credit)
+        self.assertIsNone(step.credits_cost)
+        self.assertTrue(completion.billed)
+        self.assertIsNone(completion.credits_cost)

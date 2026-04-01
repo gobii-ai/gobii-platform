@@ -2767,6 +2767,49 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(payload['canSpawnAgents'])
 
     @tag("batch_console_agents")
+    @patch('console.views.can_user_use_personal_agents_and_api', return_value=False)
+    @patch('console.views.can_user_access_personal_agent_chat', return_value=False)
+    def test_agent_list_payload_includes_signup_preview_agents_without_plan(
+        self,
+        _mock_chat_access,
+        _mock_personal_access,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        preview_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Preview Browser',
+        )
+        preview_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Preview Agent',
+            charter='Preview charter',
+            browser_use_agent=preview_browser_agent,
+            signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+        hidden_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Hidden Browser',
+        )
+        PersistentAgent.objects.create(
+            user=self.user,
+            name='Hidden Agent',
+            charter='Hidden charter',
+            browser_use_agent=hidden_browser_agent,
+            signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
+        )
+
+        response = self.client.get(reverse('agents'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = self._get_agent_list_payload(response)
+        self.assertEqual(
+            [agent['name'] for agent in payload['agents']],
+            [preview_agent.name],
+        )
+        self.assertFalse(payload['canSpawnAgents'])
+
+    @tag("batch_console_agents")
     def test_agent_detail_allows_selecting_dedicated_ip(self):
         from api.models import PersistentAgent, BrowserUseAgent, ProxyServer, DedicatedProxyAllocation
 

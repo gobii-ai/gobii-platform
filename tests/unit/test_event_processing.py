@@ -295,8 +295,7 @@ class PromptContextBuilderTests(TestCase):
             update_fields=["charter", "preferred_contact_endpoint", "signup_preview_state", "updated_at"]
         )
 
-        with patch("api.agent.core.prompt_context.has_verified_email", return_value=True), \
-             patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent, is_first_run=True)
 
@@ -304,6 +303,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIn(SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK, system_message["content"])
+        self.assertIn("Contact channel: email", system_message["content"])
         self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
             m for m in context if m["role"] == "user"
         )["content"])

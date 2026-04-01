@@ -10084,6 +10084,7 @@ class PersistentAgentStep(models.Model):
         # On creation, optionally consume credits for chargeable steps only.
         if self._state.adding:
             from django.core.exceptions import ValidationError
+            from api.services.signup_preview import can_bypass_task_credit_for_signup_preview
 
             owner = None
             if self.agent and getattr(self.agent, 'organization', None):
@@ -10104,6 +10105,10 @@ class PersistentAgentStep(models.Model):
                     # Do NOT consume again; keep the existing linkage for audit.
                     if completion_to_mark is not None and self.credits_cost is not None:
                         completion_mark_amount = self.credits_cost
+                elif can_bypass_task_credit_for_signup_preview(self.agent):
+                    # Signup preview's first reply window is intentionally free. Persist the
+                    # step/completion without consuming credits so the preview can finish.
+                    completion_mark_amount = None
                 else:
                     default_cost = get_default_task_credit_cost()
                     if self.credits_cost is not None:

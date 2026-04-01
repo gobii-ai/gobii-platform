@@ -1,4 +1,4 @@
-from api.models import PersistentAgent
+from api.models import PersistentAgent, PersistentAgentMessage
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 
 
@@ -30,6 +30,27 @@ def user_can_access_signup_preview_agent(agent: PersistentAgent | None, user) ->
     if getattr(agent, "user_id", None) != getattr(user, "id", None):
         return False
     return is_signup_preview_state_active(agent)
+
+
+def can_bypass_email_verification_for_signup_preview_first_email(
+    agent: PersistentAgent | None,
+) -> bool:
+    return is_signup_preview_first_reply_window(agent)
+
+
+def is_signup_preview_first_reply_window(agent: PersistentAgent | None) -> bool:
+    if agent is None:
+        return False
+    if getattr(agent, "signup_preview_state", None) != PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE:
+        return False
+    return not PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=True,
+    ).exists()
+
+
+def can_bypass_task_credit_for_signup_preview(agent: PersistentAgent | None) -> bool:
+    return is_signup_preview_first_reply_window(agent)
 
 
 def is_signup_preview_processing_paused(agent: PersistentAgent | None) -> bool:

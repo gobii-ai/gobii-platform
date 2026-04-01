@@ -169,7 +169,10 @@ from api.services.owner_execution_pause import (
     get_owner_execution_pause_state,
     resolve_agent_owner,
 )
-from api.services.signup_preview import is_signup_preview_processing_paused
+from api.services.signup_preview import (
+    can_bypass_task_credit_for_signup_preview,
+    is_signup_preview_processing_paused,
+)
 from api.services.web_sessions import (
     get_deliverable_web_sessions,
     has_active_web_session,
@@ -3077,6 +3080,14 @@ def _ensure_credit_for_tool(
     if not settings.GOBII_PROPRIETARY_MODE or owner is None:
         return {"cost": None, "credit": None}
 
+    if can_bypass_task_credit_for_signup_preview(agent):
+        if span is not None:
+            try:
+                span.add_event("Signup preview credit bypass active")
+            except Exception:
+                pass
+        return {"cost": None, "credit": None}
+
     cost: Decimal | None = None
     consumed: dict | None = None
     consumed_credit = None
@@ -3899,100 +3910,105 @@ def _process_agent_events_locked(
             owner_user = getattr(agent, "user", None)
             owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
             if owner is not None:
-                owner_label = (
-                    f"organization {getattr(owner, 'id', 'unknown')}"
-                    if owner_is_org
-                    else f"user {getattr(owner_user, 'id', 'unknown')}"
-                )
-                try:
-                    available = TaskCreditService.calculate_available_tasks_for_owner(owner)
-                except Exception as e:
-                    # Defensive: if availability calc fails, log and proceed (do not block agent)
-                    logger.error(
-                        "Credit availability check failed for agent %s (%s): %s",
-                        persistent_agent_id,
-                        owner_label,
-                        str(e),
+                if can_bypass_task_credit_for_signup_preview(agent):
+                    span.add_event("Signup preview credit gate bypassed")
+                    span.set_attribute("credit_check.signup_preview_bypass", True)
+                    credit_snapshot = {"available": None, "daily_state": {}}
+                else:
+                    owner_label = (
+                        f"organization {getattr(owner, 'id', 'unknown')}"
+                        if owner_is_org
+                        else f"user {getattr(owner_user, 'id', 'unknown')}"
                     )
-                    available = None
+                    try:
+                        available = TaskCreditService.calculate_available_tasks_for_owner(owner)
+                    except Exception as e:
+                        # Defensive: if availability calc fails, log and proceed (do not block agent)
+                        logger.error(
+                            "Credit availability check failed for agent %s (%s): %s",
+                            persistent_agent_id,
+                            owner_label,
+                            str(e),
+                        )
+                        available = None
 
-                span.set_attribute("credit_check.available", int(available) if available is not None else 0)
-                span.set_attribute("credit_check.proprietary_mode", True)
-                span.set_attribute("credit_check.owner_type", "organization" if owner_is_org else "user")
-                if owner_is_org:
-                    span.set_attribute("credit_check.organization_id", str(getattr(owner, "id", None)))
-                if owner_user is not None:
-                    span.set_attribute("credit_check.user_id", owner_user.id)
+                    span.set_attribute("credit_check.available", int(available) if available is not None else 0)
+                    span.set_attribute("credit_check.proprietary_mode", True)
+                    span.set_attribute("credit_check.owner_type", "organization" if owner_is_org else "user")
+                    if owner_is_org:
+                        span.set_attribute("credit_check.organization_id", str(getattr(owner, "id", None)))
+                    if owner_user is not None:
+                        span.set_attribute("credit_check.user_id", owner_user.id)
 
-                if (
-                    available is not None
-                    and available != TASKS_UNLIMITED
-                    and Decimal(available) <= Decimal("0")
-                ):
-                    msg = f"Skipped processing due to insufficient credits (proprietary mode)."
-                    logger.warning(
-                        "Persistent agent %s not processed – %s has no remaining task credits.",
-                        persistent_agent_id,
-                        owner_label,
-                    )
+                    if (
+                        available is not None
+                        and available != TASKS_UNLIMITED
+                        and Decimal(available) <= Decimal("0")
+                    ):
+                        msg = f"Skipped processing due to insufficient credits (proprietary mode)."
+                        logger.warning(
+                            "Persistent agent %s not processed – %s has no remaining task credits.",
+                            persistent_agent_id,
+                            owner_label,
+                        )
 
-                    step = PersistentAgentStep.objects.create(
-                        agent=agent,
-                        description=msg,
-                    )
-                    PersistentAgentSystemStep.objects.create(
-                        step=step,
-                        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-                        notes="credit_insufficient",
-                    )
+                        step = PersistentAgentStep.objects.create(
+                            agent=agent,
+                            description=msg,
+                        )
+                        PersistentAgentSystemStep.objects.create(
+                            step=step,
+                            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                            notes="credit_insufficient",
+                        )
 
-                    span.add_event("Agent processing skipped - insufficient credits")
-                    span.set_attribute("credit_check.sufficient", False)
-                    return agent
-                daily_state = get_agent_daily_credit_state(agent)
-                daily_limit = daily_state.get("hard_limit")
-                daily_remaining = daily_state.get("hard_limit_remaining")
-                credit_snapshot = {
-                    "available": available,
-                    "daily_state": daily_state,
-                }
-                try:
-                    span.set_attribute(
-                        "credit_check.daily_limit",
-                        float(daily_limit) if daily_limit is not None else -1.0,
-                    )
-                    span.set_attribute(
-                        "credit_check.daily_remaining_before_loop",
-                        float(daily_remaining) if daily_remaining is not None else -1.0,
-                    )
-                except Exception:
-                    pass
+                        span.add_event("Agent processing skipped - insufficient credits")
+                        span.set_attribute("credit_check.sufficient", False)
+                        return agent
+                    daily_state = get_agent_daily_credit_state(agent)
+                    daily_limit = daily_state.get("hard_limit")
+                    daily_remaining = daily_state.get("hard_limit_remaining")
+                    credit_snapshot = {
+                        "available": available,
+                        "daily_state": daily_state,
+                    }
+                    try:
+                        span.set_attribute(
+                            "credit_check.daily_limit",
+                            float(daily_limit) if daily_limit is not None else -1.0,
+                        )
+                        span.set_attribute(
+                            "credit_check.daily_remaining_before_loop",
+                            float(daily_remaining) if daily_remaining is not None else -1.0,
+                        )
+                    except Exception:
+                        pass
 
-                if daily_limit is not None and (daily_remaining is None or daily_remaining <= Decimal("0")):
-                    msg = (
-                        "Skipped processing because this agent has reached its enforced daily task credit limit."
-                    )
-                    logger.warning(
-                        "Persistent agent %s not processed – hard daily limit reached (used=%s limit=%s).",
-                        persistent_agent_id,
-                        daily_state.get("used"),
-                        daily_limit,
-                    )
+                    if daily_limit is not None and (daily_remaining is None or daily_remaining <= Decimal("0")):
+                        msg = (
+                            "Skipped processing because this agent has reached its enforced daily task credit limit."
+                        )
+                        logger.warning(
+                            "Persistent agent %s not processed – hard daily limit reached (used=%s limit=%s).",
+                            persistent_agent_id,
+                            daily_state.get("used"),
+                            daily_limit,
+                        )
 
-                    step = PersistentAgentStep.objects.create(
-                        agent=agent,
-                        description=msg,
-                    )
-                    PersistentAgentSystemStep.objects.create(
-                        step=step,
-                        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-                        notes="daily_credit_limit_exhausted",
-                    )
+                        step = PersistentAgentStep.objects.create(
+                            agent=agent,
+                            description=msg,
+                        )
+                        PersistentAgentSystemStep.objects.create(
+                            step=step,
+                            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                            notes="daily_credit_limit_exhausted",
+                        )
 
-                    send_owner_daily_credit_hard_limit_notice(agent)
-                    span.add_event("Agent processing skipped - daily credit limit reached")
-                    span.set_attribute("credit_check.daily_limit_block", True)
-                    return agent
+                        send_owner_daily_credit_hard_limit_notice(agent)
+                        span.add_event("Agent processing skipped - daily credit limit reached")
+                        span.set_attribute("credit_check.daily_limit_block", True)
+                        return agent
             else:
                 # Agents without a linked user (system/automation) are not gated
                 span.add_event("Agent has no owner; skipping credit gate")

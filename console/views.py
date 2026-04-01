@@ -2727,13 +2727,23 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
+            personal_agents = PersistentAgent.objects.non_eval().alive().filter(
+                user=self.request.user,
+                organization__isnull=True,  # Only personal agents
+            )
             if can_user_access_personal_agent_chat(self.request.user):
-                persistent_agents = PersistentAgent.objects.non_eval().alive().filter(
-                    user=self.request.user,
-                    organization__isnull=True,  # Only personal agents
-                ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+                persistent_agents = personal_agents
             else:
-                persistent_agents = PersistentAgent.objects.none()
+                persistent_agents = personal_agents.exclude(
+                    signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
+                )
+            persistent_agents = (
+                persistent_agents
+                .select_related('browser_use_agent', 'agent_color')
+                .prefetch_related(email_prefetch)
+                .prefetch_related(primary_sms_prefetch)
+                .order_by('-created_at')
+            )
         
         persistent_agents = list(persistent_agents)
         shared_agents_qs = (
