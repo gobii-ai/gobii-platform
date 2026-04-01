@@ -62,6 +62,7 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
+from util.personal_signup_preview import SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE
 from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE
 from util.analytics import AnalyticsEvent
 
@@ -244,12 +245,19 @@ class AgentChatAPITests(TestCase):
     )
     @tag("batch_agent_chat")
     def test_quick_create_allows_signup_preview_creation_when_processing_limit_flag_enabled(self):
+        fresh_user = get_user_model().objects.create_user(
+            username="preview-user",
+            email="preview@example.com",
+            password="password123",
+        )
+        preview_client = Client()
+        preview_client.force_login(fresh_user)
         with (
             override_flag("personal_agent_signup_preview_processing_limit", active=True),
             patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
             patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
         ):
-            response = self.client.post(
+            response = preview_client.post(
                 "/console/api/agents/create/",
                 data=json.dumps({"message": "Create from immersive app"}),
                 content_type="application/json",
@@ -261,6 +269,47 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(
             created_agent.signup_preview_state,
             PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
+        )
+
+    @override_settings(
+        GOBII_PROPRIETARY_MODE=True,
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
+    )
+    @tag("batch_agent_chat")
+    def test_quick_create_blocks_second_signup_preview_agent_without_plan(self):
+        fresh_user = get_user_model().objects.create_user(
+            username="preview-repeat-user",
+            email="preview-repeat@example.com",
+            password="password123",
+        )
+        preview_client = Client()
+        preview_client.force_login(fresh_user)
+        with (
+            override_flag("personal_agent_signup_preview_processing_limit", active=True),
+            patch("console.agent_creation.can_user_use_personal_agents_and_api", return_value=False),
+            patch("util.personal_signup_preview.can_user_use_personal_agents_and_api", return_value=False),
+        ):
+            first_response = preview_client.post(
+                "/console/api/agents/create/",
+                data=json.dumps({"message": "Create from immersive app"}),
+                content_type="application/json",
+            )
+            second_response = preview_client.post(
+                "/console/api/agents/create/",
+                data=json.dumps({"message": "Create another preview"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 400)
+        self.assertEqual(second_response.json().get("error"), SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE)
+        self.assertEqual(
+            PersistentAgent.objects.filter(
+                user=fresh_user,
+                organization__isnull=True,
+                is_deleted=False,
+            ).count(),
+            1,
         )
 
     @tag("batch_agent_chat")

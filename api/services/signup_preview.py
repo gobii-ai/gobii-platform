@@ -36,6 +36,17 @@ def get_signup_preview_creation_state(preview_creation_allowed: bool) -> str | N
     return PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
 
 
+def user_has_existing_personal_agent_for_signup_preview(user) -> bool:
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        return False
+    return PersistentAgent.objects.filter(
+        user_id=user_id,
+        organization__isnull=True,
+        is_deleted=False,
+    ).exists()
+
+
 def is_signup_preview_state_active(agent: PersistentAgent | None) -> bool:
     if agent is None:
         return False

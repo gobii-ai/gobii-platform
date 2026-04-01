@@ -15,6 +15,9 @@ from util.waffle_flags import is_waffle_flag_active
 
 
 GENERIC_STARTER_CHARTER = "Hello!"
+SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE = (
+    "Finish signup to create another agent. Your preview can continue once you start a plan."
+)
 
 
 SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK = """

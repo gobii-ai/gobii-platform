@@ -2,6 +2,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 import logging
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest
@@ -35,6 +36,7 @@ from api.services.persistent_agents import (
     ensure_default_agent_email_endpoint,
 )
 from api.services.signup_preview import get_signup_preview_creation_state
+from api.services.signup_preview import user_has_existing_personal_agent_for_signup_preview
 from api.pipedream_app_utils import normalize_app_slugs
 from api.services.pipedream_apps import get_owner_selected_app_slugs, set_owner_selected_app_slugs
 from console.context_helpers import build_console_context
@@ -44,6 +46,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import clear_trial_onboarding_intent
 from util.personal_signup_preview import (
     resolve_personal_signup_preview,
+    SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE,
 )
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import get_owner_plan
@@ -212,6 +215,13 @@ def create_persistent_agent_from_charter(
                 raise ValidationError("Unsupported intelligence tier selection.")
 
     with transaction.atomic():
+        if preview_creation_allowed and organization is None:
+            # Serialize preview creation per user so repeated quick-create requests
+            # cannot provision multiple free preview agents before the first commit lands.
+            get_user_model().objects.select_for_update().filter(pk=request.user.pk).exists()
+            if user_has_existing_personal_agent_for_signup_preview(request.user):
+                raise ValidationError(SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE)
+
         try:
             provisioning = PersistentAgentProvisioningService.provision(
                 user=request.user,

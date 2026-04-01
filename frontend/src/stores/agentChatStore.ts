@@ -380,6 +380,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const providedName = options?.agentName ?? null
     const providedAvatarUrl = options?.agentAvatarUrl ?? null
     const providedSignupPreviewState = options?.signupPreviewState ?? null
+    const hasProvidedSignupPreviewState = Object.prototype.hasOwnProperty.call(options ?? {}, 'signupPreviewState')
     const hasProvidedProcessingActive = Object.prototype.hasOwnProperty.call(options ?? {}, 'processingActive')
     const providedProcessingActive = hasProvidedProcessingActive ? Boolean(options?.processingActive) : false
     const reuseExisting = get().agentId === agentId
@@ -414,7 +415,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       agentColorHex: providedColor ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
       agentName: providedName ?? fallbackName ?? null,
       agentAvatarUrl: providedAvatarUrl ?? fallbackAvatarUrl ?? null,
-      signupPreviewState: reuseExisting ? get().signupPreviewState : (providedSignupPreviewState ?? 'none'),
+      signupPreviewState: reuseExisting
+        ? (hasProvidedSignupPreviewState ? (providedSignupPreviewState ?? 'none') : get().signupPreviewState)
+        : (providedSignupPreviewState ?? 'none'),
       // Reset insight state only when switching to a different agent
       ...(reuseExisting ? {} : {
         insights: [],
