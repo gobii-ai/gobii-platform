@@ -25,6 +25,13 @@ class SignupFormWithTurnstile(SignupForm):
 class LoginFormWithTurnstile(LoginForm):
     """Require a successful Turnstile validation to log in."""
 
-    turnstile = TurnstileField()
+    turnstile = TurnstileField(
+        callback="gobiiLoginTurnstileSuccess",
+        **{
+            "expired-callback": "gobiiLoginTurnstileExpired",
+            "timeout-callback": "gobiiLoginTurnstileExpired",
+            "error-callback": "gobiiLoginTurnstileError",
+        },
+    )
 
     # Validation handled by field; credentials check runs afterwards. 

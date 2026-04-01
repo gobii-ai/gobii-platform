@@ -106,7 +106,60 @@
       {# Cloudflare Turnstile widget (enabled only when configured) #}
       {% if settings.TURNSTILE_ENABLED and form.turnstile %}
         <div class="mt-4 flex flex-col items-center">
+          <script>
+            (() => {
+              const loginForm = document.currentScript.closest('form');
+              const submitButton = loginForm?.querySelector('[data-turnstile-submit]');
+              const statusMessage = loginForm?.querySelector('[data-turnstile-status]');
+              const widget = loginForm?.querySelector('.cf-turnstile');
+
+              const setSubmitEnabled = (enabled) => {
+                if (!submitButton) {
+                  return;
+                }
+                submitButton.disabled = !enabled;
+                submitButton.classList.toggle('opacity-60', !enabled);
+                submitButton.classList.toggle('cursor-not-allowed', !enabled);
+                submitButton.setAttribute('aria-disabled', enabled ? 'false' : 'true');
+              };
+
+              const setStatusMessage = (message) => {
+                if (!statusMessage) {
+                  return;
+                }
+                statusMessage.textContent = message;
+                statusMessage.classList.toggle('hidden', !message);
+              };
+
+              const resetWidget = () => {
+                if (!widget || !window.turnstile?.reset) {
+                  return;
+                }
+                window.turnstile.reset(widget);
+              };
+
+              window.gobiiLoginTurnstileSuccess = () => {
+                setSubmitEnabled(true);
+                setStatusMessage('');
+              };
+
+              window.gobiiLoginTurnstileExpired = () => {
+                setSubmitEnabled(false);
+                setStatusMessage('Verification expired. Please try again.');
+                resetWidget();
+              };
+
+              window.gobiiLoginTurnstileError = () => {
+                setSubmitEnabled(false);
+                setStatusMessage('Verification failed. Please try again.');
+                resetWidget();
+              };
+
+              setSubmitEnabled(false);
+            })();
+          </script>
           {{ form.turnstile }}
+          <p data-turnstile-status class="mt-2 hidden text-center text-sm text-red-600"></p>
           {% if form.turnstile.errors %}
             <div class="mt-2 text-center">
               {% for error in form.turnstile.errors %}
@@ -118,8 +171,10 @@
       {% endif %}
 
       <button type="submit"
+              data-turnstile-submit
+              {% if settings.TURNSTILE_ENABLED and form.turnstile %}disabled aria-disabled="true"{% endif %}
               class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white
-                     shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2
+                     shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2
                      focus:ring-blue-500 focus:ring-offset-2">Sign in</button>
       {% if settings.GOBII_PROPRIETARY_MODE %}
       <p class="mt-4 text-xs text-gray-500 text-center">

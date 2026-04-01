@@ -1,4 +1,3 @@
-
 from urllib.parse import parse_qs, urlparse
 import re
 from types import SimpleNamespace
@@ -9,7 +8,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.core import signing
 from django.template.loader import render_to_string
-from django.test import RequestFactory, TestCase, override_settings, tag
+from django.test import RequestFactory, TestCase, modify_settings, override_settings, tag
 from django.urls import reverse
 from waffle.testutils import override_flag
 from api.models import BrowserUseAgent, MCPServerConfig, PersistentAgent, UserBilling, UserFlags
@@ -2197,6 +2196,34 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, "gobii_signup_fpjs_request_id")
         self.assertContains(response, "gobii_signup_ga_client_id")
 
+
+@tag("batch_pages")
+class LoginTurnstilePageTests(TestCase):
+    @tag("batch_pages")
+    @modify_settings(INSTALLED_APPS={"append": "turnstile"})
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        ACCOUNT_FORMS={
+            "signup": "turnstile_signup.SignupFormWithTurnstile",
+            "login": "turnstile_signup.LoginFormWithTurnstile",
+        },
+    )
+    def test_login_page_disables_submit_until_fresh_turnstile_token(self):
+        response = self.client.get(reverse("account_login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "data-turnstile-submit")
+        self.assertContains(response, 'disabled aria-disabled="true"')
+        self.assertContains(response, "window.gobiiLoginTurnstileSuccess = () => {")
+        self.assertContains(response, "window.gobiiLoginTurnstileExpired = () => {")
+        self.assertContains(response, "window.gobiiLoginTurnstileError = () => {")
+        self.assertContains(response, "Verification expired. Please try again.")
+        self.assertContains(response, "Verification failed. Please try again.")
+        self.assertContains(response, "window.turnstile.reset(widget);")
+        self.assertContains(response, 'data-expired-callback="gobiiLoginTurnstileExpired"')
+        self.assertContains(response, 'data-timeout-callback="gobiiLoginTurnstileExpired"')
+        self.assertContains(response, 'data-error-callback="gobiiLoginTurnstileError"')
+        self.assertContains(response, 'data-callback="gobiiLoginTurnstileSuccess"')
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):
     @tag("batch_pages")
