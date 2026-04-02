@@ -1,6 +1,5 @@
 import base64
 import logging
-import mimetypes
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -14,6 +13,7 @@ from sandbox_server.workspace import (
     _decode_content,
     _elapsed_ms,
     _ensure_capacity,
+    _guess_mime_type,
     _iter_workspace_files,
     _normalize_checksum,
     _normalize_workspace_path,
@@ -142,7 +142,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 content = path.read_bytes()
             except OSError:
                 continue
-            mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            mime_type = _guess_mime_type(path)
             checksum_sha256 = _checksum_bytes(content)
             changes.append(
                 {
@@ -180,7 +180,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 content = path.read_bytes()
             except OSError:
                 continue
-            mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            mime_type = _guess_mime_type(path)
             changes.append(
                 {
                     "path": rel,

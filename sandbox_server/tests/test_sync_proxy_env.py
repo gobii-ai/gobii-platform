@@ -166,7 +166,7 @@ class SyncProxyEnvTests(unittest.TestCase):
         change = result["changes"][0]
         self.assertEqual(change["path"], CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
         self.assertEqual(change["content_b64"], "c3FsaXRlIGJ5dGVz")
-        self.assertEqual(change["mime_type"], "application/octet-stream")
+        self.assertEqual(change["mime_type"], "application/vnd.sqlite3")
         self.assertEqual(change["checksum_sha256"], sha256(b"sqlite bytes").hexdigest())
 
 

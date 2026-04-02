@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from sandbox_server.workspace import _ensure_capacity, _normalize_workspace_path
+from sandbox_server.workspace import _ensure_capacity, _guess_mime_type, _normalize_workspace_path
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ def _substitute_workspace_tokens(html: str, agent_root: Path) -> str:
             content = full_path.read_bytes()
         except OSError:
             return match.group(0)
-        mime_type = mimetypes.guess_type(full_path.name)[0] or "application/octet-stream"
+        mime_type = _guess_mime_type(full_path)
         encoded = base64.b64encode(content).decode("utf-8")
         return f"data:{mime_type};base64,{encoded}"
 
