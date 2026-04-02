@@ -35,12 +35,19 @@ from api.tasks.sandbox_compute import sync_filespace_after_call
 
 class _DummyBackend:
     def __init__(self) -> None:
+        self.deploy_calls: list[dict] = []
         self.sync_calls: list[dict] = []
         self.run_command_calls: list[dict] = []
         self.mcp_calls: list[dict] = []
         self.tool_calls: list[dict] = []
 
     def deploy_or_resume(self, agent, session):
+        self.deploy_calls.append(
+            {
+                "agent_id": str(agent.id),
+                "state": session.state,
+            }
+        )
         return SandboxSessionUpdate(state=AgentComputeSession.State.RUNNING)
 
     def sync_filespace(self, agent, session, *, direction, payload=None):
@@ -197,6 +204,7 @@ class SandboxComputeSyncTests(TestCase):
             service._ensure_session(self.agent, source="tool_request")
 
         self.assertEqual(len(backend.sync_calls), 2)
+        self.assertEqual(len(backend.deploy_calls), 2)
         self.assertEqual(backend.sync_calls[0]["direction"], "pull")
         self.assertEqual(backend.sync_calls[1]["direction"], "pull")
 
@@ -483,6 +491,17 @@ class SandboxComputeSyncTests(TestCase):
             )
 
             self.assertEqual(result.get("status"), "ok")
+            self.assertEqual(
+                result.get("shared_sqlite_db"),
+                {
+                    "available": True,
+                    "same_db_as_sqlite_batch": True,
+                    "transport": "sandbox_sync",
+                    "sync_back": "ok",
+                    "deleted": False,
+                    "size_bytes": len(synced_bytes),
+                },
+            )
             with open(db_path, "rb") as handle:
                 self.assertEqual(handle.read(), synced_bytes)
 
@@ -626,6 +645,17 @@ class SandboxComputeSyncTests(TestCase):
             )
 
         self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(
+            result.get("shared_sqlite_db"),
+            {
+                "available": True,
+                "same_db_as_sqlite_batch": True,
+                "transport": "sandbox_sync",
+                "sync_back": "ok",
+                "deleted": False,
+                "size_bytes": len(b"initial sqlite bytes"),
+            },
+        )
         self.assertEqual(len(backend.run_command_calls), 1)
         merged_env = backend.run_command_calls[0]["env"]
         self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")

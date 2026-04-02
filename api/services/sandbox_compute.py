@@ -1150,25 +1150,25 @@ class SandboxComputeService:
         previous_state = session.state
         started = session.state != AgentComputeSession.State.RUNNING
         bootstrap_started_at = time.monotonic()
-        if started:
-            deploy_started_at = time.monotonic()
-            update = self._backend.deploy_or_resume(agent, session)
-            deploy_duration_ms = _elapsed_ms(deploy_started_at)
-            if not update.state:
-                update.state = AgentComputeSession.State.RUNNING
-            self._apply_session_update(session, update)
-            logger.info(
-                (
-                    "Sandbox bootstrap deploy_or_resume agent=%s source=%s duration_ms=%s "
-                    "state=%s pod=%s namespace=%s"
-                ),
-                agent.id,
-                source,
-                deploy_duration_ms,
-                update.state,
-                update.pod_name or session.pod_name,
-                update.namespace or session.namespace,
-            )
+        deploy_started_at = time.monotonic()
+        update = self._backend.deploy_or_resume(agent, session)
+        deploy_duration_ms = _elapsed_ms(deploy_started_at)
+        if not update.state:
+            update.state = AgentComputeSession.State.RUNNING
+        self._apply_session_update(session, update)
+        logger.info(
+            (
+                "Sandbox %s deploy_or_resume agent=%s source=%s duration_ms=%s "
+                "state=%s pod=%s namespace=%s"
+            ),
+            "bootstrap" if started else "refresh",
+            agent.id,
+            source,
+            deploy_duration_ms,
+            update.state,
+            update.pod_name or session.pod_name,
+            update.namespace or session.namespace,
+        )
         pull_started_at = time.monotonic()
         sync_result = self._sync_workspace_pull(agent, session)
         pull_duration_ms = _elapsed_ms(pull_started_at)
@@ -1511,6 +1511,7 @@ class SandboxComputeService:
         sqlite_env_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         session = self._ensure_session(agent, source="custom_tool_run_command")
+        shared_sqlite_db: Optional[Dict[str, Any]] = None
 
         runtime_env = dict(env or {})
         if sqlite_env_key and local_sqlite_db_path:
@@ -1541,6 +1542,14 @@ class SandboxComputeService:
             interactive=interactive,
         )
 
+        if local_sqlite_db_path and isinstance(self._backend, LocalSandboxBackend):
+            shared_sqlite_db = {
+                "available": True,
+                "same_db_as_sqlite_batch": True,
+                "transport": "local",
+                "sync_back": "not_needed",
+            }
+
         if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
             push_result = self._sync_custom_tool_sqlite_push(
                 agent,
@@ -1560,6 +1569,19 @@ class SandboxComputeService:
                     result["sqlite_sync_error"] = message
                     return result
                 return {"status": "error", "message": message}
+            shared_sqlite_db = {
+                "available": True,
+                "same_db_as_sqlite_batch": True,
+                "transport": "sandbox_sync",
+                "sync_back": "ok",
+                "deleted": bool(push_result.get("deleted")),
+            }
+            if isinstance(push_result.get("size_bytes"), int):
+                shared_sqlite_db["size_bytes"] = push_result["size_bytes"]
+
+        if shared_sqlite_db and isinstance(result, dict):
+            result = dict(result)
+            result["shared_sqlite_db"] = shared_sqlite_db
 
         return result
 
