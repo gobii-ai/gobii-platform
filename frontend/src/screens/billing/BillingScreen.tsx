@@ -83,6 +83,22 @@ function buildChurnKeySessionAnalytics(sessionResults: unknown): Record<string, 
   }
 }
 
+async function waitForChurnKeyReady(timeoutMs = 1500): Promise<boolean> {
+  if (typeof window.churnkey?.init === 'function') {
+    return true
+  }
+
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => window.setTimeout(resolve, 50))
+    if (typeof window.churnkey?.init === 'function') {
+      return true
+    }
+  }
+
+  return false
+}
+
 function computeAddonsDisabledReason(initialData: BillingInitialData): string | null {
   if (!initialData.canManageBilling) return 'You do not have permission to manage billing.'
   if (initialData.addonsDisabled) return 'Add-ons are unavailable for this subscription.'
@@ -357,7 +373,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const churnKeyConfig = initialData.contextType === 'personal' ? initialData.churnKey : null
   const churnKeyAnalyticsBase = useMemo(() => buildChurnKeyBaseAnalytics(initialData), [initialData])
 
-  const openCancelFlow = useCallback(() => {
+  const openCancelFlow = useCallback(async () => {
     if (!churnKeyConfig?.enabled) {
       track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
         ...churnKeyAnalyticsBase,
@@ -369,8 +385,8 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       return
     }
 
-    const churnkey = window.churnkey
-    if (typeof churnkey?.init !== 'function') {
+    const churnKeyReady = await waitForChurnKeyReady()
+    if (!churnKeyReady || typeof window.churnkey?.init !== 'function') {
       track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
         ...churnKeyAnalyticsBase,
         errorType: 'script_not_ready',
@@ -389,7 +405,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     try {
       track(AnalyticsEvent.BILLING_CANCEL_FLOW_OPENED, churnKeyAnalyticsBase)
 
-      churnkey.init('show', {
+      window.churnkey.init('show', {
         appId: churnKeyConfig.appId,
         customerId: churnKeyConfig.customerId,
         authHash: churnKeyConfig.authHash,
