@@ -3546,7 +3546,7 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
         )
 
     def delete_model(self, request, obj):
-        skill = GlobalAgentSkill.objects.get(pk=obj.pk)
+        skill = obj
         super().delete_model(request, obj)
         track_global_agent_skill_event(
             user_id=getattr(request.user, "id", None),

@@ -851,8 +851,8 @@ def _search_with_llm(
                     invalid_label="Invalid tools",
                 )
 
-                # Fallback: if the LLM did not call enable_tools, heuristically enable core built-ins
-                if not requested:
+                # Fallback only when the model made no explicit tool or skill selection.
+                if not requested and not requested_skills:
                     fallback = _fallback_builtin_selection(query or "", content_text or "", available_names)
                     fallback = [name for name in fallback if name in available_names]
                     if fallback:

@@ -1656,6 +1656,65 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools._fallback_builtin_selection')
+    @patch('api.agent.tools.search_tools.enable_global_skills')
+    def test_search_tools_global_skill_selection_skips_builtin_fallback(
+        self,
+        mock_enable_global_skills,
+        mock_fallback_builtin_selection,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate an ops report",
+            tools=["sqlite_batch"],
+            instructions="Collect the latest operational metrics and summarize them.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+        mock_enable_global_skills.return_value = {
+            "status": "success",
+            "enabled": ["ops-report"],
+            "already_enabled": [],
+            "conflicts": [],
+        }
+        mock_fallback_builtin_selection.return_value = ["read_file"]
+
+        msg = MagicMock()
+        msg.content = "Enable the ops report skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_global_skills",
+                    "arguments": json.dumps({"skill_names": ["ops-report"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "generate recurring ops reports")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["skills"]["enabled"], ["ops-report"])
+        mock_enable_global_skills.assert_called_once()
+        mock_fallback_builtin_selection.assert_not_called()
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
     def test_search_tools_global_skill_enablement_is_idempotent(
         self,
         mock_get_config,
