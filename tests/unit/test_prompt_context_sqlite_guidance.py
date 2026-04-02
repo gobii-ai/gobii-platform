@@ -70,3 +70,10 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         examples = prompt_context._get_sqlite_examples()
         self.assertIn("grep_context_all(\n        json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)", examples)
         self.assertIn("try wider context (200 chars)", examples)
+
+    def test_examples_prefer_patch_and_retry_for_named_missing_parameters(self):
+        examples = prompt_context._get_sqlite_examples()
+        self.assertIn(
+            "If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous",
+            examples,
+        )
