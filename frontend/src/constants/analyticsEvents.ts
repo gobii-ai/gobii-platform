@@ -53,6 +53,15 @@ export const AnalyticsEvent = {
   AGENT_SETUP_UPGRADE_CLICKED: 'Agent - Upgrade Clicked',
 
   // ============================================
+  // Signup Preview
+  // ============================================
+  SIGNUP_PREVIEW_ENTERED: 'Signup Preview Entered',
+  SIGNUP_PREVIEW_AGENT_CREATED: 'Signup Preview Agent Created',
+  SIGNUP_PREVIEW_PAUSED_AFTER_FIRST_REPLY: 'Signup Preview Paused After First Reply',
+  SIGNUP_PREVIEW_RESUMED_AFTER_PLAN: 'Signup Preview Resumed After Plan',
+  SIGNUP_PREVIEW_ACTION_BLOCKED: 'Signup Preview Action Blocked',
+
+  // ============================================
   // Subscription Upgrade Flow
   // ============================================
   /** User clicked upgrade button in banner */

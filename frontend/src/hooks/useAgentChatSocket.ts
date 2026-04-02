@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { normalizePendingHumanInputRequests } from '../api/agentChat'
 import { scheduleLoginRedirect } from '../api/http'
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
+import type { SignupPreviewState } from '../types/agentRoster'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import { refreshTimelineLatestInCache, replacePendingHumanInputRequestsInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
@@ -405,6 +406,7 @@ export function useAgentChatSocket(
               agentName?: string | null
               agentColorHex?: string | null
               agentAvatarUrl?: string | null
+              signupPreviewState?: SignupPreviewState | null
             } = {}
             if (typeof profilePayload.agent_id === 'string') {
               nextIdentity.agentId = profilePayload.agent_id
@@ -417,6 +419,16 @@ export function useAgentChatSocket(
             }
             if (Object.prototype.hasOwnProperty.call(profilePayload, 'agent_avatar_url')) {
               nextIdentity.agentAvatarUrl = typeof profilePayload.agent_avatar_url === 'string' ? profilePayload.agent_avatar_url : null
+            }
+            if (Object.prototype.hasOwnProperty.call(profilePayload, 'signup_preview_state')) {
+              const nextSignupPreviewState = profilePayload.signup_preview_state
+              nextIdentity.signupPreviewState = (
+                nextSignupPreviewState === 'awaiting_first_reply_pause'
+                || nextSignupPreviewState === 'awaiting_signup_completion'
+                || nextSignupPreviewState === 'none'
+              )
+                ? nextSignupPreviewState
+                : null
             }
             updateAgentIdentityRef.current(nextIdentity)
             profileEventRef.current?.(profilePayload)

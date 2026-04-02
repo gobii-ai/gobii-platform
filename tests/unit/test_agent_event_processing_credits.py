@@ -146,6 +146,33 @@ class PersistentAgentCreditGateTests(TestCase):
             "Normal event-window step should not be created on early exit",
         )
 
+    def test_signup_preview_first_reply_bypasses_startup_credit_gate(self):
+        self.agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        )
+        self.agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(
+            "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+            return_value=0,
+        ) as available_mock, patch(
+            "api.agent.core.event_processing._run_agent_loop",
+            return_value={},
+        ) as loop_mock:
+            from api.agent.core.event_processing import _process_agent_events_locked
+
+            _process_agent_events_locked(self.agent.id, _DummySpan())
+
+        available_mock.assert_not_called()
+        loop_mock.assert_called_once()
+        self.assertFalse(
+            PersistentAgentSystemStep.objects.filter(
+                step__agent=self.agent,
+                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                notes="credit_insufficient",
+            ).exists()
+        )
+
     def test_owner_execution_pause_exits_early(self):
         UserBilling.objects.update_or_create(
             user=self.user,
@@ -425,6 +452,27 @@ class PersistentAgentToolCreditTests(TestCase):
 
         span.add_event.assert_any_call("Tool skipped - insufficient credits mid-loop")
         span.set_attribute.assert_any_call("credit_check.tool_cost", 0.8)
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner")
+    def test_signup_preview_first_reply_bypasses_tool_credit_consumption(
+        self,
+        mock_available,
+        mock_consume,
+    ):
+        self.agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        )
+        self.agent.save(update_fields=["signup_preview_state", "updated_at"])
+        span = MagicMock()
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertEqual(result, {"cost": None, "credit": None})
+        mock_available.assert_not_called()
+        mock_consume.assert_not_called()
+        span.add_event.assert_any_call("Signup preview credit bypass active")
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")

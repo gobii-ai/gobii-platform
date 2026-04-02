@@ -17,6 +17,7 @@ from api.models import (
     BrowserUseAgent,
     CommsChannel,
     PersistentAgentCommsEndpoint,
+    PersistentAgentMessage,
     PersistentAgentWebhook,
     UserPhoneNumber,
 )
@@ -205,6 +206,58 @@ class EmailVerificationToolGatingTests(TransactionTestCase):
             "mobile_first_html": "<p>Hello</p>",
         })
         self.assertEqual(result["status"], "ok")
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    @tag("batch_email_verification")
+    def test_send_email_allows_first_signup_preview_email_for_unverified_user(
+        self, mock_deliver, mock_close
+    ):
+        self.unverified_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        )
+        self.unverified_agent.save(update_fields=["signup_preview_state", "updated_at"])
+
+        result = execute_send_email(self.unverified_agent, {
+            "to_address": self.unverified_user.email,
+            "subject": "Test",
+            "mobile_first_html": "<p>Hello</p>",
+        })
+
+        self.assertEqual(result["status"], "ok")
+        mock_deliver.assert_called_once()
+
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    @tag("batch_email_verification")
+    def test_send_email_blocks_second_signup_preview_email_for_unverified_user(
+        self, mock_deliver, mock_close
+    ):
+        self.unverified_agent.signup_preview_state = (
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        )
+        self.unverified_agent.save(update_fields=["signup_preview_state", "updated_at"])
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.unverified_agent,
+            from_endpoint=PersistentAgentCommsEndpoint.objects.get(
+                owner_agent=self.unverified_agent,
+                channel=CommsChannel.EMAIL,
+            ),
+            to_endpoint=PersistentAgentCommsEndpoint.objects.create(
+                channel=CommsChannel.EMAIL,
+                address="recipient@example.com",
+            ),
+            is_outbound=True,
+            body="<p>Hello</p>",
+        )
+
+        result = execute_send_email(self.unverified_agent, {
+            "to_address": self.unverified_user.email,
+            "subject": "Test",
+            "mobile_first_html": "<p>Hello again</p>",
+        })
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error_code"], "EMAIL_VERIFICATION_REQUIRED")
+        mock_deliver.assert_not_called()
 
     @patch("api.agent.tools.sms_sender.deliver_agent_sms")
     @tag("batch_email_verification")

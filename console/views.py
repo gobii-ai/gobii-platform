@@ -52,6 +52,7 @@ from billing.checkout_metadata import (
 )
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
+from api.services.signup_preview import user_can_access_signup_preview_agent
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
@@ -153,6 +154,9 @@ from util.onboarding import (
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
+from util.personal_signup_preview import (
+    resolve_personal_signup_preview,
+)
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import (
     reconcile_user_plan_from_stripe,
@@ -196,6 +200,7 @@ from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED, get_plan_config
 from waffle import flag_is_active
 from api.services.email_verification import has_verified_email
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
+from api.services.signup_preview import resume_signup_preview_agent_if_eligible
 
 
 def _clamp_color(value: int) -> int:
@@ -256,6 +261,7 @@ def _enforce_personal_agent_access_or_raise(user, agent: PersistentAgent) -> Non
     if (
         agent.organization_id is None
         and agent.user_id == user.id
+        and not user_can_access_signup_preview_agent(agent, user)
         and not can_user_use_personal_agents_and_api(user)
     ):
         raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
@@ -660,6 +666,19 @@ def _is_cta_continue_agent_btn_enabled(request: HttpRequest | None) -> bool:
 def _is_cta_no_charge_during_trial_enabled(request: HttpRequest | None) -> bool:
     """Default to disabled until the rollout is explicitly enabled."""
     return is_waffle_flag_active(CTA_NO_CHARGE_DURING_TRIAL, request, default=False)
+
+
+def _get_personal_signup_preview_config(
+    request: HttpRequest,
+    *,
+    resolved_context=None,
+):
+    context_info = resolved_context or build_console_context(request)
+    return resolve_personal_signup_preview(
+        request.user,
+        request=request,
+        current_context_type=context_info.current_context.type,
+    )
 
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
@@ -2146,6 +2165,10 @@ def get_user_plan_api(request):
     cta_pick_a_plan = _is_cta_pick_a_plan_enabled(request)
     cta_continue_agent_btn = _is_cta_continue_agent_btn_enabled(request)
     cta_no_charge_during_trial = _is_cta_no_charge_during_trial_enabled(request)
+    resolved_context = build_console_context(request)
+    preview_config = _get_personal_signup_preview_config(request, resolved_context=resolved_context)
+    personal_signup_preview_available = preview_config.ui_enabled
+    personal_signup_preview_processing_available = preview_config.processing_limit_enabled
 
     try:
         plan = reconcile_user_plan_from_stripe(request.user)
@@ -2168,6 +2191,8 @@ def get_user_plan_api(request):
             'cta_pick_a_plan': cta_pick_a_plan,
             'cta_continue_agent_btn': cta_continue_agent_btn,
             'cta_no_charge_during_trial': cta_no_charge_during_trial,
+            'personal_signup_preview_available': personal_signup_preview_available,
+            'personal_signup_preview_processing_available': personal_signup_preview_processing_available,
         })
     except Exception as e:
         return JsonResponse({
@@ -2182,6 +2207,8 @@ def get_user_plan_api(request):
             'cta_pick_a_plan': cta_pick_a_plan,
             'cta_continue_agent_btn': cta_continue_agent_btn,
             'cta_no_charge_during_trial': cta_no_charge_during_trial,
+            'personal_signup_preview_available': personal_signup_preview_available,
+            'personal_signup_preview_processing_available': personal_signup_preview_processing_available,
             'error': str(e),
         })
 
@@ -2697,13 +2724,23 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         else:
             # Show personal agents
+            personal_agents = PersistentAgent.objects.non_eval().alive().filter(
+                user=self.request.user,
+                organization__isnull=True,  # Only personal agents
+            )
             if can_user_access_personal_agent_chat(self.request.user):
-                persistent_agents = PersistentAgent.objects.non_eval().alive().filter(
-                    user=self.request.user,
-                    organization__isnull=True,  # Only personal agents
-                ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
+                persistent_agents = personal_agents
             else:
-                persistent_agents = PersistentAgent.objects.none()
+                persistent_agents = personal_agents.exclude(
+                    signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
+                )
+            persistent_agents = (
+                persistent_agents
+                .select_related('browser_use_agent', 'agent_color')
+                .prefetch_related(email_prefetch)
+                .prefetch_related(primary_sms_prefetch)
+                .order_by('-created_at')
+            )
         
         persistent_agents = list(persistent_agents)
         shared_agents_qs = (
@@ -5965,9 +6002,19 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
     template_name = "console/persistent_agent_chat_shell.html"
     allow_delinquent_personal_chat = True
 
+    def _resume_signup_preview_if_eligible(self, agent: PersistentAgent) -> PersistentAgent:
+        resume_signup_preview_agent_if_eligible(
+            agent,
+            self.request.user,
+            resume_source="chat_shell",
+        )
+        return agent
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        agent = self.object
+        agent = self._resume_signup_preview_if_eligible(self.object)
+        self.object = agent
+        preview_config = _get_personal_signup_preview_config(self.request)
         startup_trial_days, scale_trial_days = _get_checkout_trial_days()
         immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
         context["immersive"] = immersive
@@ -5982,6 +6029,8 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["cta_pick_a_plan"] = _is_cta_pick_a_plan_enabled(self.request)
         context["cta_continue_agent_btn"] = _is_cta_continue_agent_btn_enabled(self.request)
         context["cta_no_charge_during_trial"] = _is_cta_no_charge_during_trial_enabled(self.request)
+        context["personal_signup_preview_available"] = preview_config.ui_enabled
+        context["personal_signup_preview_processing_available"] = preview_config.processing_limit_enabled
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
 
@@ -5992,6 +6041,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
         context["max_chat_upload_size_bytes"] = get_max_file_size()
         context["pipedream_integrations_enabled"] = pipedream_status().enabled
+        context["agent_signup_preview_state"] = agent.signup_preview_state
         return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only

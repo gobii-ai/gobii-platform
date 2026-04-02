@@ -105,6 +105,9 @@ from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
 from api.agent.tasks import process_agent_events_task
 from api.services.system_settings import get_max_file_size
+from api.services.signup_preview import (
+    resume_signup_preview_agent_if_eligible,
+)
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
@@ -117,9 +120,13 @@ from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
-    get_trial_onboarding_state,
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
+)
+from util.personal_signup_preview import (
+    build_personal_signup_starter_charter,
+    resolve_personal_signup_preview,
+    resolve_personal_signup_preview_onboarding_state,
 )
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
@@ -353,7 +360,22 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
         if "agent_charter" not in request.session:
             restored_cookie = restore_oauth_session_state(request, overwrite_existing=False)
 
-        pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
+        resolved_context = build_console_context(request)
+        saved_charter = request.session.get("agent_charter")
+        preview_config = resolve_personal_signup_preview(
+            request.user,
+            request=request,
+            current_context_type=resolved_context.current_context.type,
+        )
+        onboarding_state = resolve_personal_signup_preview_onboarding_state(
+            request,
+            preview_config=preview_config,
+        )
+        if preview_config.should_synthesize_starter_charter(
+            saved_charter=saved_charter,
+            pending_onboarding=onboarding_state.pending,
+        ):
+            saved_charter = build_personal_signup_starter_charter()
         preferred_llm_tier_raw = (request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or "").strip()
         preferred_llm_tier = None
         if preferred_llm_tier_raw:
@@ -361,15 +383,17 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
 
         payload = {
-            "charter": request.session.get("agent_charter"),
+            "charter": saved_charter,
             "charter_override": request.session.get("agent_charter_override"),
             "preferred_llm_tier": preferred_llm_tier,
             "selected_pipedream_app_slugs": request.session.get(
                 AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
             )
             or [],
-            "onboarding_target": onboarding_target if pending_onboarding else None,
-            "requires_plan_selection": bool(pending_onboarding and requires_plan_selection),
+            "onboarding_target": onboarding_state.target if onboarding_state.pending else None,
+            "requires_plan_selection": bool(
+                onboarding_state.pending and onboarding_state.requires_plan_selection
+            ),
         }
         response = JsonResponse(payload)
         if restored_cookie:
@@ -2291,6 +2315,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "sms": get_primary_sms(agent),
                 "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
                 "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
+                "signup_preview_state": agent.signup_preview_state,
             }
             for agent in agents
         ]
@@ -2708,6 +2733,18 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
 class AgentTimelineAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
+    def _resume_signup_preview_if_eligible(
+        self,
+        request: HttpRequest,
+        agent: PersistentAgent,
+    ) -> PersistentAgent:
+        resume_signup_preview_agent_if_eligible(
+            agent,
+            request.user,
+            resume_source="timeline",
+        )
+        return agent
+
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         direction_raw = (request.GET.get("direction") or "initial").lower()
         direction: TimelineDirection
@@ -2720,6 +2757,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
+        agent = self._resume_signup_preview_if_eligible(request, agent)
 
         cursor = request.GET.get("cursor") or None
         try:
@@ -2744,6 +2782,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_color_hex": agent.get_display_color(),
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_url(),
+            "signup_preview_state": agent.signup_preview_state,
             "pending_human_input_requests": list_pending_human_input_requests(agent),
         }
         return JsonResponse(payload)
@@ -5556,6 +5595,7 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
             {
                 "processing_active": snapshot.active,
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
+                "signup_preview_state": agent.signup_preview_state,
             }
         )
 

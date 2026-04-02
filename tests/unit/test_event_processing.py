@@ -18,9 +18,13 @@ import zstandard as zstd
 from allauth.account.models import EmailAddress
 
 from api.agent.core.event_processing import (
+    _execute_prepared_tool_batch,
     _gate_send_chat_tool_for_delivery,
     build_prompt_context,
     _get_completed_process_run_count,
+    _PreparedToolBatch,
+    _PreparedToolExecution,
+    _ToolExecutionOutcome,
     _run_agent_loop,
 )
 from api.agent.core.processing_flags import PendingDrainSettings
@@ -73,6 +77,10 @@ from api.services.tool_settings import (
     invalidate_tool_settings_cache,
 )
 from api.services.web_sessions import start_web_session
+from util.personal_signup_preview import (
+    GENERIC_STARTER_CHARTER,
+    SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK,
+)
 
 User = get_user_model()
 
@@ -278,10 +286,27 @@ class PromptContextBuilderTests(TestCase):
             "inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC",
             system_content,
         )
-        self.assertNotIn(
-            "recent_messages → SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 20",
-            system_content,
+
+    def test_first_run_prompt_includes_signup_preview_override_without_changing_charter(self):
+        self.agent.charter = GENERIC_STARTER_CHARTER
+        self.agent.preferred_contact_endpoint = self.external_endpoint
+        self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        self.agent.save(
+            update_fields=["charter", "preferred_contact_endpoint", "signup_preview_state", "updated_at"]
         )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent, is_first_run=True)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+
+        self.assertIsNotNone(system_message)
+        self.assertIn(SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK, system_message["content"])
+        self.assertIn("Contact channel: email", system_message["content"])
+        self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
+            m for m in context if m["role"] == "user"
+        )["content"])
 
     def test_unified_history_uses_collaborator_name_for_web_sender(self):
         self.user.first_name = "Will"
@@ -2851,6 +2876,75 @@ class EventProcessingRuntimeGuardTests(TestCase):
             countdown=10,
         )
         self.assertEqual(usage.get("total_tokens"), 0)
+
+    @patch("api.agent.core.event_processing._execute_prepared_tool_call")
+    def test_execute_prepared_tool_batch_stops_after_signup_preview_reply(
+        self,
+        mock_execute_prepared_tool_call,
+    ):
+        first_call = _PreparedToolExecution(
+            idx=0,
+            tool_name="send_chat_message",
+            tool_params={"body": "Preview reply"},
+            exec_params={"body": "Preview reply"},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-1",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:send_chat_message",
+        )
+        second_call = _PreparedToolExecution(
+            idx=1,
+            tool_name="sqlite_batch",
+            tool_params={"sql": "select 1"},
+            exec_params={"sql": "select 1"},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-2",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:sqlite_batch",
+        )
+        prepared_batch = _PreparedToolBatch(
+            prepared_calls=[first_call, second_call],
+            followup_required=False,
+            all_calls_sleep=False,
+            abort_after_execution=False,
+            parallel_ineligible_reason="unsafe_tool:send_chat_message",
+        )
+
+        def _execute_side_effect(agent, prepared, **_kwargs):
+            if prepared.tool_name == "send_chat_message":
+                PersistentAgent.objects.filter(id=agent.id).update(
+                    signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+                )
+            return _ToolExecutionOutcome(
+                prepared=prepared,
+                result={"status": "ok"},
+                duration_ms=1,
+                updated_tools=None,
+                variable_map={},
+            )
+
+        mock_execute_prepared_tool_call.side_effect = _execute_side_effect
+
+        executed_batch = _execute_prepared_tool_batch(
+            self.agent,
+            prepared_batch,
+            budget_ctx=None,
+            eval_run_id=None,
+            tools=[],
+            heartbeat=None,
+            lock_extender=None,
+        )
+
+        self.assertTrue(executed_batch.abort_after_execution)
+        self.assertEqual(mock_execute_prepared_tool_call.call_count, 1)
 
 
 @tag("batch_event_processing")

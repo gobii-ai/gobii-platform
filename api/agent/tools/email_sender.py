@@ -37,6 +37,9 @@ from ..files.attachment_helpers import (
 )
 from ..files.filespace_service import broadcast_message_attachment_update
 from api.services.email_verification import require_verified_email, EmailVerificationError
+from api.services.signup_preview import (
+    can_bypass_email_verification_for_signup_preview_first_email,
+)
 from .attachment_guidance import SEND_EMAIL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)
@@ -207,10 +210,11 @@ def get_send_email_tool() -> Dict[str, Any]:
 
 def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_email tool for a persistent agent."""
-    try:
-        require_verified_email(agent.user, action_description="send emails")
-    except EmailVerificationError as e:
-        return e.to_tool_response()
+    if not can_bypass_email_verification_for_signup_preview_first_email(agent):
+        try:
+            require_verified_email(agent.user, action_description="send emails")
+        except EmailVerificationError as e:
+            return e.to_tool_response()
 
     to_address = normalize_email_address(params.get("to_address"))
     subject = params.get("subject")

@@ -1,3 +1,5 @@
+import type { SignupPreviewState } from './agentRoster'
+
 export type Attachment = {
   id: string
   filename: string
@@ -179,6 +181,7 @@ export type AgentTimelineSnapshot = {
   hasMoreNewer?: boolean
   processingActive?: boolean
   processingSnapshot?: ProcessingSnapshot
+  signupPreviewState?: SignupPreviewState | null
   pendingHumanInputRequests?: PendingHumanInputRequest[]
 }
 

@@ -21,6 +21,7 @@ from api.models import (
     PersistentAgentToolCall,
     PersistentAgentSystemMessage,
 )
+from api.services.signup_preview import transition_agent_to_signup_preview_waiting
 from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
 from console.agent_audit.serializers import (
     serialize_completion,
@@ -75,6 +76,7 @@ def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool
         "agent_avatar_url": agent.get_avatar_url(),
         "mini_description": agent.mini_description or "",
         "short_description": agent.short_description or "",
+        "signup_preview_state": agent.signup_preview_state,
         "timestamp": timezone.now().isoformat(),
     }
     if processing_active is not None:
@@ -186,6 +188,9 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
     owner_agent_id = instance.owner_agent_id
     message_id = instance.id
     is_hidden = is_chat_hidden_message(instance)
+    preview_state_transitioned = False
+    if instance.is_outbound and not is_hidden:
+        preview_state_transitioned = transition_agent_to_signup_preview_waiting(owner_agent_id)
 
     def _on_commit():
         # Re-fetch to ensure we have committed data
@@ -211,6 +216,11 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
             _broadcast_audit_event(str(owner_agent_id), audit_payload)
         except Exception:
             logger.debug("Failed to broadcast audit message for %s", message_id, exc_info=True)
+        if preview_state_transitioned:
+            try:
+                emit_agent_profile_update(msg.owner_agent)
+            except Exception:
+                logger.debug("Failed to broadcast signup preview transition for %s", message_id, exc_info=True)
 
     transaction.on_commit(_on_commit)
 

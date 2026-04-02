@@ -115,6 +115,10 @@ from .tool_results import (
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
+from api.services.signup_preview import (
+    can_bypass_email_verification_for_signup_preview_first_email,
+)
+from util.personal_signup_preview import SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -4626,11 +4630,27 @@ def _get_system_instruction(
 
         if not already_contacted:
             contact_endpoint = agent.preferred_contact_endpoint
-            # Only instruct agent to send welcome message if owner has verified email
-            # (outbound email/SMS is gated by email verification)
-            if contact_endpoint and has_verified_email(agent.user):
+            email_preview_bypass_allowed = (
+                contact_endpoint is not None
+                and contact_endpoint.channel == CommsChannel.EMAIL
+                and can_bypass_email_verification_for_signup_preview_first_email(agent)
+            )
+            # Only instruct the first outreach if the user can actually receive it.
+            # Signup preview gets a single first email before verification is required.
+            if contact_endpoint and (
+                has_verified_email(agent.user) or email_preview_bypass_allowed
+            ):
                 channel = contact_endpoint.channel
                 address = contact_endpoint.address
+                signup_preview_first_run = (
+                    getattr(agent, "signup_preview_state", None)
+                    == PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+                )
+                signup_preview_instruction = (
+                    f"\n{SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK}\n\n"
+                    if signup_preview_first_run
+                    else ""
+                )
                 welcome_instruction = (
                     "This is your first run.\n"
                     f"Contact channel: {channel} at {address}.\n\n"
@@ -4638,6 +4658,7 @@ def _get_system_instruction(
                     "## REQUIRED: Your very first action must be sending a welcome message\n\n"
                     f"Before ANY tool calls, you MUST call send_{channel} to introduce yourself to the user.\n"
                     "Do not call sqlite_batch or any other tool first. Greeting comes first, always.\n\n"
+                    f"{signup_preview_instruction}"
 
                     "## Then sqlite_batch: charter + kanban cards + everything else\n\n"
 

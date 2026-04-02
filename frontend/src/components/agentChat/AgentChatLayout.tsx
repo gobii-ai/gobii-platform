@@ -20,6 +20,7 @@ import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
+import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
@@ -33,6 +34,7 @@ import type {
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import type { SignupPreviewState } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
 import {
   isContinuationUpgradeModalSource,
@@ -95,6 +97,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
+  onBlockedCreateAgent?: (location: 'sidebar') => void
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
@@ -138,6 +141,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
+  onBlockedSettingsClick?: (location: 'banner_desktop' | 'banner_mobile') => void
+  onBlockedCollaborate?: (location: 'banner_desktop' | 'banner_mobile' | 'insight_card') => void
   onSendMessage?: (
     body: string,
     attachments?: File[],
@@ -161,7 +166,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onInsightIndexChange?: (index: number) => void
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
-  onUpgrade?: (plan: PlanTier) => void
+  onUpgrade?: (plan: PlanTier, source?: string) => void
   llmIntelligence?: LlmIntelligenceConfig | null
   currentLlmTier?: string | null
   onLlmTierChange?: (tier: string) => Promise<boolean>
@@ -175,6 +180,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   composerDisabledReason?: string | null
   composerError?: string | null
   composerErrorShowUpgrade?: boolean
+  showSignupPreviewPanel?: boolean
+  signupPreviewState?: SignupPreviewState
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
@@ -218,6 +225,7 @@ export function AgentChatLayout({
   onToggleAgentFavorite,
   onCreateAgent,
   createAgentDisabledReason = null,
+  onBlockedCreateAgent,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
   onInsightsPanelExpandedPreferenceChange,
@@ -266,6 +274,8 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onShare,
+  onBlockedSettingsClick,
+  onBlockedCollaborate,
   onSendMessage,
   onComposerFocus,
   autoScrollPinned = true,
@@ -295,6 +305,8 @@ export function AgentChatLayout({
   composerDisabledReason = null,
   composerError = null,
   composerErrorShowUpgrade = false,
+  showSignupPreviewPanel = false,
+  signupPreviewState = 'none',
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
@@ -789,6 +801,10 @@ export function AgentChatLayout({
     window.localStorage.setItem(highPriorityDismissKey, 'true')
     setHighPriorityDismissed(true)
   }, [highPriorityBannerDismissible, highPriorityDismissKey])
+  const previewActionsDisabled = signupPreviewState !== 'none'
+  const previewActionsDisabledReason = previewActionsDisabled
+    ? 'Finish signup to manage settings and collaborate.'
+    : null
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
@@ -807,6 +823,7 @@ export function AgentChatLayout({
         onToggleAgentFavorite={onToggleAgentFavorite}
         onCreateAgent={onCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
+        onBlockedCreateAgent={onBlockedCreateAgent}
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
@@ -829,8 +846,14 @@ export function AgentChatLayout({
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
+          settingsDisabled={previewActionsDisabled}
+          settingsDisabledReason={previewActionsDisabledReason}
+          onBlockedSettingsClick={onBlockedSettingsClick}
           onClose={onClose}
           onShare={onShare}
+          shareDisabled={previewActionsDisabled}
+          shareDisabledReason={previewActionsDisabledReason}
+          onBlockedShareClick={onBlockedCollaborate}
 	          sidebarCollapsed={sidebarCollapsed}
 	        >
             {showHighPriorityBanner && highPriorityBanner ? (
@@ -970,7 +993,9 @@ export function AgentChatLayout({
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}
-                {pendingHumanInputRequests.length === 0 && (starterPromptsLoading || starterPrompts.length > 0) ? (
+                {pendingHumanInputRequests.length === 0
+                && signupPreviewState === 'none'
+                && (starterPromptsLoading || starterPrompts.length > 0) ? (
                   <StarterPromptSuggestions
                     prompts={starterPrompts}
                     loading={starterPromptsLoading}
@@ -1055,6 +1080,12 @@ export function AgentChatLayout({
                 </div>
               </div>
             </div>
+          ) : showSignupPreviewPanel ? (
+            <AgentSignupPreviewPanel
+              status={signupPreviewState}
+              currentPlan={subscriptionPlan}
+              onUpgrade={onUpgrade}
+            />
           ) : (
             <AgentComposer
               agentId={activeAgentId ?? agentId ?? null}
@@ -1077,6 +1108,9 @@ export function AgentChatLayout({
               onPauseChange={onPauseChange}
               isInsightsPaused={isInsightsPaused}
               onCollaborate={onShare}
+              collaborateDisabled={previewActionsDisabled}
+              collaborateDisabledReason={previewActionsDisabledReason}
+              onBlockedCollaborate={onBlockedCollaborate}
               hideInsightsPanel={hideInsightsPanel}
               intelligenceConfig={llmIntelligence}
               intelligenceTier={currentLlmTier}

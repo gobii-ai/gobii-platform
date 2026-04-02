@@ -159,6 +159,9 @@ type AgentComposerProps = {
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
   onCollaborate?: () => void
+  collaborateDisabled?: boolean
+  collaborateDisabledReason?: string | null
+  onBlockedCollaborate?: (location: 'insight_card') => void
   hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
   intelligenceTier?: string | null
@@ -198,6 +201,9 @@ export const AgentComposer = memo(function AgentComposer({
   onPauseChange,
   isInsightsPaused = false,
   onCollaborate,
+  collaborateDisabled = false,
+  collaborateDisabledReason = null,
+  onBlockedCollaborate,
   hideInsightsPanel = false,
   intelligenceConfig = null,
   intelligenceTier = null,
@@ -993,6 +999,9 @@ export const AgentComposer = memo(function AgentComposer({
                       insight={currentInsight}
                       onDismiss={handleDismissInsight}
                       onCollaborate={onCollaborate}
+                      collaborateDisabled={collaborateDisabled}
+                      collaborateDisabledReason={collaborateDisabledReason}
+                      onBlockedCollaborate={onBlockedCollaborate}
                     />
                   ) : null}
                 </div>

@@ -1,5 +1,10 @@
 export type AgentRosterSortMode = 'recent' | 'alphabetical'
 
+export type SignupPreviewState =
+  | 'none'
+  | 'awaiting_first_reply_pause'
+  | 'awaiting_signup_completion'
+
 export type AgentRosterEntry = {
   id: string
   name: string
@@ -18,4 +23,5 @@ export type AgentRosterEntry = {
   preferredLlmTier?: string | null
   email?: string | null
   sms?: string | null
+  signupPreviewState?: SignupPreviewState | null
 }

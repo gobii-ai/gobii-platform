@@ -11,6 +11,7 @@ import type {
   TimelineEvent,
 } from '../types/agentChat'
 import type { InsightEvent } from '../types/insight'
+import type { SignupPreviewState } from '../types/agentRoster'
 import { INSIGHT_TIMING } from '../types/insight'
 import { sendAgentMessage, fetchProcessingStatus, fetchAgentInsights } from '../api/agentChat'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
@@ -299,6 +300,7 @@ export type AgentChatState = {
   agentColorHex: string | null
   agentName: string | null
   agentAvatarUrl: string | null
+  signupPreviewState: SignupPreviewState
   // Insight state
   insights: InsightEvent[]
   currentInsightIndex: number
@@ -315,6 +317,7 @@ export type AgentChatState = {
       agentName?: string | null
       agentAvatarUrl?: string | null
       processingActive?: boolean
+      signupPreviewState?: SignupPreviewState | null
     },
   ) => void
   refreshProcessing: () => Promise<void>
@@ -328,6 +331,7 @@ export type AgentChatState = {
     agentName?: string | null
     agentColorHex?: string | null
     agentAvatarUrl?: string | null
+    signupPreviewState?: SignupPreviewState | null
   }) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
@@ -360,6 +364,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentColorHex: null,
   agentName: null,
   agentAvatarUrl: null,
+  signupPreviewState: 'none',
   // Insight state
   insights: [],
   currentInsightIndex: 0,
@@ -374,6 +379,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
     const providedName = options?.agentName ?? null
     const providedAvatarUrl = options?.agentAvatarUrl ?? null
+    const providedSignupPreviewState = options?.signupPreviewState ?? null
+    const hasProvidedSignupPreviewState = Object.prototype.hasOwnProperty.call(options ?? {}, 'signupPreviewState')
     const hasProvidedProcessingActive = Object.prototype.hasOwnProperty.call(options ?? {}, 'processingActive')
     const providedProcessingActive = hasProvidedProcessingActive ? Boolean(options?.processingActive) : false
     const reuseExisting = get().agentId === agentId
@@ -408,6 +415,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       agentColorHex: providedColor ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
       agentName: providedName ?? fallbackName ?? null,
       agentAvatarUrl: providedAvatarUrl ?? fallbackAvatarUrl ?? null,
+      signupPreviewState: reuseExisting
+        ? (hasProvidedSignupPreviewState ? (providedSignupPreviewState ?? 'none') : get().signupPreviewState)
+        : (providedSignupPreviewState ?? 'none'),
       // Reset insight state only when switching to a different agent
       ...(reuseExisting ? {} : {
         insights: [],
@@ -426,7 +436,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const agentId = get().agentId
     if (!agentId) return
     try {
-      const { processing_active, processing_snapshot } = await fetchProcessingStatus(agentId)
+      const { processing_active, processing_snapshot, signup_preview_state } = await fetchProcessingStatus(agentId)
       const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
       set((state) => {
         let processingStartedAt = state.processingStartedAt
@@ -441,6 +451,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           processingWebTasks: snapshot.webTasks,
           nextScheduledAt: resolveNextScheduledAt(snapshot, state.nextScheduledAt),
           awaitingResponse: snapshot.active ? false : state.awaitingResponse,
+          signupPreviewState: signup_preview_state ?? state.signupPreviewState,
         }
       })
     } catch (error) {
@@ -725,8 +736,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const hasName = Object.prototype.hasOwnProperty.call(update, 'agentName')
       const hasColor = Object.prototype.hasOwnProperty.call(update, 'agentColorHex')
       const hasAvatar = Object.prototype.hasOwnProperty.call(update, 'agentAvatarUrl')
+      const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(update, 'signupPreviewState')
 
-      if (!hasName && !hasColor && !hasAvatar) {
+      if (!hasName && !hasColor && !hasAvatar && !hasSignupPreviewState) {
         return state
       }
 
@@ -741,6 +753,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           ? { agentColorHex: update.agentColorHex ? normalizeHexColor(update.agentColorHex) : null }
           : {}),
         ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
+        ...(hasSignupPreviewState ? { signupPreviewState: update.signupPreviewState ?? 'none' } : {}),
       }
     })
   },

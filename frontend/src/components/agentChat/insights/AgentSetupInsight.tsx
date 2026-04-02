@@ -70,6 +70,9 @@ declare global {
 type AgentSetupInsightProps = {
   insight: InsightEvent
   onCollaborate?: () => void
+  collaborateDisabled?: boolean
+  collaborateDisabledReason?: string | null
+  onBlockedCollaborate?: (location: 'insight_card') => void
 }
 
 function describeError(error: unknown): string {
@@ -131,7 +134,13 @@ function formatPhoneE164(raw: string, region: string): string {
   }
 }
 
-export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightProps) {
+export function AgentSetupInsight({
+  insight,
+  onCollaborate,
+  collaborateDisabled = false,
+  collaborateDisabledReason = null,
+  onBlockedCollaborate,
+}: AgentSetupInsightProps) {
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
   const region = useMemo(() => getDefaultRegion(), [])
@@ -162,6 +171,13 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(metadata.organization.currentOrg?.id ?? null)
   const [orgError, setOrgError] = useState<string | null>(null)
   const [orgBusy, setOrgBusy] = useState(false)
+  const handleCollaborateClick = useCallback(() => {
+    if (collaborateDisabled && onBlockedCollaborate) {
+      onBlockedCollaborate('insight_card')
+      return
+    }
+    onCollaborate?.()
+  }, [collaborateDisabled, onBlockedCollaborate, onCollaborate])
 
   useEffect(() => {
     setPhone(metadata.sms.userPhone ?? null)
@@ -875,7 +891,10 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
               <button
                 type="button"
                 className="collab-row__btn collab-row__btn--green"
-                onClick={onCollaborate}
+                onClick={handleCollaborateClick}
+                disabled={collaborateDisabled && !onBlockedCollaborate}
+                aria-disabled={collaborateDisabled ? 'true' : undefined}
+                title={collaborateDisabledReason || 'Invite collaborators to this agent'}
               >
                 <UserPlus size={14} />
                 <span>Add people</span>
