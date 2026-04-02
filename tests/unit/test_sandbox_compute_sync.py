@@ -446,7 +446,12 @@ class SandboxComputeSyncTests(TestCase):
                             "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
                             "content_b64": "dXBkYXRlZCBzcWxpdGUgYnl0ZXM=",
                             "mime_type": "application/vnd.sqlite3",
-                        }
+                        },
+                        {
+                            "path": "/.gobii/internal/tool.log",
+                            "content_b64": "aWdub3JlZCBieXRlcw==",
+                            "mime_type": "text/plain",
+                        },
                     ],
                 }
             return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
@@ -495,7 +500,49 @@ class SandboxComputeSyncTests(TestCase):
         self.assertIn("content_b64", internal_entry)
         self.assertEqual(backend.run_command_calls[0]["env"]["SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"], CUSTOM_TOOL_SQLITE_WORKSPACE_PATH)
         push_call = next(call for call in backend.sync_calls if call["direction"] == "push")
-        self.assertTrue(push_call["payload"]["since"])
+        self.assertEqual(push_call["payload"]["internal_paths"], [CUSTOM_TOOL_SQLITE_FILESPACE_PATH])
+        self.assertNotIn("since", push_call["payload"])
+
+    def test_run_custom_tool_command_requires_shared_sqlite_to_sync_back(self):
+        backend = _DummyBackend()
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            if direction == "push":
+                return {"status": "ok", "changes": []}
+            return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            with open(db_path, "wb") as handle:
+                handle.write(b"initial sqlite bytes")
+
+            service = SandboxComputeService(backend=backend)
+            result = service.run_custom_tool_command(
+                self.agent,
+                "echo hello",
+                local_sqlite_db_path=db_path,
+                sqlite_env_key="SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH",
+            )
+
+        self.assertEqual(result, {"status": "error", "message": "Custom tool SQLite sync did not return the shared agent DB."})
 
     def test_run_command_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()
@@ -531,6 +578,29 @@ class SandboxComputeSyncTests(TestCase):
     def test_run_custom_tool_command_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()
         self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            if direction == "push":
+                return {
+                    "status": "ok",
+                    "changes": [
+                        {
+                            "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                            "content_b64": "aW5pdGlhbCBzcWxpdGUgYnl0ZXM=",
+                            "mime_type": "application/vnd.sqlite3",
+                        }
+                    ],
+                }
+            return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
 
         with tempfile.NamedTemporaryFile(delete=False) as handle:
             sqlite_path = handle.name

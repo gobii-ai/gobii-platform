@@ -85,6 +85,22 @@ def _download_file(url: str, expected_size: Optional[int], proxy_env: Optional[D
         raise RuntimeError(f"Failed to download file: {exc}") from exc
 
 
+def _requested_push_paths(agent_root, payload: Dict[str, Any]) -> list[tuple[Any, str]]:
+    requested = payload.get("internal_paths") or []
+    if not isinstance(requested, list):
+        return []
+
+    normalized_paths: list[tuple[Any, str]] = []
+    seen_paths: set[str] = set()
+    for requested_path in requested:
+        full_path, normalized = _normalize_workspace_path(agent_root, requested_path)
+        if full_path is None or not normalized or normalized in seen_paths:
+            continue
+        seen_paths.add(normalized)
+        normalized_paths.append((full_path, normalized))
+    return normalized_paths
+
+
 def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
     started_at = time.monotonic()
     agent_id, error = _require_agent_id(payload)
@@ -142,6 +158,37 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "checksum_sha256": checksum_sha256,
             }
             manifest["deleted"].pop(rel, None)
+            uploaded_files += 1
+            uploaded_bytes += len(content)
+
+        for path, rel in _requested_push_paths(agent_root, payload):
+            if rel in seen_paths:
+                continue
+            seen_paths.add(rel)
+            try:
+                stat = path.stat()
+            except OSError:
+                changes.append({"path": rel, "is_deleted": True})
+                deleted_count += 1
+                continue
+            if not path.is_file():
+                continue
+            mtime = stat.st_mtime
+            if since is not None and mtime <= since:
+                continue
+            try:
+                content = path.read_bytes()
+            except OSError:
+                continue
+            mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            changes.append(
+                {
+                    "path": rel,
+                    "content_b64": base64.b64encode(content).decode("utf-8"),
+                    "mime_type": mime_type,
+                    "checksum_sha256": _checksum_bytes(content),
+                }
+            )
             uploaded_files += 1
             uploaded_bytes += len(content)
 

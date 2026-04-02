@@ -26,6 +26,7 @@ from api.agent.tools.custom_tools import (
 )
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
+from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
 from api.agent.tools.tool_manager import enable_tools, get_available_tool_ids, get_enabled_tool_definitions
 from api.models import (
@@ -307,6 +308,8 @@ class CustomToolsTests(TestCase):
         self.assertIn("write `/tools/my_tool.py`", description)
         self.assertIn("Latest workspace edits are synced automatically", description)
         self.assertIn("Small disposable tools are good", description)
+        self.assertIn("Those triggers are not exhaustive", description)
+        self.assertIn("err on the side of creating and using one", description)
         self.assertIn("Do not manually repeat MCP/tool/API calls", description)
         self.assertIn("Prefer patching the same file", description)
         self.assertIn("with ctx.sqlite() as db", description)
@@ -632,12 +635,19 @@ class CustomToolsTests(TestCase):
             timeout_seconds=30,
         )
 
-        result = execute_custom_tool(self.agent, tool, {"value": "hello"})
-
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["result"], {"stored": "hello"})
-
         with agent_sqlite_db(str(self.agent.id)) as db_path:
+            result = execute_custom_tool(self.agent, tool, {"value": "hello"})
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["result"], {"stored": "hello"})
+
+            batch_result = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT value FROM custom_tool_rows ORDER BY rowid"},
+            )
+            self.assertEqual(batch_result.get("status"), "ok")
+            self.assertEqual(batch_result["results"][0]["result"], [{"value": "hello"}])
+
             conn = sqlite3.connect(db_path)
             try:
                 rows = conn.execute("SELECT value FROM custom_tool_rows ORDER BY rowid").fetchall()
@@ -827,6 +837,8 @@ class CustomToolsTests(TestCase):
 
         self.assertIn("Custom tools: 2 saved, 1 enabled.", summary)
         self.assertIn("Default mode for repetitive or bulk work", summary)
+        self.assertIn("Those triggers are not exhaustive", summary)
+        self.assertIn("err on the side of creating and using one", summary)
         self.assertIn("DEV LOOP:", summary)
         self.assertIn("file_str_replace", summary)
         self.assertIn("ctx.sqlite_db_path", summary)

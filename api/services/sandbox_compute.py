@@ -26,7 +26,6 @@ from api.services.sandbox_filespace_sync import apply_filespace_push, build_file
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
     CUSTOM_TOOL_SQLITE_WORKSPACE_PATH,
-    is_sandbox_internal_path,
 )
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
@@ -1451,15 +1450,11 @@ class SandboxComputeService:
         agent,
         session: AgentComputeSession,
         local_sqlite_db_path: str,
-        *,
-        since: Optional[str] = None,
     ) -> Dict[str, Any]:
         if isinstance(self._backend, LocalSandboxBackend):
             return {"status": "skipped", "message": "Local backend does not require SQLite sync."}
 
-        payload: Dict[str, Any] = {}
-        if since:
-            payload["since"] = since
+        payload: Dict[str, Any] = {"internal_paths": [CUSTOM_TOOL_SQLITE_FILESPACE_PATH]}
         response = self._backend.sync_filespace(agent, session, direction="push", payload=payload)
         if not isinstance(response, dict):
             return {"status": "error", "message": "Sandbox SQLite sync returned an invalid response."}
@@ -1470,9 +1465,10 @@ class SandboxComputeService:
         for change in response.get("changes") or []:
             if not isinstance(change, dict):
                 continue
-            if not is_sandbox_internal_path(change.get("path")):
+            if change.get("path") != CUSTOM_TOOL_SQLITE_FILESPACE_PATH:
                 continue
             sqlite_change = change
+            break
 
         if sqlite_change is None:
             return {"status": "ok", "sqlite_synced": False}
@@ -1527,14 +1523,12 @@ class SandboxComputeService:
         merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, runtime_env)
         backend_env = merged_env if merged_env else None
 
-        sqlite_push_since: Optional[str] = None
         if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
             pull_result = self._sync_custom_tool_sqlite_pull(agent, session, local_sqlite_db_path)
             if not isinstance(pull_result, dict):
                 return {"status": "error", "message": "Custom tool SQLite pull sync returned an invalid response."}
             if pull_result.get("status") != "ok":
                 return pull_result
-            sqlite_push_since = (timezone.now() - timedelta(seconds=1)).isoformat()
 
         result = self._backend.run_command(
             agent,
@@ -1552,7 +1546,6 @@ class SandboxComputeService:
                 agent,
                 session,
                 local_sqlite_db_path,
-                since=sqlite_push_since,
             )
             if push_result.get("status") != "ok":
                 if isinstance(result, dict) and result.get("status") == "error":
@@ -1560,6 +1553,13 @@ class SandboxComputeService:
                     result["sqlite_sync_error"] = push_result.get("message")
                     return result
                 return push_result
+            if not push_result.get("sqlite_synced"):
+                message = "Custom tool SQLite sync did not return the shared agent DB."
+                if isinstance(result, dict) and result.get("status") == "error":
+                    result = dict(result)
+                    result["sqlite_sync_error"] = message
+                    return result
+                return {"status": "error", "message": message}
 
         return result
 

@@ -1,9 +1,11 @@
 import unittest
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from api.services.sandbox_internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 from sandbox_server.sync import _download_file, _handle_sync_filespace
 
 
@@ -128,6 +130,44 @@ class SyncProxyEnvTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         workspace_size_mock.assert_called_once()
+
+    def test_handle_sync_filespace_push_includes_requested_internal_paths(self):
+        payload = {
+            "agent_id": "agent-1",
+            "direction": "push",
+            "internal_paths": [CUSTOM_TOOL_SQLITE_FILESPACE_PATH],
+        }
+
+        with TemporaryDirectory() as tmp_dir:
+            agent_root = Path(tmp_dir).resolve()
+            with patch(
+                "sandbox_server.sync._agent_workspace",
+                return_value=agent_root,
+            ), patch(
+                "sandbox_server.sync._store_proxy_env",
+                return_value=False,
+            ), patch(
+                "sandbox_server.sync._proxy_env_from_manifest",
+                return_value=None,
+            ), patch(
+                "sandbox_server.sync._load_manifest",
+                return_value={"files": {}, "deleted": {}},
+            ), patch(
+                "sandbox_server.sync._save_manifest"
+            ):
+                sqlite_path = agent_root / ".gobii" / "internal" / "custom_tool_agent_state.sqlite3"
+                sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+                sqlite_path.write_bytes(b"sqlite bytes")
+
+                result = _handle_sync_filespace(payload)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(result["changes"]), 1)
+        change = result["changes"][0]
+        self.assertEqual(change["path"], CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
+        self.assertEqual(change["content_b64"], "c3FsaXRlIGJ5dGVz")
+        self.assertEqual(change["mime_type"], "application/octet-stream")
+        self.assertEqual(change["checksum_sha256"], sha256(b"sqlite bytes").hexdigest())
 
 
 if __name__ == "__main__":
