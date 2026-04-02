@@ -29,8 +29,9 @@ def get_secure_credentials_request_tool() -> dict:
                 "or `spawn_web_task` (classic username/password website login). Do NOT use this tool for MCP tools (e.g., Google Sheets, Slack); "
                 "for MCP tools, call the tool first—if it returns 'action_required' with a connect/auth link, surface that link to the user and wait. "
                 "Use secret_type='credential' for domain-scoped placeholders, or secret_type='env_var' for sandbox environment variables. "
-                "env_var secrets are appropriate when a custom tool script, python_exec snippet, run_command, or MCP server needs an API key/token, "
-                "and scripts can read them from os.environ. "
+                "ONLY env_var secrets are readable inside sandboxed code via os.environ. "
+                "If a custom tool script, python_exec snippet, run_command, or MCP server needs an API key/token, you MUST request secret_type='env_var'. "
+                "Domain-scoped credential secrets are not injected into sandbox processes. "
                 "You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. "
                 "IT WILL RETURN URL(S). ALWAYS MESSAGE THE USER WITH THE CORRECT ONE: "
                 "- For new/pending requests, send the credentials-request URL so they can enter the requested secret(s). "
@@ -53,7 +54,7 @@ def get_secure_credentials_request_tool() -> dict:
                                     "type": "string",
                                     "enum": ["credential", "env_var"],
                                     "description": "Optional. credential (default) for domain-scoped secrets, env_var for global sandbox env vars. "
-                                                   "env_var secrets are used for MCP servers, run_command, python_exec, and custom tool scripts via os.environ.",
+                                                   "ONLY env_var secrets are available to MCP servers, run_command, python_exec, and custom tool scripts via os.environ.",
                                 },
                             },
                             "required": ["name", "description", "key"]

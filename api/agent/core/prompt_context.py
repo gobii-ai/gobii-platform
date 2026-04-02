@@ -3038,7 +3038,9 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
         "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]). "
         "subprocess curl honors proxy env vars automatically. For tool-to-tool calls, use ctx.call_tool() as-is; it handles the internal bridge transport for you. "
-        "Secrets (API keys, DB credentials, auth tokens) are available as env vars via `os.environ`. "
+        "Only env-var secrets are available inside sandboxed code via `os.environ`. "
+        "Domain-scoped credential secrets are for placeholders and website/domain auth flows; they are NOT injected into sandboxed custom tools, python_exec, run_command, or MCP server processes. "
+        "If sandboxed code needs a secret, request or use the env_var version with the exact env key shown in the secrets block. "
         "ALWAYS use secrets for sensitive values — never hardcode credentials. "
         "Use the exact env var names shown in the secrets block; do not assume a script's variable names exist."
     )
@@ -5777,13 +5779,13 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
     lines: list[str] = []
 
     if available_credentials:
-        lines.append("These domain-scoped credential secrets are available to you:")
+        lines.append("These domain-scoped credential secrets are available to you (placeholders/web auth only; not readable via os.environ in sandbox code):")
         lines.extend(_format_credential_secrets(available_credentials, is_pending=False))
 
     if available_env_vars:
         if lines:
             lines.append("")
-        lines.append("These global sandbox environment variable secrets are available to you:")
+        lines.append("These global sandbox environment variable secrets are available to you (these ARE readable via os.environ in sandbox code):")
         lines.extend(_format_env_var_secrets(available_env_vars, is_pending=False))
 
     if pending_credentials or pending_env_vars:
@@ -5791,12 +5793,12 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
             lines.append("")
         lines.append("Pending credential requests (user has not provided these yet):")
         if pending_credentials:
-            lines.append("Pending domain-scoped credentials:")
+            lines.append("Pending domain-scoped credentials (placeholders/web auth only; not readable via os.environ in sandbox code):")
             lines.extend(_format_credential_secrets(pending_credentials, is_pending=True))
         if pending_env_vars:
             if pending_credentials:
                 lines.append("")
-            lines.append("Pending sandbox environment variables:")
+            lines.append("Pending sandbox environment variables (these will be readable via os.environ in sandbox code):")
             lines.extend(_format_env_var_secrets(pending_env_vars, is_pending=True))
         lines.append("")
         lines.append(
