@@ -2275,7 +2275,7 @@ def build_prompt_context(
         "Deterministic, repeatable fetch/transform/load, sync/import, or structured data collection work is an especially strong trigger "
         "for a custom tool that writes to SQLite, then queries the result with sqlite_batch, even if the user did not explicitly ask for a custom tool or mention SQLite. "
         "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
-        "Query __tool_results and __files with sqlite_batch (not read_file). "
+        "Use sqlite_batch to query __tool_results and __files when you need prior tool outputs or recent file metadata. "
         "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
         "Do not poll __tool_results/__files waiting for browser task completion: those completions wake you with new unified history events. "
         "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
