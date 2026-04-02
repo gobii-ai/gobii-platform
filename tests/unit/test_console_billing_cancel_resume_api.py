@@ -226,3 +226,25 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(resp.json().get("success", True))
         mock_sync_subscription.assert_not_called()
+
+    @patch("console.views.stripe_status")
+    @patch("console.views.get_stripe_customer")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_sync_billing_subscription_state_rejects_non_object_payload(
+        self,
+        mock_retrieve,
+        mock_get_stripe_customer,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+
+        resp = self.client.post(
+            reverse("sync_billing_subscription_state"),
+            data=json.dumps(["sub_123"]),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json().get("success", True))
+        mock_get_stripe_customer.assert_not_called()
+        mock_retrieve.assert_not_called()

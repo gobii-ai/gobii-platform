@@ -2340,7 +2340,16 @@ def sync_billing_subscription_state(request):
     except json.JSONDecodeError:
         payload = {}
 
-    subscription_id = str((payload or {}).get("subscriptionId") or "").strip()
+    if not isinstance(payload, dict):
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'subscriptionId is required.',
+            },
+            status=400,
+        )
+
+    subscription_id = str((payload.get("subscriptionId") or "")).strip()
     if not subscription_id:
         return JsonResponse(
             {
