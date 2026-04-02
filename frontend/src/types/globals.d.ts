@@ -50,12 +50,35 @@ type GobiiTrackCtaPayload = {
   cta_type?: string
 }
 type GobiiTrackCta = (payload: GobiiTrackCtaPayload) => void
+type ChurnKeyMode = 'live' | 'test'
+type ChurnKeyProvider = 'stripe'
+type ChurnKeyInitOptions = {
+  appId: string
+  customerId: string
+  authHash: string
+  subscriptionId?: string
+  mode: ChurnKeyMode
+  provider: ChurnKeyProvider
+  record?: boolean
+  onClose?: () => void
+  onCancel?: (customer?: unknown) => void
+  onPause?: (customer?: unknown) => void
+  onDiscount?: (customer?: unknown) => void
+  onPlanChange?: (customer?: unknown) => void
+  onTrialExtension?: (customer?: unknown) => void
+  onError?: (error: unknown, type?: string) => void
+}
+type ChurnKeyGlobal = {
+  created?: boolean
+  init?: (action: 'show', options: ChurnKeyInitOptions) => void
+}
 
 declare global {
   interface Window {
     analytics?: SegmentAnalytics
     gtag?: Gtag
     gobiiTrackCta?: GobiiTrackCta
+    churnkey?: ChurnKeyGlobal
   }
 }
 

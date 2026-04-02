@@ -999,6 +999,8 @@ ACCOUNT_EMAIL_SUBJECT_PREFIX = env(
 )
 
 # dj-stripe / Stripe configuration
+CHURN_KEY_APP_ID = env("CHURN_KEY_APP_ID", default="")
+CHURN_KEY_API_KEY = env("CHURN_KEY_API_KEY", default="")
 STRIPE_LIVE_SECRET_KEY = env("STRIPE_LIVE_SECRET_KEY", default="")
 STRIPE_TEST_SECRET_KEY = env("STRIPE_TEST_SECRET_KEY", default="")
 STRIPE_LIVE_MODE = env.bool("STRIPE_LIVE_MODE", default=False)  # Set to True in production

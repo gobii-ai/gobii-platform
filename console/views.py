@@ -50,6 +50,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     build_checkout_flow_metadata,
 )
+from billing.churnkey import build_churnkey_cancel_flow_config
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.signup_preview import user_can_access_signup_preview_agent
@@ -1815,8 +1816,19 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             user=request.user,
             defaults={"max_extra_tasks": 0},
         )
-        personal_can_open_stripe = bool(get_stripe_customer(request.user))
+        stripe_customer = get_stripe_customer(request.user)
+        personal_can_open_stripe = bool(stripe_customer)
+        churnkey_config = build_churnkey_cancel_flow_config(
+            customer_id=getattr(stripe_customer, "id", None),
+            subscription_id=getattr(sub, "id", None),
+            livemode=getattr(stripe_customer, "livemode", None),
+        )
         context['personal_can_open_stripe'] = personal_can_open_stripe
+        context["churnkey_loader_app_id"] = (
+            settings.CHURN_KEY_APP_ID
+            if paid_subscriber and not context.get("cancel_at_period_end")
+            else ""
+        )
         personal_extra_limit = int(getattr(user_billing, "max_extra_tasks", 0) or 0)
         personal_extra_settings = derive_extra_tasks_settings(
             personal_extra_limit,
@@ -1841,6 +1853,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             "periodEndDate": context.get("period_end_date"),
             "cancelAt": context.get("cancel_at"),
             "cancelAtPeriodEnd": bool(context.get("cancel_at_period_end")),
+            "churnKey": churnkey_config,
             "addons": _serialize_addon_context(addon_context),
             "addonsDisabled": bool(context.get("personal_addons_disabled")),
             "dedicatedIps": {

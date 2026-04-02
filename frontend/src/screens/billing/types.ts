@@ -54,6 +54,16 @@ export type BillingEndpoints = {
   stripePortalUrl?: string
 }
 
+export type BillingChurnKeyConfig = {
+  enabled: boolean
+  appId: string
+  customerId: string
+  subscriptionId: string
+  authHash: string
+  mode: 'live' | 'test'
+  provider: 'stripe'
+}
+
 export type BillingTrial = {
   isTrialing: boolean
   trialEndsAtIso: string | null
@@ -82,6 +92,7 @@ export type BillingPersonalData = {
   periodEndDate?: string | null
   cancelAt?: string | null
   cancelAtPeriodEnd: boolean
+  churnKey?: BillingChurnKeyConfig | null
   addons: BillingAddonContext
   addonsDisabled: boolean
   dedicatedIps: DedicatedIpContext

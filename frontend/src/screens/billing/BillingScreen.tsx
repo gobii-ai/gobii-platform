@@ -315,6 +315,49 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     openCancelActionDialog()
   }, [openCancelActionDialog, resetCancelFeedback])
 
+  const churnKeyConfig = initialData.contextType === 'personal' ? initialData.churnKey : null
+
+  const openCancelFlow = useCallback(() => {
+    if (!churnKeyConfig?.enabled) {
+      openCancelDialog()
+      return
+    }
+
+    const churnkey = window.churnkey
+    if (typeof churnkey?.init !== 'function') {
+      openCancelDialog()
+      return
+    }
+
+    let shouldRefreshOnClose = false
+    const markMutation = () => {
+      shouldRefreshOnClose = true
+    }
+
+    churnkey.init('show', {
+      appId: churnKeyConfig.appId,
+      customerId: churnKeyConfig.customerId,
+      authHash: churnKeyConfig.authHash,
+      subscriptionId: churnKeyConfig.subscriptionId,
+      mode: churnKeyConfig.mode,
+      provider: churnKeyConfig.provider,
+      record: true,
+      onCancel: markMutation,
+      onPause: markMutation,
+      onDiscount: markMutation,
+      onPlanChange: markMutation,
+      onTrialExtension: markMutation,
+      onClose: () => {
+        if (shouldRefreshOnClose) {
+          window.location.reload()
+        }
+      },
+      onError: () => {
+        openCancelDialog()
+      },
+    })
+  }, [churnKeyConfig, openCancelDialog])
+
   const closeCancelDialog = useCallback(() => {
     if (cancelActionBusy) return
     resetCancelFeedback()
@@ -352,7 +395,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         <BillingHeader
           initialData={initialData}
           onChangePlan={showPlanAction ? handlePlanActionClick : undefined}
-          onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? openCancelDialog : undefined}
+          onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? openCancelFlow : undefined}
           onResume={!isOrg
             && initialData.contextType === 'personal'
             && initialData.paidSubscriber
