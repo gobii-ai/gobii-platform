@@ -473,6 +473,7 @@ when:
 do:
   # Known API (HN, Reddit, GitHub, RSS, crypto, weather)? → http_request
   # Otherwise → search_tools("<domain>", will_continue_work=true)
+  # If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous
 
 then:
   if found extractors → M2
