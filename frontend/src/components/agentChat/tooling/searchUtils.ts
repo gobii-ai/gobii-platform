@@ -91,6 +91,11 @@ function collectStrings(value: unknown): string[] {
   return []
 }
 
+function getSection(input: Record<string, unknown>, key: string): Record<string, unknown> | null {
+  const value = input[key]
+  return isRecord(value) ? value : null
+}
+
 function normalizeToolSuggestion(value: unknown): NormalizedToolSuggestion | null {
   if (isNonEmptyString(value)) {
     return { name: softenToolTerminology(value.trim()) }
@@ -172,10 +177,13 @@ export function parseToolSearchResult(input: unknown): ToolSearchOutcome {
     : null
   const toolCount = toolCountValue !== null ? toolCountValue : tools.length ? tools.length : null
 
-  const enabledTools = collectStrings((input as { enabled_tools?: unknown }).enabled_tools ?? (input as { enabled?: unknown }).enabled)
-  const alreadyEnabledTools = collectStrings((input as { already_enabled?: unknown }).already_enabled)
-  const evictedTools = collectStrings((input as { evicted?: unknown }).evicted)
-  const invalidTools = collectStrings((input as { invalid?: unknown }).invalid)
+  const toolsSection = getSection(input, 'tools')
+  const enabledTools = collectStrings(
+    (toolsSection?.enabled ?? (input as { enabled_tools?: unknown }).enabled_tools ?? (input as { enabled?: unknown }).enabled),
+  )
+  const alreadyEnabledTools = collectStrings(toolsSection?.already_enabled ?? (input as { already_enabled?: unknown }).already_enabled)
+  const evictedTools = collectStrings(toolsSection?.evicted ?? (input as { evicted?: unknown }).evicted)
+  const invalidTools = collectStrings(toolsSection?.invalid ?? (input as { invalid?: unknown }).invalid)
 
   // Parse external resources (APIs, websites, datasets)
   const externalResourcesRaw = (input as { external_resources?: unknown }).external_resources

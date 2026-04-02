@@ -229,6 +229,14 @@ class AnalyticsEvent(StrEnum):
     MCP_SERVER_CREATED = 'MCP Server Created'
     MCP_SERVER_UPDATED = 'MCP Server Updated'
     MCP_SERVER_DELETED = 'MCP Server Deleted'
+    GLOBAL_AGENT_SKILL_CREATED = 'Global Agent Skill Created'
+    GLOBAL_AGENT_SKILL_UPDATED = 'Global Agent Skill Updated'
+    GLOBAL_AGENT_SKILL_DELETED = 'Global Agent Skill Deleted'
+    PERSISTENT_AGENT_GLOBAL_SKILL_IMPORTED = 'Persistent Agent Global Skill Imported'
+    PERSISTENT_AGENT_SKILL_CREATED = 'Persistent Agent Skill Created'
+    PERSISTENT_AGENT_SKILL_UPDATED = 'Persistent Agent Skill Updated'
+    PERSISTENT_AGENT_SKILL_DELETED = 'Persistent Agent Skill Deleted'
+    PERSISTENT_AGENT_GLOBAL_SKILL_FORKED = 'Persistent Agent Global Skill Forked'
 
     # Console Events
     CONSOLE_HOME_VIEWED = 'Console Home Viewed'
