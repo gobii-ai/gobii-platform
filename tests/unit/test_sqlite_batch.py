@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from api.agent.tools.sqlite_batch import (
     execute_sqlite_batch,
+    get_sqlite_batch_tool,
     _apply_resource_limits,
     _apply_all_sql_fixes,
     _autocorrect_ambiguous_column,
@@ -188,6 +189,13 @@ class SqliteBatchToolTests(TestCase):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"sql": 123})
             self.assertEqual(out.get("status"), "error")
+
+    def test_tool_definition_guides_bulk_work_into_custom_tools(self):
+        definition = get_sqlite_batch_tool()
+        description = definition["function"]["description"]
+
+        self.assertIn("Use sqlite_batch to query and batch-update structured data you already have", description)
+        self.assertIn("prefer a custom tool that writes to SQLite", description)
 
     def test_attach_database_is_blocked(self):
         with self._with_temp_db() as (_db_path, _token, tmp):

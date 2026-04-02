@@ -53,6 +53,7 @@ _EXEC_SOURCE_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH"
 _UV_CACHE_DIR_ENV_KEY = "SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR"
 _UV_INSTALL_DIR_ENV_KEY = "SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR"
 _SQLITE_DB_PATH_ENV_KEY = "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"
+_RUNTIME_CACHE_ROOT_ENV_KEY = "SANDBOX_RUNTIME_CACHE_ROOT"
 
 _GOBII_CTX_MODULE = textwrap.dedent(
     f"""\
@@ -183,16 +184,20 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = (
     'RUNTIME_CACHE_ROOT="${SANDBOX_RUNTIME_CACHE_ROOT:-/tmp}" && \\\n'
     f'UV_CACHE_DIR="${{{_UV_CACHE_DIR_ENV_KEY}:-$RUNTIME_CACHE_ROOT/uv-cache}}" && \\\n'
     f'UV_INSTALL_DIR="${{{_UV_INSTALL_DIR_ENV_KEY}:-$RUNTIME_CACHE_ROOT/uv-bin}}" && \\\n'
-    'mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR" && \\\n'
+    'XDG_CACHE_HOME="${XDG_CACHE_HOME:-$RUNTIME_CACHE_ROOT/xdg-cache}" && \\\n'
+    'PIP_CACHE_DIR="${PIP_CACHE_DIR:-$RUNTIME_CACHE_ROOT/pip-cache}" && \\\n'
+    'UV_TOOL_DIR="${UV_TOOL_DIR:-$RUNTIME_CACHE_ROOT/uv-tools}" && \\\n'
+    'UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$RUNTIME_CACHE_ROOT/uv-project-env}" && \\\n'
+    'mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR" "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$UV_TOOL_DIR" "$UV_PROJECT_ENVIRONMENT" && \\\n'
     'if ! command -v uv >/dev/null 2>&1; then curl -LsSf https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR" sh > /dev/null 2>&1; fi && \\\n'
     'export PATH="$UV_INSTALL_DIR:$PATH" && \\\n'
     "command -v uv >/dev/null 2>&1 && \\\n"
-    f'SOURCE_EXEC_PATH="${{{_EXEC_SOURCE_PATH_ENV_KEY}:-/workspace${_SOURCE_PATH_ENV_KEY}}}" && \\\n'
+    f'SOURCE_EXEC_PATH="${{{_EXEC_SOURCE_PATH_ENV_KEY}:-.${_SOURCE_PATH_ENV_KEY}}}" && \\\n'
     "mkdir -p /tmp/_gobii && \\\n"
     "cat > /tmp/_gobii/_gobii_ctx.py <<'CTXEOF'\n"
     f"{_GOBII_CTX_MODULE}"
     "CTXEOF\n"
-    'UV_CACHE_DIR="$UV_CACHE_DIR" PYTHONPATH=/tmp/_gobii:${PYTHONPATH:-} uv run --no-project "$SOURCE_EXEC_PATH"'
+    'UV_CACHE_DIR="$UV_CACHE_DIR" UV_TOOL_DIR="$UV_TOOL_DIR" UV_PROJECT_ENVIRONMENT="$UV_PROJECT_ENVIRONMENT" XDG_CACHE_HOME="$XDG_CACHE_HOME" PIP_CACHE_DIR="$PIP_CACHE_DIR" PYTHONPATH=/tmp/_gobii:${PYTHONPATH:-} uv run --no-project "$SOURCE_EXEC_PATH"'
 )
 
 
@@ -322,6 +327,45 @@ def _read_source_text(agent: PersistentAgent, source_path: str) -> tuple[Optiona
         return raw.decode("utf-8"), None
     except UnicodeDecodeError:
         return None, "Custom tool source must be UTF-8 text."
+
+
+def _sync_workspace_source(agent: PersistentAgent, source_path: str) -> Optional[Dict[str, Any]]:
+    try:
+        service = SandboxComputeService()
+    except SandboxComputeUnavailable:
+        return {
+            "status": "error",
+            "message": f"Sandbox workspace is unavailable; could not sync the latest source for {source_path}.",
+        }
+
+    if isinstance(service._backend, LocalSandboxBackend):
+        return None
+
+    try:
+        session = service._ensure_session(agent, source="custom_tool_source_sync")
+        sync_result = service._sync_workspace_push(agent, session)
+    except Exception as exc:
+        logger.warning(
+            "Failed syncing sandbox workspace source for agent=%s path=%s",
+            agent.id,
+            source_path,
+            exc_info=True,
+        )
+        return {
+            "status": "error",
+            "message": f"Failed to sync the latest sandbox workspace source for {source_path}: {exc}",
+        }
+
+    if isinstance(sync_result, dict) and sync_result.get("status") != "ok":
+        return {
+            "status": "error",
+            "message": (
+                f"Failed to sync the latest sandbox workspace source for {source_path}: "
+                f"{sync_result.get('message') or 'sync failed'}"
+            ),
+            "sync_result": sync_result,
+        }
+    return None
 
 
 def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
@@ -463,14 +507,20 @@ def _custom_tool_sqlite_db(agent: PersistentAgent):
 @contextlib.contextmanager
 def _custom_tool_uv_runtime_dirs(service: SandboxComputeService):
     if not isinstance(service._backend, LocalSandboxBackend):
-        yield None, None
+        yield {}
         return
 
-    with tempfile.TemporaryDirectory(prefix="gobii-custom-tool-uv-runtime-") as runtime_root:
-        yield (
-            os.path.join(runtime_root, "uv-cache"),
-            os.path.join(runtime_root, "uv-bin"),
-        )
+    with tempfile.TemporaryDirectory(prefix="gobii-custom-tool-runtime-") as runtime_root:
+        runtime_env = {
+            _RUNTIME_CACHE_ROOT_ENV_KEY: runtime_root,
+            _UV_CACHE_DIR_ENV_KEY: os.path.join(runtime_root, "uv-cache"),
+            _UV_INSTALL_DIR_ENV_KEY: os.path.join(runtime_root, "uv-bin"),
+            "HOME": os.path.join(runtime_root, "home"),
+            "TMPDIR": os.path.join(runtime_root, "tmp"),
+        }
+        for path in runtime_env.values():
+            os.makedirs(path, exist_ok=True)
+        yield runtime_env
 
 
 def get_create_custom_tool_tool() -> Dict[str, Any]:
@@ -482,6 +532,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Create or update a sandboxed Python custom tool for this agent. "
                 "Prefer custom tools over manual multi-step procedures — they are far more efficient. "
                 "Write tools eagerly: if work involves 3+ steps, loops, data transforms, or API calls, make a tool. "
+                "Small disposable tools are good; do not over-engineer. "
                 "Source is a complete Python script run via `uv run`. Structure:\n"
                 "1. PEP 723 metadata at top for third-party deps (if any): `# /// script\\n# dependencies = [\"requests\"]\\n# ///`\n"
                 "2. `from _gobii_ctx import main` (plus ToolContext if you need type hints)\n"
@@ -489,12 +540,16 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "4. `if __name__ == '__main__': main(run)`\n"
                 "ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools). "
                 "Write results directly to SQLite via ctx.sqlite_db_path instead of returning large intermediate data. "
+                "Do not manually repeat MCP/tool/API calls or paste long SQL insert/update lists in your own loop — put the loop in Python and use bulk writes in one transaction. "
                 "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
                 "PROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
                 "For direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]) "
                 "or subprocess curl, and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
                 "For tool-to-tool calls, use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
-                "Provide `source_code` to write the file now, or point at an existing filespace `.py` file. "
+                "Simplest flow: write `/tools/my_tool.py`, then call create_custom_tool with that same `source_path`. "
+                "Latest workspace edits are synced automatically before registration and execution. "
+                "Prefer patching the same file and reusing the same tool over creating near-duplicate tools. "
+                "Provide `source_code` to write the file now, or point at an existing `.py` file in the workspace. "
                 "The saved tool gets a canonical id like `custom_my_tool` and is enabled by default."
             ),
             "parameters": {
@@ -510,7 +565,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                     },
                     "source_path": {
                         "type": "string",
-                        "description": "Filespace path to the Python source file, for example `/tools/my_tool.py`.",
+                        "description": "Workspace path to the Python source file, for example `/tools/my_tool.py`.",
                     },
                     "source_code": {
                         "type": "string",
@@ -551,7 +606,7 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
 
     source_path = _resolve_source_path(params.get("source_path"))
     if not source_path:
-        return {"status": "error", "message": "source_path must be a valid filespace path."}
+        return {"status": "error", "message": "source_path must be a valid workspace path like `/tools/my_tool.py`."}
     if not source_path.endswith(".py"):
         return {"status": "error", "message": "source_path must point to a `.py` file."}
 
@@ -611,6 +666,9 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         if write_result.get("status") != "ok":
             return write_result
     else:
+        sync_error = _sync_workspace_source(agent, source_path)
+        if sync_error:
+            return sync_error
         source_text, source_error = _read_source_text(agent, source_path)
         if source_error:
             return {"status": "error", "message": source_error}
@@ -686,6 +744,10 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
     if not is_custom_tools_available_for_agent(agent):
         return {"status": "error", "message": "Custom tools require sandbox compute."}
 
+    sync_error = _sync_workspace_source(agent, tool.source_path)
+    if sync_error:
+        return sync_error
+
     source_text, source_error = _read_source_text(agent, tool.source_path)
     if source_error:
         return {"status": "error", "message": source_error}
@@ -720,13 +782,9 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
         if local_exec_source_path:
             env[_EXEC_SOURCE_PATH_ENV_KEY] = local_exec_source_path
 
-    with _custom_tool_uv_runtime_dirs(service) as (uv_cache_dir, uv_install_dir), _custom_tool_sqlite_db(
-        agent
-    ) as sqlite_db_path:
-        if uv_cache_dir:
-            env[_UV_CACHE_DIR_ENV_KEY] = uv_cache_dir
-        if uv_install_dir:
-            env[_UV_INSTALL_DIR_ENV_KEY] = uv_install_dir
+    with _custom_tool_uv_runtime_dirs(service) as runtime_env, _custom_tool_sqlite_db(agent) as sqlite_db_path:
+        if runtime_env:
+            env.update(runtime_env)
         result = service.run_custom_tool_command(
             agent,
             CUSTOM_TOOL_BOOTSTRAP_COMMAND,
@@ -791,17 +849,24 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
     ).count()
     summary = (
         f"Custom tools: {total} saved, {enabled} enabled. "
+        "Default mode for repetitive or bulk work: write or patch a custom tool first. "
         "Discoverable via search_tools; share the enabled-tool limit. "
         "\nPHILOSOPHY: Never shuttle data through your context when a tool can handle it directly. "
         "Passing intermediate results back to you for processing wastes tokens, loses fidelity, and adds latency. "
         "Custom tools run Python at machine speed with full data precision — you decide WHAT to do, the tool DOES it. "
         "Write a tool that fetches, transforms, and stores data in SQLite, then read back a summary. "
         "Your job is to orchestrate, not to manually iterate over rows or transform JSON in your context. "
+        "A short one-off tool is usually better than manual repetition. "
         "\nWHEN TO CREATE: Whenever work involves multiple steps, data processing, API calls, loops, or batch operations. "
         "If you're about to chain 3+ tool calls or handle intermediate data between steps — stop and write a tool instead. "
+        "Immediate triggers: repeated MCP/API calls, pagination/cursors, sync/import jobs, bulk INSERT/UPDATE/UPSERT work, row-by-row transforms, retries/backoff, or checkpoint/resume flows. "
         "Bias toward creating tools early — they are cheap to write, test, and iterate on. "
-        "\nDEV LOOP: create_custom_tool(source_code=...) -> invoke the custom_* tool -> inspect result/error -> "
-        "file_str_replace to patch source -> re-invoke. Jump straight in — don't ask, just write the tool and run it. "
+        "\nDEV LOOP: write `/tools/my_tool.py` -> create_custom_tool(source_path='/tools/my_tool.py', ...) -> "
+        "invoke the custom_* tool -> inspect result/error -> patch the file -> re-invoke. "
+        "Latest workspace edits are synced automatically before registration and execution. "
+        "Prefer patching the same file over creating near-duplicate tools. "
+        "Jump straight in — don't ask, just write the tool and run it. "
+        "Start with a small sample/limit, verify a few rows, then widen scope. "
         "\nSOURCE: Scripts are run via `uv run` — any pip package is available. "
         "Add PEP 723 metadata at the top for third-party deps: "
         "# /// script\\n# dependencies = [\"requests\"]\\n# ///\\n"
@@ -841,6 +906,8 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "use SOCKS5-capable libraries (requests[socks], httpx[socks]) and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
         "subprocess curl honors these proxy env vars automatically. "
         "For tool-to-tool calls, always use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
+        "\nANTI-PATTERNS: do not spend a turn manually making dozens of near-identical MCP/API calls, manually pasting rows into sqlite_batch INSERT statements, or using your context to transform large JSON payloads. "
+        "Write a tool and batch the work. "
         "\nSANDBOX TOOLS: rg, fd, jq, sqlite3, sed, awk, file, tar, unzip, fzf, yq, git are available via subprocess. "
         "Agent filespace contents are synced into the sandbox before each run. "
         "\nPATTERNS:"
@@ -858,6 +925,8 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "results = [ctx.call_tool('mcp_brightdata_search_engine', {'query': q}) for q in queries]; "
         "process all results, write to SQLite, return summary. "
         "One custom tool call replaces dozens of manual tool calls."
+        "\n- Bulk MCP fan-out: iterate ctx.call_tool(...) for many ids/queries/pages inside Python, normalize the results, "
+        "then use executemany with INSERT OR REPLACE/UPSERT inside one transaction. "
         "\n- Custom tool chains: custom tools can call other custom tools via ctx.call_tool('custom_other_tool', params). "
         "Build layered pipelines: one tool syncs data, another transforms, another exports."
         "\n- Authenticated API sync: read tokens from os.environ -> paginate through API -> "

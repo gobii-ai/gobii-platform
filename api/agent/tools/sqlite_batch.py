@@ -1803,6 +1803,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "Durable SQLite memory for structured data. "
+                "Use sqlite_batch to query and batch-update structured data you already have. "
+                "For repetitive imports, bulk MCP/API fan-out, or large row writes, prefer a custom tool that writes to SQLite, then query it here. "
                 "Provide `sql` as a single SQL string; separate multiple statements with semicolons. "
                 "ESCAPE single quotes by DOUBLING them: 'O''Brien' (NOT backslash). "
                 "grep_context_all/split_sections return STRING arrays: use json_each(...) then ctx.value directly, NOT json_extract. "

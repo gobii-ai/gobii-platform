@@ -1,7 +1,13 @@
+import base64
+import hashlib
 import json
+import os
 import sqlite3
+import tempfile
+import zipfile
 from decimal import Decimal
 from datetime import timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -86,6 +92,36 @@ class CustomToolsTests(TestCase):
         sections.append("")
         return "\n".join(sections)
 
+    @staticmethod
+    def _write_local_wheel(wheel_path: str) -> None:
+        dist_info = "helper_pkg-0.1.0.dist-info"
+        files = {
+            "helper_pkg/__init__.py": "def ping():\n    return 'pong'\n",
+            f"{dist_info}/METADATA": (
+                "Metadata-Version: 2.1\n"
+                "Name: helper-pkg\n"
+                "Version: 0.1.0\n"
+                "Summary: Local helper package for uv smoke tests\n"
+            ),
+            f"{dist_info}/WHEEL": (
+                "Wheel-Version: 1.0\n"
+                "Generator: gobii-tests\n"
+                "Root-Is-Purelib: true\n"
+                "Tag: py3-none-any\n"
+            ),
+            f"{dist_info}/top_level.txt": "helper_pkg\n",
+        }
+
+        records = []
+        with zipfile.ZipFile(wheel_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for relative_path, text in files.items():
+                payload = text.encode("utf-8")
+                archive.writestr(relative_path, payload)
+                digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode("ascii")
+                records.append(f"{relative_path},sha256={digest},{len(payload)}")
+            records.append(f"{dist_info}/RECORD,,")
+            archive.writestr(f"{dist_info}/RECORD", "\n".join(records) + "\n")
+
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
     def test_create_custom_tool_writes_source_and_enables_tool(self, mock_enable_tools, _mock_sandbox):
@@ -128,6 +164,55 @@ class CustomToolsTests(TestCase):
         node = AgentFsNode.objects.get(path="/tools/greeter.py")
         with node.content.open("rb") as handle:
             self.assertIn(b"def run", handle.read())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    @patch("api.agent.tools.tool_manager.enable_tools")
+    def test_create_custom_tool_syncs_workspace_source_before_registering(
+        self,
+        mock_enable_tools,
+        mock_service_cls,
+        _mock_sandbox,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return {'message': 'hi'}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/workspace_tool.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        mock_enable_tools.return_value = {
+            "status": "success",
+            "enabled": ["custom_workspace_tool"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+        mock_service = MagicMock()
+        mock_service._backend = object()
+        mock_service._sync_workspace_push.return_value = {"status": "ok"}
+        mock_service_cls.return_value = mock_service
+
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Workspace Tool",
+                "description": "Loads source from workspace path.",
+                "source_path": "/tools/workspace_tool.py",
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
+        mock_service._sync_workspace_push.assert_called_once()
 
     def test_file_str_replace_updates_source_and_touches_custom_tool(self):
         write_result = write_bytes_to_dir(
@@ -219,6 +304,15 @@ class CustomToolsTests(TestCase):
         self.assertIn("httpx[socks]", description)
         self.assertIn("curl", description)
         self.assertIn("tool-to-tool calls", description)
+        self.assertIn("write `/tools/my_tool.py`", description)
+        self.assertIn("Latest workspace edits are synced automatically", description)
+        self.assertIn("Small disposable tools are good", description)
+        self.assertIn("Do not manually repeat MCP/tool/API calls", description)
+        self.assertIn("Prefer patching the same file", description)
+        self.assertEqual(
+            properties["source_path"]["description"],
+            "Workspace path to the Python source file, for example `/tools/my_tool.py`.",
+        )
         self.assertNotIn("entrypoint", properties)
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
@@ -331,6 +425,7 @@ class CustomToolsTests(TestCase):
         )
 
         mock_service = MagicMock()
+        mock_service._sync_workspace_push.return_value = {"status": "ok"}
         mock_service.run_custom_tool_command.return_value = {
             "status": "ok",
             "stdout": f"debug line\n{CUSTOM_TOOL_RESULT_MARKER}{{\"result\": {{\"value\": 2}}}}\n",
@@ -343,6 +438,8 @@ class CustomToolsTests(TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["result"], {"value": 2})
         self.assertEqual(result["stdout"], "debug line")
+        mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
+        mock_service._sync_workspace_push.assert_called_once()
         mock_service.run_custom_tool_command.assert_called_once()
         call = mock_service.run_custom_tool_command.call_args
         self.assertEqual(call.kwargs["timeout"], 123)
@@ -351,10 +448,14 @@ class CustomToolsTests(TestCase):
         self.assertEqual(call.kwargs["sqlite_env_key"], "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH")
         self.assertTrue(call.kwargs["local_sqlite_db_path"])
         self.assertIn('RUNTIME_CACHE_ROOT="${SANDBOX_RUNTIME_CACHE_ROOT:-/tmp}"', call.args[1])
-        self.assertIn('SOURCE_EXEC_PATH="${SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH:-/workspace$SANDBOX_CUSTOM_TOOL_SOURCE_PATH}"', call.args[1])
+        self.assertIn('XDG_CACHE_HOME="${XDG_CACHE_HOME:-$RUNTIME_CACHE_ROOT/xdg-cache}"', call.args[1])
+        self.assertIn('PIP_CACHE_DIR="${PIP_CACHE_DIR:-$RUNTIME_CACHE_ROOT/pip-cache}"', call.args[1])
+        self.assertIn('UV_TOOL_DIR="${UV_TOOL_DIR:-$RUNTIME_CACHE_ROOT/uv-tools}"', call.args[1])
+        self.assertIn('UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-$RUNTIME_CACHE_ROOT/uv-project-env}"', call.args[1])
+        self.assertIn('SOURCE_EXEC_PATH="${SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH:-.$SANDBOX_CUSTOM_TOOL_SOURCE_PATH}"', call.args[1])
         self.assertIn('UV_CACHE_DIR="${SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR:-$RUNTIME_CACHE_ROOT/uv-cache}"', call.args[1])
         self.assertIn('UV_INSTALL_DIR="${SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR:-$RUNTIME_CACHE_ROOT/uv-bin}"', call.args[1])
-        self.assertIn('mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR"', call.args[1])
+        self.assertIn('mkdir -p "$UV_CACHE_DIR" "$UV_INSTALL_DIR" "$XDG_CACHE_HOME" "$PIP_CACHE_DIR" "$UV_TOOL_DIR" "$UV_PROJECT_ENVIRONMENT"', call.args[1])
         self.assertIn(
             'curl -LsSf https://astral.sh/uv/install.sh | UV_UNMANAGED_INSTALL="$UV_INSTALL_DIR" sh',
             call.args[1],
@@ -408,10 +509,81 @@ class CustomToolsTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         env = mock_service.run_custom_tool_command.call_args.kwargs["env"]
+        self.assertIn("SANDBOX_RUNTIME_CACHE_ROOT", env)
         self.assertIn("SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR", env)
         self.assertIn("SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR", env)
+        self.assertIn("HOME", env)
+        self.assertIn("TMPDIR", env)
         self.assertNotIn("/workspace", env["SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR"])
         self.assertNotIn("/workspace", env["SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR"])
+        self.assertTrue(env["SANDBOX_CUSTOM_TOOL_UV_CACHE_DIR"].startswith(env["SANDBOX_RUNTIME_CACHE_ROOT"]))
+        self.assertTrue(env["SANDBOX_CUSTOM_TOOL_UV_INSTALL_DIR"].startswith(env["SANDBOX_RUNTIME_CACHE_ROOT"]))
+        self.assertTrue(env["HOME"].startswith(env["SANDBOX_RUNTIME_CACHE_ROOT"]))
+        self.assertTrue(env["TMPDIR"].startswith(env["SANDBOX_RUNTIME_CACHE_ROOT"]))
+
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.services.sandbox_compute._resolve_backend", return_value=LocalSandboxBackend())
+    def test_execute_custom_tool_installs_local_pep723_dependency_with_uv(
+        self,
+        _mock_resolve_backend,
+        _mock_select_proxy,
+        _mock_service_tool_enabled,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+        _mock_bridge_url,
+    ):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            wheel_dir = os.path.join(tmp_dir, "wheels")
+            os.makedirs(wheel_dir, exist_ok=True)
+            wheel_path = os.path.join(wheel_dir, "helper_pkg-0.1.0-py3-none-any.whl")
+            self._write_local_wheel(wheel_path)
+
+            source = "\n".join(
+                [
+                    "# /// script",
+                    "# dependencies = [",
+                    f"#   \"helper-pkg @ {Path(wheel_path).as_uri()}\",",
+                    "# ]",
+                    "# ///",
+                    "from helper_pkg import ping",
+                    "from _gobii_ctx import main",
+                    "",
+                    "def run(params, ctx):",
+                    "    return {'value': ping()}",
+                    "",
+                    "if __name__ == '__main__':",
+                    "    main(run)",
+                    "",
+                ]
+            )
+            write_result = write_bytes_to_dir(
+                agent=self.agent,
+                content_bytes=source.encode("utf-8"),
+                extension=".py",
+                mime_type="text/x-python",
+                path="/tools/local_dep_tool.py",
+                overwrite=True,
+            )
+            self.assertEqual(write_result.get("status"), "ok")
+
+            tool = PersistentAgentCustomTool.objects.create(
+                agent=self.agent,
+                name="Local Dep Tool",
+                tool_name="custom_local_dep_tool",
+                description="Loads a local wheel through PEP 723 metadata.",
+                source_path="/tools/local_dep_tool.py",
+                parameters_schema={"type": "object", "properties": {}},
+                timeout_seconds=60,
+            )
+
+            result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"], {"value": "pong"})
 
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
@@ -655,6 +827,7 @@ class CustomToolsTests(TestCase):
         summary = get_custom_tools_prompt_summary(self.agent, recent_limit=2)
 
         self.assertIn("Custom tools: 2 saved, 1 enabled.", summary)
+        self.assertIn("Default mode for repetitive or bulk work", summary)
         self.assertIn("DEV LOOP:", summary)
         self.assertIn("file_str_replace", summary)
         self.assertIn("ctx.sqlite_db_path", summary)
@@ -670,6 +843,15 @@ class CustomToolsTests(TestCase):
         self.assertIn("ctx.call_tool()", summary)
         self.assertIn("internal bridge transport", summary)
         self.assertIn("sqlite3", summary)
+        self.assertIn("write `/tools/my_tool.py`", summary)
+        self.assertIn("Latest workspace edits are synced automatically", summary)
+        self.assertIn("A short one-off tool is usually better than manual repetition", summary)
+        self.assertIn("Immediate triggers:", summary)
+        self.assertIn("bulk INSERT/UPDATE/UPSERT work", summary)
+        self.assertIn("Prefer patching the same file", summary)
+        self.assertIn("Start with a small sample/limit", summary)
+        self.assertIn("ANTI-PATTERNS:", summary)
+        self.assertIn("Bulk MCP fan-out:", summary)
         self.assertIn("Data sync to SQLite:", summary)
         self.assertIn("Checkpointed orchestration:", summary)
         self.assertIn("Safe dev loop:", summary)
