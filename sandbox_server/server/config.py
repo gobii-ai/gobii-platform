@@ -60,7 +60,10 @@ def _sandbox_env(
     trusted = {str(key) for key in (trusted_env_keys or []) if isinstance(key, str) and key.strip()}
     env = {key: value for key, value in os.environ.items() if key in allowed}
     env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
-    env.setdefault("UV_PROJECT_ENVIRONMENT", _DEFAULT_UV_PROJECT_ENVIRONMENT)
+    env.setdefault(
+        "UV_PROJECT_ENVIRONMENT",
+        str(agent_root / _DEFAULT_UV_PROJECT_ENVIRONMENT) if isinstance(agent_root, Path) else _DEFAULT_UV_PROJECT_ENVIRONMENT,
+    )
     identity = agent_root.name if isinstance(agent_root, Path) and agent_root.name else "default"
     env.setdefault("UV_CACHE_DIR", str(_runtime_cache_root() / identity / "uv-cache"))
     if extra_env:

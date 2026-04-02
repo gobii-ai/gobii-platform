@@ -26,12 +26,13 @@ class EnvAllowlistTrustedKeysTests(unittest.TestCase):
             clear=False,
         ):
             env = _sandbox_env(
+                Path("/tmp/workspace"),
                 extra_env={"POSTGRES_CONNECTION_STRING": "postgres://example"},
                 trusted_env_keys=["POSTGRES_CONNECTION_STRING"],
             )
 
         self.assertEqual(env.get("POSTGRES_CONNECTION_STRING"), "postgres://example")
-        self.assertEqual(env.get("UV_PROJECT_ENVIRONMENT"), ".gobii/uv-project-env")
+        self.assertEqual(env.get("UV_PROJECT_ENVIRONMENT"), "/tmp/workspace/.gobii/uv-project-env")
 
     def test_run_command_forwards_trusted_env_keys(self):
         payload = {

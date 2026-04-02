@@ -24,7 +24,7 @@ class PythonExecEnvTests(unittest.TestCase):
             env = _sandbox_env(Path("/tmp/workspace"))
 
         self.assertEqual(env["PATH"], "/usr/bin")
-        self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], ".gobii/uv-project-env")
+        self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], "/tmp/workspace/.gobii/uv-project-env")
         self.assertEqual(env["UV_CACHE_DIR"], "/tmp/runtime-cache/workspace/uv-cache")
         self.assertNotIn("HTTP_PROXY", env)
         self.assertNotIn("HTTPS_PROXY", env)

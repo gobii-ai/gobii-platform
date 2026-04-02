@@ -66,7 +66,7 @@ class SandboxAppAndConfigTests(unittest.TestCase):
                 env = _sandbox_env(Path("/tmp/workspace/agent-1"))
 
         self.assertEqual(env["PATH"], "/usr/bin")
-        self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], ".gobii/uv-project-env")
+        self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], "/tmp/workspace/agent-1/.gobii/uv-project-env")
         self.assertEqual(env["UV_CACHE_DIR"], f"{runtime_cache}/agent-1/uv-cache")
 
 
