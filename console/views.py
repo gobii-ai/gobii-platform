@@ -1824,11 +1824,6 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             livemode=getattr(stripe_customer, "livemode", None),
         )
         context['personal_can_open_stripe'] = personal_can_open_stripe
-        context["churnkey_loader_app_id"] = (
-            settings.CHURN_KEY_APP_ID
-            if paid_subscriber and not context.get("cancel_at_period_end")
-            else ""
-        )
         personal_extra_limit = int(getattr(user_billing, "max_extra_tasks", 0) or 0)
         personal_extra_settings = derive_extra_tasks_settings(
             personal_extra_limit,
@@ -2388,6 +2383,7 @@ def sync_billing_subscription_state(request):
 
     _sync_subscription_after_direct_update(updated_subscription)
     return JsonResponse({'success': True})
+
 
 @login_required
 @require_POST
