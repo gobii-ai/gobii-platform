@@ -1014,9 +1014,9 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Search your internal tool and skill catalog to discover and enable tools and skills for a task, including saved custom tools. "
-                "NOT for web search - use the web search tool from the catalog (e.g., mcp_brightdata_search_engine). "
-                "Call this when tasks change and you need different capabilities."
+                "Discover and enable the right tools and skills for the current task, including saved custom tools. "
+                "Use this first when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
+                "Call it again when the task changes and you need different capabilities."
             ),
             "parameters": {
                 "type": "object",

@@ -90,6 +90,10 @@ class GetSecretsBlockTests(TestCase):
         # Get the secrets block
         result = _get_secrets_block(self.agent)
 
+        self.assertIn("These domain-scoped credential secrets are available to you", result)
+        self.assertIn("not readable via os.environ", result)
+        self.assertIn("Pending domain-scoped credentials", result)
+
         # Verify fulfilled secrets ARE in the result
         self.assertIn("api_key", result)
         self.assertIn("auth_token", result)
@@ -150,10 +154,12 @@ class GetSecretsBlockTests(TestCase):
 
         result = _get_secrets_block(self.agent)
 
-        self.assertIn("These domain-scoped credential secrets are available to you:", result)
-        self.assertIn("These global sandbox environment variable secrets are available to you:", result)
-        self.assertIn("Pending domain-scoped credentials:", result)
-        self.assertIn("Pending sandbox environment variables:", result)
+        self.assertIn("These domain-scoped credential secrets are available to you", result)
+        self.assertIn("not readable via os.environ", result)
+        self.assertIn("These global sandbox environment variable secrets are available to you", result)
+        self.assertIn("these ARE readable via os.environ", result)
+        self.assertIn("Pending domain-scoped credentials", result)
+        self.assertIn("Pending sandbox environment variables", result)
         self.assertIn("Key: api_credential", result)
         self.assertIn("Env Key: SANDBOX_TOKEN", result)
         self.assertNotIn("credential-secret-value", result)
@@ -302,6 +308,8 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertEqual(tool_def["function"]["name"], "secure_credentials_request")
         self.assertIn("custom tool script", tool_def["function"]["description"])
         self.assertIn("os.environ", tool_def["function"]["description"])
+        self.assertIn("ONLY env_var secrets", tool_def["function"]["description"])
+        self.assertIn("not injected into sandbox processes", tool_def["function"]["description"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["properties"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["required"])
         item_properties = (
@@ -309,6 +317,7 @@ class SecureCredentialsRequestToolTests(TestCase):
         )
         self.assertIn("secret_type", item_properties)
         self.assertEqual(item_properties["secret_type"]["enum"], ["credential", "env_var"])
+        self.assertIn("ONLY env_var secrets", item_properties["secret_type"]["description"])
         self.assertIn("custom tool scripts", item_properties["secret_type"]["description"])
         self.assertIn("os.environ", item_properties["secret_type"]["description"])
 

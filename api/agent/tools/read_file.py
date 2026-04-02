@@ -18,7 +18,6 @@ from api.services.system_settings import get_max_file_size
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_MARKDOWN_CHARS = 80000
-DEFAULT_RESPONSE_FORMAT = "markdown"
 RESPONSE_FORMAT_MARKDOWN = "markdown"
 RESPONSE_FORMAT_RAW_TEXT = "raw_text"
 ALLOWED_RESPONSE_FORMATS = {RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT}
@@ -141,8 +140,16 @@ def _sanitize_text_content(content: str) -> str:
     return DISALLOWED_CONTROL_CHARS.sub("", content)
 
 
-def _resolve_response_format(params: Dict[str, Any]) -> str:
-    raw_format = params.get("response_format", DEFAULT_RESPONSE_FORMAT)
+def _default_response_format_for_node(node: AgentFsNode) -> str:
+    if _is_hard_blocked_for_raw_text(node):
+        return RESPONSE_FORMAT_MARKDOWN
+    return RESPONSE_FORMAT_RAW_TEXT
+
+
+def _resolve_response_format(params: Dict[str, Any], node: AgentFsNode) -> str:
+    raw_format = params.get("response_format")
+    if raw_format in (None, ""):
+        return _default_response_format_for_node(node)
     if not isinstance(raw_format, str):
         return ""
     return raw_format.strip().lower()
@@ -185,7 +192,7 @@ def get_read_file_tool() -> Dict[str, Any]:
             "name": "read_file",
             "description": (
                 "Read a file from the agent filesystem and return content as markdown or raw text. "
-                "Prefer response_format='markdown' for PDFs, images, scanned documents, and office files "
+                "Defaults to raw_text for plain text files and markdown for PDFs, images, scanned documents, and office files "
                 "(markdown mode handles OCR and richer extraction). "
                 "Not for SQLite snapshots; use sqlite_batch on __tool_results, __messages, or __files instead. "
                 "Markdown mode uses OCR for images to return a detailed description. "
@@ -210,8 +217,8 @@ def get_read_file_tool() -> Dict[str, Any]:
                         "enum": [RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT],
                         "description": (
                             "Optional output format. "
-                            "'markdown' (default) is recommended for PDFs/images/office docs; "
-                            "'raw_text' is for plain text files."
+                            "Defaults to 'raw_text' for plain text files. "
+                            "Defaults to 'markdown' for PDFs/images/office docs and other rich formats."
                         ),
                     },
                 },
@@ -254,7 +261,7 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
     if max_size and node.size_bytes and node.size_bytes > max_size:
         return {"status": "error", "message": f"File exceeds maximum allowed size ({node.size_bytes} bytes)."}
 
-    response_format = _resolve_response_format(params)
+    response_format = _resolve_response_format(params, node)
     if response_format not in ALLOWED_RESPONSE_FORMATS:
         allowed = ", ".join(sorted(ALLOWED_RESPONSE_FORMATS))
         return {
