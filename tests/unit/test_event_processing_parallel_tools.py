@@ -135,9 +135,10 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False):
+        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
+            self.assertIsNone(current_sqlite_db_path)
             with lock:
                 active += 1
                 max_active = max(max_active, active)
@@ -165,9 +166,10 @@ class TestParallelToolCallsExecution(TestCase):
         max_active = 0
         lock = threading.Lock()
 
-        def side_effect(_agent, _tool_name, _params, isolated_mcp=False):
+        def side_effect(_agent, _tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
             nonlocal active, max_active
             self.assertTrue(isolated_mcp)
+            self.assertIsNone(current_sqlite_db_path)
             with lock:
                 active += 1
                 max_active = max(max_active, active)
@@ -367,10 +369,11 @@ class TestParallelToolCallsExecution(TestCase):
     ):
         captured_paths = []
 
-        def side_effect(_agent, tool_name, _params, isolated_mcp=False):
+        def side_effect(_agent, tool_name, _params, isolated_mcp=False, current_sqlite_db_path=None):
             from api.agent.tools.sqlite_state import get_sqlite_db_path
 
             self.assertTrue(isolated_mcp)
+            self.assertEqual(current_sqlite_db_path, "/tmp/parallel-safe.sqlite")
             captured_paths.append(get_sqlite_db_path())
             set_agent_variable("/shared", tool_name)
             return {"status": "ok", "auto_sleep_ok": True}
