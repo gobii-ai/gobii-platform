@@ -517,7 +517,11 @@ def load_custom_tool_bridge_payload(token: str) -> Optional[Dict[str, Any]]:
 
 
 @contextlib.contextmanager
-def _custom_tool_sqlite_db(agent: PersistentAgent):
+def _custom_tool_sqlite_db(agent: PersistentAgent, *, current_db_path: Optional[str] = None):
+    if current_db_path:
+        yield current_db_path
+        return
+
     existing_db_path = get_sqlite_db_path()
     if existing_db_path:
         yield existing_db_path
@@ -769,7 +773,13 @@ def _parse_custom_tool_result(stdout: str) -> tuple[Optional[Any], str]:
     return parsed_result, "\n".join(cleaned_lines).strip()
 
 
-def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool, params: Dict[str, Any]) -> Dict[str, Any]:
+def execute_custom_tool(
+    agent: PersistentAgent,
+    tool: PersistentAgentCustomTool,
+    params: Dict[str, Any],
+    *,
+    current_sqlite_db_path: Optional[str] = None,
+) -> Dict[str, Any]:
     if not is_custom_tools_available_for_agent(agent):
         return {"status": "error", "message": "Custom tools require sandbox compute."}
 
@@ -811,7 +821,10 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
         if local_exec_source_path:
             env[_EXEC_SOURCE_PATH_ENV_KEY] = local_exec_source_path
 
-    with _custom_tool_uv_runtime_dirs(service) as runtime_env, _custom_tool_sqlite_db(agent) as sqlite_db_path:
+    with _custom_tool_uv_runtime_dirs(service) as runtime_env, _custom_tool_sqlite_db(
+        agent,
+        current_db_path=current_sqlite_db_path,
+    ) as sqlite_db_path:
         if runtime_env:
             env.update(runtime_env)
         result = service.run_custom_tool_command(

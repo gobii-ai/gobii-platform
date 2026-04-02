@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import uuid
 import zipfile
 from decimal import Decimal
 from datetime import timedelta
@@ -28,7 +29,12 @@ from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
-from api.agent.tools.tool_manager import enable_tools, get_available_tool_ids, get_enabled_tool_definitions
+from api.agent.tools.tool_manager import (
+    enable_tools,
+    execute_enabled_tool,
+    get_available_tool_ids,
+    get_enabled_tool_definitions,
+)
 from api.models import (
     AgentFsNode,
     BrowserUseAgent,
@@ -672,7 +678,75 @@ class CustomToolsTests(TestCase):
                 rows = conn.execute("SELECT value FROM custom_tool_rows ORDER BY rowid").fetchall()
             finally:
                 conn.close()
-        self.assertEqual(rows, [("hello",)])
+            self.assertEqual(rows, [("hello",)])
+
+    @patch("api.agent.tools.custom_tools.get_sqlite_db_path", return_value=None)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.services.sandbox_compute._resolve_backend", return_value=LocalSandboxBackend())
+    def test_execute_enabled_tool_threads_current_sqlite_db_path_into_custom_tools(
+        self,
+        _mock_resolve_backend,
+        _mock_select_proxy,
+        _mock_service_tool_enabled,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+        _mock_bridge_url,
+        _mock_current_db_path,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    with ctx.sqlite() as conn:\n"
+            "        conn.execute('CREATE TABLE IF NOT EXISTS custom_tool_rows (value TEXT NOT NULL)')\n"
+            "        conn.execute('INSERT INTO custom_tool_rows(value) VALUES (?)', (params['value'],))\n"
+            "    return {'stored': params['value']}\n",
+            imports="import sqlite3",
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/store_value_via_manager.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Store Value Via Manager",
+            tool_name="custom_store_value_via_manager",
+            description="Store a value in SQLite through execute_enabled_tool.",
+            source_path="/tools/store_value_via_manager.py",
+            parameters_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+            timeout_seconds=30,
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="custom_store_value_via_manager",
+        )
+        value = f"hello-{uuid.uuid4().hex}"
+
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            result = execute_enabled_tool(
+                self.agent,
+                "custom_store_value_via_manager",
+                {"value": value},
+                current_sqlite_db_path=db_path,
+            )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["result"], {"stored": value})
+
+            batch_result = execute_sqlite_batch(
+                self.agent,
+                {"sql": f"SELECT value FROM custom_tool_rows WHERE value = '{value}' ORDER BY rowid"},
+            )
+            self.assertEqual(batch_result.get("status"), "ok")
+            self.assertEqual(batch_result["results"][0]["result"], [{"value": value}])
 
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)

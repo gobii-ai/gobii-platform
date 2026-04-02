@@ -1064,6 +1064,7 @@ def execute_enabled_tool(
     params: Dict[str, Any],
     *,
     isolated_mcp: bool = False,
+    current_sqlite_db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Execute an enabled tool, routing to the appropriate provider."""
     entry = resolve_tool_entry(agent, tool_name)
@@ -1187,7 +1188,12 @@ def execute_enabled_tool(
                 "status": "error",
                 "message": f"Custom tool '{resolved_name}' is not available for this agent.",
             }
-        return execute_custom_tool(agent, custom_tool, params)
+        return execute_custom_tool(
+            agent,
+            custom_tool,
+            params,
+            current_sqlite_db_path=current_sqlite_db_path,
+        )
 
     return {"status": "error", "message": f"Tool '{resolved_name}' has no execution handler"}
 
