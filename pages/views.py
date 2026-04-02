@@ -592,7 +592,7 @@ def _create_checkout_session_with_customer_context(
 
     try:
         return stripe.checkout.Session.create(**checkout_kwargs)
-    except stripe.error.StripeError:
+    except stripe.error.StripeError as exc:
         if customer_checkout_context_set:
             try:
                 _clear_customer_checkout_context_if_matches(
