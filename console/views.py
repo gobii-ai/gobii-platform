@@ -2625,6 +2625,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         return {
             'id': str(agent.id),
             'name': agent.name or '',
+            'signupPreviewState': agent.signup_preview_state,
             'avatarUrl': agent.get_avatar_url(),
             'listingDescription': agent.listing_description or '',
             'listingDescriptionSource': getattr(agent, 'listing_description_source', None),
