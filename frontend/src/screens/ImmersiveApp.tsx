@@ -172,6 +172,20 @@ function sanitizeSameOriginPath(value: string | null): string | null {
   }
 }
 
+function resolveNestedCloseTarget(url: URL): string | null {
+  const nestedReturnTo = sanitizeSameOriginPath(url.searchParams.get('return_to'))
+  if (nestedReturnTo) {
+    return normalizeClosePath(nestedReturnTo)
+  }
+
+  const nestedNext = sanitizeSameOriginPath(url.searchParams.get('next'))
+  if (nestedNext) {
+    return normalizeClosePath(nestedNext)
+  }
+
+  return null
+}
+
 function stripSpawnParam(url: URL): string {
   url.searchParams.delete('spawn')
   const query = url.searchParams.toString()
@@ -180,6 +194,10 @@ function stripSpawnParam(url: URL): string {
 
 function normalizeClosePath(value: string): string {
   const url = new URL(value, window.location.origin)
+  const nestedCloseTarget = resolveNestedCloseTarget(url)
+  if (nestedCloseTarget && nestedCloseTarget !== DEFAULT_CLOSE_PATH) {
+    return nestedCloseTarget
+  }
   if (!isAppPath(url.pathname)) {
     return stripSpawnParam(url)
   }
@@ -191,7 +209,13 @@ function readReturnToFromSearch(search: string): string | null {
   return sanitizeSameOriginPath(params.get('return_to'))
 }
 
+function hasSubscribeSuccess(search: string): boolean {
+  const params = new URLSearchParams(search)
+  return params.get('subscribe_success') === '1'
+}
+
 function resolveReturnTo(search: string): string {
+  const subscribeSuccess = hasSubscribeSuccess(search)
   const fromQuery = readReturnToFromSearch(search)
   if (fromQuery) {
     const normalizedQuery = normalizeClosePath(fromQuery)
@@ -199,6 +223,19 @@ function resolveReturnTo(search: string): string {
       sessionStorage.setItem(RETURN_TO_STORAGE_KEY, normalizedQuery)
       return normalizedQuery
     }
+  }
+
+  const stored = sanitizeSameOriginPath(sessionStorage.getItem(RETURN_TO_STORAGE_KEY))
+  if (stored && subscribeSuccess) {
+    const normalizedStored = normalizeClosePath(stored)
+    if (normalizedStored !== DEFAULT_CLOSE_PATH) {
+      return normalizedStored
+    }
+    sessionStorage.removeItem(RETURN_TO_STORAGE_KEY)
+  }
+
+  if (subscribeSuccess) {
+    return DEFAULT_CLOSE_PATH
   }
 
   const fromReferrer = sanitizeSameOriginPath(document.referrer)
@@ -210,7 +247,6 @@ function resolveReturnTo(search: string): string {
     }
   }
 
-  const stored = sanitizeSameOriginPath(sessionStorage.getItem(RETURN_TO_STORAGE_KEY))
   if (stored) {
     const normalizedStored = normalizeClosePath(stored)
     if (normalizedStored !== DEFAULT_CLOSE_PATH) {
