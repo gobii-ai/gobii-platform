@@ -31,6 +31,7 @@ class EnvAllowlistTrustedKeysTests(unittest.TestCase):
             )
 
         self.assertEqual(env.get("POSTGRES_CONNECTION_STRING"), "postgres://example")
+        self.assertEqual(env.get("UV_PROJECT_ENVIRONMENT"), ".gobii/uv-project-env")
 
     def test_run_command_forwards_trusted_env_keys(self):
         payload = {
@@ -66,6 +67,35 @@ class EnvAllowlistTrustedKeysTests(unittest.TestCase):
             {"POSTGRES_CONNECTION_STRING": "postgres://example"},
             trusted_env_keys=["POSTGRES_CONNECTION_STRING"],
         )
+
+    def test_run_command_defaults_cwd_to_agent_workspace(self):
+        payload = {
+            "agent_id": "agent-1",
+            "command": "pwd",
+        }
+        completed = type(
+            "CompletedProcess",
+            (),
+            {"returncode": 0, "stdout": "/tmp/workspace\n", "stderr": ""},
+        )()
+
+        with patch("sandbox_server.run._require_agent_id", return_value=("agent-1", None)), patch(
+            "sandbox_server.run._agent_workspace",
+            return_value=Path("/tmp/workspace"),
+        ), patch("sandbox_server.run._store_proxy_env"), patch(
+            "sandbox_server.run._normalize_timeout",
+            return_value=30,
+        ), patch(
+            "sandbox_server.run._sandbox_env",
+            return_value={"PATH": "/usr/bin", "UV_PROJECT_ENVIRONMENT": ".gobii/uv-project-env"},
+        ), patch(
+            "sandbox_server.run.subprocess.run",
+            return_value=completed,
+        ) as run_mock:
+            result = _handle_run_command(payload)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(run_mock.call_args.kwargs["cwd"], "/tmp/workspace")
 
 
 if __name__ == "__main__":
