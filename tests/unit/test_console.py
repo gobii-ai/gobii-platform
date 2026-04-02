@@ -2800,6 +2800,52 @@ class ConsoleViewsTest(TestCase):
             [preview_agent.name],
         )
         self.assertFalse(payload['canSpawnAgents'])
+        self.assertEqual(
+            payload['agents'][0]['signupPreviewState'],
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+
+    @tag("batch_console_agents")
+    @patch('console.views.can_user_access_personal_agent_chat', return_value=True)
+    def test_agent_list_payload_exposes_signup_preview_state_for_agents(self, _mock_chat_access):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        preview_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Preview State Browser',
+        )
+        preview_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Preview State Agent',
+            charter='Preview state charter',
+            browser_use_agent=preview_browser_agent,
+            signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+        standard_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Standard State Browser',
+        )
+        standard_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Standard State Agent',
+            charter='Standard state charter',
+            browser_use_agent=standard_browser_agent,
+            signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
+        )
+
+        response = self.client.get(reverse('agents'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = self._get_agent_list_payload(response)
+        agents_by_name = {agent['name']: agent for agent in payload['agents']}
+        self.assertEqual(
+            agents_by_name[preview_agent.name]['signupPreviewState'],
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+        self.assertEqual(
+            agents_by_name[standard_agent.name]['signupPreviewState'],
+            PersistentAgent.SignupPreviewState.NONE,
+        )
 
     @tag("batch_console_agents")
     def test_agent_detail_allows_selecting_dedicated_ip(self):

@@ -11,6 +11,7 @@ import { useModal } from '../hooks/useModal'
 type AgentSummary = {
   id: string
   name: string
+  signupPreviewState: string | null
   avatarUrl: string | null
   listingDescription: string
   listingDescriptionSource: string | null
@@ -290,11 +291,15 @@ type AgentCardProps = {
 function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardProps) {
   const creditsRemaining = agent.dailyCreditRemaining !== null ? agent.dailyCreditRemaining.toFixed(2) : null
   const creditsBurnLast24h = formatCreditBurn(agent.last24hCreditBurn)
+  const isSignupPreviewAgent = !agent.isShared && Boolean(agent.signupPreviewState) && agent.signupPreviewState !== 'none'
   const smsValue = agent.primarySms
   const emailValue = agent.primaryEmail
   const chatValue = agent.chatUrl
   const hasTags = agent.displayTags.length > 0
-  const hasChannels = Boolean(smsValue || emailValue || chatValue)
+  const showSmsAction = Boolean(smsValue) && !isSignupPreviewAgent
+  const showEmailAction = Boolean(emailValue) && !isSignupPreviewAgent
+  const showChatAction = Boolean(chatValue)
+  const hasChannels = showSmsAction || showEmailAction || showChatAction
   const canLeave = agent.isShared && Boolean(onLeaveCollaboration)
   const [copiedField, setCopiedField] = useState<null | 'sms' | 'email'>(null)
   const copyResetTimeout = useRef<number | null>(null)
@@ -387,7 +392,7 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
           </button>
         )}
 
-        {!agent.isShared && (
+        {!agent.isShared && !isSignupPreviewAgent && (
           <a
             href={agent.detailUrl}
             className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white"
@@ -397,7 +402,7 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
           </a>
         )}
 
-        {agent.auditUrl ? (
+        {agent.auditUrl && !isSignupPreviewAgent ? (
           <a
             href={agent.auditUrl}
             className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-amber-200/80 bg-amber-50/90 px-3 py-1.5 text-xs font-semibold text-amber-800 shadow-sm backdrop-blur transition hover:bg-amber-100 hover:border-amber-200"
@@ -448,7 +453,7 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
         {hasChannels && (
           <div className="mt-4 pt-4">
             <div className="flex flex-wrap items-stretch gap-2">
-              {smsValue && (
+              {showSmsAction && smsValue && (
                 <div className="inline-flex min-w-[7.5rem] flex-1 items-stretch overflow-hidden rounded-lg border border-emerald-600/80">
                   <a
                     href={`sms:${smsValue}`}
@@ -473,7 +478,7 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
                   </button>
                 </div>
               )}
-              {emailValue && (
+              {showEmailAction && emailValue && (
                 <div className="inline-flex min-w-[7.5rem] flex-1 items-stretch overflow-hidden rounded-lg border border-sky-600/80">
                   <a
                     href={`mailto:${emailValue}`}
@@ -498,7 +503,7 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
                   </button>
                 </div>
               )}
-              {chatValue && (
+              {showChatAction && chatValue && (
                 <a
                   href={chatValue}
                   data-immersive-link
