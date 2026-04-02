@@ -2271,7 +2271,7 @@ def build_prompt_context(
         f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
         "All are per-cycle snapshots dropped before persistence. "
         "For repetitive fetch/transform/load work, default to a custom tool that writes to SQLite, then query the result with sqlite_batch. "
-        "Query __tool_results and __files with sqlite_batch (not read_file). "
+        "Use sqlite_batch to query __tool_results and __files when you need prior tool outputs or recent file metadata. "
         "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
         "Do not poll __tool_results/__files waiting for browser task completion: those completions wake you with new unified history events. "
         "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "

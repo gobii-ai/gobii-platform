@@ -606,6 +606,21 @@ class PromptContextBuilderTests(TestCase):
             content,
         )
 
+    def test_prompt_describes_sqlite_snapshots_without_banning_read_file(self):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn(
+            "Use sqlite_batch to query __tool_results and __files when you need prior tool outputs or recent file metadata.",
+            content,
+        )
+        self.assertNotIn("Query __tool_results and __files with sqlite_batch (not read_file).", content)
+
     def test_recent_contacts_include_email_message_id(self):
         conversation = PersistentAgentConversation.objects.create(
             owner_agent=self.agent,
