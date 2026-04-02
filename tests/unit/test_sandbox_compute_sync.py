@@ -233,6 +233,14 @@ class SandboxComputeSyncTests(TestCase):
             path="/.uv-cache/wheels/pkg.whl",
             overwrite=True,
         )
+        uv_project_env = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"bin/python",
+            extension="",
+            mime_type="application/octet-stream",
+            path="/.gobii/uv-project-env/bin/python",
+            overwrite=True,
+        )
         visible = write_bytes_to_dir(
             agent=self.agent,
             content_bytes=b"user-file",
@@ -245,6 +253,7 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(internal.get("status"), "ok")
         self.assertEqual(gobii_internal.get("status"), "ok")
         self.assertEqual(uv_cache.get("status"), "ok")
+        self.assertEqual(uv_project_env.get("status"), "ok")
         self.assertEqual(visible.get("status"), "ok")
 
         manifest = build_filespace_pull_manifest(self.agent)
@@ -254,6 +263,7 @@ class SandboxComputeSyncTests(TestCase):
         self.assertIn("/visible.txt", paths)
         self.assertNotIn(CUSTOM_TOOL_SQLITE_FILESPACE_PATH, paths)
         self.assertNotIn("/.gobii/internal/tool.log", paths)
+        self.assertNotIn("/.gobii/uv-project-env/bin/python", paths)
         self.assertNotIn("/.uv-cache/wheels/pkg.whl", paths)
 
     def test_apply_filespace_push_ignores_internal_custom_tool_sqlite_path(self):
@@ -271,6 +281,11 @@ class SandboxComputeSyncTests(TestCase):
                     "mime_type": "text/plain",
                 },
                 {
+                    "path": "/.gobii/uv-project-env/bin/python",
+                    "content_b64": "YmluL3B5dGhvbg==",
+                    "mime_type": "application/octet-stream",
+                },
+                {
                     "path": "/.uv-cache/wheels/pkg.whl",
                     "content_b64": "d2hlZWwtY2FjaGU=",
                     "mime_type": "application/octet-stream",
@@ -284,15 +299,17 @@ class SandboxComputeSyncTests(TestCase):
         )
 
         self.assertEqual(result.get("status"), "ok")
-        self.assertEqual(result.get("skipped"), 3)
+        self.assertEqual(result.get("skipped"), 4)
         self.assertFalse(AgentFsNode.objects.filter(path=CUSTOM_TOOL_SQLITE_FILESPACE_PATH).exists())
         self.assertFalse(AgentFsNode.objects.filter(path="/.gobii/internal/tool.log").exists())
+        self.assertFalse(AgentFsNode.objects.filter(path="/.gobii/uv-project-env/bin/python").exists())
         self.assertFalse(AgentFsNode.objects.filter(path="/.uv-cache/wheels/pkg.whl").exists())
         self.assertTrue(AgentFsNode.objects.filter(path="/visible.txt").exists())
 
     def test_is_sandbox_internal_path_matches_reserved_subtrees(self):
         self.assertTrue(is_sandbox_internal_path(CUSTOM_TOOL_SQLITE_FILESPACE_PATH))
         self.assertTrue(is_sandbox_internal_path("/.gobii/internal/tool.log"))
+        self.assertTrue(is_sandbox_internal_path("/.gobii/uv-project-env/bin/python"))
         self.assertTrue(is_sandbox_internal_path("/.uv-cache/wheels/pkg.whl"))
         self.assertFalse(is_sandbox_internal_path("/reports/.uv-cache-not-really.txt"))
 

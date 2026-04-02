@@ -192,7 +192,7 @@ CUSTOM_TOOL_BOOTSTRAP_COMMAND = (
     "cat > /tmp/_gobii/_gobii_ctx.py <<'CTXEOF'\n"
     f"{_GOBII_CTX_MODULE}"
     "CTXEOF\n"
-    'UV_CACHE_DIR="$UV_CACHE_DIR" PYTHONPATH=/tmp/_gobii:${PYTHONPATH:-} uv run "$SOURCE_EXEC_PATH"'
+    'UV_CACHE_DIR="$UV_CACHE_DIR" PYTHONPATH=/tmp/_gobii:${PYTHONPATH:-} uv run --no-project "$SOURCE_EXEC_PATH"'
 )
 
 

@@ -120,7 +120,7 @@ def _handle_run_command(payload: Dict[str, Any]) -> Dict[str, Any]:
             return {"status": "error", "message": "Invalid cwd path."}
         cwd = str(cwd_path)
     else:
-        cwd = None
+        cwd = str(agent_root)
     env = payload.get("env") if isinstance(payload.get("env"), dict) else None
     trusted_env_keys = payload.get("trusted_env_keys")
     if not isinstance(trusted_env_keys, list):
@@ -134,7 +134,7 @@ def _handle_run_command(payload: Dict[str, Any]) -> Dict[str, Any]:
         result = subprocess.run(
             command,
             shell=True,
-            cwd=cwd or None,
+            cwd=cwd,
             env=_sandbox_env_with_proxy_manifest(agent_root, env, trusted_env_keys=trusted_env_keys),
             capture_output=True,
             text=True,
@@ -219,6 +219,7 @@ def _handle_python_exec(payload: Dict[str, Any]) -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [sys.executable, "-c", code],
+            cwd=str(agent_root),
             env=_sandbox_env_with_proxy_manifest(agent_root, extra_env, trusted_env_keys=trusted_env_keys),
             capture_output=True,
             text=True,

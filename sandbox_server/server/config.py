@@ -16,6 +16,8 @@ _DEFAULT_ALLOWED_ENV_KEYS = {
     "SSL_CERT_DIR",
     "PYTHONUNBUFFERED",
     "PYTHONIOENCODING",
+    "UV_CACHE_DIR",
+    "UV_PROJECT_ENVIRONMENT",
 }
 
 _PROXY_ENV_KEYS = {
@@ -33,6 +35,7 @@ _PROXY_ENV_KEYS = {
 _TRACEPARENT_HEADER = "HTTP_TRACEPARENT"
 _TRACE_ID_HEX_LEN = 32
 _TRACEPARENT_PARTS = 4
+_DEFAULT_UV_PROJECT_ENVIRONMENT = ".gobii/uv-project-env"
 
 
 def _safe_identity_segment(value: str, *, fallback: str = "default") -> str:
@@ -57,6 +60,12 @@ def _sandbox_env(
     trusted = {str(key) for key in (trusted_env_keys or []) if isinstance(key, str) and key.strip()}
     env = {key: value for key, value in os.environ.items() if key in allowed}
     env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    env.setdefault(
+        "UV_PROJECT_ENVIRONMENT",
+        str(agent_root / _DEFAULT_UV_PROJECT_ENVIRONMENT) if isinstance(agent_root, Path) else _DEFAULT_UV_PROJECT_ENVIRONMENT,
+    )
+    identity = agent_root.name if isinstance(agent_root, Path) and agent_root.name else "default"
+    env.setdefault("UV_CACHE_DIR", str(_runtime_cache_root() / identity / "uv-cache"))
     if extra_env:
         for key, value in extra_env.items():
             if key in allowed or key.startswith("SANDBOX_") or key in trusted:

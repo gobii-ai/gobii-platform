@@ -376,7 +376,7 @@ class LocalSandboxBackend(SandboxComputeBackend):
             result = subprocess.run(
                 command,
                 shell=True,
-                cwd=cwd or None,
+                cwd=cwd or str(getattr(settings, "BASE_DIR", os.getcwd())),
                 env=_sanitize_env(env, trusted_env_keys=trusted_env_keys),
                 capture_output=True,
                 text=True,

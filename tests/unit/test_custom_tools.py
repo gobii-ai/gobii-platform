@@ -360,7 +360,7 @@ class CustomToolsTests(TestCase):
             call.args[1],
         )
         self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
-        self.assertIn('uv run "$SOURCE_EXEC_PATH"', call.args[1])
+        self.assertIn('uv run --no-project "$SOURCE_EXEC_PATH"', call.args[1])
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
@@ -418,8 +418,10 @@ class CustomToolsTests(TestCase):
     @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
     @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.services.sandbox_compute._resolve_backend", return_value=LocalSandboxBackend())
     def test_execute_custom_tool_can_write_directly_to_agent_sqlite(
         self,
+        _mock_resolve_backend,
         _mock_select_proxy,
         _mock_service_tool_enabled,
         _mock_service_enabled,
@@ -477,8 +479,10 @@ class CustomToolsTests(TestCase):
     @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
     @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.services.sandbox_compute._resolve_backend", return_value=LocalSandboxBackend())
     def test_execute_custom_tool_can_read_env_var_secret_from_os_environ(
         self,
+        _mock_resolve_backend,
         _mock_select_proxy,
         _mock_service_tool_enabled,
         _mock_service_enabled,

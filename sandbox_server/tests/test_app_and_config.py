@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sandbox_server.app import application
-from sandbox_server.config import _agent_workspace
+from sandbox_server.config import _agent_workspace, _sandbox_env
 
 
 class SandboxAppAndConfigTests(unittest.TestCase):
@@ -55,6 +55,19 @@ class SandboxAppAndConfigTests(unittest.TestCase):
             self.assertNotEqual(first, second)
             self.assertTrue(first.is_dir())
             self.assertTrue(second.is_dir())
+
+    def test_sandbox_env_sets_internal_uv_defaults(self):
+        with tempfile.TemporaryDirectory() as runtime_cache:
+            with patch.dict(
+                "os.environ",
+                {"SANDBOX_RUNTIME_CACHE_ROOT": runtime_cache, "PATH": "/usr/bin"},
+                clear=True,
+            ):
+                env = _sandbox_env(Path("/tmp/workspace/agent-1"))
+
+        self.assertEqual(env["PATH"], "/usr/bin")
+        self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], "/tmp/workspace/agent-1/.gobii/uv-project-env")
+        self.assertEqual(env["UV_CACHE_DIR"], f"{runtime_cache}/agent-1/uv-cache")
 
 
 if __name__ == "__main__":
