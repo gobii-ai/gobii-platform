@@ -2358,7 +2358,7 @@ def _generate_compact_summary(
                     if emb.byte_size > 10000:
                         # Large content - suggest grep
                         parts.append(
-                            f"  → SEARCH: SELECT grep_context_all({extract_expr}, 'keyword', 50, 5) "
+                            f"  → SEARCH: SELECT grep_context_all({extract_expr}, 'keyword', 120, 5) "
                             f"FROM __tool_results WHERE result_id='{result_id}'"
                         )
                     else:
@@ -2436,7 +2436,7 @@ def _generate_compact_summary(
                 if size_strategy.bytes > 10000:
                     # Large content (>10KB) - suggest grep
                     parts.append(
-                        f"→ SEARCH: SELECT grep_context_all(result_text, 'keyword', 50, 5) "
+                        f"→ SEARCH: SELECT grep_context_all(result_text, 'keyword', 120, 5) "
                         f"FROM __tool_results WHERE result_id='{result_id}'"
                     )
                 else:

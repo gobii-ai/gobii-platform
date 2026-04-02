@@ -65,3 +65,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
 
         self.assertIn("Loop warning", warning)
         self.assertIn("73b1fa", warning)
+
+    def test_examples_show_larger_grep_context_window(self):
+        examples = prompt_context._get_sqlite_examples()
+        self.assertIn("grep_context_all(\n        json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)", examples)
+        self.assertIn("try wider context (200 chars)", examples)
