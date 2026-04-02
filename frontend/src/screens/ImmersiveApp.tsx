@@ -172,10 +172,16 @@ function sanitizeSameOriginPath(value: string | null): string | null {
   }
 }
 
+function stripSpawnParam(url: URL): string {
+  url.searchParams.delete('spawn')
+  const query = url.searchParams.toString()
+  return `${url.pathname}${query ? `?${query}` : ''}${url.hash}`
+}
+
 function normalizeClosePath(value: string): string {
   const url = new URL(value, window.location.origin)
   if (!isAppPath(url.pathname)) {
-    return `${url.pathname}${url.search}${url.hash}`
+    return stripSpawnParam(url)
   }
   return DEFAULT_CLOSE_PATH
 }
