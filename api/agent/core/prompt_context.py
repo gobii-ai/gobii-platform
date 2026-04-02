@@ -2211,7 +2211,7 @@ def build_prompt_context(
         important_group.section_text(
             "agent_custom_tools",
             custom_tools_block,
-            weight=3,
+            weight=4,
             shrinker="hmt",
         )
 
@@ -2270,6 +2270,7 @@ def build_prompt_context(
         "__messages.message_id is the internal Gobii message id accepted by send_email.reply_to_message_id. "
         f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
         "All are per-cycle snapshots dropped before persistence. "
+        "For repetitive fetch/transform/load work, default to a custom tool that writes to SQLite, then query the result with sqlite_batch. "
         "Query __tool_results and __files with sqlite_batch (not read_file). "
         "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
         "Do not poll __tool_results/__files waiting for browser task completion: those completions wake you with new unified history events. "
@@ -3026,10 +3027,13 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
 
     return (
         "Sandbox access is enabled. `python_exec`, `run_command`, and sandboxed custom tools run inside your sandbox workspace. "
+        "Default mode for repetitive, paginated, or bulk work: write or patch a small custom tool first. "
         "Filespace paths like `/reports/foo.txt` map to `/workspace/reports/foo.txt`; in tool arguments, prefer filespace paths and avoid writing `/workspace` explicitly. "
         "For `run_command`, `cwd` is relative to the workspace root; do not pass `/workspace` as the cwd. "
         "Common CLI tools available by default include `git`, `curl`, `rg`, `jq`, `less`, `unzip`, `zip`, `file`, `tree`, and `fd`/`fdfind`. "
+        "For ad hoc Python with third-party deps, prefer `uv run --no-project ...`; `python_exec` itself does not install packages. "
         "Custom tools can import any pip package — declare deps with PEP 723 inline metadata and they are auto-installed via uv. "
+        "Prefer a small custom tool for repetitive, paginated, or bulk work, especially bulk MCP/API fan-out, data syncs, and bulk SQLite writes. "
         "Standard proxy env vars are already injected: `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, plus lowercase variants. "
         "All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
         "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]). "

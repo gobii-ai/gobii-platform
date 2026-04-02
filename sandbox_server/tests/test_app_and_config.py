@@ -66,8 +66,43 @@ class SandboxAppAndConfigTests(unittest.TestCase):
                 env = _sandbox_env(Path("/tmp/workspace/agent-1"))
 
         self.assertEqual(env["PATH"], "/usr/bin")
+        self.assertEqual(env["HOME"], f"{runtime_cache}/agent-1/home")
+        self.assertEqual(env["TMPDIR"], f"{runtime_cache}/agent-1/tmp")
         self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], "/tmp/workspace/agent-1/.gobii/uv-project-env")
         self.assertEqual(env["UV_CACHE_DIR"], f"{runtime_cache}/agent-1/uv-cache")
+        self.assertEqual(env["UV_TOOL_DIR"], f"{runtime_cache}/agent-1/uv-tools")
+        self.assertEqual(env["XDG_CACHE_HOME"], f"{runtime_cache}/agent-1/xdg-cache")
+        self.assertEqual(env["XDG_CONFIG_HOME"], f"{runtime_cache}/agent-1/xdg-config")
+        self.assertEqual(env["XDG_DATA_HOME"], f"{runtime_cache}/agent-1/xdg-data")
+        self.assertEqual(env["NPM_CONFIG_CACHE"], f"{runtime_cache}/agent-1/npm")
+        self.assertEqual(env["npm_config_cache"], f"{runtime_cache}/agent-1/npm")
+        self.assertEqual(env["PIP_CACHE_DIR"], f"{runtime_cache}/agent-1/pip")
+
+    def test_sandbox_env_rehomes_generic_tmp_defaults(self):
+        with tempfile.TemporaryDirectory() as runtime_cache:
+            with patch.dict(
+                "os.environ",
+                {
+                    "SANDBOX_RUNTIME_CACHE_ROOT": runtime_cache,
+                    "PATH": "/usr/bin",
+                    "HOME": "/tmp",
+                    "TMPDIR": "/tmp",
+                    "XDG_CACHE_HOME": "/tmp/.cache",
+                    "NPM_CONFIG_CACHE": "/tmp/.npm",
+                    "npm_config_cache": "/tmp/.npm",
+                    "PIP_CACHE_DIR": "/tmp/.cache/pip",
+                    "UV_PROJECT_ENVIRONMENT": "/app/.venv",
+                },
+                clear=True,
+            ):
+                env = _sandbox_env(Path("/tmp/workspace/agent-1"))
+
+        self.assertEqual(env["HOME"], f"{runtime_cache}/agent-1/home")
+        self.assertEqual(env["TMPDIR"], f"{runtime_cache}/agent-1/tmp")
+        self.assertEqual(env["XDG_CACHE_HOME"], f"{runtime_cache}/agent-1/xdg-cache")
+        self.assertEqual(env["NPM_CONFIG_CACHE"], f"{runtime_cache}/agent-1/npm")
+        self.assertEqual(env["PIP_CACHE_DIR"], f"{runtime_cache}/agent-1/pip")
+        self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], "/tmp/workspace/agent-1/.gobii/uv-project-env")
 
 
 if __name__ == "__main__":
