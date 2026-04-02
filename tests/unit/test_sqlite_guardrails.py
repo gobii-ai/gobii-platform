@@ -1,10 +1,12 @@
 import os
 import sqlite3
 import tempfile
+import json
 
 from django.test import SimpleTestCase, tag
 
 from api.agent.tools.sqlite_guardrails import (
+    _grep_context_all,
     clear_guarded_connection,
     open_guarded_sqlite_connection,
 )
@@ -31,3 +33,14 @@ class SqliteGuardrailsMaintenanceTests(SimpleTestCase):
 
     def test_guarded_connection_allows_vacuum_with_attach_enabled(self):
         self._run_vacuum(allow_attach=True)
+
+    def test_grep_context_all_defaults_to_larger_context_window(self):
+        text = "A" * 80 + "needle" + "B" * 80
+
+        result = _grep_context_all(text, "needle")
+
+        snippets = json.loads(result)
+        self.assertEqual(len(snippets), 1)
+        self.assertIn("needle", snippets[0])
+        self.assertIn("A" * 80, snippets[0])
+        self.assertIn("B" * 80, snippets[0])

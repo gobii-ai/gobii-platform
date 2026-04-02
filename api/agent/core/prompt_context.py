@@ -553,17 +553,17 @@ do:
   mcp_brightdata_scrape_as_markdown(url="<url>", will_continue_work=true)
 
   # Extract patterns with context:
-  sqlite_batch(sql="
+    sqlite_batch(sql="
     SELECT regexp_extract(ctx.value, '<pattern>') as val,
            ctx.value as context
     FROM __tool_results,
       json_each(grep_context_all(
-        json_extract(result_json,'$.excerpt'), '<pattern>', 60, 15)) ctx
+        json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)) ctx
     WHERE result_id='<id>'", will_continue_work=true)
 
 then:
   if found data → M5 (store in table)
-  if nothing found → try wider context (80 chars) or different pattern
+  if nothing found → try wider context (200 chars) or different pattern
   if page empty/gated → try different URL
 ```
 
@@ -571,10 +571,10 @@ Pattern reference:
 ```
 | Goal    | Pattern                          | Context |
 |---------|----------------------------------|---------|
-| Prices  | \\$[\\d,]+                       | 80 chars |
-| Emails  | [a-zA-Z0-9._%+-]+@[a-z.]+        | 60 chars |
-| Funding | \\$[\\d.]+[BMK]                  | 60 chars |
-| Tech    | (Python|React|Kubernetes)        | 80 chars |
+| Prices  | \\$[\\d,]+                       | 120 chars |
+| Emails  | [a-zA-Z0-9._%+-]+@[a-z.]+        | 100 chars |
+| Funding | \\$[\\d.]+[BMK]                  | 120 chars |
+| Tech    | (Python|React|Kubernetes)        | 120 chars |
 ```
 
 ---
