@@ -44,6 +44,45 @@ const CANCEL_REASON_OPTIONS: Array<{ value: Exclude<CancelReasonCode, ''>; label
   { value: 'other', label: 'Other' },
 ]
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function buildChurnKeyBaseAnalytics(initialData: BillingInitialData) {
+  const churnKeyConfig = initialData.contextType === 'personal' ? initialData.churnKey : null
+  return {
+    source: 'billing_header',
+    provider: churnKeyConfig?.provider ?? 'stripe',
+    mode: churnKeyConfig?.mode ?? null,
+    hasSubscriptionId: Boolean(churnKeyConfig?.subscriptionId),
+    planId: String(initialData.plan?.id ?? ''),
+    isTrialing: Boolean(initialData.trial?.isTrialing),
+  }
+}
+
+function buildChurnKeySessionAnalytics(sessionResults: unknown): Record<string, unknown> {
+  const session = asRecord(sessionResults)
+  const acceptedOffer = asRecord(session?.acceptedOffer)
+  return {
+    result: typeof session?.result === 'string' ? session.result : null,
+    sessionMode: typeof session?.mode === 'string' ? session.mode : null,
+    surveyResponse: typeof session?.surveyResponse === 'string' ? session.surveyResponse : null,
+    followupQuestion: typeof session?.followupQuestion === 'string' ? session.followupQuestion : null,
+    hasFollowupResponse: typeof session?.followupResponse === 'string' ? session.followupResponse.length > 0 : Boolean(session?.followupResponse),
+    hasFeedback: typeof session?.feedback === 'string' ? session.feedback.length > 0 : Boolean(session?.feedback),
+    usedClickToCancel: Boolean(session?.usedClickToCancel),
+    acceptedOfferType: typeof acceptedOffer?.offerType === 'string' ? acceptedOffer.offerType : null,
+    pauseDuration: typeof acceptedOffer?.pauseDuration === 'number' ? acceptedOffer.pauseDuration : null,
+    trialExtensionDays: typeof acceptedOffer?.trialExtensionDays === 'number' ? acceptedOffer.trialExtensionDays : null,
+    newPlanId: typeof acceptedOffer?.newPlanId === 'string' ? acceptedOffer.newPlanId : null,
+    redirectUrlPresent: typeof acceptedOffer?.redirectUrl === 'string' && acceptedOffer.redirectUrl.length > 0,
+    couponId: typeof acceptedOffer?.couponId === 'string' ? acceptedOffer.couponId : null,
+    couponType: typeof acceptedOffer?.couponType === 'string' ? acceptedOffer.couponType : null,
+    couponAmount: typeof acceptedOffer?.couponAmount === 'number' ? acceptedOffer.couponAmount : null,
+    couponDuration: typeof acceptedOffer?.couponDuration === 'number' ? acceptedOffer.couponDuration : null,
+  }
+}
+
 function computeAddonsDisabledReason(initialData: BillingInitialData): string | null {
   if (!initialData.canManageBilling) return 'You do not have permission to manage billing.'
   if (initialData.addonsDisabled) return 'Add-ons are unavailable for this subscription.'
@@ -316,15 +355,28 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   }, [openCancelActionDialog, resetCancelFeedback])
 
   const churnKeyConfig = initialData.contextType === 'personal' ? initialData.churnKey : null
+  const churnKeyAnalyticsBase = useMemo(() => buildChurnKeyBaseAnalytics(initialData), [initialData])
 
   const openCancelFlow = useCallback(() => {
     if (!churnKeyConfig?.enabled) {
+      track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
+        ...churnKeyAnalyticsBase,
+        errorType: 'missing_config',
+        errorMessage: 'ChurnKey config unavailable for billing page.',
+        fallback: 'native_cancel_modal',
+      })
       openCancelDialog()
       return
     }
 
     const churnkey = window.churnkey
     if (typeof churnkey?.init !== 'function') {
+      track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
+        ...churnKeyAnalyticsBase,
+        errorType: 'script_not_ready',
+        errorMessage: 'ChurnKey script has not finished loading.',
+        fallback: 'native_cancel_modal',
+      })
       openCancelDialog()
       return
     }
@@ -334,29 +386,96 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       shouldRefreshOnClose = true
     }
 
-    churnkey.init('show', {
-      appId: churnKeyConfig.appId,
-      customerId: churnKeyConfig.customerId,
-      authHash: churnKeyConfig.authHash,
-      subscriptionId: churnKeyConfig.subscriptionId,
-      mode: churnKeyConfig.mode,
-      provider: churnKeyConfig.provider,
-      record: true,
-      onCancel: markMutation,
-      onPause: markMutation,
-      onDiscount: markMutation,
-      onPlanChange: markMutation,
-      onTrialExtension: markMutation,
-      onClose: () => {
-        if (shouldRefreshOnClose) {
-          window.location.reload()
-        }
-      },
-      onError: () => {
-        openCancelDialog()
-      },
-    })
-  }, [churnKeyConfig, openCancelDialog])
+    try {
+      track(AnalyticsEvent.BILLING_CANCEL_FLOW_OPENED, churnKeyAnalyticsBase)
+
+      churnkey.init('show', {
+        appId: churnKeyConfig.appId,
+        customerId: churnKeyConfig.customerId,
+        authHash: churnKeyConfig.authHash,
+        subscriptionId: churnKeyConfig.subscriptionId,
+        mode: churnKeyConfig.mode,
+        provider: churnKeyConfig.provider,
+        record: true,
+        onCancel: (_customer, surveyResponse) => {
+          markMutation()
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
+            ...churnKeyAnalyticsBase,
+            action: 'cancel',
+            surveyResponse: surveyResponse ?? null,
+          })
+        },
+        onPause: (_customer, data) => {
+          markMutation()
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
+            ...churnKeyAnalyticsBase,
+            action: 'pause',
+            pauseDuration: data?.pauseDuration ?? null,
+          })
+        },
+        onDiscount: (_customer, coupon) => {
+          markMutation()
+          const couponRecord = asRecord(coupon)
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
+            ...churnKeyAnalyticsBase,
+            action: 'discount',
+            couponId: typeof couponRecord?.couponId === 'string' ? couponRecord.couponId : null,
+            couponType: typeof couponRecord?.couponType === 'string' ? couponRecord.couponType : null,
+            couponAmount: typeof couponRecord?.couponAmount === 'number' ? couponRecord.couponAmount : null,
+            couponDuration: typeof couponRecord?.couponDuration === 'number' ? couponRecord.couponDuration : null,
+          })
+        },
+        onPlanChange: (_customer, data) => {
+          markMutation()
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
+            ...churnKeyAnalyticsBase,
+            action: 'plan_change',
+            targetPlanId: data?.planId ?? null,
+          })
+        },
+        onTrialExtension: (_customer, data) => {
+          markMutation()
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
+            ...churnKeyAnalyticsBase,
+            action: 'trial_extension',
+            trialExtensionDays: data?.trialExtensionDays ?? null,
+          })
+        },
+        onGoToAccount: (sessionResults) => {
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_GO_TO_ACCOUNT, {
+            ...churnKeyAnalyticsBase,
+            ...buildChurnKeySessionAnalytics(sessionResults),
+          })
+        },
+        onClose: (sessionResults) => {
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_CLOSED, {
+            ...churnKeyAnalyticsBase,
+            ...buildChurnKeySessionAnalytics(sessionResults),
+          })
+          if (shouldRefreshOnClose) {
+            window.location.reload()
+          }
+        },
+        onError: (error, errorType) => {
+          track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
+            ...churnKeyAnalyticsBase,
+            errorType: errorType ?? null,
+            errorMessage: error instanceof Error ? error.message : String(error ?? ''),
+            fallback: 'native_cancel_modal',
+          })
+          openCancelDialog()
+        },
+      })
+    } catch (error) {
+      track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
+        ...churnKeyAnalyticsBase,
+        errorType: 'init_exception',
+        errorMessage: error instanceof Error ? error.message : String(error ?? ''),
+        fallback: 'native_cancel_modal',
+      })
+      openCancelDialog()
+    }
+  }, [churnKeyAnalyticsBase, churnKeyConfig, openCancelDialog])
 
   const closeCancelDialog = useCallback(() => {
     if (cancelActionBusy) return

@@ -52,6 +52,35 @@ type GobiiTrackCtaPayload = {
 type GobiiTrackCta = (payload: GobiiTrackCtaPayload) => void
 type ChurnKeyMode = 'live' | 'test'
 type ChurnKeyProvider = 'stripe'
+type ChurnKeyStep = {
+  stepType?: string
+  header?: string
+  description?: string
+  offer?: {
+    offerType?: string
+  }
+}
+type ChurnKeyAcceptedOffer = {
+  offerType?: string
+  pauseDuration?: number
+  trialExtensionDays?: number
+  newPlanId?: string
+  redirectUrl?: string
+  couponId?: string
+  couponType?: string
+  couponAmount?: number
+  couponDuration?: number
+}
+type ChurnKeySessionResults = {
+  result?: string
+  mode?: string
+  surveyResponse?: string
+  followupQuestion?: string
+  followupResponse?: string
+  feedback?: string
+  usedClickToCancel?: boolean
+  acceptedOffer?: ChurnKeyAcceptedOffer
+}
 type ChurnKeyInitOptions = {
   appId: string
   customerId: string
@@ -60,12 +89,26 @@ type ChurnKeyInitOptions = {
   mode: ChurnKeyMode
   provider: ChurnKeyProvider
   record?: boolean
-  onClose?: () => void
-  onCancel?: (customer?: unknown) => void
-  onPause?: (customer?: unknown) => void
-  onDiscount?: (customer?: unknown) => void
-  onPlanChange?: (customer?: unknown) => void
-  onTrialExtension?: (customer?: unknown) => void
+  handlePause?: (customer: unknown, data: { pauseDuration: number }) => Promise<unknown>
+  handleCancel?: (
+    customer: unknown,
+    surveyResponse?: string,
+    feedback?: string | null,
+    followupResponse?: unknown,
+  ) => Promise<unknown>
+  handleDiscount?: (customer: unknown, coupon?: unknown) => Promise<unknown>
+  handleTrialExtension?: (customer: unknown, data: { trialExtensionDays: number }) => Promise<unknown>
+  handlePlanChange?: (customer: unknown, data: { plan?: unknown }) => Promise<unknown>
+  handleRedirect?: (customer: unknown, data: { redirectLabel?: string; redirectUrl?: string }) => Promise<unknown>
+  handleSupportRequest?: (customer: unknown) => void
+  onGoToAccount?: (sessionResults?: ChurnKeySessionResults) => void
+  onStepChange?: (newStep?: ChurnKeyStep, oldStep?: ChurnKeyStep) => void
+  onClose?: (sessionResults?: ChurnKeySessionResults) => void
+  onCancel?: (customer?: unknown, surveyResponse?: string) => void
+  onPause?: (customer?: unknown, data?: { pauseDuration?: number }) => void
+  onDiscount?: (customer?: unknown, coupon?: unknown) => void
+  onPlanChange?: (customer?: unknown, data?: { planId?: string }) => void
+  onTrialExtension?: (customer?: unknown, data?: { trialExtensionDays?: number }) => void
   onError?: (error: unknown, type?: string) => void
 }
 type ChurnKeyGlobal = {
