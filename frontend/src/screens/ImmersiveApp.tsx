@@ -172,20 +172,6 @@ function sanitizeSameOriginPath(value: string | null): string | null {
   }
 }
 
-function resolveNestedCloseTarget(url: URL): string | null {
-  const nestedReturnTo = sanitizeSameOriginPath(url.searchParams.get('return_to'))
-  if (nestedReturnTo) {
-    return normalizeClosePath(nestedReturnTo)
-  }
-
-  const nestedNext = sanitizeSameOriginPath(url.searchParams.get('next'))
-  if (nestedNext) {
-    return normalizeClosePath(nestedNext)
-  }
-
-  return null
-}
-
 function stripSpawnParam(url: URL): string {
   url.searchParams.delete('spawn')
   const query = url.searchParams.toString()
@@ -193,15 +179,31 @@ function stripSpawnParam(url: URL): string {
 }
 
 function normalizeClosePath(value: string): string {
-  const url = new URL(value, window.location.origin)
-  const nestedCloseTarget = resolveNestedCloseTarget(url)
-  if (nestedCloseTarget && nestedCloseTarget !== DEFAULT_CLOSE_PATH) {
-    return nestedCloseTarget
+  let currentValue = value
+  const visited = new Set<string>()
+
+  while (true) {
+    const url = new URL(currentValue, window.location.origin)
+    const currentPath = `${url.pathname}${url.search}${url.hash}`
+    if (visited.has(currentPath)) {
+      return DEFAULT_CLOSE_PATH
+    }
+    visited.add(currentPath)
+
+    const nestedCloseTarget = (
+      sanitizeSameOriginPath(url.searchParams.get('return_to'))
+      || sanitizeSameOriginPath(url.searchParams.get('next'))
+    )
+    if (nestedCloseTarget && !visited.has(nestedCloseTarget)) {
+      currentValue = nestedCloseTarget
+      continue
+    }
+
+    if (!isAppPath(url.pathname)) {
+      return stripSpawnParam(url)
+    }
+    return DEFAULT_CLOSE_PATH
   }
-  if (!isAppPath(url.pathname)) {
-    return stripSpawnParam(url)
-  }
-  return DEFAULT_CLOSE_PATH
 }
 
 function readReturnToFromSearch(search: string): string | null {
