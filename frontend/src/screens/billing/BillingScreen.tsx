@@ -401,7 +401,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     }
 
     let shouldRefreshOnClose = false
-    let shouldSyncCancelledSubscription = false
+    let shouldSyncSubscriptionState = false
     const markMutation = () => {
       shouldRefreshOnClose = true
     }
@@ -419,7 +419,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         record: true,
         onCancel: (_customer, surveyResponse) => {
           markMutation()
-          shouldSyncCancelledSubscription = true
+          shouldSyncSubscriptionState = true
           track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
             ...churnKeyAnalyticsBase,
             action: 'cancel',
@@ -436,6 +436,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         },
         onDiscount: (_customer, coupon) => {
           markMutation()
+          shouldSyncSubscriptionState = true
           const couponRecord = asRecord(coupon)
           track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
             ...churnKeyAnalyticsBase,
@@ -448,6 +449,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         },
         onPlanChange: (_customer, data) => {
           markMutation()
+          shouldSyncSubscriptionState = true
           track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
             ...churnKeyAnalyticsBase,
             action: 'plan_change',
@@ -456,6 +458,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         },
         onTrialExtension: (_customer, data) => {
           markMutation()
+          shouldSyncSubscriptionState = true
           track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
             ...churnKeyAnalyticsBase,
             action: 'trial_extension',
@@ -474,7 +477,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
             ...buildChurnKeySessionAnalytics(sessionResults),
           })
           if (shouldRefreshOnClose) {
-            if (shouldSyncCancelledSubscription && churnKeySyncUrl && churnKeyConfig.subscriptionId) {
+            if (shouldSyncSubscriptionState && churnKeySyncUrl && churnKeyConfig.subscriptionId) {
               try {
                 const result = await jsonRequest<{ success: boolean; error?: string }>(churnKeySyncUrl, {
                   method: 'POST',
@@ -482,7 +485,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
                   json: { subscriptionId: churnKeyConfig.subscriptionId },
                 })
                 if (!result?.success) {
-                  setSaveError(result?.error ?? 'Your cancellation was applied, but billing may take a moment to refresh.')
+                  setSaveError(result?.error ?? 'Your billing changes were applied, but billing may take a moment to refresh.')
                   return
                 }
               } catch (error) {
@@ -492,7 +495,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
                   errorMessage: error instanceof Error ? error.message : String(error ?? ''),
                   fallback: 'await_webhook',
                 })
-                setSaveError('Your cancellation was applied, but billing may take a moment to refresh.')
+                setSaveError('Your billing changes were applied, but billing may take a moment to refresh.')
                 return
               }
             }
