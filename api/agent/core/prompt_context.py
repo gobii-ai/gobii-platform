@@ -509,8 +509,8 @@ when:
   - Will scrape multiple pages
 
 do:
-  # First, enable search tools if needed
-  search_tools(query="web search", will_continue_work=true)
+  # First, discover the best search/extractor tools for this domain if needed
+  search_tools(query="<site/platform/domain or capability>", will_continue_work=true)
   # Then use the enabled search tool
   <search_tool>(query="<topic>", will_continue_work=true)
 
@@ -4509,7 +4509,7 @@ def _get_system_instruction(
         "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
         "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
-        "Use it before raw web search when the task looks like a known structured domain, and otherwise when unsure. "
+        "Use it before broad web search when the task may map to a known site/platform/domain tool, and whenever you're unsure which tool family fits best. "
 
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"
@@ -4532,7 +4532,7 @@ def _get_system_instruction(
         "```\n"
         "# Research task\n"
         "User: 'Research Acme Corp'\n"
-        "Turn 1: → search_tools('company info')     # NO TEXT\n"
+        "Turn 1: → search_tools('company research, people, profiles, company pages')     # NO TEXT\n"
         "Turn 2: → mcp_brightdata_scrape_as_markdown('...')        # NO TEXT\n"
         "Turn 3: → sqlite_batch('CREATE TABLE...')  # NO TEXT\n"
         "Turn 4: '## Acme Corp\\n| Founded |...'    # FINDINGS → speak\n"
