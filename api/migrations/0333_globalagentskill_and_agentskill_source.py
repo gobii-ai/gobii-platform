@@ -6,7 +6,7 @@ import uuid
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0330_toolconfig_tool_search_auto_enable_apps"),
+        ("api", "0332_personal_signup_preview"),
     ]
 
     operations = [

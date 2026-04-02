@@ -1014,7 +1014,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Search your internal tool catalog to discover and enable tools for a task, including saved custom tools. "
+                "Search your internal tool and skill catalog to discover and enable tools and skills for a task, including saved custom tools. "
                 "NOT for web search - use the web search tool from the catalog (e.g., mcp_brightdata_search_engine). "
                 "Call this when tasks change and you need different capabilities."
             ),
@@ -1023,7 +1023,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Description of what you want to accomplish or what kind of tools you're looking for",
+                        "description": "Description of what you want to accomplish or what kind of tools and skills you're looking for",
                     },
                     "will_continue_work": {
                         "type": "boolean",
