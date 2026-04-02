@@ -351,6 +351,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   }, [addonsInteractable, dedicatedInteractable, draft, initialData, submitSave, trialConfirmOpen])
 
   const cancelUrl = initialData.contextType === 'personal' ? initialData.endpoints.cancelSubscriptionUrl : undefined
+  const churnKeySyncUrl = initialData.contextType === 'personal' ? initialData.endpoints.churnKeySyncUrl : undefined
   const resumeUrl = initialData.contextType === 'personal' ? initialData.endpoints.resumeSubscriptionUrl : undefined
   const cancelAction = useConfirmPostAction({ url: cancelUrl, defaultErrorMessage: 'Unable to cancel subscription.' })
   const resumeAction = useConfirmPostAction({ url: resumeUrl, defaultErrorMessage: 'Unable to resume subscription.' })
@@ -374,6 +375,8 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   const churnKeyAnalyticsBase = useMemo(() => buildChurnKeyBaseAnalytics(initialData), [initialData])
 
   const openCancelFlow = useCallback(async () => {
+    setSaveError(null)
+
     if (!churnKeyConfig?.enabled) {
       track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
         ...churnKeyAnalyticsBase,
@@ -398,6 +401,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     }
 
     let shouldRefreshOnClose = false
+    let shouldSyncCancelledSubscription = false
     const markMutation = () => {
       shouldRefreshOnClose = true
     }
@@ -415,6 +419,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
         record: true,
         onCancel: (_customer, surveyResponse) => {
           markMutation()
+          shouldSyncCancelledSubscription = true
           track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
             ...churnKeyAnalyticsBase,
             action: 'cancel',
@@ -463,12 +468,34 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
             ...buildChurnKeySessionAnalytics(sessionResults),
           })
         },
-        onClose: (sessionResults) => {
+        onClose: async (sessionResults) => {
           track(AnalyticsEvent.BILLING_CANCEL_FLOW_CLOSED, {
             ...churnKeyAnalyticsBase,
             ...buildChurnKeySessionAnalytics(sessionResults),
           })
           if (shouldRefreshOnClose) {
+            if (shouldSyncCancelledSubscription && churnKeySyncUrl && churnKeyConfig.subscriptionId) {
+              try {
+                const result = await jsonRequest<{ success: boolean; error?: string }>(churnKeySyncUrl, {
+                  method: 'POST',
+                  includeCsrf: true,
+                  json: { subscriptionId: churnKeyConfig.subscriptionId },
+                })
+                if (!result?.success) {
+                  setSaveError(result?.error ?? 'Your cancellation was applied, but billing may take a moment to refresh.')
+                  return
+                }
+              } catch (error) {
+                track(AnalyticsEvent.BILLING_CANCEL_FLOW_ERROR, {
+                  ...churnKeyAnalyticsBase,
+                  errorType: 'sync_failed',
+                  errorMessage: error instanceof Error ? error.message : String(error ?? ''),
+                  fallback: 'await_webhook',
+                })
+                setSaveError('Your cancellation was applied, but billing may take a moment to refresh.')
+                return
+              }
+            }
             window.location.reload()
           }
         },
@@ -491,7 +518,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       })
       openCancelDialog()
     }
-  }, [churnKeyAnalyticsBase, churnKeyConfig, openCancelDialog])
+  }, [churnKeyAnalyticsBase, churnKeyConfig, churnKeySyncUrl, openCancelDialog])
 
   const closeCancelDialog = useCallback(() => {
     if (cancelActionBusy) return

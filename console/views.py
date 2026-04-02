@@ -1866,6 +1866,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             "endpoints": {
                 "updateUrl": reverse("console_billing_update"),
                 "cancelSubscriptionUrl": reverse("cancel_subscription"),
+                "churnKeySyncUrl": reverse("sync_billing_subscription_state"),
                 "resumeSubscriptionUrl": reverse("resume_subscription"),
                 "stripePortalUrl": reverse("billing_portal") if personal_can_open_stripe else None,
             },
@@ -2310,6 +2311,83 @@ def cancel_subscription(request):
             'success': False,
             'error': "You do not have an active subscription to cancel."
         }, status=400)
+
+
+def _stripe_object_field(value: Any, field: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(field)
+    return getattr(value, field, None)
+
+
+def _stripe_subscription_customer_id(subscription_payload: Any) -> str | None:
+    customer = _stripe_object_field(subscription_payload, "customer")
+    if isinstance(customer, dict):
+        customer = customer.get("id")
+    customer_id = str(customer or "").strip()
+    return customer_id or None
+
+
+@login_required
+@require_POST
+@tracer.start_as_current_span("BILLING Sync Subscription State")
+def sync_billing_subscription_state(request):
+    if not stripe_status().enabled:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Stripe billing is not available in this deployment.',
+            },
+            status=404,
+        )
+
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+
+    subscription_id = str((payload or {}).get("subscriptionId") or "").strip()
+    if not subscription_id:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'subscriptionId is required.',
+            },
+            status=400,
+        )
+
+    customer = get_stripe_customer(request.user)
+    if not customer or not getattr(customer, "id", None):
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'No Stripe customer is associated with this account.',
+            },
+            status=400,
+        )
+
+    try:
+        _assign_stripe_api_key()
+        updated_subscription = stripe.Subscription.retrieve(subscription_id)
+    except stripe.error.StripeError:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Error syncing subscription state.',
+            },
+            status=500,
+        )
+
+    if _stripe_subscription_customer_id(updated_subscription) != str(customer.id):
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Subscription does not belong to the current account.',
+            },
+            status=403,
+        )
+
+    _sync_subscription_after_direct_update(updated_subscription)
+    return JsonResponse({'success': True})
 
 @login_required
 @require_POST
