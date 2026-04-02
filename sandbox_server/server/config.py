@@ -1,5 +1,6 @@
 import os
 import re
+import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Sequence
 
@@ -136,23 +137,36 @@ def _runtime_cache_root() -> Path:
 
 def _runtime_cache_paths(identity: str) -> Dict[str, Path]:
     cleaned = _safe_identity_segment(identity)
-    base = _runtime_cache_root() / cleaned
-    paths = {
-        "base": base,
-        "home": base / "home",
-        "tmp": base / "tmp",
-        "uv_cache": base / "uv-cache",
-        "uv_tools": base / "uv-tools",
-        "xdg_cache": base / "xdg-cache",
-        "xdg_config": base / "xdg-config",
-        "xdg_data": base / "xdg-data",
-        "npm": base / "npm",
-        "pip": base / "pip",
-    }
-    paths["xdg"] = paths["xdg_cache"]
-    for path in paths.values():
-        path.mkdir(parents=True, exist_ok=True)
-    return paths
+    configured_root = os.environ.get("SANDBOX_RUNTIME_CACHE_ROOT", "/runtime-cache").strip() or "/runtime-cache"
+    candidate_roots = [Path(configured_root)]
+    if configured_root == "/runtime-cache":
+        candidate_roots.append(Path(tempfile.gettempdir()) / "gobii-runtime-cache")
+
+    last_error: Optional[OSError] = None
+    for root in candidate_roots:
+        base = root / cleaned
+        paths = {
+            "base": base,
+            "home": base / "home",
+            "tmp": base / "tmp",
+            "uv_cache": base / "uv-cache",
+            "uv_tools": base / "uv-tools",
+            "xdg": base / "xdg",
+            "xdg_cache": base / "xdg-cache",
+            "xdg_config": base / "xdg-config",
+            "xdg_data": base / "xdg-data",
+            "npm": base / "npm",
+            "pip": base / "pip",
+        }
+        try:
+            for path in set(paths.values()):
+                path.mkdir(parents=True, exist_ok=True)
+            return paths
+        except OSError as exc:
+            last_error = exc
+
+    assert last_error is not None
+    raise last_error
 
 
 def _workspace_max_bytes() -> int:
