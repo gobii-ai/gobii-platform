@@ -309,6 +309,9 @@ class CustomToolsTests(TestCase):
         self.assertIn("Small disposable tools are good", description)
         self.assertIn("Do not manually repeat MCP/tool/API calls", description)
         self.assertIn("Prefer patching the same file", description)
+        self.assertIn("with ctx.sqlite() as db", description)
+        self.assertIn("same durable agent SQLite DB that sqlite_batch reads", description)
+        self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", description)
         self.assertEqual(
             properties["source_path"]["description"],
             "Workspace path to the Python source file, for example `/tools/my_tool.py`.",
@@ -602,13 +605,9 @@ class CustomToolsTests(TestCase):
     ):
         source = self._build_runnable_tool_source(
             "def run(params, ctx):\n"
-            "    conn = sqlite3.connect(ctx.sqlite_db_path)\n"
-            "    try:\n"
+            "    with ctx.sqlite() as conn:\n"
             "        conn.execute('CREATE TABLE IF NOT EXISTS custom_tool_rows (value TEXT NOT NULL)')\n"
             "        conn.execute('INSERT INTO custom_tool_rows(value) VALUES (?)', (params['value'],))\n"
-            "        conn.commit()\n"
-            "    finally:\n"
-            "        conn.close()\n"
             "    return {'stored': params['value']}\n"
             ,
             imports="import sqlite3",
@@ -848,6 +847,9 @@ class CustomToolsTests(TestCase):
         self.assertIn("A short one-off tool is usually better than manual repetition", summary)
         self.assertIn("Immediate triggers:", summary)
         self.assertIn("bulk INSERT/UPDATE/UPSERT work", summary)
+        self.assertIn("with ctx.sqlite() as db", summary)
+        self.assertIn("sqlite_batch already reads that same durable DB directly", summary)
+        self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", summary)
         self.assertIn("Prefer patching the same file", summary)
         self.assertIn("Start with a small sample/limit", summary)
         self.assertIn("ANTI-PATTERNS:", summary)

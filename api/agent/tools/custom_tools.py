@@ -58,6 +58,7 @@ _RUNTIME_CACHE_ROOT_ENV_KEY = "SANDBOX_RUNTIME_CACHE_ROOT"
 _GOBII_CTX_MODULE = textwrap.dedent(
     f"""\
     import base64
+    import contextlib
     import json
     import os
     import subprocess
@@ -143,6 +144,28 @@ _GOBII_CTX_MODULE = textwrap.dedent(
                 return json.loads(raw or "{{}}")
             except json.JSONDecodeError as exc:
                 raise RuntimeError(f"Tool bridge returned invalid JSON: {{raw[:500]}}") from exc
+
+        @contextlib.contextmanager
+        def sqlite(self):
+            import sqlite3
+
+            if not self.sqlite_db_path:
+                raise RuntimeError("ctx.sqlite_db_path is unavailable.")
+            os.makedirs(os.path.dirname(self.sqlite_db_path), exist_ok=True)
+            conn = sqlite3.connect(self.sqlite_db_path)
+            try:
+                conn.execute("PRAGMA busy_timeout=5000;")
+            except Exception:
+                pass
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    conn.rollback()
+                raise
+            finally:
+                conn.close()
 
         def log(self, *parts):
             print(*parts, file=sys.stderr)
@@ -540,6 +563,9 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "4. `if __name__ == '__main__': main(run)`\n"
                 "ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools). "
                 "Write results directly to SQLite via ctx.sqlite_db_path instead of returning large intermediate data. "
+                "Prefer `with ctx.sqlite() as db:` for writes; it opens the shared DB, commits on success, rolls back on errors, and closes automatically. "
+                "That path may look sandbox-local during execution, but it is still the same durable agent SQLite DB that sqlite_batch reads. "
+                "Do not ATTACH sandbox file paths in sqlite_batch. "
                 "Do not manually repeat MCP/tool/API calls or paste long SQL insert/update lists in your own loop — put the loop in Python and use bulk writes in one transaction. "
                 "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
                 "PROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
@@ -883,16 +909,18 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "    # Use os.environ for secrets (API keys, DB creds, etc.)\\n"
         "    # Use ctx.call_tool(name, params) to call other agent tools\\n"
         "    # Write results to SQLite instead of returning large data:\\n"
-        "    db = sqlite3.connect(ctx.sqlite_db_path)\\n"
-        "    db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, value TEXT)')\\n"
-        "    db.executemany('INSERT OR REPLACE INTO results VALUES (?, ?)', rows)\\n"
-        "    db.commit()\\n"
+        "    with ctx.sqlite() as db:\\n"
+        "        db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, value TEXT)')\\n"
+        "        db.executemany('INSERT OR REPLACE INTO results VALUES (?, ?)', rows)\\n"
         "    return {'rows_written': len(rows)}\\n\\n"
         "if __name__ == '__main__':\\n"
         "    main(run)\\n"
         "```\\n"
         "\nSQLITE-FIRST: Write results directly to ctx.sqlite_db_path using sqlite3 instead of returning large data. "
+        "Prefer `with ctx.sqlite() as db:` for writes; it auto-commits on success, rolls back on error, and closes the connection for you. "
         "Your custom tool shares the agent's embedded SQLite DB — INSERT/UPDATE/SELECT directly. "
+        "ctx.sqlite_db_path may look like a sandbox-local file path during execution, but sqlite_batch already reads that same durable DB directly. "
+        "Do not ATTACH sandbox file paths in sqlite_batch. "
         "This is far more efficient than passing intermediate results back to the agent for processing. "
         "Pattern: tool fetches data -> normalizes it -> writes to SQLite tables -> returns a summary. "
         "\nTOOL ORCHESTRATION: ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools) "
@@ -912,8 +940,8 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "Agent filespace contents are synced into the sandbox before each run. "
         "\nPATTERNS:"
         "\n- Data sync to SQLite: fetch data from external sources (APIs, scraping, MCP tools) -> normalize -> "
-        "conn = sqlite3.connect(ctx.sqlite_db_path); conn.execute('CREATE TABLE IF NOT EXISTS ...'); "
-        "conn.executemany('INSERT OR REPLACE INTO ...', rows); conn.commit() -> return {'rows_synced': len(rows)}. "
+        "with ctx.sqlite() as conn: conn.execute('CREATE TABLE IF NOT EXISTS ...'); "
+        "conn.executemany('INSERT OR REPLACE INTO ...', rows) -> return {'rows_synced': len(rows)}. "
         "The agent can then query this table via sqlite_batch without re-fetching. "
         "This is the most common pattern — sync once, query many times."
         "\n- Bulk read & process from SQLite: read existing agent data from SQLite, transform, enrich, "
