@@ -58,6 +58,7 @@ _RUNTIME_CACHE_ROOT_ENV_KEY = "SANDBOX_RUNTIME_CACHE_ROOT"
 _GOBII_CTX_MODULE = textwrap.dedent(
     f"""\
     import base64
+    import contextlib
     import json
     import os
     import subprocess
@@ -143,6 +144,28 @@ _GOBII_CTX_MODULE = textwrap.dedent(
                 return json.loads(raw or "{{}}")
             except json.JSONDecodeError as exc:
                 raise RuntimeError(f"Tool bridge returned invalid JSON: {{raw[:500]}}") from exc
+
+        @contextlib.contextmanager
+        def sqlite(self):
+            import sqlite3
+
+            if not self.sqlite_db_path:
+                raise RuntimeError("ctx.sqlite_db_path is unavailable.")
+            os.makedirs(os.path.dirname(self.sqlite_db_path), exist_ok=True)
+            conn = sqlite3.connect(self.sqlite_db_path)
+            try:
+                conn.execute("PRAGMA busy_timeout=5000;")
+            except Exception:
+                pass
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    conn.rollback()
+                raise
+            finally:
+                conn.close()
 
         def log(self, *parts):
             print(*parts, file=sys.stderr)
@@ -494,7 +517,11 @@ def load_custom_tool_bridge_payload(token: str) -> Optional[Dict[str, Any]]:
 
 
 @contextlib.contextmanager
-def _custom_tool_sqlite_db(agent: PersistentAgent):
+def _custom_tool_sqlite_db(agent: PersistentAgent, *, current_db_path: Optional[str] = None):
+    if current_db_path:
+        yield current_db_path
+        return
+
     existing_db_path = get_sqlite_db_path()
     if existing_db_path:
         yield existing_db_path
@@ -532,6 +559,8 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Create or update a sandboxed Python custom tool for this agent. "
                 "Prefer custom tools over manual multi-step procedures — they are far more efficient. "
                 "Write tools eagerly: if work involves 3+ steps, loops, data transforms, or API calls, make a tool. "
+                "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
+                "Deterministic, repeatable, structured data work is an especially strong trigger for a small custom tool plus shared SQLite, even if the user did not explicitly ask for a custom tool or mention SQLite. "
                 "Small disposable tools are good; do not over-engineer. "
                 "Source is a complete Python script run via `uv run`. Structure:\n"
                 "1. PEP 723 metadata at top for third-party deps (if any): `# /// script\\n# dependencies = [\"requests\"]\\n# ///`\n"
@@ -539,7 +568,11 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "3. `def run(params, ctx): ...` — your tool logic, return JSON-serializable data\n"
                 "4. `if __name__ == '__main__': main(run)`\n"
                 "ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools). "
-                "Write results directly to SQLite via ctx.sqlite_db_path instead of returning large intermediate data. "
+                "Write results directly to the shared agent SQLite DB instead of returning large intermediate data. "
+                "For normal DB work, use `with ctx.sqlite() as db:`; it opens the shared DB, commits on success, rolls back on errors, and closes automatically. "
+                "Treat ctx.sqlite_db_path as an internal/advanced escape hatch; most tools should not need it. "
+                "That DB may look sandbox-local during execution, but it is still the same durable agent SQLite DB that sqlite_batch reads. "
+                "Do not ATTACH sandbox file paths in sqlite_batch. "
                 "Do not manually repeat MCP/tool/API calls or paste long SQL insert/update lists in your own loop — put the loop in Python and use bulk writes in one transaction. "
                 "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
                 "PROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
@@ -740,7 +773,13 @@ def _parse_custom_tool_result(stdout: str) -> tuple[Optional[Any], str]:
     return parsed_result, "\n".join(cleaned_lines).strip()
 
 
-def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool, params: Dict[str, Any]) -> Dict[str, Any]:
+def execute_custom_tool(
+    agent: PersistentAgent,
+    tool: PersistentAgentCustomTool,
+    params: Dict[str, Any],
+    *,
+    current_sqlite_db_path: Optional[str] = None,
+) -> Dict[str, Any]:
     if not is_custom_tools_available_for_agent(agent):
         return {"status": "error", "message": "Custom tools require sandbox compute."}
 
@@ -782,7 +821,10 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
         if local_exec_source_path:
             env[_EXEC_SOURCE_PATH_ENV_KEY] = local_exec_source_path
 
-    with _custom_tool_uv_runtime_dirs(service) as runtime_env, _custom_tool_sqlite_db(agent) as sqlite_db_path:
+    with _custom_tool_uv_runtime_dirs(service) as runtime_env, _custom_tool_sqlite_db(
+        agent,
+        current_db_path=current_sqlite_db_path,
+    ) as sqlite_db_path:
         if runtime_env:
             env.update(runtime_env)
         result = service.run_custom_tool_command(
@@ -812,6 +854,8 @@ def execute_custom_tool(agent: PersistentAgent, tool: PersistentAgentCustomTool,
         "status": "ok",
         "result": parsed_result,
     }
+    if isinstance(result.get("shared_sqlite_db"), dict):
+        response["shared_sqlite_db"] = result["shared_sqlite_db"]
     if cleaned_stdout:
         response["stdout"] = cleaned_stdout
     if result.get("stderr"):
@@ -857,6 +901,8 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "Write a tool that fetches, transforms, and stores data in SQLite, then read back a summary. "
         "Your job is to orchestrate, not to manually iterate over rows or transform JSON in your context. "
         "A short one-off tool is usually better than manual repetition. "
+        "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
+        "Deterministic, repeatable, structured-data oriented work is an especially strong trigger for a small custom tool writing to shared SQLite even if the user never says 'custom tool' or 'SQLite'. "
         "\nWHEN TO CREATE: Whenever work involves multiple steps, data processing, API calls, loops, or batch operations. "
         "If you're about to chain 3+ tool calls or handle intermediate data between steps — stop and write a tool instead. "
         "Immediate triggers: repeated MCP/API calls, pagination/cursors, sync/import jobs, bulk INSERT/UPDATE/UPSERT work, row-by-row transforms, retries/backoff, or checkpoint/resume flows. "
@@ -883,16 +929,20 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "    # Use os.environ for secrets (API keys, DB creds, etc.)\\n"
         "    # Use ctx.call_tool(name, params) to call other agent tools\\n"
         "    # Write results to SQLite instead of returning large data:\\n"
-        "    db = sqlite3.connect(ctx.sqlite_db_path)\\n"
-        "    db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, value TEXT)')\\n"
-        "    db.executemany('INSERT OR REPLACE INTO results VALUES (?, ?)', rows)\\n"
-        "    db.commit()\\n"
+        "    with ctx.sqlite() as db:\\n"
+        "        db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, value TEXT)')\\n"
+        "        db.executemany('INSERT OR REPLACE INTO results VALUES (?, ?)', rows)\\n"
         "    return {'rows_written': len(rows)}\\n\\n"
         "if __name__ == '__main__':\\n"
         "    main(run)\\n"
         "```\\n"
-        "\nSQLITE-FIRST: Write results directly to ctx.sqlite_db_path using sqlite3 instead of returning large data. "
+        "\nSQLITE-FIRST: Write results directly to the shared agent SQLite DB instead of returning large data. "
+        "For normal DB work, use `with ctx.sqlite() as db:`; it auto-commits on success, rolls back on error, and closes the connection for you. "
         "Your custom tool shares the agent's embedded SQLite DB — INSERT/UPDATE/SELECT directly. "
+        "Fetch/normalize/store/query work is an especially strong trigger for this SQLite-backed custom-tool pattern, without waiting for the user to request it explicitly. "
+        "Treat ctx.sqlite_db_path as an internal/advanced escape hatch; most tools should not need it. "
+        "That DB may look sandbox-local during execution, but sqlite_batch already reads that same durable DB directly. "
+        "Do not ATTACH sandbox file paths in sqlite_batch. "
         "This is far more efficient than passing intermediate results back to the agent for processing. "
         "Pattern: tool fetches data -> normalizes it -> writes to SQLite tables -> returns a summary. "
         "\nTOOL ORCHESTRATION: ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools) "
@@ -912,8 +962,8 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "Agent filespace contents are synced into the sandbox before each run. "
         "\nPATTERNS:"
         "\n- Data sync to SQLite: fetch data from external sources (APIs, scraping, MCP tools) -> normalize -> "
-        "conn = sqlite3.connect(ctx.sqlite_db_path); conn.execute('CREATE TABLE IF NOT EXISTS ...'); "
-        "conn.executemany('INSERT OR REPLACE INTO ...', rows); conn.commit() -> return {'rows_synced': len(rows)}. "
+        "with ctx.sqlite() as conn: conn.execute('CREATE TABLE IF NOT EXISTS ...'); "
+        "conn.executemany('INSERT OR REPLACE INTO ...', rows) -> return {'rows_synced': len(rows)}. "
         "The agent can then query this table via sqlite_batch without re-fetching. "
         "This is the most common pattern — sync once, query many times."
         "\n- Bulk read & process from SQLite: read existing agent data from SQLite, transform, enrich, "

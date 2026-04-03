@@ -1408,7 +1408,13 @@ def _execute_tool_call_runtime(
         )
         return mock_result, updated_tools
     if parallel_safe:
-        return execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True), updated_tools
+        return execute_enabled_tool(
+            agent,
+            tool_name,
+            exec_params,
+            isolated_mcp=True,
+            current_sqlite_db_path=get_sqlite_db_path(),
+        ), updated_tools
     if tool_name == "spawn_web_task":
         return execute_spawn_web_task(agent, exec_params), updated_tools
     if tool_name == "send_email":
@@ -1447,7 +1453,12 @@ def _execute_tool_call_runtime(
         return result, updated_tools
     if tool_name == "file_str_replace":
         return execute_file_str_replace(agent, exec_params), updated_tools
-    return execute_enabled_tool(agent, tool_name, exec_params), updated_tools
+    return execute_enabled_tool(
+        agent,
+        tool_name,
+        exec_params,
+        current_sqlite_db_path=get_sqlite_db_path(),
+    ), updated_tools
 
 
 def _execute_prepared_tool_call(

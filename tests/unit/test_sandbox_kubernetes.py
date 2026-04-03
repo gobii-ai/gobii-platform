@@ -285,6 +285,91 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
         )
 
+    def test_deploy_or_resume_recreates_stale_sandbox_pod_image(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-stale-image")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(
+            return_value={
+                "status": {"phase": "Running"},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "sandbox-supervisor",
+                            "image": "ghcr.io/example/sandbox:old",
+                            "env": [
+                                {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True, True]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-stale-image")
+        backend._create_pod.assert_called_once_with(
+            "sandbox-agent-agent-stale-image",
+            "sandbox-workspace-agent-stale-image",
+            agent_id="agent-stale-image",
+            egress_service_name=None,
+            no_proxy=None,
+        )
+
+    def test_deploy_or_resume_recreates_sandbox_pod_when_proxy_env_drifted(self):
+        backend = self._backend()
+        backend._egress_proxy_image = "ghcr.io/example/egress:latest"
+        backend._egress_proxy_service_port = 3128
+        backend._egress_proxy_socks_service_port = 1080
+        agent = SimpleNamespace(id="agent-proxy-drift")
+        session = SimpleNamespace(
+            proxy_server=SimpleNamespace(id="proxy-1"),
+            workspace_snapshot=None,
+        )
+        backend._ensure_egress_proxy = Mock(return_value="sandbox-egress-agent-proxy-drift")
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(
+            return_value={
+                "status": {"phase": "Running"},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "sandbox-supervisor",
+                            "image": "ghcr.io/example/sandbox:latest",
+                            "env": [
+                                {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
+                            ],
+                        }
+                    ]
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True, True]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-proxy-drift")
+        backend._create_pod.assert_called_once_with(
+            "sandbox-agent-agent-proxy-drift",
+            "sandbox-workspace-agent-proxy-drift",
+            agent_id="agent-proxy-drift",
+            egress_service_name="sandbox-egress-agent-proxy-drift",
+            no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
+        )
+
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):

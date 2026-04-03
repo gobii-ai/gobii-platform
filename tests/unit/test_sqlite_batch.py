@@ -196,6 +196,7 @@ class SqliteBatchToolTests(TestCase):
 
         self.assertIn("Use sqlite_batch to query and batch-update structured data you already have", description)
         self.assertIn("prefer a custom tool that writes to SQLite", description)
+        self.assertIn("do not ATTACH sandbox file paths", description)
 
     def test_attach_database_is_blocked(self):
         with self._with_temp_db() as (_db_path, _token, tmp):

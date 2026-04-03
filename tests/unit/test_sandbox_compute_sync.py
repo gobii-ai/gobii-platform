@@ -1,4 +1,6 @@
+import base64
 import os
+import sqlite3
 import tempfile
 from datetime import timedelta
 from types import SimpleNamespace
@@ -20,27 +22,36 @@ from api.models import (
 )
 from api.services.sandbox_compute import (
     SandboxComputeService,
+    SandboxComputeUnavailable,
     SandboxSessionUpdate,
     _build_nonzero_exit_error_payload,
     _post_sync_queue_key,
 )
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
-    CUSTOM_TOOL_SQLITE_WORKSPACE_PATH,
+    custom_tool_sqlite_workspace_path,
     is_sandbox_internal_path,
 )
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.tasks.sandbox_compute import sync_filespace_after_call
+from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH as SANDBOX_CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 
 
 class _DummyBackend:
     def __init__(self) -> None:
+        self.deploy_calls: list[dict] = []
         self.sync_calls: list[dict] = []
         self.run_command_calls: list[dict] = []
         self.mcp_calls: list[dict] = []
         self.tool_calls: list[dict] = []
 
     def deploy_or_resume(self, agent, session):
+        self.deploy_calls.append(
+            {
+                "agent_id": str(agent.id),
+                "state": session.state,
+            }
+        )
         return SandboxSessionUpdate(state=AgentComputeSession.State.RUNNING)
 
     def sync_filespace(self, agent, session, *, direction, payload=None):
@@ -142,6 +153,29 @@ class SandboxComputeSyncTests(TestCase):
         secret.save()
         return secret
 
+    def _create_sqlite_db_file(self, path, rows=None):
+        conn = sqlite3.connect(path)
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS crypto_prices (coin_id TEXT PRIMARY KEY, name TEXT)")
+            for row in rows or []:
+                conn.execute(
+                    "INSERT OR REPLACE INTO crypto_prices (coin_id, name) VALUES (?, ?)",
+                    row,
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _sqlite_bytes(self, rows=None):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=rows)
+            with open(db_path, "rb") as handle:
+                return handle.read()
+
+    def test_custom_tool_sqlite_internal_path_matches_sandbox_server_constant(self):
+        self.assertEqual(CUSTOM_TOOL_SQLITE_FILESPACE_PATH, SANDBOX_CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
+
     def test_pull_manifest_includes_checksum_and_cursor(self):
         write_result = write_bytes_to_dir(
             agent=self.agent,
@@ -197,6 +231,7 @@ class SandboxComputeSyncTests(TestCase):
             service._ensure_session(self.agent, source="tool_request")
 
         self.assertEqual(len(backend.sync_calls), 2)
+        self.assertEqual(len(backend.deploy_calls), 2)
         self.assertEqual(backend.sync_calls[0]["direction"], "pull")
         self.assertEqual(backend.sync_calls[1]["direction"], "pull")
 
@@ -207,6 +242,36 @@ class SandboxComputeSyncTests(TestCase):
 
         session = AgentComputeSession.objects.get(agent=self.agent)
         self.assertEqual(session.last_filespace_pull_at, cursor_two)
+
+    def test_ensure_session_fails_before_pull_when_backend_returns_error_state(self):
+        class _ErrorBackend(_DummyBackend):
+            def deploy_or_resume(self, agent, session):
+                self.deploy_calls.append(
+                    {
+                        "agent_id": str(agent.id),
+                        "state": session.state,
+                    }
+                )
+                return SandboxSessionUpdate(
+                    state=AgentComputeSession.State.ERROR,
+                    pod_name="sandbox-agent-bad",
+                    namespace="gobii-pr-815",
+                )
+
+        backend = _ErrorBackend()
+        service = SandboxComputeService(backend=backend)
+
+        with patch("api.services.sandbox_compute.build_filespace_pull_manifest") as manifest_mock:
+            with self.assertRaises(SandboxComputeUnavailable) as exc_info:
+                service._ensure_session(self.agent, source="custom_tool_source_sync")
+
+        self.assertIn("state=error", str(exc_info.exception))
+        self.assertIn("sandbox-agent-bad", str(exc_info.exception))
+        manifest_mock.assert_not_called()
+        session = AgentComputeSession.objects.get(agent=self.agent)
+        self.assertEqual(session.state, AgentComputeSession.State.ERROR)
+        self.assertEqual(session.pod_name, "sandbox-agent-bad")
+        self.assertEqual(session.namespace, "gobii-pr-815")
 
     def test_pull_manifest_excludes_internal_custom_tool_sqlite_path(self):
         internal = write_bytes_to_dir(
@@ -428,7 +493,7 @@ class SandboxComputeSyncTests(TestCase):
 
     def test_run_custom_tool_command_syncs_sqlite_for_remote_backend(self):
         backend = _DummyBackend()
-        synced_bytes = b"updated sqlite bytes"
+        synced_bytes = self._sqlite_bytes(rows=[("bitcoin", "Bitcoin")])
 
         def _sync_filespace(agent, session, *, direction, payload=None):
             backend.sync_calls.append(
@@ -444,9 +509,14 @@ class SandboxComputeSyncTests(TestCase):
                     "changes": [
                         {
                             "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
-                            "content_b64": "dXBkYXRlZCBzcWxpdGUgYnl0ZXM=",
+                            "content_b64": base64.b64encode(synced_bytes).decode("ascii"),
                             "mime_type": "application/vnd.sqlite3",
-                        }
+                        },
+                        {
+                            "path": "/.gobii/internal/tool.log",
+                            "content_b64": "aWdub3JlZCBieXRlcw==",
+                            "mime_type": "text/plain",
+                        },
                     ],
                 }
             return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
@@ -464,8 +534,7 @@ class SandboxComputeSyncTests(TestCase):
             return_value={"status": "ok", "files": [], "sync_cursor": None},
         ):
             db_path = f"{tmp_dir}/state.db"
-            with open(db_path, "wb") as handle:
-                handle.write(b"initial sqlite bytes")
+            self._create_sqlite_db_file(db_path, rows=[("test", "Test")])
 
             service = SandboxComputeService(backend=backend)
             result = service.run_custom_tool_command(
@@ -478,8 +547,23 @@ class SandboxComputeSyncTests(TestCase):
             )
 
             self.assertEqual(result.get("status"), "ok")
-            with open(db_path, "rb") as handle:
-                self.assertEqual(handle.read(), synced_bytes)
+            self.assertEqual(
+                result.get("shared_sqlite_db"),
+                {
+                    "available": True,
+                    "same_db_as_sqlite_batch": True,
+                    "transport": "sandbox_sync",
+                    "sync_back": "ok",
+                    "deleted": False,
+                    "size_bytes": len(synced_bytes),
+                },
+            )
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute("SELECT coin_id, name FROM crypto_prices ORDER BY coin_id").fetchall()
+            finally:
+                conn.close()
+            self.assertEqual(rows, [("bitcoin", "Bitcoin")])
 
         internal_pull = next(
             call
@@ -493,9 +577,156 @@ class SandboxComputeSyncTests(TestCase):
         internal_entry = internal_pull["payload"]["files"][0]
         self.assertEqual(internal_entry["path"], CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
         self.assertIn("content_b64", internal_entry)
-        self.assertEqual(backend.run_command_calls[0]["env"]["SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"], CUSTOM_TOOL_SQLITE_WORKSPACE_PATH)
+        self.assertEqual(
+            backend.run_command_calls[0]["env"]["SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"],
+            custom_tool_sqlite_workspace_path(self.agent.id),
+        )
         push_call = next(call for call in backend.sync_calls if call["direction"] == "push")
-        self.assertTrue(push_call["payload"]["since"])
+        self.assertEqual(push_call["payload"]["internal_paths"], [CUSTOM_TOOL_SQLITE_FILESPACE_PATH])
+        self.assertNotIn("since", push_call["payload"])
+
+    def test_sync_custom_tool_sqlite_pull_snapshots_live_wal_database(self):
+        backend = _DummyBackend()
+        service = SandboxComputeService(backend=backend)
+        session = AgentComputeSession.objects.create(agent=self.agent, state=AgentComputeSession.State.RUNNING)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = f"{tmp_dir}/state.db"
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("PRAGMA journal_mode=WAL;")
+                conn.execute("CREATE TABLE crypto_prices (coin_id TEXT PRIMARY KEY, name TEXT)")
+                conn.execute("INSERT INTO crypto_prices VALUES ('test', 'Test')")
+                conn.commit()
+
+                result = service._sync_custom_tool_sqlite_pull(self.agent, session, db_path)
+                self.assertEqual(result.get("status"), "ok")
+
+                pull_call = next(call for call in backend.sync_calls if call["direction"] == "pull")
+                sqlite_entry = next(
+                    entry
+                    for entry in pull_call["payload"]["files"]
+                    if entry.get("path") == CUSTOM_TOOL_SQLITE_FILESPACE_PATH
+                )
+                snapshot_bytes = base64.b64decode(sqlite_entry["content_b64"])
+
+                snapshot_path = f"{tmp_dir}/snapshot.db"
+                with open(snapshot_path, "wb") as handle:
+                    handle.write(snapshot_bytes)
+
+                snapshot_conn = sqlite3.connect(snapshot_path)
+                try:
+                    rows = snapshot_conn.execute(
+                        "SELECT coin_id, name FROM crypto_prices ORDER BY coin_id"
+                    ).fetchall()
+                finally:
+                    snapshot_conn.close()
+            finally:
+                conn.close()
+
+        self.assertEqual(rows, [("test", "Test")])
+
+    def test_sync_custom_tool_sqlite_push_replaces_host_db_without_stale_wal_sidecars(self):
+        backend = _DummyBackend()
+        service = SandboxComputeService(backend=backend)
+        session = AgentComputeSession.objects.create(agent=self.agent, state=AgentComputeSession.State.RUNNING)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = f"{tmp_dir}/state.db"
+            live_conn = sqlite3.connect(db_path)
+            try:
+                live_conn.execute("PRAGMA journal_mode=WAL;")
+                live_conn.execute("CREATE TABLE crypto_prices (coin_id TEXT PRIMARY KEY, name TEXT)")
+                live_conn.execute("INSERT INTO crypto_prices VALUES ('test', 'Test')")
+                live_conn.commit()
+                self.assertTrue(os.path.exists(f"{db_path}-wal"))
+
+                synced_db_path = f"{tmp_dir}/synced.db"
+                synced_conn = sqlite3.connect(synced_db_path)
+                try:
+                    synced_conn.execute("CREATE TABLE crypto_prices (coin_id TEXT PRIMARY KEY, name TEXT)")
+                    synced_conn.execute("INSERT INTO crypto_prices VALUES ('bitcoin', 'Bitcoin')")
+                    synced_conn.execute("INSERT INTO crypto_prices VALUES ('ethereum', 'Ethereum')")
+                    synced_conn.commit()
+                finally:
+                    synced_conn.close()
+
+                with open(synced_db_path, "rb") as handle:
+                    synced_bytes = handle.read()
+
+                def _sync_filespace(agent, session, *, direction, payload=None):
+                    if direction == "push":
+                        return {
+                            "status": "ok",
+                            "changes": [
+                                {
+                                    "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                                    "content_b64": base64.b64encode(synced_bytes).decode("ascii"),
+                                    "mime_type": "application/vnd.sqlite3",
+                                }
+                            ],
+                        }
+                    return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+                backend.sync_filespace = _sync_filespace
+
+                result = service._sync_custom_tool_sqlite_push(self.agent, session, db_path)
+                self.assertEqual(result.get("status"), "ok")
+                self.assertTrue(result.get("sqlite_synced"))
+                self.assertFalse(os.path.exists(f"{db_path}-wal"))
+                self.assertFalse(os.path.exists(f"{db_path}-shm"))
+
+                restored_conn = sqlite3.connect(db_path)
+                try:
+                    rows = restored_conn.execute(
+                        "SELECT coin_id, name FROM crypto_prices ORDER BY coin_id"
+                    ).fetchall()
+                finally:
+                    restored_conn.close()
+            finally:
+                live_conn.close()
+
+        self.assertEqual(rows, [("bitcoin", "Bitcoin"), ("ethereum", "Ethereum")])
+
+    def test_run_custom_tool_command_requires_shared_sqlite_to_sync_back(self):
+        backend = _DummyBackend()
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            if direction == "push":
+                return {"status": "ok", "changes": []}
+            return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
+
+        with tempfile.TemporaryDirectory() as tmp_dir, patch(
+            "api.services.sandbox_compute.sandbox_compute_enabled",
+            return_value=True,
+        ), patch(
+            "api.services.sandbox_compute._select_proxy_for_session",
+            return_value=None,
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ):
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("test", "Test")])
+
+            service = SandboxComputeService(backend=backend)
+            result = service.run_custom_tool_command(
+                self.agent,
+                "echo hello",
+                local_sqlite_db_path=db_path,
+                sqlite_env_key="SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH",
+            )
+
+        self.assertEqual(result, {"status": "error", "message": "Custom tool SQLite sync did not return the shared agent DB."})
 
     def test_run_command_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()
@@ -531,10 +762,35 @@ class SandboxComputeSyncTests(TestCase):
     def test_run_custom_tool_command_merges_env_var_secrets_with_precedence(self):
         backend = _DummyBackend()
         self._create_env_var_secret("OPENAI_API_KEY", "from-secret")
+        synced_bytes = self._sqlite_bytes(rows=[("test", "Test")])
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            if direction == "push":
+                return {
+                    "status": "ok",
+                    "changes": [
+                        {
+                            "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                            "content_b64": base64.b64encode(synced_bytes).decode("ascii"),
+                            "mime_type": "application/vnd.sqlite3",
+                        }
+                    ],
+                }
+            return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
 
         with tempfile.NamedTemporaryFile(delete=False) as handle:
             sqlite_path = handle.name
         self.addCleanup(lambda: os.path.exists(sqlite_path) and os.remove(sqlite_path))
+        self._create_sqlite_db_file(sqlite_path, rows=[("test", "Test")])
 
         with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
             "api.services.sandbox_compute.sandbox_compute_enabled_for_agent",
@@ -556,6 +812,17 @@ class SandboxComputeSyncTests(TestCase):
             )
 
         self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(
+            result.get("shared_sqlite_db"),
+            {
+                "available": True,
+                "same_db_as_sqlite_batch": True,
+                "transport": "sandbox_sync",
+                "sync_back": "ok",
+                "deleted": False,
+                "size_bytes": len(synced_bytes),
+            },
+        )
         self.assertEqual(len(backend.run_command_calls), 1)
         merged_env = backend.run_command_calls[0]["env"]
         self.assertEqual(merged_env["OPENAI_API_KEY"], "from-secret")

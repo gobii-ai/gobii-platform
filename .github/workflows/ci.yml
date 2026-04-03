@@ -419,16 +419,19 @@ jobs:
       - name: Run batch tests (${{ matrix.batch }})
         run: |
           set -euo pipefail
-          mkdir -p "$TEST_OUTPUT_DIR"
+          BATCH_OUTPUT_DIR="$TEST_OUTPUT_DIR/${{ matrix.batch }}"
+          mkdir -p "$BATCH_OUTPUT_DIR"
           TAG="${{ matrix.tag }}"
           echo "Running tests with tag: $TAG"
           uv run python manage.py test --tag "$TAG" \
             --settings=config.test_settings \
             --parallel 1 \
             --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner
-          # Collect any stray TEST-*.xml files into the output dir
+          # xmlrunner uses suite name + second-level timestamp for filenames, so
+          # batch-specific subdirs avoid collisions when multiple matrix jobs
+          # emit the same TEST-*.xml basename.
           shopt -s nullglob || true
-          for f in TEST-*.xml; do mv "$f" "$TEST_OUTPUT_DIR/"; done || true
+          for f in TEST-*.xml; do mv "$f" "$BATCH_OUTPUT_DIR/"; done || true
 
       - name: Upload test results artifact
         if: always()

@@ -1,5 +1,8 @@
 import io
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -103,6 +106,42 @@ class SandboxAppAndConfigTests(unittest.TestCase):
         self.assertEqual(env["NPM_CONFIG_CACHE"], f"{runtime_cache}/agent-1/npm")
         self.assertEqual(env["PIP_CACHE_DIR"], f"{runtime_cache}/agent-1/pip")
         self.assertEqual(env["UV_PROJECT_ENVIRONMENT"], "/tmp/workspace/agent-1/.gobii/uv-project-env")
+
+    def test_standalone_package_import_does_not_require_api_package(self):
+        repo_root = Path(__file__).resolve().parents[2]
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(repo_root)
+        script = """
+import importlib.abc
+import sys
+
+
+class BlockApi(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "api" or fullname.startswith("api."):
+            raise ModuleNotFoundError("blocked api import")
+        return None
+
+
+sys.meta_path.insert(0, BlockApi())
+import sandbox_server
+print("ok")
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(
+            completed.returncode,
+            0,
+            msg=f"stdout={completed.stdout}\nstderr={completed.stderr}",
+        )
+        self.assertIn("ok", completed.stdout)
 
 
 if __name__ == "__main__":

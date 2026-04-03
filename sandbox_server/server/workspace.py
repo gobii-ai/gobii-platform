@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import mimetypes
 import os
 import time
 from datetime import datetime, timezone
@@ -113,6 +114,13 @@ def _normalize_workspace_path(agent_root: Path, path: str) -> Tuple[Optional[Pat
     if agent_root not in full_path.parents and full_path != agent_root:
         return None, None
     return full_path, "/" + rel_path.as_posix()
+
+
+def _guess_mime_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".sqlite", ".sqlite3"}:
+        return "application/vnd.sqlite3"
+    return mimetypes.guess_type(path.name)[0] or "application/octet-stream"
 
 
 def _workspace_size_bytes(agent_root: Path) -> int:

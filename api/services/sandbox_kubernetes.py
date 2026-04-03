@@ -172,7 +172,23 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 )
             else:
                 phase = (pod.get("status") or {}).get("phase")
-                if phase not in {"Running", "Pending"}:
+                if not _sandbox_pod_matches(
+                    pod,
+                    image=self._pod_image,
+                    egress_service_name=egress_service_name,
+                    http_proxy_port=self._egress_proxy_service_port,
+                    socks_proxy_port=self._egress_proxy_socks_service_port,
+                    no_proxy=no_proxy,
+                ):
+                    self._delete_pod(pod_name)
+                    self._create_pod(
+                        pod_name,
+                        pvc_name,
+                        agent_id=str(agent.id),
+                        egress_service_name=egress_service_name,
+                        no_proxy=no_proxy,
+                    )
+                elif phase not in {"Running", "Pending"}:
                     self._delete_pod(pod_name)
                     self._create_pod(
                         pod_name,
@@ -1107,6 +1123,64 @@ def _egress_proxy_pod_matches(
         "UPSTREAM_PASSWORD": str(getattr(proxy_server, "password", "") or "").strip(),
     }
     return all(env.get(key, "") == value for key, value in expected.items())
+
+
+def _sandbox_pod_matches(
+    pod: Dict[str, Any],
+    *,
+    image: str,
+    egress_service_name: Optional[str],
+    http_proxy_port: int,
+    socks_proxy_port: int,
+    no_proxy: Optional[str],
+) -> bool:
+    spec = (pod.get("spec") or {}) if isinstance(pod, dict) else {}
+    containers = spec.get("containers") or []
+    if not containers:
+        return False
+    container = next(
+        (
+            entry
+            for entry in containers
+            if isinstance(entry, dict) and str(entry.get("name", "")).strip() == "sandbox-supervisor"
+        ),
+        containers[0],
+    )
+    if not isinstance(container, dict):
+        return False
+    if str(container.get("image", "") or "").strip() != image:
+        return False
+
+    env_entries = container.get("env") or []
+    env = {
+        str(entry.get("name")): str(entry.get("value", ""))
+        for entry in env_entries
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    if env.get("SANDBOX_RUNTIME_CACHE_ROOT", "") != "/runtime-cache":
+        return False
+
+    expected_proxy_env = {
+        str(entry.get("name")): str(entry.get("value", ""))
+        for entry in _build_proxy_env(
+            egress_service_name=egress_service_name,
+            http_proxy_port=http_proxy_port,
+            socks_proxy_port=socks_proxy_port,
+            no_proxy=no_proxy,
+        )
+        if isinstance(entry, dict) and entry.get("name")
+    }
+    proxy_keys = {
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+    }
+    return all(env.get(key, "") == expected_proxy_env.get(key, "") for key in proxy_keys)
 
 
 def _build_egress_proxy_service_manifest(

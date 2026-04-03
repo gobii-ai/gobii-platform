@@ -1,6 +1,5 @@
 import base64
 import logging
-import mimetypes
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -9,11 +8,13 @@ import requests
 
 from sandbox_server.config import _agent_workspace, _workspace_max_bytes
 from sandbox_server.manifest import _load_manifest, _proxy_env_from_manifest, _save_manifest, _store_proxy_env
+from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 from sandbox_server.workspace import (
     _checksum_bytes,
     _decode_content,
     _elapsed_ms,
     _ensure_capacity,
+    _guess_mime_type,
     _iter_workspace_files,
     _normalize_checksum,
     _normalize_workspace_path,
@@ -27,6 +28,7 @@ from sandbox_server.workspace import (
 )
 
 logger = logging.getLogger(__name__)
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 
 
 def _requests_proxies_from_env(proxy_env: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
@@ -85,6 +87,30 @@ def _download_file(url: str, expected_size: Optional[int], proxy_env: Optional[D
         raise RuntimeError(f"Failed to download file: {exc}") from exc
 
 
+def _clear_sqlite_sidecars(path) -> None:
+    for suffix in _SQLITE_SIDECAR_SUFFIXES:
+        try:
+            path.with_name(path.name + suffix).unlink()
+        except FileNotFoundError:
+            continue
+
+
+def _requested_push_paths(agent_root, payload: Dict[str, Any]) -> list[tuple[Any, str]]:
+    requested = payload.get("internal_paths") or []
+    if not isinstance(requested, list):
+        return []
+
+    normalized_paths: list[tuple[Any, str]] = []
+    seen_paths: set[str] = set()
+    for requested_path in requested:
+        full_path, normalized = _normalize_workspace_path(agent_root, requested_path)
+        if full_path is None or not normalized or normalized in seen_paths:
+            continue
+        seen_paths.add(normalized)
+        normalized_paths.append((full_path, normalized))
+    return normalized_paths
+
+
 def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
     started_at = time.monotonic()
     agent_id, error = _require_agent_id(payload)
@@ -126,7 +152,7 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 content = path.read_bytes()
             except OSError:
                 continue
-            mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+            mime_type = _guess_mime_type(path)
             checksum_sha256 = _checksum_bytes(content)
             changes.append(
                 {
@@ -142,6 +168,37 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "checksum_sha256": checksum_sha256,
             }
             manifest["deleted"].pop(rel, None)
+            uploaded_files += 1
+            uploaded_bytes += len(content)
+
+        for path, rel in _requested_push_paths(agent_root, payload):
+            if rel in seen_paths:
+                continue
+            seen_paths.add(rel)
+            try:
+                stat = path.stat()
+            except OSError:
+                changes.append({"path": rel, "is_deleted": True})
+                deleted_count += 1
+                continue
+            if not path.is_file():
+                continue
+            mtime = stat.st_mtime
+            if since is not None and mtime <= since:
+                continue
+            try:
+                content = path.read_bytes()
+            except OSError:
+                continue
+            mime_type = _guess_mime_type(path)
+            changes.append(
+                {
+                    "path": rel,
+                    "content_b64": base64.b64encode(content).decode("utf-8"),
+                    "mime_type": mime_type,
+                    "checksum_sha256": _checksum_bytes(content),
+                }
+            )
             uploaded_files += 1
             uploaded_bytes += len(content)
 
@@ -204,9 +261,12 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             full_path, normalized = _normalize_workspace_path(agent_root, path)
             if full_path is None or not normalized:
                 continue
+            is_custom_tool_sqlite = normalized == CUSTOM_TOOL_SQLITE_FILESPACE_PATH
             entry_updated_at = _parse_entry_updated_at(entry)
             is_deleted = bool(entry.get("is_deleted"))
             if is_deleted:
+                if is_custom_tool_sqlite:
+                    _clear_sqlite_sidecars(full_path)
                 deleted_entries += 1
                 existing_bytes = 0
                 local_mtime = None
@@ -235,6 +295,8 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             remote_checksum = _normalize_checksum(entry.get("checksum_sha256"))
             local_meta = manifest.get("files", {}).get(normalized)
+            if is_custom_tool_sqlite:
+                _clear_sqlite_sidecars(full_path)
             if remote_checksum and full_path.exists():
                 local_checksum = _resolve_local_checksum(full_path, local_meta)
                 if local_checksum == remote_checksum:
@@ -351,6 +413,8 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return capacity_error
 
             full_path.parent.mkdir(parents=True, exist_ok=True)
+            if is_custom_tool_sqlite:
+                _clear_sqlite_sidecars(full_path)
             try:
                 with open(full_path, "wb") as handle:
                     handle.write(content)

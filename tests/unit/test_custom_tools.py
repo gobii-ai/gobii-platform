@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import uuid
 import zipfile
 from decimal import Decimal
 from datetime import timedelta
@@ -26,8 +27,14 @@ from api.agent.tools.custom_tools import (
 )
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
+from api.agent.tools.sqlite_batch import execute_sqlite_batch
 from api.agent.tools.sqlite_state import agent_sqlite_db
-from api.agent.tools.tool_manager import enable_tools, get_available_tool_ids, get_enabled_tool_definitions
+from api.agent.tools.tool_manager import (
+    enable_tools,
+    execute_enabled_tool,
+    get_available_tool_ids,
+    get_enabled_tool_definitions,
+)
 from api.models import (
     AgentFsNode,
     BrowserUseAgent,
@@ -307,8 +314,13 @@ class CustomToolsTests(TestCase):
         self.assertIn("write `/tools/my_tool.py`", description)
         self.assertIn("Latest workspace edits are synced automatically", description)
         self.assertIn("Small disposable tools are good", description)
+        self.assertIn("Those triggers are not exhaustive", description)
+        self.assertIn("err on the side of creating and using one", description)
         self.assertIn("Do not manually repeat MCP/tool/API calls", description)
         self.assertIn("Prefer patching the same file", description)
+        self.assertIn("with ctx.sqlite() as db", description)
+        self.assertIn("same durable agent SQLite DB that sqlite_batch reads", description)
+        self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", description)
         self.assertEqual(
             properties["source_path"]["description"],
             "Workspace path to the Python source file, for example `/tools/my_tool.py`.",
@@ -430,6 +442,14 @@ class CustomToolsTests(TestCase):
             "status": "ok",
             "stdout": f"debug line\n{CUSTOM_TOOL_RESULT_MARKER}{{\"result\": {{\"value\": 2}}}}\n",
             "stderr": "",
+            "shared_sqlite_db": {
+                "available": True,
+                "same_db_as_sqlite_batch": True,
+                "transport": "sandbox_sync",
+                "sync_back": "ok",
+                "deleted": False,
+                "size_bytes": 123,
+            },
         }
         mock_service_cls.return_value = mock_service
 
@@ -437,6 +457,17 @@ class CustomToolsTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["result"], {"value": 2})
+        self.assertEqual(
+            result["shared_sqlite_db"],
+            {
+                "available": True,
+                "same_db_as_sqlite_batch": True,
+                "transport": "sandbox_sync",
+                "sync_back": "ok",
+                "deleted": False,
+                "size_bytes": 123,
+            },
+        )
         self.assertEqual(result["stdout"], "debug line")
         mock_service._ensure_session.assert_called_once_with(self.agent, source="custom_tool_source_sync")
         mock_service._sync_workspace_push.assert_called_once()
@@ -602,13 +633,9 @@ class CustomToolsTests(TestCase):
     ):
         source = self._build_runnable_tool_source(
             "def run(params, ctx):\n"
-            "    conn = sqlite3.connect(ctx.sqlite_db_path)\n"
-            "    try:\n"
+            "    with ctx.sqlite() as conn:\n"
             "        conn.execute('CREATE TABLE IF NOT EXISTS custom_tool_rows (value TEXT NOT NULL)')\n"
             "        conn.execute('INSERT INTO custom_tool_rows(value) VALUES (?)', (params['value'],))\n"
-            "        conn.commit()\n"
-            "    finally:\n"
-            "        conn.close()\n"
             "    return {'stored': params['value']}\n"
             ,
             imports="import sqlite3",
@@ -633,18 +660,93 @@ class CustomToolsTests(TestCase):
             timeout_seconds=30,
         )
 
-        result = execute_custom_tool(self.agent, tool, {"value": "hello"})
-
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["result"], {"stored": "hello"})
-
         with agent_sqlite_db(str(self.agent.id)) as db_path:
+            result = execute_custom_tool(self.agent, tool, {"value": "hello"})
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["result"], {"stored": "hello"})
+
+            batch_result = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT value FROM custom_tool_rows ORDER BY rowid"},
+            )
+            self.assertEqual(batch_result.get("status"), "ok")
+            self.assertEqual(batch_result["results"][0]["result"], [{"value": "hello"}])
+
             conn = sqlite3.connect(db_path)
             try:
                 rows = conn.execute("SELECT value FROM custom_tool_rows ORDER BY rowid").fetchall()
             finally:
                 conn.close()
-        self.assertEqual(rows, [("hello",)])
+            self.assertEqual(rows, [("hello",)])
+
+    @patch("api.agent.tools.custom_tools.get_sqlite_db_path", return_value=None)
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.services.sandbox_compute._resolve_backend", return_value=LocalSandboxBackend())
+    def test_execute_enabled_tool_threads_current_sqlite_db_path_into_custom_tools(
+        self,
+        _mock_resolve_backend,
+        _mock_select_proxy,
+        _mock_service_tool_enabled,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+        _mock_bridge_url,
+        _mock_current_db_path,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    with ctx.sqlite() as conn:\n"
+            "        conn.execute('CREATE TABLE IF NOT EXISTS custom_tool_rows (value TEXT NOT NULL)')\n"
+            "        conn.execute('INSERT INTO custom_tool_rows(value) VALUES (?)', (params['value'],))\n"
+            "    return {'stored': params['value']}\n",
+            imports="import sqlite3",
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/store_value_via_manager.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Store Value Via Manager",
+            tool_name="custom_store_value_via_manager",
+            description="Store a value in SQLite through execute_enabled_tool.",
+            source_path="/tools/store_value_via_manager.py",
+            parameters_schema={"type": "object", "properties": {"value": {"type": "string"}}},
+            timeout_seconds=30,
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="custom_store_value_via_manager",
+        )
+        value = f"hello-{uuid.uuid4().hex}"
+
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            result = execute_enabled_tool(
+                self.agent,
+                "custom_store_value_via_manager",
+                {"value": value},
+                current_sqlite_db_path=db_path,
+            )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["result"], {"stored": value})
+
+            batch_result = execute_sqlite_batch(
+                self.agent,
+                {"sql": f"SELECT value FROM custom_tool_rows WHERE value = '{value}' ORDER BY rowid"},
+            )
+            self.assertEqual(batch_result.get("status"), "ok")
+            self.assertEqual(batch_result["results"][0]["result"], [{"value": value}])
 
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
@@ -828,6 +930,8 @@ class CustomToolsTests(TestCase):
 
         self.assertIn("Custom tools: 2 saved, 1 enabled.", summary)
         self.assertIn("Default mode for repetitive or bulk work", summary)
+        self.assertIn("Those triggers are not exhaustive", summary)
+        self.assertIn("err on the side of creating and using one", summary)
         self.assertIn("DEV LOOP:", summary)
         self.assertIn("file_str_replace", summary)
         self.assertIn("ctx.sqlite_db_path", summary)
@@ -848,6 +952,9 @@ class CustomToolsTests(TestCase):
         self.assertIn("A short one-off tool is usually better than manual repetition", summary)
         self.assertIn("Immediate triggers:", summary)
         self.assertIn("bulk INSERT/UPDATE/UPSERT work", summary)
+        self.assertIn("with ctx.sqlite() as db", summary)
+        self.assertIn("sqlite_batch already reads that same durable DB directly", summary)
+        self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", summary)
         self.assertIn("Prefer patching the same file", summary)
         self.assertIn("Start with a small sample/limit", summary)
         self.assertIn("ANTI-PATTERNS:", summary)

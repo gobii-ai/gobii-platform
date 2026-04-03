@@ -102,3 +102,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Prefer a small custom tool for repetitive, paginated, or bulk work", summary)
         self.assertIn("bulk MCP/API fan-out", summary)
         self.assertIn("bulk SQLite writes", summary)
+        self.assertIn("Those triggers are not exhaustive", summary)
+        self.assertIn("err on the side of creating and using one", summary)
+        self.assertIn("especially strong trigger", summary)
+        self.assertIn("even if the user did not explicitly ask for a custom tool or mention SQLite", summary)
