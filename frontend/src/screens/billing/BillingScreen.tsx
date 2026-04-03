@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useReducer, useState } from 'react'
-import { CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
 
 import { getCsrfToken, jsonRequest } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
@@ -575,6 +575,19 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           onCancelScheduledSeatChange={initialData.contextType === 'organization' ? handleCancelSeatSchedule : undefined}
         />
 
+        {saveError ? (
+          <section
+            className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700"
+            role="alert"
+            aria-live="polite"
+          >
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden="true" />
+              <div>{saveError}</div>
+            </div>
+          </section>
+        ) : null}
+
         <AddonSections
           initialData={initialData}
           draft={draft}
@@ -591,7 +604,6 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           draft={draft}
           showActions={hasAnyChanges}
           saving={saving}
-          error={saveError}
           onSave={handleSave}
           onCancel={resetDraft}
         />
