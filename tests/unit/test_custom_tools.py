@@ -309,8 +309,13 @@ class CustomToolsTests(TestCase):
         self.assertIn("SOCKS5", description)
         self.assertIn("requests[socks]", description)
         self.assertIn("httpx[socks]", description)
+        self.assertIn("ctx.requests_proxies()", description)
+        self.assertIn("ctx.proxy_url()", description)
         self.assertIn("curl", description)
         self.assertIn("tool-to-tool calls", description)
+        self.assertIn("secret_type='env_var'", description)
+        self.assertIn("domain-scoped credential", description)
+        self.assertIn("direct HTTPS tunneling", description)
         self.assertIn("write `/tools/my_tool.py`", description)
         self.assertIn("Latest workspace edits are synced automatically", description)
         self.assertIn("Small disposable tools are good", description)
@@ -754,6 +759,66 @@ class CustomToolsTests(TestCase):
     @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
     @patch("api.services.sandbox_compute._resolve_backend", return_value=LocalSandboxBackend())
+    def test_execute_custom_tool_proxy_helpers_prefer_all_proxy(
+        self,
+        _mock_resolve_backend,
+        _mock_select_proxy,
+        _mock_service_tool_enabled,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+        _mock_bridge_url,
+    ):
+        source = self._build_runnable_tool_source(
+            "def run(params, ctx):\n"
+            "    return {'proxy_url': ctx.proxy_url(), 'requests_proxies': ctx.requests_proxies()}\n"
+        )
+        write_result = write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=source.encode("utf-8"),
+            extension=".py",
+            mime_type="text/x-python",
+            path="/tools/read_proxy.py",
+            overwrite=True,
+        )
+        self.assertEqual(write_result.get("status"), "ok")
+
+        tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Read Proxy",
+            tool_name="custom_read_proxy",
+            description="Read the canonical sandbox proxy helpers.",
+            source_path="/tools/read_proxy.py",
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=30,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "ALL_PROXY": "socks5://all-proxy.internal:1080",
+                "HTTPS_PROXY": "http://https-proxy.internal:3128",
+                "HTTP_PROXY": "http://http-proxy.internal:3128",
+            },
+            clear=False,
+        ):
+            result = execute_custom_tool(self.agent, tool, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["result"]["proxy_url"], "socks5://all-proxy.internal:1080")
+        self.assertEqual(
+            result["result"]["requests_proxies"],
+            {
+                "http": "socks5://all-proxy.internal:1080",
+                "https": "socks5://all-proxy.internal:1080",
+            },
+        )
+
+    @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.services.sandbox_compute._resolve_backend", return_value=LocalSandboxBackend())
     def test_execute_custom_tool_can_read_env_var_secret_from_os_environ(
         self,
         _mock_resolve_backend,
@@ -943,9 +1008,14 @@ class CustomToolsTests(TestCase):
         self.assertIn("SOCKS5", summary)
         self.assertIn("requests[socks]", summary)
         self.assertIn("httpx[socks]", summary)
+        self.assertIn("ctx.requests_proxies()", summary)
+        self.assertIn("ctx.proxy_url()", summary)
         self.assertIn("curl", summary)
         self.assertIn("ctx.call_tool()", summary)
         self.assertIn("internal bridge transport", summary)
+        self.assertIn("secret_type='env_var'", summary)
+        self.assertIn("domain-scoped credential", summary)
+        self.assertIn("direct HTTPS tunneling", summary)
         self.assertIn("sqlite3", summary)
         self.assertIn("write `/tools/my_tool.py`", summary)
         self.assertIn("Latest workspace edits are synced automatically", summary)

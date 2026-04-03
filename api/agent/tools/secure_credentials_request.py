@@ -17,6 +17,45 @@ from ...domain_validation import DomainPatternValidator
 
 logger = logging.getLogger(__name__)
 
+_ENV_VAR_INFERENCE_HINTS = (
+    "custom tool",
+    "tool script",
+    "python_exec",
+    "run_command",
+    "mcp server",
+    "os.environ",
+    "environment variable",
+    "env var",
+    "python snippet",
+    "python code",
+    "python script",
+    "sandbox python",
+)
+
+
+def _resolve_secret_type(
+    *,
+    raw_secret_type,
+    sandbox_enabled: bool,
+    name,
+    description,
+    key,
+) -> tuple[str, bool]:
+    explicit_secret_type = str(raw_secret_type or "").strip().lower()
+    if explicit_secret_type:
+        return explicit_secret_type, False
+
+    if not sandbox_enabled:
+        return PersistentAgentSecret.SecretType.CREDENTIAL, False
+
+    normalized_key = str(key or "").strip().upper()
+    combined_text = " ".join(str(value or "") for value in (name, description)).lower()
+    hinted_env_usage = any(hint in combined_text for hint in _ENV_VAR_INFERENCE_HINTS)
+    if hinted_env_usage and PersistentAgentSecret.ENV_VAR_KEY_PATTERN.match(normalized_key):
+        return PersistentAgentSecret.SecretType.ENV_VAR, True
+
+    return PersistentAgentSecret.SecretType.CREDENTIAL, False
+
 
 def get_secure_credentials_request_tool() -> dict:
     """Return the tool definition for secure credentials request."""
@@ -30,7 +69,8 @@ def get_secure_credentials_request_tool() -> dict:
                 "for MCP tools, call the tool first—if it returns 'action_required' with a connect/auth link, surface that link to the user and wait. "
                 "Use secret_type='credential' for domain-scoped placeholders, or secret_type='env_var' for sandbox environment variables. "
                 "env_var secrets are appropriate when a custom tool script, python_exec snippet, run_command, or MCP server needs an API key/token, "
-                "and scripts can read them from os.environ. "
+                "and scripts can read them from os.environ. If a custom tool, python_exec snippet, run_command, or MCP server will read the secret "
+                "from os.environ, ALWAYS set secret_type='env_var' and omit domain_pattern. "
                 "You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. "
                 "IT WILL RETURN URL(S). ALWAYS MESSAGE THE USER WITH THE CORRECT ONE: "
                 "- For new/pending requests, send the credentials-request URL so they can enter the requested secret(s). "
@@ -48,11 +88,12 @@ def get_secure_credentials_request_tool() -> dict:
                                 "name": {"type": "string", "description": "Human-readable name for the credential."},
                                 "description": {"type": "string", "description": "Description of what this credential is used for."},
                                 "key": {"type": "string", "description": "Unique key identifier for this credential (e.g., 'api_key', 'username')."},
-                                "domain_pattern": {"type": "string", "description": "Domain pattern this credential applies to (required for credential type)."},
+                                "domain_pattern": {"type": "string", "description": "Domain pattern for credential secrets. Required for credential; omit it for env_var."},
                                 "secret_type": {
                                     "type": "string",
                                     "enum": ["credential", "env_var"],
                                     "description": "Optional. credential (default) for domain-scoped secrets, env_var for global sandbox env vars. "
+                                                   "If a custom tool, python_exec, run_command, or MCP server will read os.environ, this MUST be env_var. "
                                                    "env_var secrets are used for MCP servers, run_command, python_exec, and custom tool scripts via os.environ.",
                                 },
                             },
@@ -102,7 +143,13 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
             name = cred.get("name")
             description = cred.get("description") 
             key = cred.get("key")
-            secret_type = str(cred.get("secret_type") or PersistentAgentSecret.SecretType.CREDENTIAL).strip().lower()
+            secret_type, inferred_env_var = _resolve_secret_type(
+                raw_secret_type=cred.get("secret_type"),
+                sandbox_enabled=sandbox_enabled,
+                name=name,
+                description=description,
+                key=key,
+            )
             domain_pattern = cred.get("domain_pattern")
             
             if secret_type not in {
@@ -115,6 +162,13 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
             if not all([name, description, key]):
                 errors.append(f"Missing required fields for credential: {cred}")
                 continue
+
+            if inferred_env_var:
+                logger.info(
+                    "Inferring env_var secret_type for agent %s credential key=%s based on sandbox env usage hints",
+                    agent.id,
+                    key,
+                )
 
             if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
                 if not sandbox_enabled:
