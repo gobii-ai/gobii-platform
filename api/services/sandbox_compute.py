@@ -27,7 +27,7 @@ from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
-    CUSTOM_TOOL_SQLITE_WORKSPACE_PATH,
+    custom_tool_sqlite_workspace_path,
 )
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
@@ -1575,7 +1575,7 @@ class SandboxComputeService:
             runtime_env[sqlite_env_key] = (
                 local_sqlite_db_path
                 if isinstance(self._backend, LocalSandboxBackend)
-                else CUSTOM_TOOL_SQLITE_WORKSPACE_PATH
+                else custom_tool_sqlite_workspace_path(agent.id)
             )
 
         merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, runtime_env)

@@ -29,7 +29,7 @@ from api.services.sandbox_compute import (
 )
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
-    CUSTOM_TOOL_SQLITE_WORKSPACE_PATH,
+    custom_tool_sqlite_workspace_path,
     is_sandbox_internal_path,
 )
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
@@ -577,7 +577,10 @@ class SandboxComputeSyncTests(TestCase):
         internal_entry = internal_pull["payload"]["files"][0]
         self.assertEqual(internal_entry["path"], CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
         self.assertIn("content_b64", internal_entry)
-        self.assertEqual(backend.run_command_calls[0]["env"]["SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"], CUSTOM_TOOL_SQLITE_WORKSPACE_PATH)
+        self.assertEqual(
+            backend.run_command_calls[0]["env"]["SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH"],
+            custom_tool_sqlite_workspace_path(self.agent.id),
+        )
         push_call = next(call for call in backend.sync_calls if call["direction"] == "push")
         self.assertEqual(push_call["payload"]["internal_paths"], [CUSTOM_TOOL_SQLITE_FILESPACE_PATH])
         self.assertNotIn("since", push_call["payload"])
