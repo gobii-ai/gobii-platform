@@ -81,6 +81,19 @@ _GOBII_CTX_MODULE = textwrap.dedent(
             self.token = os.environ.get({_TOKEN_ENV_KEY!r}, "")
             self.sqlite_db_path = os.environ.get({_SQLITE_DB_PATH_ENV_KEY!r}, "")
 
+        def proxy_url(self):
+            for key in ("ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"):
+                value = os.environ.get(key, "")
+                if value:
+                    return value
+            return ""
+
+        def requests_proxies(self):
+            proxy = self.proxy_url()
+            if not proxy:
+                return {{}}
+            return {{"http": proxy, "https": proxy}}
+
         def _call_tool_via_curl(self, body):
             command = [
                 "curl",
@@ -575,9 +588,14 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Do not ATTACH sandbox file paths in sqlite_batch. "
                 "Do not manually repeat MCP/tool/API calls or paste long SQL insert/update lists in your own loop — put the loop in Python and use bulk writes in one transaction. "
                 "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
+                "If a needed env var secret is missing, request it with `secure_credentials_request` using `secret_type='env_var'` "
+                "rather than a domain-scoped credential. "
                 "PROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
                 "For direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]) "
                 "or subprocess curl, and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
+                "Prefer `ALL_PROXY` as the canonical proxy path: map both `http` and `https` to `ALL_PROXY`, and do not rely on "
+                "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
+                "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "
                 "For tool-to-tool calls, use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
                 "Simplest flow: write `/tools/my_tool.py`, then call create_custom_tool with that same `source_path`. "
                 "Latest workspace edits are synced automatically before registration and execution. "
@@ -950,10 +968,15 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "e.g., call search/scrape tools in a loop, process results, store in SQLite — all in one tool execution. "
         "\nSECRETS: API keys, DB connection strings, auth tokens, and all sensitive values are available as "
         "env vars via os.environ. ALWAYS use secrets for credentials — never hardcode them. "
+        "If a needed env var secret is missing, request it with secure_credentials_request using secret_type='env_var' "
+        "rather than a domain-scoped credential. "
         "Use the exact env var names shown in the secrets/env_var configuration. "
         "\nPROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
         "The proxy is SOCKS5. For direct outbound requests in your own code, "
         "use SOCKS5-capable libraries (requests[socks], httpx[socks]) and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
+        "Prefer `ALL_PROXY` as the canonical proxy path: map both `http` and `https` to `ALL_PROXY`, and do not rely on "
+        "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
+        "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "
         "subprocess curl honors these proxy env vars automatically. "
         "For tool-to-tool calls, always use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
         "\nANTI-PATTERNS: do not spend a turn manually making dozens of near-identical MCP/API calls, manually pasting rows into sqlite_batch INSERT statements, or using your context to transform large JSON payloads. "

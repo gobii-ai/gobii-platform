@@ -2155,7 +2155,9 @@ def build_prompt_context(
     important_group.section_text(
         "secrets_note",
         (
-            "Request credentials only when you'll use them immediately—API keys for http_request, or login credentials for spawn_web_task."
+            "Request credentials only when you'll use them immediately: use domain-scoped credentials for `http_request`, "
+            "login credentials for `spawn_web_task`, and `secret_type='env_var'` for custom tools, `python_exec`, `run_command`, "
+            "or MCP servers that read secrets from `os.environ`."
         ),
         weight=1,
         non_shrinkable=True
@@ -3041,9 +3043,14 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "Standard proxy env vars are already injected: `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, plus lowercase variants. "
         "All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
         "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]). "
+        "Prefer `ALL_PROXY` as the canonical proxy path: map both `http` and `https` to `ALL_PROXY`, and do not rely on "
+        "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
+        "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "
         "subprocess curl honors proxy env vars automatically. For tool-to-tool calls, use ctx.call_tool() as-is; it handles the internal bridge transport for you. "
         "Secrets (API keys, DB credentials, auth tokens) are available as env vars via `os.environ`. "
         "ALWAYS use secrets for sensitive values — never hardcode credentials. "
+        "If a custom tool, `python_exec`, `run_command`, or MCP server needs a secret in `os.environ`, request it with "
+        "`secure_credentials_request` using `secret_type='env_var'`. "
         "Use the exact env var names shown in the secrets block; do not assume a script's variable names exist."
     )
 

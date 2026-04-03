@@ -302,6 +302,8 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertEqual(tool_def["function"]["name"], "secure_credentials_request")
         self.assertIn("custom tool script", tool_def["function"]["description"])
         self.assertIn("os.environ", tool_def["function"]["description"])
+        self.assertIn("ALWAYS set secret_type='env_var'", tool_def["function"]["description"])
+        self.assertIn("omit domain_pattern", tool_def["function"]["description"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["properties"])
         self.assertIn("credentials", tool_def["function"]["parameters"]["required"])
         item_properties = (
@@ -311,6 +313,11 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertEqual(item_properties["secret_type"]["enum"], ["credential", "env_var"])
         self.assertIn("custom tool scripts", item_properties["secret_type"]["description"])
         self.assertIn("os.environ", item_properties["secret_type"]["description"])
+        self.assertIn("MUST be env_var", item_properties["secret_type"]["description"])
+        self.assertIn(
+            "Required for credential; omit it for env_var.",
+            item_properties["domain_pattern"]["description"],
+        )
 
     def test_create_new_credential_requests(self):
         """Test creating new credential requests."""
@@ -436,6 +443,27 @@ class SecureCredentialsRequestToolTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("sandbox compute is not enabled", result["message"])
         self.assertEqual(PersistentAgentSecret.objects.filter(agent=self.agent).count(), 0)
+
+    @patch("api.agent.tools.secure_credentials_request.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_env_var_request_is_inferred_for_custom_tool_env_usage(self, _mock_sandbox_enabled):
+        params = {
+            "credentials": [
+                {
+                    "name": "OpenAI API Key",
+                    "description": "Token for a custom tool script to read from os.environ in sandbox python code",
+                    "key": "openai_api_key",
+                }
+            ]
+        }
+
+        result = execute_secure_credentials_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["created_count"], 1)
+        secret = PersistentAgentSecret.objects.get(agent=self.agent, key="OPENAI_API_KEY")
+        self.assertEqual(secret.secret_type, PersistentAgentSecret.SecretType.ENV_VAR)
+        self.assertEqual(secret.domain_pattern, PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL)
+        self.assertTrue(secret.requested)
 
     @patch("api.agent.tools.secure_credentials_request.sandbox_compute_enabled_for_agent", return_value=True)
     def test_env_var_request_rejects_invalid_env_key(self, _mock_sandbox_enabled):

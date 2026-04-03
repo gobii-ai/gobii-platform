@@ -3,7 +3,11 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
-from api.agent.core.prompt_context import _build_agent_capabilities_sections, _get_sandbox_prompt_summary
+from api.agent.core.prompt_context import (
+    _build_agent_capabilities_sections,
+    _get_sandbox_prompt_summary,
+    build_prompt_context,
+)
 from api.models import BrowserUseAgent, CommsAllowlistEntry, PersistentAgent
 from billing.addons import AddonUplift
 
@@ -94,6 +98,17 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("IMAP (inbound)", email_settings)
         self.assertIn(f"/console/agents/{self.agent.id}/email/", email_settings)
 
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_includes_secret_request_guidance(self, _mock_comms, _mock_steps):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("domain-scoped credentials for `http_request`", contents)
+        self.assertIn("login credentials for `spawn_web_task`", contents)
+        self.assertIn("`secret_type='env_var'`", contents)
+        self.assertIn("`os.environ`", contents)
+
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_biases_toward_custom_tools_for_bulk_work(self, _mock_sandbox):
         summary = _get_sandbox_prompt_summary(self.agent)
@@ -106,3 +121,8 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("err on the side of creating and using one", summary)
         self.assertIn("especially strong trigger", summary)
         self.assertIn("even if the user did not explicitly ask for a custom tool or mention SQLite", summary)
+        self.assertIn("Prefer `ALL_PROXY` as the canonical proxy path", summary)
+        self.assertIn("direct HTTPS tunneling", summary)
+        self.assertIn("ctx.requests_proxies()", summary)
+        self.assertIn("ctx.proxy_url()", summary)
+        self.assertIn("`secure_credentials_request` using `secret_type='env_var'`", summary)
