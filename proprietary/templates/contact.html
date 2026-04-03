@@ -14,6 +14,31 @@
   </div>
 
   <div class="mb-10">
+    <div class="gobii-card-base overflow-hidden mb-6">
+      <div class="bg-gradient-to-r from-violet-700 via-purple-600 to-purple-500 p-6 sm:p-8">
+        <div class="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div class="max-w-2xl">
+            <span class="inline-flex items-center rounded-full border border-white/25 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white">
+              Need help?
+            </span>
+            <h3 class="mt-4 text-2xl font-semibold text-white sm:text-3xl">
+              Support requests move faster through our dedicated support page.
+            </h3>
+            <p class="mt-3 text-base leading-7 text-purple-50">
+              If you need help with your account, billing, or a product issue, use
+              <a href="{% url 'proprietary:support' %}" class="font-semibold text-white underline decoration-white/60 underline-offset-4 hover:decoration-white">Support</a>
+              so your message lands in the right queue right away.
+            </p>
+          </div>
+          <div class="shrink-0">
+            <a href="{% url 'proprietary:support' %}" class="inline-flex w-full items-center justify-center rounded-md bg-white px-5 py-3 text-sm font-semibold text-purple-700 transition hover:bg-purple-50 focus:outline-none focus:ring-2 focus:ring-white focus:ring-offset-2 focus:ring-offset-purple-700 sm:w-auto">
+              Go to Support
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="grid md:grid-cols-2 gap-6">
       <!-- Discord Card -->
       <div class="gobii-card-base">
@@ -40,7 +65,11 @@
       <!-- Email/Form Card -->
       <div class="gobii-card-base">
         <div class="p-6">
-          <h3 class="text-lg font-medium text-gray-900 mb-4">Send us a message</h3>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Send a general inquiry</h3>
+          <p class="mb-4 text-sm text-gray-600">
+            Use this form for partnerships, press, or general questions. For product or account help, head to
+            <a href="{% url 'proprietary:support' %}" class="font-medium text-blue-600 hover:text-blue-700">Support</a>.
+          </p>
           <form class="space-y-4" hx-post="{% url 'proprietary:contact' %}" hx-swap="innerHTML" hx-target="#form-response">
             {% csrf_token %}
             <div>

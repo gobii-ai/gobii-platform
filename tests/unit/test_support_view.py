@@ -184,6 +184,8 @@ class SupportViewTurnstileTests(TestCase):
         self.assertContains(response, "cf-turnstile")
         self.assertContains(response, "turnstile/v0/api.js")
         self.assertNotContains(response, "Frequently Asked Questions")
+        self.assertContains(response, "Support requests move faster through our dedicated support page.")
+        self.assertContains(response, reverse("proprietary:support"))
 
     @tag(BATCH_TAG)
     def test_contact_get_includes_turnstile_widget_for_authenticated_users(self):
