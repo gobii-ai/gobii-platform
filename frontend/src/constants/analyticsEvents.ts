@@ -78,6 +78,20 @@ export const AnalyticsEvent = {
   CTA_FREE_UPGRADE_PLAN: 'CTA - Free - Upgrade Plan',
 
   // ============================================
+  // Billing - ChurnKey Cancel Flow
+  // ============================================
+  /** User launched the ChurnKey cancel flow */
+  BILLING_CANCEL_FLOW_OPENED: 'Billing Cancel Flow Opened',
+  /** User accepted a ChurnKey retention or cancel outcome */
+  BILLING_CANCEL_FLOW_ACTION_SELECTED: 'Billing Cancel Flow Action Selected',
+  /** User left the ChurnKey flow and returned to account */
+  BILLING_CANCEL_FLOW_GO_TO_ACCOUNT: 'Billing Cancel Flow Go To Account',
+  /** ChurnKey flow closed */
+  BILLING_CANCEL_FLOW_CLOSED: 'Billing Cancel Flow Closed',
+  /** ChurnKey flow errored and Gobii used fallback handling */
+  BILLING_CANCEL_FLOW_ERROR: 'Billing Cancel Flow Error',
+
+  // ============================================
   // Intelligence Gate Events
   // ============================================
   /** Intelligence gate modal was shown */

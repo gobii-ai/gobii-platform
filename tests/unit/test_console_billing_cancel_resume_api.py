@@ -173,3 +173,78 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         resp = self.client.post(reverse("resume_subscription"))
         self.assertEqual(resp.status_code, 400)
         self.assertFalse(resp.json().get("success", True))
+
+    @patch("console.views.stripe_status")
+    @patch("console.views._assign_stripe_api_key", return_value=None)
+    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_123"))
+    @patch("console.views._sync_subscription_after_direct_update")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_sync_billing_subscription_state_refreshes_user_subscription(
+        self,
+        mock_retrieve,
+        mock_sync_subscription,
+        mock_get_stripe_customer,
+        mock_assign_key,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_retrieve.return_value = SimpleNamespace(id="sub_123", customer="cus_123")
+
+        resp = self.client.post(
+            reverse("sync_billing_subscription_state"),
+            data=json.dumps({"subscriptionId": "sub_123"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("success"))
+        mock_retrieve.assert_called_once_with("sub_123")
+        mock_sync_subscription.assert_called_once_with(mock_retrieve.return_value)
+
+    @patch("console.views.stripe_status")
+    @patch("console.views._assign_stripe_api_key", return_value=None)
+    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_123"))
+    @patch("console.views._sync_subscription_after_direct_update")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_sync_billing_subscription_state_rejects_foreign_subscription(
+        self,
+        mock_retrieve,
+        mock_sync_subscription,
+        mock_get_stripe_customer,
+        mock_assign_key,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_retrieve.return_value = SimpleNamespace(id="sub_123", customer="cus_other")
+
+        resp = self.client.post(
+            reverse("sync_billing_subscription_state"),
+            data=json.dumps({"subscriptionId": "sub_123"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(resp.json().get("success", True))
+        mock_sync_subscription.assert_not_called()
+
+    @patch("console.views.stripe_status")
+    @patch("console.views.get_stripe_customer")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_sync_billing_subscription_state_rejects_non_object_payload(
+        self,
+        mock_retrieve,
+        mock_get_stripe_customer,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+
+        resp = self.client.post(
+            reverse("sync_billing_subscription_state"),
+            data=json.dumps(["sub_123"]),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json().get("success", True))
+        mock_get_stripe_customer.assert_not_called()
+        mock_retrieve.assert_not_called()

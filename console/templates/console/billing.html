@@ -7,6 +7,24 @@
      data-app="billing"
      data-props-json-id="billing-props">
 </div>
+{% if billing_props.churnKey and billing_props.churnKey.appId %}
+<script>
+!function(){
+  if (!window.churnkey || !window.churnkey.created) {
+    window.churnkey = { created: true };
+    const a = document.createElement('script');
+    a.src = 'https://assets.churnkey.co/js/app.js?appId={{ billing_props.churnKey.appId|escapejs }}';
+    a.async = true;
+    const b = document.getElementsByTagName('script')[0];
+    if (b && b.parentNode) {
+      b.parentNode.insertBefore(a, b);
+    } else {
+      document.body.appendChild(a);
+    }
+  }
+}();
+</script>
+{% endif %}
 {{ billing_props|json_script:"billing-props" }}
 {% endblock %}
 
@@ -14,4 +32,3 @@
   {{ block.super }}
   {% vite_asset 'src/main.tsx' %}
 {% endblock %}
-
