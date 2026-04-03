@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 
 import requests
 
+from api.services.sandbox_internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 from sandbox_server.config import _agent_workspace, _workspace_max_bytes
 from sandbox_server.manifest import _load_manifest, _proxy_env_from_manifest, _save_manifest, _store_proxy_env
 from sandbox_server.workspace import (
@@ -27,6 +28,7 @@ from sandbox_server.workspace import (
 )
 
 logger = logging.getLogger(__name__)
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 
 
 def _requests_proxies_from_env(proxy_env: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
@@ -83,6 +85,14 @@ def _download_file(url: str, expected_size: Optional[int], proxy_env: Optional[D
             _elapsed_ms(started_at),
         )
         raise RuntimeError(f"Failed to download file: {exc}") from exc
+
+
+def _clear_sqlite_sidecars(path) -> None:
+    for suffix in _SQLITE_SIDECAR_SUFFIXES:
+        try:
+            path.with_name(path.name + suffix).unlink()
+        except FileNotFoundError:
+            continue
 
 
 def _requested_push_paths(agent_root, payload: Dict[str, Any]) -> list[tuple[Any, str]]:
@@ -251,9 +261,12 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             full_path, normalized = _normalize_workspace_path(agent_root, path)
             if full_path is None or not normalized:
                 continue
+            is_custom_tool_sqlite = normalized == CUSTOM_TOOL_SQLITE_FILESPACE_PATH
             entry_updated_at = _parse_entry_updated_at(entry)
             is_deleted = bool(entry.get("is_deleted"))
             if is_deleted:
+                if is_custom_tool_sqlite:
+                    _clear_sqlite_sidecars(full_path)
                 deleted_entries += 1
                 existing_bytes = 0
                 local_mtime = None
@@ -282,6 +295,8 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
 
             remote_checksum = _normalize_checksum(entry.get("checksum_sha256"))
             local_meta = manifest.get("files", {}).get(normalized)
+            if is_custom_tool_sqlite:
+                _clear_sqlite_sidecars(full_path)
             if remote_checksum and full_path.exists():
                 local_checksum = _resolve_local_checksum(full_path, local_meta)
                 if local_checksum == remote_checksum:
@@ -398,6 +413,8 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 return capacity_error
 
             full_path.parent.mkdir(parents=True, exist_ok=True)
+            if is_custom_tool_sqlite:
+                _clear_sqlite_sidecars(full_path)
             try:
                 with open(full_path, "wb") as handle:
                     handle.write(content)

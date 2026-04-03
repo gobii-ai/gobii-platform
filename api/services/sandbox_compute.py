@@ -3,8 +3,10 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import timedelta
@@ -50,6 +52,7 @@ _NO_PROXY_ENV_KEYS = (
     "no_proxy",
 )
 _CUSTOM_TOOL_SQLITE_MIME_TYPE = "application/vnd.sqlite3"
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 _ACTIVE_CONVERSATION_CHANNEL_CACHE_ATTR = "_sandbox_active_conversation_channel"
 _ACTIVE_CONVERSATION_CHANNEL_UNSET = object()
 
@@ -810,19 +813,65 @@ def _decode_sync_change_content(change: Dict[str, Any]) -> Optional[bytes]:
     return None
 
 
-def _write_sqlite_file(db_path: str, content: bytes) -> None:
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    tmp_path = f"{db_path}.sandbox-sync"
-    try:
-        with open(tmp_path, "wb") as handle:
-            handle.write(content)
-        os.replace(tmp_path, db_path)
-    finally:
-        if os.path.exists(tmp_path):
+def _sqlite_sidecar_paths(db_path: str) -> list[str]:
+    return [f"{db_path}{suffix}" for suffix in _SQLITE_SIDECAR_SUFFIXES]
+
+
+def _remove_sqlite_sidecars(db_path: str) -> None:
+    for sidecar_path in _sqlite_sidecar_paths(db_path):
+        try:
+            os.remove(sidecar_path)
+        except FileNotFoundError:
+            continue
+
+
+def _snapshot_sqlite_file_content(db_path: str) -> bytes:
+    with tempfile.TemporaryDirectory(prefix="gobii-sqlite-sync-") as tmp_dir:
+        snapshot_path = os.path.join(tmp_dir, "snapshot.db")
+        source_conn = sqlite3.connect(db_path, timeout=5)
+        snapshot_conn = sqlite3.connect(snapshot_path, timeout=5)
+        try:
             try:
-                os.remove(tmp_path)
-            except OSError:
+                source_conn.execute("PRAGMA busy_timeout=5000;")
+            except sqlite3.Error:
                 pass
+            source_conn.backup(snapshot_conn)
+            snapshot_conn.commit()
+        finally:
+            snapshot_conn.close()
+            source_conn.close()
+
+        with open(snapshot_path, "rb") as handle:
+            return handle.read()
+
+
+def _restore_sqlite_file_content(db_path: str, content: bytes) -> None:
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="gobii-sqlite-sync-") as tmp_dir:
+        snapshot_path = os.path.join(tmp_dir, "snapshot.db")
+        with open(snapshot_path, "wb") as handle:
+            handle.write(content)
+
+        _remove_sqlite_sidecars(db_path)
+        try:
+            os.remove(db_path)
+        except FileNotFoundError:
+            pass
+
+        source_conn = sqlite3.connect(snapshot_path, timeout=5)
+        target_conn = sqlite3.connect(db_path, timeout=5)
+        try:
+            try:
+                target_conn.execute("PRAGMA busy_timeout=5000;")
+            except sqlite3.Error:
+                pass
+            source_conn.backup(target_conn)
+            target_conn.commit()
+        finally:
+            target_conn.close()
+            source_conn.close()
+
+        _remove_sqlite_sidecars(db_path)
 
 
 def _select_proxy_for_session(agent, session: AgentComputeSession) -> Optional[Any]:
@@ -1430,8 +1479,10 @@ class SandboxComputeService:
             "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
         }
         if os.path.exists(local_sqlite_db_path):
-            with open(local_sqlite_db_path, "rb") as handle:
-                content = handle.read()
+            try:
+                content = _snapshot_sqlite_file_content(local_sqlite_db_path)
+            except (OSError, sqlite3.Error) as exc:
+                return {"status": "error", "message": f"Failed to snapshot shared SQLite DB: {exc}"}
             entry.update(
                 {
                     "content_b64": base64.b64encode(content).decode("ascii"),
@@ -1487,8 +1538,8 @@ class SandboxComputeService:
             return {"status": "error", "message": "Sandbox SQLite sync returned invalid file content."}
 
         try:
-            _write_sqlite_file(local_sqlite_db_path, content)
-        except OSError as exc:
+            _restore_sqlite_file_content(local_sqlite_db_path, content)
+        except (OSError, sqlite3.Error) as exc:
             return {"status": "error", "message": f"Failed to write synced SQLite DB: {exc}"}
 
         return {
