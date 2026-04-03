@@ -3043,6 +3043,8 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "Standard proxy env vars are already injected: `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, plus lowercase variants. "
         "All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
         "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]). "
+        "If you import `requests` or `httpx` in custom tool code for outbound network access, declare the SOCKS-capable package in PEP 723 metadata by default "
+        "(`requests[socks]` or `httpx[socks]`), not bare `requests`/`httpx`. "
         "Prefer `ALL_PROXY` as the canonical proxy path: map both `http` and `https` to `ALL_PROXY`, and do not rely on "
         "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
         "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "

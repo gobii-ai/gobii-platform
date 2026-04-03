@@ -125,4 +125,5 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("direct HTTPS tunneling", summary)
         self.assertIn("ctx.requests_proxies()", summary)
         self.assertIn("ctx.proxy_url()", summary)
+        self.assertIn("not bare `requests`/`httpx`", summary)
         self.assertIn("`secure_credentials_request` using `secret_type='env_var'`", summary)
