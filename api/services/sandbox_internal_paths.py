@@ -1,6 +1,7 @@
 import posixpath
 from typing import Any
 
+# Keep this path in sync with sandbox_server/server/internal_paths.py.
 CUSTOM_TOOL_SQLITE_FILESPACE_PATH = "/.gobii/internal/custom_tool_agent_state.sqlite3"
 CUSTOM_TOOL_SQLITE_WORKSPACE_PATH = f"/workspace{CUSTOM_TOOL_SQLITE_FILESPACE_PATH}"
 

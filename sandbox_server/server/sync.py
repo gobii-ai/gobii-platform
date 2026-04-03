@@ -6,9 +6,9 @@ from typing import Any, Dict, Optional
 
 import requests
 
-from api.services.sandbox_internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 from sandbox_server.config import _agent_workspace, _workspace_max_bytes
 from sandbox_server.manifest import _load_manifest, _proxy_env_from_manifest, _save_manifest, _store_proxy_env
+from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 from sandbox_server.workspace import (
     _checksum_bytes,
     _decode_content,

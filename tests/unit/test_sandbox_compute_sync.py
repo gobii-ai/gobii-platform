@@ -22,6 +22,7 @@ from api.models import (
 )
 from api.services.sandbox_compute import (
     SandboxComputeService,
+    SandboxComputeUnavailable,
     SandboxSessionUpdate,
     _build_nonzero_exit_error_payload,
     _post_sync_queue_key,
@@ -33,6 +34,7 @@ from api.services.sandbox_internal_paths import (
 )
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.tasks.sandbox_compute import sync_filespace_after_call
+from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH as SANDBOX_CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 
 
 class _DummyBackend:
@@ -171,6 +173,9 @@ class SandboxComputeSyncTests(TestCase):
             with open(db_path, "rb") as handle:
                 return handle.read()
 
+    def test_custom_tool_sqlite_internal_path_matches_sandbox_server_constant(self):
+        self.assertEqual(CUSTOM_TOOL_SQLITE_FILESPACE_PATH, SANDBOX_CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
+
     def test_pull_manifest_includes_checksum_and_cursor(self):
         write_result = write_bytes_to_dir(
             agent=self.agent,
@@ -237,6 +242,36 @@ class SandboxComputeSyncTests(TestCase):
 
         session = AgentComputeSession.objects.get(agent=self.agent)
         self.assertEqual(session.last_filespace_pull_at, cursor_two)
+
+    def test_ensure_session_fails_before_pull_when_backend_returns_error_state(self):
+        class _ErrorBackend(_DummyBackend):
+            def deploy_or_resume(self, agent, session):
+                self.deploy_calls.append(
+                    {
+                        "agent_id": str(agent.id),
+                        "state": session.state,
+                    }
+                )
+                return SandboxSessionUpdate(
+                    state=AgentComputeSession.State.ERROR,
+                    pod_name="sandbox-agent-bad",
+                    namespace="gobii-pr-815",
+                )
+
+        backend = _ErrorBackend()
+        service = SandboxComputeService(backend=backend)
+
+        with patch("api.services.sandbox_compute.build_filespace_pull_manifest") as manifest_mock:
+            with self.assertRaises(SandboxComputeUnavailable) as exc_info:
+                service._ensure_session(self.agent, source="custom_tool_source_sync")
+
+        self.assertIn("state=error", str(exc_info.exception))
+        self.assertIn("sandbox-agent-bad", str(exc_info.exception))
+        manifest_mock.assert_not_called()
+        session = AgentComputeSession.objects.get(agent=self.agent)
+        self.assertEqual(session.state, AgentComputeSession.State.ERROR)
+        self.assertEqual(session.pod_name, "sandbox-agent-bad")
+        self.assertEqual(session.namespace, "gobii-pr-815")
 
     def test_pull_manifest_excludes_internal_custom_tool_sqlite_path(self):
         internal = write_bytes_to_dir(

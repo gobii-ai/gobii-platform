@@ -1218,6 +1218,12 @@ class SandboxComputeService:
             update.pod_name or session.pod_name,
             update.namespace or session.namespace,
         )
+        if session.state != AgentComputeSession.State.RUNNING:
+            raise SandboxComputeUnavailable(
+                "Sandbox session is not ready"
+                f" (state={session.state}, pod={session.pod_name or 'unknown'},"
+                f" namespace={session.namespace or 'unknown'})."
+            )
         pull_started_at = time.monotonic()
         sync_result = self._sync_workspace_pull(agent, session)
         pull_duration_ms = _elapsed_ms(pull_started_at)

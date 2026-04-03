@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from api.services.sandbox_internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
+from sandbox_server.server.internal_paths import CUSTOM_TOOL_SQLITE_FILESPACE_PATH
 from sandbox_server.sync import _download_file, _handle_sync_filespace
 
 
