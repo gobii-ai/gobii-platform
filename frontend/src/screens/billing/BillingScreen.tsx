@@ -575,7 +575,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           onCancelScheduledSeatChange={initialData.contextType === 'organization' ? handleCancelSeatSchedule : undefined}
         />
 
-        {saveError ? (
+        {saveError && !hasAnyChanges ? (
           <section
             className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700"
             role="alert"
@@ -604,6 +604,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           draft={draft}
           showActions={hasAnyChanges}
           saving={saving}
+          error={saveError}
           onSave={handleSave}
           onCancel={resetDraft}
         />

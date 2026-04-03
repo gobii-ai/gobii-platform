@@ -9,6 +9,7 @@ type SubscriptionSummaryProps = {
   draft: BillingDraftState
   showActions?: boolean
   saving?: boolean
+  error?: string | null
   onSave?: () => void
   onCancel?: () => void
 }
@@ -20,6 +21,7 @@ export function SubscriptionSummary({
   draft,
   showActions = false,
   saving = false,
+  error = null,
   onSave,
   onCancel,
 }: SubscriptionSummaryProps) {
@@ -112,6 +114,11 @@ export function SubscriptionSummary({
 
       {showActions ? (
         <div className="mt-5 space-y-3" id="billing-summary-actions">
+          {error ? (
+            <div className="rounded-2xl border border-rose-200 bg-white px-4 py-3 text-sm font-semibold text-rose-700">
+              {error}
+            </div>
+          ) : null}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
             <button
               type="button"
