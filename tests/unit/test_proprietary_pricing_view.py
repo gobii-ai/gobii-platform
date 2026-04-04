@@ -65,6 +65,26 @@ class PricingPageCtaCopyTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.build_stripe_radar_context", return_value={"publishableKey": "pk_test_pricing", "captureUrl": "/radar"})
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_includes_stripe_radar_assets_when_configured(
+        self,
+        mock_get_stripe_settings,
+        _mock_radar_context,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
+        self.assertContains(response, "stripe-radar-config")
+        self.assertContains(response, "pk_test_pricing")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
     def test_unauthenticated_pricing_cta_uses_trial_copy(self, mock_get_stripe_settings):
         mock_get_stripe_settings.return_value = SimpleNamespace(

@@ -17,6 +17,7 @@ from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
+from billing.radar import build_stripe_radar_context
 from util.waffle_flags import is_waffle_flag_active
 from util.subscription_helper import (
     get_user_plan,
@@ -59,6 +60,9 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context["stripe_radar"] = build_stripe_radar_context(
+            capture_url=reverse("pages:stripe_radar_session"),
+        )
 
         authenticated = self.request.user.is_authenticated
 

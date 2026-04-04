@@ -52,13 +52,20 @@ class StripeConfigHelperTests(TestCase):
         config.set_value("live_secret_key", "sk_live_db", is_secret=True)
         config.set_value("test_secret_key", "sk_test_db", is_secret=True)
 
-        with self.settings(STRIPE_LIVE_SECRET_KEY="sk_live_env", STRIPE_TEST_SECRET_KEY="sk_test_env"):
+        with self.settings(
+            STRIPE_LIVE_SECRET_KEY="sk_live_env",
+            STRIPE_TEST_SECRET_KEY="sk_test_env",
+            STRIPE_LIVE_PUBLISHABLE_KEY="pk_live_env",
+            STRIPE_TEST_PUBLISHABLE_KEY="pk_test_env",
+        ):
             invalidate_stripe_settings_cache()
             stripe_settings = get_stripe_settings(force_reload=True)
 
         self.assertTrue(stripe_settings.live_mode)
         self.assertEqual(stripe_settings.live_secret_key, "sk_live_env")
         self.assertEqual(stripe_settings.test_secret_key, "sk_test_env")
+        self.assertEqual(stripe_settings.live_publishable_key, "pk_live_env")
+        self.assertEqual(stripe_settings.test_publishable_key, "pk_test_env")
         self.assertEqual(stripe_settings.webhook_secret, "whsec_test")
         self.assertEqual(stripe_settings.task_meter_event_name, "task_test")
         self.assertEqual(stripe_settings.org_team_price_id, "price_org_test")
@@ -83,6 +90,7 @@ class StripeConfigHelperTests(TestCase):
         self.assertEqual(stripe_settings.org_team_task_meter_id, "meter_org_team_test")
         self.assertEqual(stripe_settings.org_team_task_meter_event_name, "task_org_team_test")
         self.assertEqual(PaymentsHelper.get_stripe_key(), "sk_live_env")
+        self.assertEqual(PaymentsHelper.get_stripe_publishable_key(), "pk_live_env")
 
         product_id = plan_module.get_plan_product_id(PlanNames.STARTUP)
         self.assertEqual(product_id, "prod_startup_test")
