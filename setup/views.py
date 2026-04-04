@@ -47,6 +47,7 @@ DEFAULT_ORCHESTRATOR_MODELS = {
     LLMConfigForm.PROVIDER_OPENROUTER: "deepseek/deepseek-v3.2",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/gpt-oss-120b",
+    LLMConfigForm.PROVIDER_AVIAN: "deepseek-v3.2",
 }
 
 DEFAULT_BROWSER_MODELS = {
@@ -54,16 +55,19 @@ DEFAULT_BROWSER_MODELS = {
     LLMConfigForm.PROVIDER_OPENROUTER: "deepseek/deepseek-v3.2",
     LLMConfigForm.PROVIDER_ANTHROPIC: "claude-sonnet-4-20250514",
     LLMConfigForm.PROVIDER_FIREWORKS: "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
+    LLMConfigForm.PROVIDER_AVIAN: "deepseek-v3.2",
 }
 
 DEFAULT_BROWSER_BASE_URLS = {
     LLMConfigForm.PROVIDER_OPENROUTER: "https://openrouter.ai/api/v1",
     LLMConfigForm.PROVIDER_FIREWORKS: "https://api.fireworks.ai/inference/v1",
+    LLMConfigForm.PROVIDER_AVIAN: "https://api.avian.io/v1",
 }
 DEFAULT_PROVIDER_API_BASES = {
     LLMConfigForm.PROVIDER_OPENAI: "https://api.openai.com/v1",
     LLMConfigForm.PROVIDER_OPENROUTER: DEFAULT_BROWSER_BASE_URLS.get(LLMConfigForm.PROVIDER_OPENROUTER, ""),
     LLMConfigForm.PROVIDER_FIREWORKS: DEFAULT_BROWSER_BASE_URLS.get(LLMConfigForm.PROVIDER_FIREWORKS, ""),
+    LLMConfigForm.PROVIDER_AVIAN: DEFAULT_BROWSER_BASE_URLS.get(LLMConfigForm.PROVIDER_AVIAN, ""),
 }
 
 ORCHESTRATOR_ENDPOINT_KEYS = {
@@ -71,6 +75,7 @@ ORCHESTRATOR_ENDPOINT_KEYS = {
     LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_deepseek_32",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic_sonnet4",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_gpt_oss_120b",
+    LLMConfigForm.PROVIDER_AVIAN: "avian_deepseek_v32",
 }
 
 BROWSER_ENDPOINT_KEYS = {
@@ -78,6 +83,7 @@ BROWSER_ENDPOINT_KEYS = {
     LLMConfigForm.PROVIDER_OPENROUTER: "openrouter_deepseek_32",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic_sonnet4",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_qwen3_235b",
+    LLMConfigForm.PROVIDER_AVIAN: "avian_deepseek_v32",
 }
 
 PROVIDER_KEY_MAP = {
@@ -85,6 +91,7 @@ PROVIDER_KEY_MAP = {
     LLMConfigForm.PROVIDER_OPENROUTER: "openrouter",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks",
+    LLMConfigForm.PROVIDER_AVIAN: "avian",
 }
 
 MODEL_PREFIXES = {
@@ -92,6 +99,7 @@ MODEL_PREFIXES = {
     LLMConfigForm.PROVIDER_OPENROUTER: "openrouter/",
     LLMConfigForm.PROVIDER_ANTHROPIC: "anthropic/",
     LLMConfigForm.PROVIDER_FIREWORKS: "fireworks_ai/",
+    LLMConfigForm.PROVIDER_AVIAN: "openai/",
 }
 
 
@@ -339,15 +347,16 @@ class SetupWizardView(View):
             provider.save()
 
             endpoint_key = ORCHESTRATOR_ENDPOINT_KEYS[provider_choice]
+            effective_api_base = api_base or DEFAULT_PROVIDER_API_BASES.get(provider_choice, "")
             endpoint = self._create_or_update_persistent_endpoint(
                 key_slug=endpoint_key,
                 provider=provider,
                 litellm_model=model,
-                api_base=api_base,
+                api_base=effective_api_base,
                 supports_tool_choice=supports_tool_choice,
                 use_parallel_tools=use_parallel_tools,
                 supports_vision=supports_vision,
-                update_api_base=bool(api_base),
+                update_api_base=bool(effective_api_base),
             )
 
         self._reset_persistent_tiers(endpoint)
