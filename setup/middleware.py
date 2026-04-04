@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - avoid import errors during migrations
 
 
 _ALLOWED_PREFIXES = (
+    "/api/",
     "/setup/",
     "/static/",
     "/favicon.ico",

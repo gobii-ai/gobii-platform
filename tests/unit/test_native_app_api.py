@@ -113,6 +113,32 @@ class NativeAppAuthAPITests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.json()["errorCode"], "PASSWORD_LOGIN_DISABLED")
 
+    @override_settings(FIRST_RUN_SETUP_ENABLED=True)
+    @patch("setup.middleware.is_initial_setup_complete", return_value=False)
+    def test_sign_in_bypasses_first_run_setup_redirect(self, _mock_setup_incomplete):
+        user = self.user_model.objects.create_user(
+            username="native-setup-login",
+            email="native-setup-login@example.com",
+            password="password123",
+        )
+        EmailAddress.objects.create(
+            user=user,
+            email=user.email,
+            verified=True,
+            primary=True,
+        )
+
+        with patch("app_api.views.Analytics.track_event"):
+            response = self.client.post(
+                "/api/app/v1/auth/sign-in/",
+                data=json.dumps({"email": user.email, "password": "password123"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertIn("tokens", response.json())
+
     def test_sign_in_refresh_and_logout_rotate_and_revoke_tokens(self):
         user = self.user_model.objects.create_user(
             username="native-login",
