@@ -31,6 +31,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY,
 )
+from billing.radar import STRIPE_RADAR_SESSION_ID_SESSION_KEY
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from api.services.pipedream_apps import PipedreamCatalogError
@@ -59,6 +60,16 @@ class HomePageTests(TestCase):
         """Basic smoke test for home page."""
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
+
+    @tag("batch_pages")
+    @patch("pages.views.build_stripe_radar_context", return_value={"publishableKey": "pk_test_home", "captureUrl": "/radar"})
+    def test_home_page_includes_stripe_radar_assets_when_configured(self, _mock_radar_context):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
+        self.assertContains(response, "stripe-radar-config")
+        self.assertContains(response, "pk_test_home")
 
     @tag("batch_pages")
     def test_home_page_shows_fish_in_both_modes(self):
@@ -753,6 +764,24 @@ class HomePageTests(TestCase):
             owner_user=user,
             owner_org=None,
         )
+
+@tag("batch_pages")
+class StripeRadarSessionCaptureTests(TestCase):
+    @tag("batch_pages")
+    def test_capture_view_stores_radar_session_id_in_session(self):
+        response = self.client.post(
+            reverse("pages:stripe_radar_session"),
+            data='{"radarSessionId":"rse_test_123"}',
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"success": True})
+        self.assertEqual(
+            self.client.session[STRIPE_RADAR_SESSION_ID_SESSION_KEY],
+            "rse_test_123",
+        )
+
 
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
