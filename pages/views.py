@@ -187,6 +187,24 @@ def _normalize_trial_days(value: int | str | None) -> int:
         return 0
 
 
+def _apply_trial_checkout_fields(checkout_kwargs: dict, *, trial_days: int) -> None:
+    if trial_days <= 0:
+        return
+
+    checkout_kwargs["billing_address_collection"] = "required"
+    checkout_kwargs["name_collection"] = {
+        "individual": {
+            "enabled": True,
+            "optional": False,
+        }
+    }
+    checkout_kwargs["custom_text"] = {
+        "after_submit": {
+            "message": "Prepaid cards are not eligible for a free trial. Subscriptions are automatically charged at the end of the trial period if not canceled."
+        }
+    }
+
+
 def _customer_has_price_subscription(customer_id: str, target_price_id: str) -> bool:
     """Check if the customer already has an active individual subscription for the price."""
     return _customer_has_price_subscription_with_cache(customer_id, target_price_id)[0]
@@ -1921,6 +1939,9 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "line_items": line_items,
             "idempotency_key": f"checkout-startup-{customer.id}-{event_id}",
         }
+
+        _apply_trial_checkout_fields(checkout_kwargs, trial_days=trial_days)
+
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
             checkout_kwargs["client_reference_id"] = rewardful_referral
@@ -2102,6 +2123,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "line_items": line_items,
             "idempotency_key": f"checkout-scale-{customer.id}-{event_id}",
         }
+        _apply_trial_checkout_fields(checkout_kwargs, trial_days=trial_days)
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
             checkout_kwargs["client_reference_id"] = rewardful_referral
