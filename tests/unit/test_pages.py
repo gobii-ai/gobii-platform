@@ -1954,6 +1954,24 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+        self.assertEqual(kwargs["billing_address_collection"], "required")
+        self.assertEqual(
+            kwargs["name_collection"],
+            {
+                "individual": {
+                    "enabled": True,
+                    "optional": False,
+                }
+            },
+        )
+        self.assertEqual(
+            kwargs["custom_text"],
+            {
+                "after_submit": {
+                    "message": "Prepaid cards are not eligible for a free trial. Subscriptions are automatically charged at the end of the trial period if not canceled."
+                }
+            },
+        )
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_startup", "quantity": 1}],
@@ -2186,6 +2204,71 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.record_checkout_context")
+    @patch("pages.views.stripe.Customer.modify")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_scale_checkout_applies_trial_checkout_fields_when_trial_configured(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        _mock_customer_modify,
+        mock_existing_subs,
+        mock_ensure,
+        _mock_trial_eligible,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="scale_trial_fields@test.com",
+            password="pw",
+            username="scale_trial_fields_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="price_scale_meter",
+            scale_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale_trial_fields")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+        mock_existing_subs.return_value = []
+        mock_ensure.return_value = (None, "absent")
+
+        resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(kwargs["billing_address_collection"], "required")
+        self.assertEqual(
+            kwargs["name_collection"],
+            {
+                "individual": {
+                    "enabled": True,
+                    "optional": False,
+                }
+            },
+        )
+        self.assertEqual(
+            kwargs["custom_text"],
+            {
+                "after_submit": {
+                    "message": "Prepaid cards are not eligible for a free trial. Subscriptions are automatically charged at the end of the trial period if not canceled."
+                }
+            },
+        )
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views._is_individual_trial_eligible", return_value=False)
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
