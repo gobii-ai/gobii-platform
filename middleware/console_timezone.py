@@ -6,7 +6,7 @@ from api.services.user_timezone import maybe_infer_user_timezone
 
 
 TIMEZONE_HEADER = "X-Gobii-Timezone"
-CONSOLE_API_PREFIX = "/console/api/"
+TIMEZONE_API_PREFIXES = ("/console/api/", "/api/app/v1/")
 
 
 class ConsoleApiTimezoneInferenceMiddleware:
@@ -21,7 +21,7 @@ class ConsoleApiTimezoneInferenceMiddleware:
 
     @staticmethod
     def _maybe_store_inferred_timezone(request: HttpRequest) -> None:
-        if not request.path.startswith(CONSOLE_API_PREFIX):
+        if not any(request.path.startswith(prefix) for prefix in TIMEZONE_API_PREFIXES):
             return
 
         user = getattr(request, "user", None)

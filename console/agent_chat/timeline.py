@@ -515,7 +515,12 @@ def _tool_icon_for(name: str | None) -> dict[str, object]:
     return data
 
 
-def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.UUID | None) -> dict:
+def _serialize_attachment(
+    att: PersistentAgentMessageAttachment,
+    agent_id: uuid.UUID | None,
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> dict:
     size_label = None
     try:
         from django.template.defaultfilters import filesizeformat
@@ -532,7 +537,7 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
         filespace_node_id = str(node.id)
     if (filespace_path or filespace_node_id) and agent_id:
         query = urlencode({"node_id": filespace_node_id} if filespace_node_id else {"path": filespace_path})
-        download_url = f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
+        download_url = f"{reverse(download_route_name, kwargs={'agent_id': agent_id})}?{query}"
     return {
         "id": str(att.id),
         "filename": att.filename,
@@ -543,7 +548,12 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
         "fileSizeLabel": size_label,
     }
 
-def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | None] | None = None) -> dict:
+def _serialize_message(
+    env: MessageEnvelope,
+    user_lookup: Mapping[int, str | None] | None = None,
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> dict:
     message = env.message
     timestamp = message.timestamp
     channel = "web"
@@ -551,7 +561,14 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         channel = message.conversation.channel
     elif message.from_endpoint_id:
         channel = message.from_endpoint.channel
-    attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
+    attachments = [
+        _serialize_attachment(
+            att,
+            message.owner_agent_id,
+            download_route_name=download_route_name,
+        )
+        for att in message.attachments.all()
+    ]
     conversation = message.conversation
     source_kind, source_label = get_message_source_metadata(message.raw_payload)
     webhook_meta = get_webhook_timeline_metadata(message.raw_payload)
@@ -649,6 +666,8 @@ _MARKDOWN_IMG_RE = re.compile(r"!\[[^\]]*]\(([^)]+)\)")
 def _resolve_tool_image_candidate(
     tool_call: PersistentAgentToolCall,
     candidate: str | Mapping[str, object] | None,
+    *,
+    download_route_name: str = "console_agent_fs_download",
 ) -> str | None:
     if isinstance(candidate, Mapping):
         raw_candidate = candidate.get("url") or candidate.get("image_url")
@@ -675,7 +694,7 @@ def _resolve_tool_image_candidate(
     if file_path:
         agent_id = tool_call.step.agent_id
         query = urlencode({"path": file_path})
-        return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
+        return f"{reverse(download_route_name, kwargs={'agent_id': agent_id})}?{query}"
 
     if normalized.startswith(("http://", "https://", "data:image/")):
         return normalized
@@ -683,7 +702,11 @@ def _resolve_tool_image_candidate(
     return None
 
 
-def _extract_tool_image_url(tool_call: PersistentAgentToolCall) -> str | None:
+def _extract_tool_image_url(
+    tool_call: PersistentAgentToolCall,
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> str | None:
     """Resolve chart/image tool outputs to an image URL suitable for timeline previews."""
     import json as _json
 
@@ -707,13 +730,22 @@ def _extract_tool_image_url(tool_call: PersistentAgentToolCall) -> str | None:
         candidate_keys = ("file", "image_url", "url", "inline_html", "inline")
 
     for key in candidate_keys:
-        resolved = _resolve_tool_image_candidate(tool_call, result.get(key))
+        resolved = _resolve_tool_image_candidate(
+            tool_call,
+            result.get(key),
+            download_route_name=download_route_name,
+        )
         if resolved:
             return resolved
     return None
 
 
-def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
+def _serialize_step_entry(
+    env: StepEnvelope,
+    labels: Mapping[str, str],
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> dict:
     step = env.step
     tool_call = env.tool_call
     tool_name = tool_call.tool_name or ""
@@ -733,7 +765,10 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         else tool_call.result,
         "status": status,
     }
-    preview_image_url = _extract_tool_image_url(tool_call)
+    preview_image_url = _extract_tool_image_url(
+        tool_call,
+        download_route_name=download_route_name,
+    )
     if preview_image_url:
         lowered_tool_name = tool_name.lower()
         if lowered_tool_name == "create_chart":
@@ -743,8 +778,20 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     return entry
 
 
-def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -> dict:
-    serialized_entries = [_serialize_step_entry(env, labels) for env in entries]
+def _build_cluster(
+    entries: Sequence[StepEnvelope],
+    labels: Mapping[str, str],
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> dict:
+    serialized_entries = [
+        _serialize_step_entry(
+            env,
+            labels,
+            download_route_name=download_route_name,
+        )
+        for env in entries
+    ]
     earliest = entries[0]
     latest = entries[-1]
     return {
@@ -1329,6 +1376,7 @@ def fetch_timeline_window(
     cursor: str | None = None,
     direction: TimelineDirection = "initial",
     limit: int = DEFAULT_PAGE_SIZE,
+    download_route_name: str = "console_agent_fs_download",
 ) -> TimelineWindow:
     limit = max(1, min(limit, MAX_PAGE_SIZE))
     cursor_payload = CursorPayload.decode(cursor)
@@ -1368,16 +1416,34 @@ def fetch_timeline_window(
             cluster_buffer.append(env)
             continue
         if cluster_buffer:
-            timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
+            timeline_events.append(
+                _build_cluster(
+                    cluster_buffer,
+                    tool_label_map,
+                    download_route_name=download_route_name,
+                )
+            )
             cluster_buffer = []
         if isinstance(env, ThinkingEnvelope):
             timeline_events.append(_serialize_thinking(env))
         elif isinstance(env, KanbanEnvelope):
             timeline_events.append(serialize_persisted_kanban_event(env, agent_name))
         else:
-            timeline_events.append(_serialize_message(env, user_lookup))
+            timeline_events.append(
+                _serialize_message(
+                    env,
+                    user_lookup,
+                    download_route_name=download_route_name,
+                )
+            )
     if cluster_buffer:
-        timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
+        timeline_events.append(
+            _build_cluster(
+                cluster_buffer,
+                tool_label_map,
+                download_route_name=download_route_name,
+            )
+        )
 
     oldest_cursor = truncated[0].cursor if truncated else None
     newest_cursor = truncated[-1].cursor if truncated else None
@@ -1399,9 +1465,13 @@ def fetch_timeline_window(
     )
 
 
-def serialize_message_event(message: PersistentAgentMessage) -> dict:
+def serialize_message_event(
+    message: PersistentAgentMessage,
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> dict:
     envelope = _envelop_messages([message])[0]
-    return _serialize_message(envelope)
+    return _serialize_message(envelope, download_route_name=download_route_name)
 
 
 def serialize_thinking_event(completion: PersistentAgentCompletion) -> dict | None:
@@ -1411,14 +1481,22 @@ def serialize_thinking_event(completion: PersistentAgentCompletion) -> dict | No
     return _serialize_thinking(envelopes[0])
 
 
-def serialize_step_entry(step: PersistentAgentStep) -> dict:
+def serialize_step_entry(
+    step: PersistentAgentStep,
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> dict:
     envelopes = _envelop_steps([step])
     if not envelopes:
         raise ValueError("Step does not include a tool call")
     label_map = _load_tool_label_map(
         [envelopes[0].tool_call.tool_name] if envelopes[0].tool_call else []
     )
-    return _serialize_step_entry(envelopes[0], label_map)
+    return _serialize_step_entry(
+        envelopes[0],
+        label_map,
+        download_route_name=download_route_name,
+    )
 
 
 def compute_processing_status(agent: PersistentAgent) -> bool:
@@ -1426,14 +1504,22 @@ def compute_processing_status(agent: PersistentAgent) -> bool:
     return build_processing_snapshot(agent).active
 
 
-def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:
+def build_tool_cluster_from_steps(
+    steps: Sequence[PersistentAgentStep],
+    *,
+    download_route_name: str = "console_agent_fs_download",
+) -> dict:
     envelopes = _envelop_steps(steps)
     if not envelopes:
         raise ValueError("No tool calls available")
     label_map = _load_tool_label_map(
         env.tool_call.tool_name for env in envelopes if env.tool_call
     )
-    return _build_cluster(envelopes, label_map)
+    return _build_cluster(
+        envelopes,
+        label_map,
+        download_route_name=download_route_name,
+    )
 
 
 def serialize_persisted_kanban_event(env: KanbanEnvelope, agent_name: str) -> dict:

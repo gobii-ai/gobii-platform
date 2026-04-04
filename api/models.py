@@ -9911,6 +9911,40 @@ class PersistentAgentWebSession(models.Model):
     def __str__(self) -> str:
         return f"WebSession<{self.agent_id}:{self.user_id}:{self.session_key}>"
 
+
+class NativeAppSession(models.Model):
+    """Opaque token pair for authenticated native Gobii app sessions."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="native_app_sessions",
+    )
+    access_token_hash = models.CharField(max_length=64)
+    refresh_token_hash = models.CharField(max_length=64)
+    access_expires_at = models.DateTimeField(db_index=True)
+    refresh_expires_at = models.DateTimeField(db_index=True)
+    revoked_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    last_used_at = models.DateTimeField(default=timezone.now)
+    device_name = models.CharField(max_length=128, blank=True)
+    device_platform = models.CharField(max_length=64, blank=True)
+    app_version = models.CharField(max_length=64, blank=True)
+    user_agent = models.CharField(max_length=512, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["user", "last_used_at"], name="native_app_user_seen_idx"),
+            models.Index(fields=["revoked_at", "access_expires_at"], name="native_app_access_idx"),
+            models.Index(fields=["revoked_at", "refresh_expires_at"], name="native_app_refresh_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"NativeAppSession<{self.user_id}:{self.id}>"
+
+
 class PersistentAgentCompletion(models.Model):
     """Represents a single LLM completion within a persistent agent run."""
 

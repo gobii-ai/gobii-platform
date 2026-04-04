@@ -7,6 +7,9 @@ class ApiDocsUrlTests(TestCase):
         "/api/schema/swagger-ui/",
         "/api/schema/redoc/",
         "/api/docs/",
+        "/api/app/v1/schema/swagger-ui/",
+        "/api/app/v1/schema/redoc/",
+        "/api/app/v1/docs/",
     )
     _docs_redirect_url = "https://docs.gobii.ai/api-reference"
 

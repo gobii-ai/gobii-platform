@@ -248,6 +248,16 @@ API_REFERENCE_DOCS_URL = "https://docs.gobii.ai/api-reference"
 
 _schema_swagger_view = SpectacularSwaggerView.as_view(url_name="schema")
 _schema_redoc_view = SpectacularRedocView.as_view(url_name="schema")
+_app_schema_view = SpectacularAPIView.as_view(
+    urlconf="app_api.urls",
+    custom_settings={
+        "SCHEMA_PATH_PREFIX": r"/api/app/v[0-9]",
+        "SCHEMA_PATH_PREFIX_TRIM": True,
+        "SERVE_INCLUDE_SCHEMA": False,
+    },
+)
+_app_schema_swagger_view = SpectacularSwaggerView.as_view(url_name="app-schema")
+_app_schema_redoc_view = SpectacularRedocView.as_view(url_name="app-schema")
 
 
 def schema_swagger_view(request, *args, **kwargs):
@@ -260,6 +270,24 @@ def schema_redoc_view(request, *args, **kwargs):
     if settings.GOBII_PROPRIETARY_MODE:
         return redirect(API_REFERENCE_DOCS_URL)
     return _schema_redoc_view(request, *args, **kwargs)
+
+
+def app_schema_view(request, *args, **kwargs):
+    if settings.GOBII_PROPRIETARY_MODE:
+        return redirect(API_REFERENCE_DOCS_URL)
+    return _app_schema_view(request, *args, **kwargs)
+
+
+def app_schema_swagger_view(request, *args, **kwargs):
+    if settings.GOBII_PROPRIETARY_MODE:
+        return redirect(API_REFERENCE_DOCS_URL)
+    return _app_schema_swagger_view(request, *args, **kwargs)
+
+
+def app_schema_redoc_view(request, *args, **kwargs):
+    if settings.GOBII_PROPRIETARY_MODE:
+        return redirect(API_REFERENCE_DOCS_URL)
+    return _app_schema_redoc_view(request, *args, **kwargs)
 
 urlpatterns = [
     path("setup/", include("setup.urls")),
@@ -574,15 +602,20 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/schema/swagger-ui/", schema_swagger_view, name="schema-swagger-ui"),
     path("api/schema/redoc/", schema_redoc_view, name="schema-redoc"),
-    
+
     # Legacy API docs URL (keeping for backward compatibility)
     path("api/docs/", schema_swagger_view, name="api_docs"),
+    path("api/app/v1/schema/", app_schema_view, name="app-schema"),
+    path("api/app/v1/schema/swagger-ui/", app_schema_swagger_view, name="app-schema-swagger-ui"),
+    path("api/app/v1/schema/redoc/", app_schema_redoc_view, name="app-schema-redoc"),
+    path("api/app/v1/docs/", app_schema_swagger_view, name="app_api_docs"),
 
     # Evals & Simulations
     path("eval/", include("api.evals.urls", namespace="evals")),
 
     # API
     path("api/v1/", include("api.urls")),
+    path("api/app/v1/", include(("app_api.urls", "app_api"), namespace="app_api")),
 
     # Stripe integration
     path("stripe/", include("djstripe.urls", namespace="djstripe")),

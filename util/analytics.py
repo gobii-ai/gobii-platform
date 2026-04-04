@@ -103,6 +103,9 @@ class AnalyticsEvent(StrEnum):
     WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'
     WEB_CHAT_SESSION_ENDED = 'Web Chat Session Ended'
     WEB_CHAT_MESSAGE_SENT = 'Web Chat Message Sent'
+    APP_CHAT_SESSION_STARTED = 'App Chat Session Started'
+    APP_CHAT_SESSION_ENDED = 'App Chat Session Ended'
+    APP_CHAT_MESSAGE_SENT = 'App Chat Message Sent'
     SIGNUP_PREVIEW_ENTERED = 'Signup Preview Entered'
     SIGNUP_PREVIEW_AGENT_CREATED = 'Signup Preview Agent Created'
     SIGNUP_PREVIEW_PAUSED_AFTER_FIRST_REPLY = 'Signup Preview Paused After First Reply'
@@ -335,6 +338,7 @@ class AnalyticsCTAs(StrEnum):
 class AnalyticsSource(StrEnum):
     API = 'API'
     WEB = 'Web'
+    APP = 'App'
     NA = 'N/A'
     AGENT = 'Agent'
     EMAIL = 'Email'
