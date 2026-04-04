@@ -74,6 +74,7 @@ class LLMConfigForm(forms.Form):
     PROVIDER_OPENROUTER = "openrouter"
     PROVIDER_ANTHROPIC = "anthropic"
     PROVIDER_FIREWORKS = "fireworks"
+    PROVIDER_AVIAN = "avian"
     PROVIDER_CUSTOM = "custom"
 
     PROVIDER_CHOICES = (
@@ -81,6 +82,7 @@ class LLMConfigForm(forms.Form):
         (PROVIDER_OPENROUTER, _("OpenRouter")),
         (PROVIDER_ANTHROPIC, _("Anthropic")),
         (PROVIDER_FIREWORKS, _("Fireworks.ai")),
+        (PROVIDER_AVIAN, _("Avian")),
         (PROVIDER_CUSTOM, _("Custom OpenAI-compatible endpoint")),
     )
 
