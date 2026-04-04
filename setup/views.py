@@ -347,15 +347,16 @@ class SetupWizardView(View):
             provider.save()
 
             endpoint_key = ORCHESTRATOR_ENDPOINT_KEYS[provider_choice]
+            effective_api_base = api_base or DEFAULT_PROVIDER_API_BASES.get(provider_choice, "")
             endpoint = self._create_or_update_persistent_endpoint(
                 key_slug=endpoint_key,
                 provider=provider,
                 litellm_model=model,
-                api_base=api_base,
+                api_base=effective_api_base,
                 supports_tool_choice=supports_tool_choice,
                 use_parallel_tools=use_parallel_tools,
                 supports_vision=supports_vision,
-                update_api_base=bool(api_base),
+                update_api_base=bool(effective_api_base),
             )
 
         self._reset_persistent_tiers(endpoint)

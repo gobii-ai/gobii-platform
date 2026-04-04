@@ -20,6 +20,11 @@ def seed_avian_provider(apps, schema_editor):
     )
 
 
+def remove_avian_provider(apps, schema_editor):
+    LLMProvider = apps.get_model("api", "LLMProvider")
+    LLMProvider.objects.filter(key="avian").delete()
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -27,5 +32,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunPython(seed_avian_provider, reverse_code=migrations.RunPython.noop),
+        migrations.RunPython(seed_avian_provider, reverse_code=remove_avian_provider),
     ]
