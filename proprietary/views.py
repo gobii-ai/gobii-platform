@@ -4,11 +4,9 @@ from smtplib import SMTPException
 from email.utils import formataddr
 
 from anymail.exceptions import AnymailAPIError
-from billing.plan_resolver import get_plan_context_for_version
-from django.apps import apps
+from billing.plan_resolver import get_active_public_plan_context
 from django.conf import settings
 from django.contrib import sitemaps
-from django.db import OperationalError, ProgrammingError
 from django.http import HttpResponse, Http404, JsonResponse
 from django.template.loader import render_to_string
 from django.templatetags.static import static
@@ -32,7 +30,7 @@ from constants.feature_flags import (
     SUPPORT_INTERCOM,
 )
 from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
-from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
+from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings
 from waffle import flag_is_active, get_waffle_flag_model
@@ -47,40 +45,6 @@ class ProprietaryModeRequiredMixin:
         if not settings.GOBII_PROPRIETARY_MODE:
             raise Http404()
         return super().dispatch(request, *args, **kwargs)
-
-
-def _get_public_plan_context(plan_code: str) -> dict:
-    """Resolve the active public plan version and fall back to legacy plan config."""
-    fallback = dict(get_plan_config(plan_code) or {})
-    plan_slug = PLAN_SLUG_BY_LEGACY_CODE.get(plan_code, plan_code)
-
-    try:
-        PlanVersion = apps.get_model("api", "PlanVersion")
-        plan_version = (
-            PlanVersion.objects
-            .select_related("plan")
-            .filter(
-                plan__slug__iexact=plan_slug,
-                plan__is_org=False,
-                is_active_for_new_subs=True,
-            )
-            .first()
-        )
-    except (LookupError, OperationalError, ProgrammingError):
-        return fallback
-
-    if plan_version is None:
-        return fallback
-
-    try:
-        plan_context = get_plan_context_for_version(plan_version)
-    except (LookupError, OperationalError, ProgrammingError):
-        return fallback
-
-    if plan_context.get("monthly_task_credits") is None:
-        return fallback
-
-    return plan_context
 
 class PricingView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "pricing.html"
@@ -205,8 +169,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             limit = PLAN_CONFIG.get(plan_name, {}).get("max_contacts_per_agent")
             return f"{limit} contacts/agent" if limit is not None else "Contacts/agent: —"
 
-        startup_plan_context = _get_public_plan_context(PlanNames.STARTUP)
-        scale_plan_context = _get_public_plan_context(PlanNames.SCALE)
+        startup_plan_context = get_active_public_plan_context(PlanNames.STARTUP)
+        scale_plan_context = get_active_public_plan_context(PlanNames.SCALE)
         startup_task_credits = int(startup_plan_context.get("monthly_task_credits") or 0)
         scale_task_credits = int(scale_plan_context.get("monthly_task_credits") or 0)
         startup_task_credits_display = f"{startup_task_credits:,}"

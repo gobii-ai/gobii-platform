@@ -2,6 +2,8 @@ import logging
 from typing import Any
 
 from django.apps import apps
+from django.core.exceptions import AppRegistryNotReady
+from django.db import OperationalError, ProgrammingError
 
 from config.plans import PLAN_CONFIG
 from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
@@ -245,3 +247,38 @@ def get_plan_context_for_version(plan_version) -> dict[str, Any]:
     legacy_code = getattr(plan_version, "legacy_plan_code", None)
     plan_context = _plan_context_base(plan_version, legacy_code)
     return _apply_entitlements(plan_context, plan_version)
+
+
+def get_active_public_plan_context(plan_code: str, *, is_org: bool = False) -> dict[str, Any]:
+    """Return the active public plan context for a plan, falling back to static config."""
+    normalized_plan_code = _normalize_code(plan_code) or PlanNames.FREE
+    fallback = dict(PLAN_CONFIG.get(normalized_plan_code, {}))
+    plan_slug = PLAN_SLUG_BY_LEGACY_CODE.get(normalized_plan_code, normalized_plan_code)
+
+    try:
+        PlanVersion = _get_model("api", "PlanVersion")
+        plan_version = (
+            PlanVersion.objects
+            .select_related("plan")
+            .filter(
+                plan__slug__iexact=plan_slug,
+                plan__is_org=is_org,
+                is_active_for_new_subs=True,
+            )
+            .first()
+        )
+    except (AppRegistryNotReady, LookupError, OperationalError, ProgrammingError):
+        return fallback
+
+    if plan_version is None:
+        return fallback
+
+    try:
+        plan_context = get_plan_context_for_version(plan_version)
+    except (AppRegistryNotReady, LookupError, OperationalError, ProgrammingError):
+        return fallback
+
+    if plan_context.get("monthly_task_credits") is None and fallback.get("monthly_task_credits") is not None:
+        return fallback
+
+    return plan_context

@@ -50,6 +50,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     build_checkout_flow_metadata,
 )
+from billing.plan_resolver import get_active_public_plan_context
 from billing.churnkey import build_churnkey_cancel_flow_config
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
@@ -2167,6 +2168,8 @@ def get_user_plan_api(request):
     from constants.plans import PlanNames
 
     startup_trial_days, scale_trial_days = _get_checkout_trial_days()
+    startup_task_credits = int(get_active_public_plan_context(PlanNames.STARTUP).get("monthly_task_credits") or 0)
+    scale_task_credits = int(get_active_public_plan_context(PlanNames.SCALE).get("monthly_task_credits") or 0)
     trial_eligible = _is_checkout_trial_eligible(request.user, request)
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
     cta_start_free_trial = _is_cta_start_free_trial_enabled(request)
@@ -2193,6 +2196,8 @@ def get_user_plan_api(request):
             'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
             'startup_trial_days': startup_trial_days,
             'scale_trial_days': scale_trial_days,
+            'startup_task_credits': startup_task_credits,
+            'scale_task_credits': scale_task_credits,
             'trial_eligible': trial_eligible,
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
@@ -2209,6 +2214,8 @@ def get_user_plan_api(request):
             'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
             'startup_trial_days': startup_trial_days,
             'scale_trial_days': scale_trial_days,
+            'startup_task_credits': startup_task_credits,
+            'scale_task_credits': scale_task_credits,
             'trial_eligible': trial_eligible,
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'cta_start_free_trial': cta_start_free_trial,
@@ -6119,6 +6126,12 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["is_collaborator"] = self.is_collaborator
         context["startup_trial_days"] = startup_trial_days
         context["scale_trial_days"] = scale_trial_days
+        context["startup_task_credits"] = int(
+            get_active_public_plan_context(PlanNames.STARTUP).get("monthly_task_credits") or 0
+        )
+        context["scale_task_credits"] = int(
+            get_active_public_plan_context(PlanNames.SCALE).get("monthly_task_credits") or 0
+        )
         context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user, self.request)
         context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
         context["cta_pricing_cancel_text_under_btn"] = _is_cta_pricing_cancel_text_under_btn_enabled(self.request)

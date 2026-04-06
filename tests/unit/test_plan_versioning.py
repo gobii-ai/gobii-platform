@@ -11,6 +11,7 @@ from api.models import (
     UserBilling,
 )
 from billing.plan_resolver import (
+    get_active_public_plan_context,
     get_owner_plan_context,
     get_plan_context_for_version,
     get_plan_version_by_price_id,
@@ -81,6 +82,26 @@ class PlanVersionResolverTests(TestCase):
         resolved = get_plan_version_by_product_id("prod_startup_fallback", kind="base")
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.id, self.plan_version.id)
+
+    def test_active_public_plan_context_prefers_entitlements(self):
+        entitlement_task_credits, _ = EntitlementDefinition.objects.get_or_create(
+            key="monthly_task_credits",
+            defaults={
+                "display_name": "Monthly task credits",
+                "description": "Included monthly task credits.",
+                "value_type": "int",
+                "unit": "credits",
+            },
+        )
+        PlanVersionEntitlement.objects.update_or_create(
+            plan_version=self.plan_version,
+            entitlement=entitlement_task_credits,
+            defaults={"value_int": 750},
+        )
+
+        plan_context = get_active_public_plan_context(PlanNames.STARTUP)
+
+        self.assertEqual(plan_context.get("monthly_task_credits"), 750)
 
     def test_resolves_shared_price_id_with_context(self):
         org_plan = Plan.objects.create(slug="org_team", is_org=True, is_active=True)

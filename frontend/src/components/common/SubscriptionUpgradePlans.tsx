@@ -4,6 +4,7 @@ import { Check, ChevronRight, Rocket, Sparkles } from 'lucide-react'
 import {
   isContinuationUpgradeModalSource,
   useSubscriptionStore,
+  type PlanTaskCreditsByPlan,
   type PlanTier,
 } from '../../stores/subscriptionStore'
 import { appendReturnTo } from '../../util/returnTo'
@@ -16,7 +17,6 @@ type PlanConfig = {
   price: string
   priceSubtext: string
   description: string
-  features: string[]
   highlight?: boolean
   badge?: string
 }
@@ -29,14 +29,6 @@ const PLANS: PlanConfig[] = [
     priceSubtext: '/month',
     description: 'Smart Power for Everyday Work',
     badge: 'Popular',
-    features: [
-      '500 tasks included',
-      'Unlimited always-on agents',
-      '10 contacts per agent',
-      'Agents never expire',
-      'Priority support',
-      '$0.10 per extra task',
-    ],
   },
   {
     id: 'scale',
@@ -46,16 +38,36 @@ const PLANS: PlanConfig[] = [
     description: 'Maximum Intelligence for Reliable Results',
     highlight: true,
     badge: 'Best Value',
-    features: [
-      '10,000 tasks included',
-      'Unlimited always-on agents',
-      '50 contacts per agent',
-      'Agents never expire',
-      'Priority work queue',
-      '$0.04 per extra task',
-    ],
   },
 ]
+
+function formatTaskCredits(count: number): string {
+  return count.toLocaleString()
+}
+
+function getPlanFeatures(planId: PlanTier, planTaskCreditsByPlan: PlanTaskCreditsByPlan): string[] {
+  if (planId === 'startup') {
+    const taskCredits = formatTaskCredits(planTaskCreditsByPlan.startup)
+    return [
+      `${taskCredits} tasks included`,
+      'Unlimited always-on agents',
+      '10 contacts per agent',
+      'Agents never expire',
+      'Priority support',
+      '$0.10 per extra task',
+    ]
+  }
+
+  const taskCredits = formatTaskCredits(planTaskCreditsByPlan.scale)
+  return [
+    `${taskCredits} tasks included`,
+    'Unlimited always-on agents',
+    '50 contacts per agent',
+    'Agents never expire',
+    'Priority work queue',
+    '$0.04 per extra task',
+  ]
+}
 
 type SubscriptionUpgradePlansProps = {
   currentPlan: PlanTier | null
@@ -78,6 +90,7 @@ export function SubscriptionUpgradePlans({
 }: SubscriptionUpgradePlansProps) {
   const {
     trialDaysByPlan,
+    planTaskCreditsByPlan,
     trialEligible,
     pricingModalAlmostFullScreen,
     ctaPricingCancelTextUnderBtn,
@@ -165,6 +178,7 @@ export function SubscriptionUpgradePlans({
             const isCurrent = isCurrentPlan(plan.id)
             const canUpgrade = canSelectPlan(plan.id)
             const featuresExpanded = isFeatureListExpanded(plan.id)
+            const features = getPlanFeatures(plan.id, planTaskCreditsByPlan)
             const trialDays = plan.id === 'startup' ? trialDaysByPlan.startup : trialDaysByPlan.scale
             const subscribeLabel = `Subscribe to ${plan.name}`
             const ctaLabel = useTrialCopy
@@ -248,7 +262,7 @@ export function SubscriptionUpgradePlans({
                     ) : null}
                     {featuresExpanded ? (
                       <ul className={collapseFeaturesByDefault ? 'mt-3 space-y-2.5' : 'space-y-2.5'}>
-                        {plan.features.map((feature, idx) => (
+                        {features.map((feature, idx) => (
                           <li
                             key={idx}
                             className="flex items-center gap-2.5 text-sm text-slate-600"
