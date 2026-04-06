@@ -19,6 +19,7 @@ function buildInitialSubscriptionState() {
     pricingModalAlmostFullScreen: true,
     ctaPricingCancelTextUnderBtn: false,
     ctaStartFreeTrial: true,
+    ctaUnlockAgentCopy: false,
     ctaPickAPlan: false,
     ctaContinueAgentBtn: false,
     ctaNoChargeDuringTrial: false,
@@ -54,5 +55,32 @@ describe('SubscriptionUpgradePlans mobile layout', () => {
     expect(scalePlan).toHaveClass('sm:h-full')
     expect(scalePlan).not.toHaveClass('h-full')
     expect(screen.getAllByRole('button', { name: /start free trial/i })).toHaveLength(2)
+  })
+
+  it('keeps the default trial copy when no unlock variant is requested', () => {
+    render(
+      <SubscriptionUpgradePlans
+        currentPlan="free"
+        onUpgrade={vi.fn()}
+        source="trial_onboarding"
+      />,
+    )
+
+    expect(screen.getAllByRole('button', { name: /start free trial/i })).toHaveLength(2)
+    expect(screen.queryByText('No charge today. Cancel anytime.')).not.toBeInTheDocument()
+  })
+
+  it('uses the unlock copy only when the unlock variant is requested', () => {
+    render(
+      <SubscriptionUpgradePlans
+        currentPlan="free"
+        onUpgrade={vi.fn()}
+        source="signup_preview_panel"
+        trialCopyVariant="unlock_agent"
+      />,
+    )
+
+    expect(screen.getAllByRole('button', { name: /start for free/i })).toHaveLength(2)
+    expect(screen.getAllByText('No charge today. Cancel anytime.')).toHaveLength(2)
   })
 })

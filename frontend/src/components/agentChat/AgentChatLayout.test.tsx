@@ -119,6 +119,7 @@ function buildInitialSubscriptionState() {
     pricingModalAlmostFullScreen: true,
     ctaPricingCancelTextUnderBtn: false,
     ctaStartFreeTrial: true,
+    ctaUnlockAgentCopy: false,
     ctaPickAPlan: true,
     ctaContinueAgentBtn: false,
     ctaNoChargeDuringTrial: true,

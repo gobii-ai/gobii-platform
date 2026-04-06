@@ -480,6 +480,7 @@ from constants.feature_flags import (
     CTA_PICK_A_PLAN,
     CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
     CTA_START_FREE_TRIAL,
+    CTA_UNLOCK_AGENT_COPY,
     ORGANIZATIONS,
     PRICING_MODAL_ALMOST_FULL_SCREEN,
 )
@@ -652,6 +653,11 @@ def _is_cta_pricing_cancel_text_under_btn_enabled(request: HttpRequest | None) -
 def _is_cta_start_free_trial_enabled(request: HttpRequest | None) -> bool:
     """Default to disabled until the rollout is explicitly enabled."""
     return is_waffle_flag_active(CTA_START_FREE_TRIAL, request, default=False)
+
+
+def _is_cta_unlock_agent_copy_enabled(request: HttpRequest | None) -> bool:
+    """Default to disabled until the rollout is explicitly enabled."""
+    return is_waffle_flag_active(CTA_UNLOCK_AGENT_COPY, request, default=False)
 
 
 def _is_cta_pick_a_plan_enabled(request: HttpRequest | None) -> bool:
@@ -2171,6 +2177,7 @@ def get_user_plan_api(request):
     pricing_modal_almost_full_screen = _is_pricing_modal_almost_full_screen_enabled(request)
     cta_start_free_trial = _is_cta_start_free_trial_enabled(request)
     cta_pricing_cancel_text_under_btn = _is_cta_pricing_cancel_text_under_btn_enabled(request)
+    cta_unlock_agent_copy = _is_cta_unlock_agent_copy_enabled(request)
     cta_pick_a_plan = _is_cta_pick_a_plan_enabled(request)
     cta_continue_agent_btn = _is_cta_continue_agent_btn_enabled(request)
     cta_no_charge_during_trial = _is_cta_no_charge_during_trial_enabled(request)
@@ -2195,8 +2202,9 @@ def get_user_plan_api(request):
             'scale_trial_days': scale_trial_days,
             'trial_eligible': trial_eligible,
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
-            'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
             'cta_start_free_trial': cta_start_free_trial,
+            'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
+            'cta_unlock_agent_copy': cta_unlock_agent_copy,
             'cta_pick_a_plan': cta_pick_a_plan,
             'cta_continue_agent_btn': cta_continue_agent_btn,
             'cta_no_charge_during_trial': cta_no_charge_during_trial,
@@ -2213,6 +2221,7 @@ def get_user_plan_api(request):
             'pricing_modal_almost_full_screen': pricing_modal_almost_full_screen,
             'cta_start_free_trial': cta_start_free_trial,
             'cta_pricing_cancel_text_under_btn': cta_pricing_cancel_text_under_btn,
+            'cta_unlock_agent_copy': cta_unlock_agent_copy,
             'cta_pick_a_plan': cta_pick_a_plan,
             'cta_continue_agent_btn': cta_continue_agent_btn,
             'cta_no_charge_during_trial': cta_no_charge_during_trial,
@@ -6123,6 +6132,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
         context["cta_pricing_cancel_text_under_btn"] = _is_cta_pricing_cancel_text_under_btn_enabled(self.request)
         context["cta_start_free_trial"] = _is_cta_start_free_trial_enabled(self.request)
+        context["cta_unlock_agent_copy"] = _is_cta_unlock_agent_copy_enabled(self.request)
         context["cta_pick_a_plan"] = _is_cta_pick_a_plan_enabled(self.request)
         context["cta_continue_agent_btn"] = _is_cta_continue_agent_btn_enabled(self.request)
         context["cta_no_charge_during_trial"] = _is_cta_no_charge_during_trial_enabled(self.request)
