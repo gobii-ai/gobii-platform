@@ -108,12 +108,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             if not show_trial_copy:
                 return None
             if cta_unlock_agent_copy:
-                if days <= 0:
-                    return None
                 return "No charge today. Cancel anytime."
             if not (cta_pricing_cancel_text_under_btn or cta_no_charge_during_trial):
-                return None
-            if days <= 0:
                 return None
             if cta_no_charge_during_trial:
                 return f"No charge if you cancel during the {days}-day trial. Takes 30 seconds."
