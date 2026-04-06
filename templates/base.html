@@ -51,6 +51,9 @@
   <meta name="theme-color" content="#0ea5e9">
 
   <script src="https://unpkg.com/lucide@0.546.0"></script>
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+  <script src="https://js.stripe.com/dahlia/stripe.js"></script>
+  {% endif %}
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       if (window.lucide && typeof window.lucide.createIcons === 'function') {

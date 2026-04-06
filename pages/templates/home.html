@@ -8,7 +8,6 @@
   {{ block.super }}
   <link rel="stylesheet" href="{% static 'css/home_hero_fish.css' %}">
   <meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">
-  {% include "partials/_stripe_radar.html" %}
   {% if immersive_app_assets %}
     {% for href in immersive_app_assets.styles %}
       <link rel="preload" as="style" href="{{ href }}">
@@ -1063,18 +1062,14 @@
         gateModal.setAttribute('aria-hidden', 'false')
       }
 
-	      if (gateUpgrade) {
-	        gateUpgrade.addEventListener('click', () => {
-	          if (upgradeUrl) {
-	            if (window.GobiiStripeRadar && typeof window.GobiiStripeRadar.captureThenNavigate === 'function') {
-	              window.GobiiStripeRadar.captureThenNavigate(upgradeUrl, { target: '_top' })
-	            } else {
-	              window.open(upgradeUrl, '_top')
-	            }
-	          }
-	          closeGate()
-	        })
-	      }
+      if (gateUpgrade) {
+        gateUpgrade.addEventListener('click', () => {
+          if (upgradeUrl) {
+            window.open(upgradeUrl, '_top')
+          }
+          closeGate()
+        })
+      }
 
       if (gateAddPack) {
         gateAddPack.addEventListener('click', () => {

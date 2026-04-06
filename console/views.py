@@ -52,7 +52,6 @@ from billing.checkout_metadata import (
 )
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from billing.churnkey import build_churnkey_cancel_flow_config
-from billing.radar import build_stripe_radar_context
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.signup_preview import user_can_access_signup_preview_agent
@@ -1459,9 +1458,6 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
     def get(self, request, *args, **kwargs):
         context = super().get_context_data(**kwargs)
         context["extra_tasks_default_max_tasks"] = EXTRA_TASKS_DEFAULT_MAX_TASKS
-        context["stripe_radar"] = build_stripe_radar_context(
-            capture_url=reverse("pages:stripe_radar_session"),
-        )
 
         def _serialize_addon_context(addon_context: dict) -> dict[str, object]:
             if not addon_context:

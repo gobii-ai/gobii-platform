@@ -24,8 +24,6 @@ class StripeSettings:
     live_mode: bool
     live_secret_key: Optional[str]
     test_secret_key: Optional[str]
-    live_publishable_key: Optional[str]
-    test_publishable_key: Optional[str]
     webhook_secret: Optional[str]
     startup_price_id: str
     startup_trial_days: int
@@ -117,8 +115,6 @@ def _env_defaults() -> StripeSettings:
         live_mode=getattr(settings, "STRIPE_LIVE_MODE", False),
         live_secret_key=getattr(settings, "STRIPE_LIVE_SECRET_KEY", None),
         test_secret_key=getattr(settings, "STRIPE_TEST_SECRET_KEY", None),
-        live_publishable_key=getattr(settings, "STRIPE_LIVE_PUBLISHABLE_KEY", None),
-        test_publishable_key=getattr(settings, "STRIPE_TEST_PUBLISHABLE_KEY", None),
         webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
         startup_trial_days=env.int("STRIPE_STARTUP_TRIAL_DAYS", default=0),

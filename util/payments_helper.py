@@ -37,24 +37,3 @@ class PaymentsHelper:
         if not key:
             logger.warning("Stripe requested but secret key missing for %s mode", "live" if stripe.live_mode else "test")
         return key
-
-    @staticmethod
-    def get_stripe_publishable_key():
-        """Return the publishable Stripe key for the active environment."""
-        status = stripe_status()
-        if not status.enabled:
-            logger.debug("Stripe publishable key requested while integration disabled: %s", status.reason)
-            return None
-
-        stripe = get_stripe_settings()
-        if stripe.live_mode:
-            key = stripe.live_publishable_key
-        else:
-            key = stripe.test_publishable_key
-
-        if not key:
-            logger.warning(
-                "Stripe requested but publishable key missing for %s mode",
-                "live" if stripe.live_mode else "test",
-            )
-        return key

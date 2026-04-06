@@ -1,7 +1,6 @@
 from datetime import timezone, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from types import SimpleNamespace
-import json
 import uuid
 
 from django.http.response import JsonResponse
@@ -45,7 +44,6 @@ from billing.checkout_metadata import (
 )
 from billing.checkout_context import record_checkout_context
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
-from billing.radar import build_stripe_radar_context, store_stripe_radar_session
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -711,10 +709,6 @@ class HomePage(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context["stripe_radar"] = build_stripe_radar_context(
-            capture_url=reverse("pages:stripe_radar_session"),
-        )
-
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 

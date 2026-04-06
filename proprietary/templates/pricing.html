@@ -6,7 +6,6 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="Compare Gobii's Pro, Scale, and Enterprise plans to scale always-on pretrained workers with transparent pricing.">
-  {% include "partials/_stripe_radar.html" %}
   {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
   <script>
     (function () {
@@ -305,15 +304,11 @@
       btn.addEventListener("click", closeModal);
     });
 
-	    confirmBtn?.addEventListener("click", () => {
-	      if (pendingHref) {
-	        if (window.GobiiStripeRadar && typeof window.GobiiStripeRadar.captureThenNavigate === "function") {
-	          window.GobiiStripeRadar.captureThenNavigate(pendingHref);
-	          return;
-	        }
-	        window.location.href = pendingHref;
-	      }
-	    });
+    confirmBtn?.addEventListener("click", () => {
+      if (pendingHref) {
+        window.location.href = pendingHref;
+      }
+    });
 
     const shouldConfirm = (targetPlan) => {
       if (!currentPaid) return false;
@@ -323,23 +318,19 @@
       return paidPlans.has(targetPlan);
     };
 
-	    document.querySelectorAll(".plan-cta").forEach(link => {
-	      link.addEventListener("click", (e) => {
-	        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
-	          return;
-	        }
-	        const targetPlan = (link.dataset.planCode || "").toLowerCase();
-	        const targetName = link.dataset.planName || "this plan";
-	        if (!shouldConfirm(targetPlan)) {
-	          if (window.GobiiStripeRadar && typeof window.GobiiStripeRadar.captureThenNavigate === "function") {
-	            e.preventDefault();
-	            window.GobiiStripeRadar.captureThenNavigate(link.href);
-	          }
-	          return;
-	        }
+    document.querySelectorAll(".plan-cta").forEach(link => {
+      link.addEventListener("click", (e) => {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+          return;
+        }
+        const targetPlan = (link.dataset.planCode || "").toLowerCase();
+        const targetName = link.dataset.planName || "this plan";
+        if (!shouldConfirm(targetPlan)) {
+          return;
+        }
 
-	        e.preventDefault();
-        pendingHref = link.getAttribute("href");
+        e.preventDefault();
+	        pendingHref = link.getAttribute("href");
 
         if (titleEl) titleEl.textContent = `Switch to ${targetName}`;
         if (bodyEl) {

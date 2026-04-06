@@ -18,6 +18,9 @@
     <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/apple-touch-icon.png' %}" />
   {% endif %}
   <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+  <script src="https://js.stripe.com/dahlia/stripe.js"></script>
+  {% endif %}
   {% if fish_collateral_enabled %}
     <link rel="preload" as="image" href="{% static 'images/gobii_fish.png' %}" />
   {% else %}
