@@ -227,15 +227,7 @@ function normalizePlan(plan: unknown): PlanTier | null {
   return null
 }
 
-function normalizeTrialDays(value: unknown): number {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric)) {
-    return 0
-  }
-  return Math.max(0, Math.trunc(numeric))
-}
-
-function normalizeTaskCredits(value: unknown, defaultValue: number): number {
+function normalizeNonNegativeInteger(value: unknown, defaultValue = 0): number {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) {
     return defaultValue
@@ -255,15 +247,15 @@ function normalizeBoolean(value: unknown, defaultValue = false): boolean {
 
 function normalizeTrialDaysByPlan(payload: UserPlanPayload | null | undefined): TrialDaysByPlan {
   return {
-    startup: normalizeTrialDays(payload?.startup_trial_days),
-    scale: normalizeTrialDays(payload?.scale_trial_days),
+    startup: normalizeNonNegativeInteger(payload?.startup_trial_days),
+    scale: normalizeNonNegativeInteger(payload?.scale_trial_days),
   }
 }
 
 function normalizePlanTaskCreditsByPlan(payload: UserPlanPayload | null | undefined): PlanTaskCreditsByPlan {
   return {
-    startup: normalizeTaskCredits(payload?.startup_task_credits, 500),
-    scale: normalizeTaskCredits(payload?.scale_task_credits, 10000),
+    startup: normalizeNonNegativeInteger(payload?.startup_task_credits, 500),
+    scale: normalizeNonNegativeInteger(payload?.scale_task_credits, 10000),
   }
 }
 
@@ -376,12 +368,12 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   const planAttr = mountElement.dataset.userPlan
   const trialEligibleAttr = mountElement.dataset.trialEligible
   const trialDaysByPlan: TrialDaysByPlan = {
-    startup: normalizeTrialDays(mountElement.dataset.startupTrialDays),
-    scale: normalizeTrialDays(mountElement.dataset.scaleTrialDays),
+    startup: normalizeNonNegativeInteger(mountElement.dataset.startupTrialDays),
+    scale: normalizeNonNegativeInteger(mountElement.dataset.scaleTrialDays),
   }
   const planTaskCreditsByPlan: PlanTaskCreditsByPlan = {
-    startup: normalizeTaskCredits(mountElement.dataset.startupTaskCredits, 500),
-    scale: normalizeTaskCredits(mountElement.dataset.scaleTaskCredits, 10000),
+    startup: normalizeNonNegativeInteger(mountElement.dataset.startupTaskCredits, 500),
+    scale: normalizeNonNegativeInteger(mountElement.dataset.scaleTaskCredits, 10000),
   }
 
   useSubscriptionStore.getState().setTrialDaysByPlan(trialDaysByPlan)

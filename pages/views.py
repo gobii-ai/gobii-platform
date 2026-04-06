@@ -37,7 +37,7 @@ from billing.checkout_metadata import (
     build_checkout_flow_metadata,
     clear_checkout_customer_metadata,
 )
-from billing.plan_resolver import get_active_public_plan_context
+from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -1647,9 +1647,7 @@ class PaidPlanLanding(LoginRequiredMixin, TemplateView):
         plan_slug = self.kwargs.get('plan', 'startup')
         
         # Plan-specific copy
-        startup_task_credits = int(
-            get_active_public_plan_context(PlanNames.STARTUP).get("monthly_task_credits") or 0
-        )
+        startup_task_credits = get_active_public_plan_monthly_task_credits(PlanNames.STARTUP)
         plan_info = {
             'startup': {
                 'name': 'Pro',

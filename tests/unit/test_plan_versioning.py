@@ -103,6 +103,25 @@ class PlanVersionResolverTests(TestCase):
 
         self.assertEqual(plan_context.get("monthly_task_credits"), 750)
 
+    def test_active_public_plan_context_falls_back_for_missing_task_credits(self):
+        entitlement_task_credits, _ = EntitlementDefinition.objects.get_or_create(
+            key="monthly_task_credits",
+            defaults={
+                "display_name": "Monthly task credits",
+                "description": "Included monthly task credits.",
+                "value_type": "int",
+                "unit": "credits",
+            },
+        )
+        PlanVersionEntitlement.objects.filter(
+            plan_version=self.plan_version,
+            entitlement=entitlement_task_credits,
+        ).delete()
+
+        plan_context = get_active_public_plan_context(PlanNames.STARTUP)
+
+        self.assertEqual(plan_context.get("monthly_task_credits"), 500)
+
     def test_resolves_shared_price_id_with_context(self):
         org_plan = Plan.objects.create(slug="org_team", is_org=True, is_active=True)
         org_version = PlanVersion.objects.create(

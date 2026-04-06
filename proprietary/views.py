@@ -4,7 +4,7 @@ from smtplib import SMTPException
 from email.utils import formataddr
 
 from anymail.exceptions import AnymailAPIError
-from billing.plan_resolver import get_active_public_plan_context
+from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from django.conf import settings
 from django.contrib import sitemaps
 from django.http import HttpResponse, Http404, JsonResponse
@@ -169,10 +169,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             limit = PLAN_CONFIG.get(plan_name, {}).get("max_contacts_per_agent")
             return f"{limit} contacts/agent" if limit is not None else "Contacts/agent: —"
 
-        startup_plan_context = get_active_public_plan_context(PlanNames.STARTUP)
-        scale_plan_context = get_active_public_plan_context(PlanNames.SCALE)
-        startup_task_credits = int(startup_plan_context.get("monthly_task_credits") or 0)
-        scale_task_credits = int(scale_plan_context.get("monthly_task_credits") or 0)
+        startup_task_credits = get_active_public_plan_monthly_task_credits(PlanNames.STARTUP)
+        scale_task_credits = get_active_public_plan_monthly_task_credits(PlanNames.SCALE)
         startup_task_credits_display = f"{startup_task_credits:,}"
         scale_task_credits_display = f"{scale_task_credits:,}"
 

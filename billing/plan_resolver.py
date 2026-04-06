@@ -278,7 +278,12 @@ def get_active_public_plan_context(plan_code: str, *, is_org: bool = False) -> d
     except (AppRegistryNotReady, LookupError, OperationalError, ProgrammingError):
         return fallback
 
-    if plan_context.get("monthly_task_credits") is None and fallback.get("monthly_task_credits") is not None:
-        return fallback
+    merged = dict(fallback)
+    merged.update(plan_context)
+    return merged
 
-    return plan_context
+
+def get_active_public_plan_monthly_task_credits(plan_code: str, *, is_org: bool = False) -> int:
+    """Return included monthly task credits for the active public plan."""
+    plan_context = get_active_public_plan_context(plan_code, is_org=is_org)
+    return int(plan_context.get("monthly_task_credits") or 0)
