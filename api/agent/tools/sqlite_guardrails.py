@@ -107,10 +107,10 @@ def _grep_context(string: Optional[str], pattern: str, context_chars: int = 100)
         return None
 
 
-def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 50, max_matches: int = 10) -> Optional[str]:
+def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 120, max_matches: int = 10) -> Optional[str]:
     r"""Find all pattern matches with surrounding context, as JSON array.
 
-    Usage: SELECT ctx.value FROM json_each(grep_context_all(col, 'pattern', 60, 10)) AS ctx
+    Usage: SELECT ctx.value FROM json_each(grep_context_all(col, 'pattern', 120, 10)) AS ctx
     Returns: JSON array of context snippets, usable with json_each()
     """
     import json as json_module

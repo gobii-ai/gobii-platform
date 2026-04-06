@@ -74,6 +74,10 @@ SHORT_RESULT_ID_MIN_LEN = 6
 SHORT_RESULT_ID_MAX_LEN = 12
 
 
+def _is_scrape_as_markdown_tool(tool_name: str) -> bool:
+    return tool_name.endswith("scrape_as_markdown")
+
+
 @dataclass(frozen=True)
 class ToolCallResultRecord:
     step_id: str
@@ -191,7 +195,19 @@ def prepare_tool_results_for_prompt(
             stored_in_db=stored_in_db,
             context_hint=context_hint,
         )
-        preview_source = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
+        if _is_scrape_as_markdown_tool(record.tool_name) and stored_in_db:
+            meta_text += (
+                f"\nSCRAPE MARKDOWN: result_text already contains the plain markdown body."
+                f"\nIf you need the original MCP envelope field, use "
+                f"json_extract(result_json,'$.result') FROM __tool_results WHERE result_id='{result_id}'"
+            )
+
+        preview_source = (
+            stored_text
+            if stored_text is not None
+            else analysis.prepared_text if analysis and analysis.prepared_text is not None
+            else result_text
+        )
         preview_text, is_inline = _build_prompt_preview(
             preview_source,
             meta["bytes"],
@@ -600,18 +616,23 @@ def _summarize_result(
     result_json = truncated_text if is_json and not is_truncated else None
     result_text_store = truncated_text  # Always set for robust querying
 
-    # For http_request results, extract the content field directly into result_text
-    # so agents can read it without needing json_extract(result_json, '$.content')
-    if tool_name == "http_request" and is_json and not is_truncated:
+    # Flatten common wrapper fields into result_text when the useful payload is a
+    # text body nested inside a JSON envelope. Keep result_json intact so agents
+    # can still access the original structured result when needed.
+    if is_json and not is_truncated:
         try:
             parsed = json.loads(truncated_text)
-            if isinstance(parsed, dict) and "content" in parsed:
-                content = parsed["content"]
-                if isinstance(content, str):
-                    result_text_store = content
-                elif content is not None:
-                    # Content is structured data (dict/list) - serialize it
-                    result_text_store = json.dumps(content, ensure_ascii=False)
+            content = None
+            if isinstance(parsed, dict):
+                if tool_name == "http_request" and "content" in parsed:
+                    content = parsed["content"]
+                elif _is_scrape_as_markdown_tool(tool_name) and "result" in parsed:
+                    content = parsed["result"]
+
+            if isinstance(content, str):
+                result_text_store = content
+            elif content is not None:
+                result_text_store = json.dumps(content, ensure_ascii=False)
         except Exception:
             pass  # Keep original on any error
 

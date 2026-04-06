@@ -359,6 +359,7 @@ result_text   → always populated (use this to inspect unknown/plain-text outpu
 result_json   → populated when is_json=1 (prefer this for json_extract/json_each extraction)
 analysis_json → optional hints (not the data)
 if is_json=1  → extract from result_json before falling back to regexp_extract(result_text)
+scrape_as_markdown → prefer json_extract(result_json,'$.result') when you want the original markdown field; result_text may already be flattened to that markdown for easier grep/substr work
 do not invent columns; only use those listed above
 
 # __messages (special table)
@@ -473,6 +474,7 @@ when:
 do:
   # Known API (HN, Reddit, GitHub, RSS, crypto, weather)? → http_request
   # Otherwise → search_tools("<domain>", will_continue_work=true)
+  # If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous
 
 then:
   if found extractors → M2
@@ -509,8 +511,8 @@ when:
   - Will scrape multiple pages
 
 do:
-  # First, enable search tools if needed
-  search_tools(query="web search", will_continue_work=true)
+  # First, discover the best search/extractor tools for this domain if needed
+  search_tools(query="<site/platform/domain or capability>", will_continue_work=true)
   # Then use the enabled search tool
   <search_tool>(query="<topic>", will_continue_work=true)
 
@@ -553,17 +555,17 @@ do:
   mcp_brightdata_scrape_as_markdown(url="<url>", will_continue_work=true)
 
   # Extract patterns with context:
-  sqlite_batch(sql="
+    sqlite_batch(sql="
     SELECT regexp_extract(ctx.value, '<pattern>') as val,
            ctx.value as context
     FROM __tool_results,
       json_each(grep_context_all(
-        json_extract(result_json,'$.excerpt'), '<pattern>', 60, 15)) ctx
+        json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)) ctx
     WHERE result_id='<id>'", will_continue_work=true)
 
 then:
   if found data → M5 (store in table)
-  if nothing found → try wider context (80 chars) or different pattern
+  if nothing found → try wider context (200 chars) or different pattern
   if page empty/gated → try different URL
 ```
 
@@ -571,10 +573,10 @@ Pattern reference:
 ```
 | Goal    | Pattern                          | Context |
 |---------|----------------------------------|---------|
-| Prices  | \\$[\\d,]+                       | 80 chars |
-| Emails  | [a-zA-Z0-9._%+-]+@[a-z.]+        | 60 chars |
-| Funding | \\$[\\d.]+[BMK]                  | 60 chars |
-| Tech    | (Python|React|Kubernetes)        | 80 chars |
+| Prices  | \\$[\\d,]+                       | 120 chars |
+| Emails  | [a-zA-Z0-9._%+-]+@[a-z.]+        | 100 chars |
+| Funding | \\$[\\d.]+[BMK]                  | 120 chars |
+| Tech    | (Python|React|Kubernetes)        | 120 chars |
 ```
 
 ---
@@ -2275,7 +2277,7 @@ def build_prompt_context(
         "Deterministic, repeatable fetch/transform/load, sync/import, or structured data collection work is an especially strong trigger "
         "for a custom tool that writes to SQLite, then queries the result with sqlite_batch, even if the user did not explicitly ask for a custom tool or mention SQLite. "
         "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
-        "Query __tool_results and __files with sqlite_batch (not read_file). "
+        "Use sqlite_batch to query __tool_results and __files when you need prior tool outputs or recent file metadata. "
         "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
         "Do not poll __tool_results/__files waiting for browser task completion: those completions wake you with new unified history events. "
         "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
@@ -3049,7 +3051,9 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
         "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "
         "subprocess curl honors proxy env vars automatically. For tool-to-tool calls, use ctx.call_tool() as-is; it handles the internal bridge transport for you. "
-        "Secrets (API keys, DB credentials, auth tokens) are available as env vars via `os.environ`. "
+        "Only env-var secrets are available inside sandboxed code via `os.environ`. "
+        "Domain-scoped credential secrets are for placeholders and website/domain auth flows; they are NOT injected into sandboxed custom tools, python_exec, run_command, or MCP server processes. "
+        "If sandboxed code needs a secret, request or use the env_var version with the exact env key shown in the secrets block. "
         "ALWAYS use secrets for sensitive values — never hardcode credentials. "
         "If a custom tool, `python_exec`, `run_command`, or MCP server needs a secret in `os.environ`, request it with "
         "`secure_credentials_request` using `secret_type='env_var'`. "
@@ -4522,7 +4526,7 @@ def _get_system_instruction(
         "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
         "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
-        "Use it before raw web search when the task looks like a known structured domain, and otherwise when unsure. "
+        "Use it before broad web search when the task may map to a known site/platform/domain tool, and whenever you're unsure which tool family fits best. "
 
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"
@@ -4545,7 +4549,7 @@ def _get_system_instruction(
         "```\n"
         "# Research task\n"
         "User: 'Research Acme Corp'\n"
-        "Turn 1: → search_tools('company info')     # NO TEXT\n"
+        "Turn 1: → search_tools('company research, people, profiles, company pages')     # NO TEXT\n"
         "Turn 2: → mcp_brightdata_scrape_as_markdown('...')        # NO TEXT\n"
         "Turn 3: → sqlite_batch('CREATE TABLE...')  # NO TEXT\n"
         "Turn 4: '## Acme Corp\\n| Founded |...'    # FINDINGS → speak\n"
@@ -5790,13 +5794,13 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
     lines: list[str] = []
 
     if available_credentials:
-        lines.append("These domain-scoped credential secrets are available to you:")
+        lines.append("These domain-scoped credential secrets are available to you (placeholders/web auth only; not readable via os.environ in sandbox code):")
         lines.extend(_format_credential_secrets(available_credentials, is_pending=False))
 
     if available_env_vars:
         if lines:
             lines.append("")
-        lines.append("These global sandbox environment variable secrets are available to you:")
+        lines.append("These global sandbox environment variable secrets are available to you (these ARE readable via os.environ in sandbox code):")
         lines.extend(_format_env_var_secrets(available_env_vars, is_pending=False))
 
     if pending_credentials or pending_env_vars:
@@ -5804,12 +5808,12 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
             lines.append("")
         lines.append("Pending credential requests (user has not provided these yet):")
         if pending_credentials:
-            lines.append("Pending domain-scoped credentials:")
+            lines.append("Pending domain-scoped credentials (placeholders/web auth only; not readable via os.environ in sandbox code):")
             lines.extend(_format_credential_secrets(pending_credentials, is_pending=True))
         if pending_env_vars:
             if pending_credentials:
                 lines.append("")
-            lines.append("Pending sandbox environment variables:")
+            lines.append("Pending sandbox environment variables (these will be readable via os.environ in sandbox code):")
             lines.extend(_format_env_var_secrets(pending_env_vars, is_pending=True))
         lines.append("")
         lines.append(

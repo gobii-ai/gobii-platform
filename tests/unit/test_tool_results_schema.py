@@ -366,6 +366,42 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIsNotNone(analysis.decode_info)
         self.assertIn("base64", analysis.decode_info.steps)
 
+    def test_scrape_as_markdown_stores_plain_markdown_in_result_text(self):
+        markdown = "# Gemma 4\n\nBenchmark table"
+        payload = {"status": "success", "result": markdown}
+
+        meta, stored_json, stored_text, analysis = tool_results._summarize_result(
+            json.dumps(payload), "test-id", "mcp_brightdata_scrape_as_markdown"
+        )
+
+        self.assertTrue(meta["is_json"])
+        self.assertIsNotNone(stored_json)
+        self.assertEqual(json.loads(stored_json)["result"], markdown)
+        self.assertEqual(stored_text, markdown)
+        self.assertIsNotNone(analysis)
+
+    def test_scrape_as_markdown_preview_uses_plain_markdown_and_meta_guidance(self):
+        markdown = "# Gemma 4\n\nBenchmark table"
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-scrape",
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({"status": "success", "result": markdown}),
+        )
+
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-scrape",
+        )
+
+        prompt_info = info.get("step-scrape")
+        self.assertIsNotNone(prompt_info)
+        self.assertIn("SCRAPE MARKDOWN:", prompt_info.meta)
+        self.assertIn("json_extract(result_json,'$.result')", prompt_info.meta)
+        self.assertIn("# Gemma 4", prompt_info.preview_text)
+        self.assertNotIn('"status":"success"', prompt_info.preview_text)
+
 
 @tag("batch_tool_results")
 class MetaTextFormattingTests(SimpleTestCase):

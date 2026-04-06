@@ -150,10 +150,12 @@ class GetSecretsBlockTests(TestCase):
 
         result = _get_secrets_block(self.agent)
 
-        self.assertIn("These domain-scoped credential secrets are available to you:", result)
-        self.assertIn("These global sandbox environment variable secrets are available to you:", result)
-        self.assertIn("Pending domain-scoped credentials:", result)
-        self.assertIn("Pending sandbox environment variables:", result)
+        self.assertIn("These domain-scoped credential secrets are available to you", result)
+        self.assertIn("not readable via os.environ", result)
+        self.assertIn("These global sandbox environment variable secrets are available to you", result)
+        self.assertIn("these ARE readable via os.environ", result)
+        self.assertIn("Pending domain-scoped credentials", result)
+        self.assertIn("Pending sandbox environment variables", result)
         self.assertIn("Key: api_credential", result)
         self.assertIn("Env Key: SANDBOX_TOKEN", result)
         self.assertNotIn("credential-secret-value", result)

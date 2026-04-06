@@ -2539,6 +2539,10 @@ class MCPToolExecutorsTests(TestCase):
         self.assertIn("query", tool_def["function"]["parameters"]["properties"])
         self.assertIn("will_continue_work", tool_def["function"]["parameters"]["properties"])
         self.assertIn("query", tool_def["function"]["parameters"]["required"])
+        description = tool_def["function"]["description"]
+        self.assertIn("structured extractors", description)
+        self.assertIn("web search", description)
+        self.assertNotIn("NOT for web search", description)
         
     @patch('api.agent.tools.search_tools.search_tools')
     def test_execute_search_tools(self, mock_search):
