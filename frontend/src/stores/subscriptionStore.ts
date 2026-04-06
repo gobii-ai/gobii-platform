@@ -44,6 +44,7 @@ type SubscriptionState = {
   pricingModalAlmostFullScreen: boolean
   ctaPricingCancelTextUnderBtn: boolean
   ctaStartFreeTrial: boolean
+  ctaUnlockAgentCopy: boolean
   ctaPickAPlan: boolean
   ctaContinueAgentBtn: boolean
   ctaNoChargeDuringTrial: boolean
@@ -56,6 +57,7 @@ type SubscriptionState = {
   setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen: boolean) => void
   setCtaPricingCancelTextUnderBtn: (ctaPricingCancelTextUnderBtn: boolean) => void
   setCtaStartFreeTrial: (ctaStartFreeTrial: boolean) => void
+  setCtaUnlockAgentCopy: (ctaUnlockAgentCopy: boolean) => void
   setCtaPickAPlan: (ctaPickAPlan: boolean) => void
   setCtaContinueAgentBtn: (ctaContinueAgentBtn: boolean) => void
   setCtaNoChargeDuringTrial: (ctaNoChargeDuringTrial: boolean) => void
@@ -78,6 +80,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   pricingModalAlmostFullScreen: true,
   ctaPricingCancelTextUnderBtn: false,
   ctaStartFreeTrial: false,
+  ctaUnlockAgentCopy: false,
   ctaPickAPlan: false,
   ctaContinueAgentBtn: false,
   ctaNoChargeDuringTrial: false,
@@ -90,6 +93,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   setPricingModalAlmostFullScreen: (pricingModalAlmostFullScreen) => set({ pricingModalAlmostFullScreen }),
   setCtaPricingCancelTextUnderBtn: (ctaPricingCancelTextUnderBtn) => set({ ctaPricingCancelTextUnderBtn }),
   setCtaStartFreeTrial: (ctaStartFreeTrial) => set({ ctaStartFreeTrial }),
+  setCtaUnlockAgentCopy: (ctaUnlockAgentCopy) => set({ ctaUnlockAgentCopy }),
   setCtaPickAPlan: (ctaPickAPlan) => set({ ctaPickAPlan }),
   setCtaContinueAgentBtn: (ctaContinueAgentBtn) => set({ ctaContinueAgentBtn }),
   setCtaNoChargeDuringTrial: (ctaNoChargeDuringTrial) => set({ ctaNoChargeDuringTrial }),
@@ -135,6 +139,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
         pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
         ctaPricingCancelTextUnderBtn: normalizeBoolean(data?.cta_pricing_cancel_text_under_btn),
         ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
+        ctaUnlockAgentCopy: normalizeBoolean(data?.cta_unlock_agent_copy),
         ctaPickAPlan: normalizeBoolean(data?.cta_pick_a_plan),
         ctaContinueAgentBtn: normalizeBoolean(data?.cta_continue_agent_btn),
         ctaNoChargeDuringTrial: normalizeBoolean(data?.cta_no_charge_during_trial),
@@ -161,6 +166,7 @@ type UserPlanPayload = {
   pricing_modal_almost_full_screen?: boolean | string | null
   cta_pricing_cancel_text_under_btn?: boolean | string | null
   cta_start_free_trial?: boolean | string | null
+  cta_unlock_agent_copy?: boolean | string | null
   cta_pick_a_plan?: boolean | string | null
   cta_continue_agent_btn?: boolean | string | null
   cta_no_charge_during_trial?: boolean | string | null
@@ -177,6 +183,7 @@ type UserPlanResponse = {
   pricingModalAlmostFullScreen: boolean
   ctaPricingCancelTextUnderBtn: boolean
   ctaStartFreeTrial: boolean
+  ctaUnlockAgentCopy: boolean
   ctaPickAPlan: boolean
   ctaContinueAgentBtn: boolean
   ctaNoChargeDuringTrial: boolean
@@ -195,6 +202,7 @@ type HydratedSubscriptionState = Pick<
   | 'pricingModalAlmostFullScreen'
   | 'ctaPricingCancelTextUnderBtn'
   | 'ctaStartFreeTrial'
+  | 'ctaUnlockAgentCopy'
   | 'ctaPickAPlan'
   | 'ctaContinueAgentBtn'
   | 'ctaNoChargeDuringTrial'
@@ -262,6 +270,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         pricingModalAlmostFullScreen: true,
         ctaPricingCancelTextUnderBtn: false,
         ctaStartFreeTrial: false,
+        ctaUnlockAgentCopy: false,
         ctaPickAPlan: false,
         ctaContinueAgentBtn: false,
         ctaNoChargeDuringTrial: false,
@@ -279,6 +288,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       pricingModalAlmostFullScreen: normalizeBoolean(data?.pricing_modal_almost_full_screen, true),
       ctaPricingCancelTextUnderBtn: normalizeBoolean(data?.cta_pricing_cancel_text_under_btn),
       ctaStartFreeTrial: normalizeBoolean(data?.cta_start_free_trial),
+      ctaUnlockAgentCopy: normalizeBoolean(data?.cta_unlock_agent_copy),
       ctaPickAPlan: normalizeBoolean(data?.cta_pick_a_plan),
       ctaContinueAgentBtn: normalizeBoolean(data?.cta_continue_agent_btn),
       ctaNoChargeDuringTrial: normalizeBoolean(data?.cta_no_charge_during_trial),
@@ -296,6 +306,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         pricingModalAlmostFullScreen: true,
         ctaPricingCancelTextUnderBtn: false,
         ctaStartFreeTrial: false,
+        ctaUnlockAgentCopy: false,
         ctaPickAPlan: false,
         ctaContinueAgentBtn: false,
         ctaNoChargeDuringTrial: false,
@@ -312,6 +323,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       pricingModalAlmostFullScreen: true,
       ctaPricingCancelTextUnderBtn: false,
       ctaStartFreeTrial: false,
+      ctaUnlockAgentCopy: false,
       ctaPickAPlan: false,
       ctaContinueAgentBtn: false,
       ctaNoChargeDuringTrial: false,
@@ -335,6 +347,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   const pricingModalAlmostFullScreenAttr = mountElement.dataset.pricingModalAlmostFullScreen
   const ctaPricingCancelTextUnderBtnAttr = mountElement.dataset.ctaPricingCancelTextUnderBtn
   const ctaStartFreeTrialAttr = mountElement.dataset.ctaStartFreeTrial
+  const ctaUnlockAgentCopyAttr = mountElement.dataset.ctaUnlockAgentCopy
   const ctaPickAPlanAttr = mountElement.dataset.ctaPickAPlan
   const ctaContinueAgentBtnAttr = mountElement.dataset.ctaContinueAgentBtn
   const ctaNoChargeDuringTrialAttr = mountElement.dataset.ctaNoChargeDuringTrial
@@ -355,6 +368,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     normalizeBoolean(ctaPricingCancelTextUnderBtnAttr),
   )
   useSubscriptionStore.getState().setCtaStartFreeTrial(normalizeBoolean(ctaStartFreeTrialAttr))
+  useSubscriptionStore.getState().setCtaUnlockAgentCopy(normalizeBoolean(ctaUnlockAgentCopyAttr))
   useSubscriptionStore.getState().setCtaPickAPlan(normalizeBoolean(ctaPickAPlanAttr))
   useSubscriptionStore.getState().setCtaContinueAgentBtn(normalizeBoolean(ctaContinueAgentBtnAttr))
   useSubscriptionStore.getState().setCtaNoChargeDuringTrial(normalizeBoolean(ctaNoChargeDuringTrialAttr))
@@ -378,6 +392,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       pricingModalAlmostFullScreen: normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
       ctaPricingCancelTextUnderBtn: normalizeBoolean(ctaPricingCancelTextUnderBtnAttr),
       ctaStartFreeTrial: normalizeBoolean(ctaStartFreeTrialAttr),
+      ctaUnlockAgentCopy: normalizeBoolean(ctaUnlockAgentCopyAttr),
       ctaPickAPlan: normalizeBoolean(ctaPickAPlanAttr),
       ctaContinueAgentBtn: normalizeBoolean(ctaContinueAgentBtnAttr),
       ctaNoChargeDuringTrial: normalizeBoolean(ctaNoChargeDuringTrialAttr),
@@ -397,6 +412,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     pricingModalAlmostFullScreen,
     ctaPricingCancelTextUnderBtn,
     ctaStartFreeTrial,
+    ctaUnlockAgentCopy,
     ctaPickAPlan,
     ctaContinueAgentBtn,
     ctaNoChargeDuringTrial,
@@ -411,6 +427,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       pricingModalAlmostFullScreen,
       ctaPricingCancelTextUnderBtn,
       ctaStartFreeTrial,
+      ctaUnlockAgentCopy,
       ctaPickAPlan,
       ctaContinueAgentBtn,
       ctaNoChargeDuringTrial,

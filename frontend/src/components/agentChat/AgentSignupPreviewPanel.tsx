@@ -1,23 +1,34 @@
 import type { SignupPreviewState } from '../../types/agentRoster'
 import type { PlanTier } from '../../stores/subscriptionStore'
+import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 
 type AgentSignupPreviewPanelProps = {
   status: SignupPreviewState
+  agentName?: string | null
   currentPlan: PlanTier | null
   onUpgrade?: (plan: PlanTier, source?: string) => void
 }
 
 export function AgentSignupPreviewPanel({
   status,
+  agentName,
   currentPlan,
   onUpgrade,
 }: AgentSignupPreviewPanelProps) {
+  const ctaUnlockAgentCopy = useSubscriptionStore((state) => state.ctaUnlockAgentCopy)
   const isPaused = status === 'awaiting_signup_completion'
-  const title = isPaused ? 'Keep your agent going' : 'Your agent is working'
-  const body = isPaused
-    ? 'Start a plan to continue working.'
-    : 'Start a plan to talk to your agent.'
+  const resolvedAgentName = agentName?.trim() || 'Your agent'
+  const title = ctaUnlockAgentCopy
+    ? `${resolvedAgentName} is ready.`
+    : (isPaused ? 'Keep your agent going' : 'Your agent is working')
+  const body = ctaUnlockAgentCopy
+    ? 'Unlock your agent now.'
+    : (
+        isPaused
+          ? 'Start a plan to continue working.'
+          : 'Start a plan to talk to your agent.'
+      )
 
   return (
     <section className="px-1.5 pb-1.5 pt-1.5 sm:px-3 sm:pb-3 sm:pt-2 lg:px-6">
@@ -34,6 +45,7 @@ export function AgentSignupPreviewPanel({
               variant="inline"
               source="signup_preview_panel"
               collapseFeaturesByDefault
+              trialCopyVariant={ctaUnlockAgentCopy ? 'unlock_agent' : 'default'}
             />
           </div>
         </div>

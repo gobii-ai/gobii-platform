@@ -25,6 +25,10 @@ CTA_PRICING_CANCEL_TEXT_UNDER_BTN = "cta_pricing_cancel_text_under_btn"
 # Controls whether pricing trial CTA buttons omit the explicit day count.
 CTA_START_FREE_TRIAL = "cta_start_free_trial"
 
+# Controls whether immersive signup preview and /pricing use the
+# bundled "unlock your agent" CTA copy refresh.
+CTA_UNLOCK_AGENT_COPY = "cta_unlock_agent_copy"
+
 # Controls whether pricing trial modals use a softer completion-style title.
 CTA_PICK_A_PLAN = "cta_pick_a_plan"
 

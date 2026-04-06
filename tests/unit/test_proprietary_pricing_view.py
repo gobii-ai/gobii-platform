@@ -114,6 +114,31 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertContains(response, "Cancel anytime during the 14-day trial")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_unauthenticated_pricing_uses_unlock_copy_when_flag_enabled(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag("cta_unlock_agent_copy", active=True):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Start for Free")
+        self.assertEqual(plans[PlanNames.SCALE]["cta"], "Start for Free")
+        self.assertEqual(plans[PlanNames.STARTUP]["trial_cancel_text"], "No charge today. Cancel anytime.")
+        self.assertEqual(plans[PlanNames.SCALE]["trial_cancel_text"], "No charge today. Cancel anytime.")
+        self.assertContains(response, "No charge today. Cancel anytime.")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.get_stripe_settings")
@@ -144,6 +169,40 @@ class PricingPageCtaCopyTests(TestCase):
         }
         self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Subscribe to Pro")
         self.assertEqual(plans[PlanNames.SCALE]["cta"], "Subscribe to Scale")
+        self.assertIsNone(plans[PlanNames.STARTUP]["trial_cancel_text"])
+        self.assertIsNone(plans[PlanNames.SCALE]["trial_cancel_text"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.STARTUP})
+    @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=True))
+    @patch("proprietary.views.get_stripe_settings")
+    def test_paid_plan_pricing_keeps_non_trial_cta_copy_when_unlock_flag_enabled(
+        self,
+        mock_get_stripe_settings,
+        _mock_trial_eligibility,
+        _mock_get_user_plan,
+    ):
+        user = get_user_model().objects.create_user(
+            username="pricingstartup@example.com",
+            email="pricingstartup@example.com",
+            password="pw",
+        )
+        self.client.force_login(user)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag("cta_unlock_agent_copy", active=True):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Current Plan")
+        self.assertEqual(plans[PlanNames.SCALE]["cta"], "Upgrade to Scale")
         self.assertIsNone(plans[PlanNames.STARTUP]["trial_cancel_text"])
         self.assertIsNone(plans[PlanNames.SCALE]["trial_cancel_text"])
 

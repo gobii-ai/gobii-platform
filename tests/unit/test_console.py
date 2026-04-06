@@ -618,6 +618,7 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(payload.get("pricing_modal_almost_full_screen"))
         self.assertFalse(payload.get("cta_pricing_cancel_text_under_btn"))
         self.assertFalse(payload.get("cta_start_free_trial"))
+        self.assertFalse(payload.get("cta_unlock_agent_copy"))
         self.assertFalse(payload.get("cta_pick_a_plan"))
         self.assertFalse(payload.get("cta_continue_agent_btn"))
         self.assertFalse(payload.get("cta_no_charge_during_trial"))
@@ -683,6 +684,37 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload.get("cta_start_free_trial"))
+
+    @tag("batch_console_agents")
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
+    @patch("console.views.get_stripe_settings")
+    def test_user_plan_api_includes_cta_unlock_agent_copy_flag_state(
+        self,
+        mock_get_stripe_settings,
+        _mock_trial_eligible,
+    ):
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="cta_unlock_agent_copy",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=14,
+            scale_trial_days=30,
+        )
+
+        response = self.client.get(reverse("get_user_plan"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload.get("cta_unlock_agent_copy"))
 
     @tag("batch_console_agents")
     @patch("console.views.get_stripe_settings")
@@ -882,12 +914,14 @@ class ConsoleViewsTest(TestCase):
         mock_trial_eligibility.assert_not_called()
 
     @tag("batch_console_agents")
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
     @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
     def test_agent_chat_shell_exposes_trial_days_in_data_attributes(
         self,
         mock_get_stripe_settings,
         _mock_trial_eligible,
+        _mock_personal_chat_access,
     ):
         from api.models import BrowserUseAgent, PersistentAgent
 
@@ -915,6 +949,7 @@ class ConsoleViewsTest(TestCase):
         self.assertContains(response, 'data-trial-eligible="true"')
         self.assertContains(response, 'data-pricing-modal-almost-full-screen="true"')
         self.assertContains(response, 'data-cta-start-free-trial="false"')
+        self.assertContains(response, 'data-cta-unlock-agent-copy="false"')
         self.assertContains(response, 'data-cta-pricing-cancel-text-under-btn="false"')
         self.assertContains(response, 'data-is-staff="false"')
 
@@ -960,6 +995,51 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-pricing-modal-almost-full-screen="false"')
+
+    @tag("batch_console_agents")
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    @patch("console.views._is_checkout_trial_eligible", return_value=True)
+    @patch("console.views.get_stripe_settings")
+    def test_agent_chat_shell_exposes_cta_unlock_agent_copy_data_attribute_state(
+        self,
+        mock_get_stripe_settings,
+        _mock_trial_eligible,
+        _mock_personal_chat_access,
+    ):
+        from api.models import BrowserUseAgent, PersistentAgent
+        from waffle.models import Flag
+
+        Flag.objects.update_or_create(
+            name="cta_unlock_agent_copy",
+            defaults={
+                "everyone": True,
+                "percent": 0,
+                "superusers": False,
+                "staff": False,
+                "authenticated": False,
+            },
+        )
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=9,
+            scale_trial_days=18,
+        )
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="CTA Unlock Agent Copy Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="CTA Unlock Agent Copy Agent",
+            charter="CTA unlock agent copy charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-cta-unlock-agent-copy="true"')
 
     @tag("batch_console_agents")
     @patch("console.views._is_checkout_trial_eligible", return_value=True)

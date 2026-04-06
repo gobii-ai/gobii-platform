@@ -1083,6 +1083,7 @@ export function AgentChatLayout({
           ) : showSignupPreviewPanel ? (
             <AgentSignupPreviewPanel
               status={signupPreviewState}
+              agentName={agentName}
               currentPlan={subscriptionPlan}
               onUpgrade={onUpgrade}
             />

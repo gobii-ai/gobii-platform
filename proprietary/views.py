@@ -26,10 +26,10 @@ from constants.feature_flags import (
     CTA_NO_CHARGE_DURING_TRIAL,
     CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
     CTA_START_FREE_TRIAL,
+    CTA_UNLOCK_AGENT_COPY,
     SUPPORT_INTERCOM,
 )
 from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
-from constants.feature_flags import CTA_PRICING_CANCEL_TEXT_UNDER_BTN, CTA_START_FREE_TRIAL, SUPPORT_INTERCOM
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings
@@ -84,6 +84,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             self.request,
             default=False,
         )
+        cta_unlock_agent_copy = is_waffle_flag_active(
+            CTA_UNLOCK_AGENT_COPY,
+            self.request,
+            default=False,
+        )
         cta_no_charge_during_trial = is_waffle_flag_active(
             CTA_NO_CHARGE_DURING_TRIAL,
             self.request,
@@ -92,15 +97,23 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         def _trial_cta(days: int, label: str) -> str:
             if days > 0 and trial_eligible:
+                if cta_unlock_agent_copy:
+                    return "Start for Free"
                 if cta_start_free_trial:
                     return "Start Free Trial"
                 return f"Start {days}-day Free Trial"
             return f"Subscribe to {label}"
 
-        def _trial_cancel_text(days: int) -> str | None:
+        def _trial_cancel_text(days: int, *, show_trial_copy: bool) -> str | None:
+            if not show_trial_copy:
+                return None
+            if cta_unlock_agent_copy:
+                if days <= 0:
+                    return None
+                return "No charge today. Cancel anytime."
             if not (cta_pricing_cancel_text_under_btn or cta_no_charge_during_trial):
                 return None
-            if not trial_eligible or days <= 0:
+            if days <= 0:
                 return None
             if cta_no_charge_during_trial:
                 return f"No charge if you cancel during the {days}-day trial. Takes 30 seconds."
@@ -206,6 +219,9 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ]
         )
 
+        startup_uses_trial_copy = startup_cta_text.startswith("Start ")
+        scale_uses_trial_copy = scale_cta_text.startswith("Start ")
+
         context["pricing_plans"] = [
             {
                 "code": PlanNames.STARTUP,
@@ -220,7 +236,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "disabled": False,
                 "cta_disabled": startup_cta_disabled,
                 "current_plan": startup_current,
-                "trial_cancel_text": _trial_cancel_text(startup_trial_days),
+                "trial_cancel_text": _trial_cancel_text(
+                    startup_trial_days,
+                    show_trial_copy=startup_uses_trial_copy,
+                ),
                 "features": startup_features,
                 "cta": startup_cta_text,
                 "cta_url": reverse("proprietary:startup_checkout") if not startup_cta_disabled else "",
@@ -237,7 +256,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "badge": "Best value",
                 "cta_disabled": scale_cta_disabled,
                 "current_plan": scale_current,
-                "trial_cancel_text": _trial_cancel_text(scale_trial_days),
+                "trial_cancel_text": _trial_cancel_text(
+                    scale_trial_days,
+                    show_trial_copy=scale_uses_trial_copy,
+                ),
                 "features": scale_features,
                 "cta": scale_cta_text,
                 "cta_url": reverse("proprietary:scale_checkout") if not scale_cta_disabled else "",

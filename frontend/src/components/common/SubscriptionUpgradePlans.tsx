@@ -65,6 +65,7 @@ type SubscriptionUpgradePlansProps = {
   source?: string
   allowDowngrade?: boolean
   collapseFeaturesByDefault?: boolean
+  trialCopyVariant?: 'default' | 'unlock_agent'
 }
 
 export function SubscriptionUpgradePlans({
@@ -75,6 +76,7 @@ export function SubscriptionUpgradePlans({
   source,
   allowDowngrade = false,
   collapseFeaturesByDefault = false,
+  trialCopyVariant = 'default',
 }: SubscriptionUpgradePlansProps) {
   const {
     trialDaysByPlan,
@@ -173,22 +175,30 @@ export function SubscriptionUpgradePlans({
                     ? (
                         useContinuationButtonCopy
                           ? 'Continue Your Agent'
-                          : (ctaStartFreeTrial ? 'Start Free Trial' : `Start ${trialDays}-day Free Trial`)
+                          : (
+                              trialCopyVariant === 'unlock_agent'
+                                ? 'Start for Free'
+                                : (ctaStartFreeTrial ? 'Start Free Trial' : `Start ${trialDays}-day Free Trial`)
+                            )
                       )
                     : subscribeLabel
                 )
               : (allowDowngrade ? `Select ${plan.name}` : subscribeLabel)
             const shouldShowTrialCancelText = (
-              (ctaNoChargeDuringTrial || ctaPricingCancelTextUnderBtn)
+              (trialCopyVariant === 'unlock_agent' || ctaNoChargeDuringTrial || ctaPricingCancelTextUnderBtn)
               && canUpgrade
               && useTrialCopy
               && trialDays > 0
             )
             const trialCancelText = shouldShowTrialCancelText
               ? (
-                  ctaNoChargeDuringTrial
-                    ? `No charge if you cancel during the ${trialDays}-day trial. Takes 30 seconds.`
-                    : `Cancel anytime during the ${trialDays}-day trial`
+                  trialCopyVariant === 'unlock_agent'
+                    ? 'No charge today. Cancel anytime.'
+                    : (
+                        ctaNoChargeDuringTrial
+                          ? `No charge if you cancel during the ${trialDays}-day trial. Takes 30 seconds.`
+                          : `Cancel anytime during the ${trialDays}-day trial`
+                      )
                 )
               : null
 
