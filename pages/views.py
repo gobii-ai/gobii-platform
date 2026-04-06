@@ -187,8 +187,13 @@ def _normalize_trial_days(value: int | str | None) -> int:
         return 0
 
 
-def _apply_trial_checkout_fields(checkout_kwargs: dict, *, trial_days: int) -> None:
-    if trial_days <= 0:
+def _apply_trial_checkout_fields(
+    checkout_kwargs: dict,
+    *,
+    include_trial: bool,
+    trial_days: int,
+) -> None:
+    if not include_trial or trial_days <= 0:
         return
 
     checkout_kwargs["billing_address_collection"] = "required"
@@ -1939,7 +1944,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "idempotency_key": f"checkout-startup-{customer.id}-{event_id}",
         }
 
-        _apply_trial_checkout_fields(checkout_kwargs, trial_days=trial_days)
+        _apply_trial_checkout_fields(
+            checkout_kwargs,
+            include_trial=include_trial,
+            trial_days=trial_days,
+        )
 
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
@@ -2122,7 +2131,11 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "line_items": line_items,
             "idempotency_key": f"checkout-scale-{customer.id}-{event_id}",
         }
-        _apply_trial_checkout_fields(checkout_kwargs, trial_days=trial_days)
+        _apply_trial_checkout_fields(
+            checkout_kwargs,
+            include_trial=include_trial,
+            trial_days=trial_days,
+        )
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
             checkout_kwargs["client_reference_id"] = rewardful_referral
