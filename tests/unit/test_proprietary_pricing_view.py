@@ -6,11 +6,63 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from waffle.testutils import override_flag
 
-from constants.plans import PlanNames
+from api.models import EntitlementDefinition, Plan, PlanVersion, PlanVersionEntitlement
+from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
 
 
 @tag("batch_pages")
 class PricingPageCtaCopyTests(TestCase):
+    def _set_monthly_task_credits(self, plan_code: str, credits: int) -> None:
+        plan_slug = PLAN_SLUG_BY_LEGACY_CODE[plan_code]
+        plan, _ = Plan.objects.get_or_create(
+            slug=plan_slug,
+            defaults={"is_org": False, "is_active": True},
+        )
+        update_fields: list[str] = []
+        if plan.is_org:
+            plan.is_org = False
+            update_fields.append("is_org")
+        if not plan.is_active:
+            plan.is_active = True
+            update_fields.append("is_active")
+        if update_fields:
+            plan.save(update_fields=update_fields)
+
+        plan_version = (
+            PlanVersion.objects
+            .filter(plan=plan, is_active_for_new_subs=True)
+            .order_by("-created_at")
+            .first()
+        )
+        if plan_version is None:
+            plan_version = PlanVersion.objects.create(
+                plan=plan,
+                version_code="test-pricing",
+                legacy_plan_code=plan_code,
+                is_active_for_new_subs=True,
+                display_name=plan_slug.title(),
+                description="",
+                marketing_features=[],
+            )
+        elif plan_version.legacy_plan_code != plan_code:
+            plan_version.legacy_plan_code = plan_code
+            plan_version.save(update_fields=["legacy_plan_code"])
+
+        entitlement, _ = EntitlementDefinition.objects.get_or_create(
+            key="monthly_task_credits",
+            defaults={
+                "display_name": "Monthly task credits",
+                "description": "Included monthly task credits.",
+                "value_type": "int",
+                "unit": "credits",
+            },
+        )
+        PlanVersionEntitlement.objects.update_or_create(
+            plan_version=plan_version,
+            entitlement=entitlement,
+            defaults={"value_int": credits},
+        )
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
     def test_unauthenticated_pricing_cta_uses_trial_copy(self, mock_get_stripe_settings):
@@ -239,3 +291,49 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Start 7-day Free Trial")
         self.assertEqual(plans[PlanNames.SCALE]["cta"], "Start 14-day Free Trial")
         mock_trial_eligibility.assert_not_called()
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_uses_db_backed_task_credit_amounts(self, mock_get_stripe_settings):
+        self._set_monthly_task_credits(PlanNames.STARTUP, 750)
+        self._set_monthly_task_credits(PlanNames.SCALE, 12500)
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(plans[PlanNames.STARTUP]["task_credits"], 750)
+        self.assertEqual(plans[PlanNames.STARTUP]["tasks"], "750")
+        self.assertEqual(plans[PlanNames.SCALE]["task_credits"], 12500)
+        self.assertEqual(plans[PlanNames.SCALE]["tasks"], "12,500")
+        self.assertContains(
+            response,
+            '<li><span class="font-semibold">750</span> tasks included</li>',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            '<li><span class="font-semibold">12,500</span> tasks included</li>',
+            html=True,
+        )
+        self.assertContains(response, "$0.10 per task beyond 750")
+        self.assertContains(response, "$0.04 per task beyond 12,500")
+        self.assertContains(response, "750/month")
+        self.assertContains(response, "12,500/month")
+        self.assertContains(
+            response,
+            "Pro includes 750 tasks per month, then charges $0.10 for each additional task. "
+            "Scale includes 12,500 tasks per month with $0.04 pricing after that.",
+        )
+        self.assertContains(
+            response,
+            "On the Pro tier, additional tasks are $0.10 each, while Scale brings that down "
+            "to $0.04 once you pass the included 12,500 tasks.",
+        )

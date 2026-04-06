@@ -34,6 +34,11 @@ export type TrialDaysByPlan = {
   scale: number
 }
 
+export type PlanTaskCreditsByPlan = {
+  startup: number
+  scale: number
+}
+
 type SubscriptionState = {
   currentPlan: PlanTier | null
   isLoading: boolean
@@ -51,6 +56,7 @@ type SubscriptionState = {
   personalSignupPreviewAvailable: boolean
   personalSignupPreviewProcessingAvailable: boolean
   trialDaysByPlan: TrialDaysByPlan
+  planTaskCreditsByPlan: PlanTaskCreditsByPlan
   trialEligible: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
   setProprietaryMode: (isProprietary: boolean) => void
@@ -64,6 +70,7 @@ type SubscriptionState = {
   setPersonalSignupPreviewAvailable: (personalSignupPreviewAvailable: boolean) => void
   setPersonalSignupPreviewProcessingAvailable: (personalSignupPreviewProcessingAvailable: boolean) => void
   setTrialDaysByPlan: (trialDaysByPlan: TrialDaysByPlan) => void
+  setPlanTaskCreditsByPlan: (planTaskCreditsByPlan: PlanTaskCreditsByPlan) => void
   setTrialEligible: (trialEligible: boolean) => void
   openUpgradeModal: (source?: UpgradeModalSource, options?: UpgradeModalOptions) => void
   closeUpgradeModal: () => void
@@ -87,6 +94,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   personalSignupPreviewAvailable: false,
   personalSignupPreviewProcessingAvailable: false,
   trialDaysByPlan: { startup: 0, scale: 0 },
+  planTaskCreditsByPlan: { startup: 500, scale: 10000 },
   trialEligible: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
   setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
@@ -101,6 +109,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   setPersonalSignupPreviewProcessingAvailable: (personalSignupPreviewProcessingAvailable) =>
     set({ personalSignupPreviewProcessingAvailable }),
   setTrialDaysByPlan: (trialDaysByPlan) => set({ trialDaysByPlan }),
+  setPlanTaskCreditsByPlan: (planTaskCreditsByPlan) => set({ planTaskCreditsByPlan }),
   setTrialEligible: (trialEligible) => set({ trialEligible }),
   openUpgradeModal: (source = 'unknown', options = {}) => set((state) => {
     const resolvedSource = source ?? 'unknown'
@@ -146,6 +155,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
         personalSignupPreviewAvailable: normalizeBoolean(data?.personal_signup_preview_available),
         personalSignupPreviewProcessingAvailable: normalizeBoolean(data?.personal_signup_preview_processing_available),
         trialDaysByPlan: normalizeTrialDaysByPlan(data),
+        planTaskCreditsByPlan: normalizePlanTaskCreditsByPlan(data),
         trialEligible: normalizeBoolean(data?.trial_eligible),
         isLoading: false,
       })
@@ -174,6 +184,8 @@ type UserPlanPayload = {
   personal_signup_preview_processing_available?: boolean | string | null
   startup_trial_days?: number | string | null
   scale_trial_days?: number | string | null
+  startup_task_credits?: number | string | null
+  scale_task_credits?: number | string | null
   trial_eligible?: boolean | string | null
 }
 
@@ -190,6 +202,7 @@ type UserPlanResponse = {
   personalSignupPreviewAvailable: boolean
   personalSignupPreviewProcessingAvailable: boolean
   trialDaysByPlan: TrialDaysByPlan
+  planTaskCreditsByPlan: PlanTaskCreditsByPlan
   trialEligible: boolean
   authenticated: boolean
 }
@@ -209,6 +222,7 @@ type HydratedSubscriptionState = Pick<
   | 'personalSignupPreviewAvailable'
   | 'personalSignupPreviewProcessingAvailable'
   | 'trialDaysByPlan'
+  | 'planTaskCreditsByPlan'
   | 'trialEligible'
 >
 
@@ -221,10 +235,10 @@ function normalizePlan(plan: unknown): PlanTier | null {
   return null
 }
 
-function normalizeTrialDays(value: unknown): number {
+function normalizeNonNegativeInteger(value: unknown, defaultValue = 0): number {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) {
-    return 0
+    return defaultValue
   }
   return Math.max(0, Math.trunc(numeric))
 }
@@ -241,8 +255,15 @@ function normalizeBoolean(value: unknown, defaultValue = false): boolean {
 
 function normalizeTrialDaysByPlan(payload: UserPlanPayload | null | undefined): TrialDaysByPlan {
   return {
-    startup: normalizeTrialDays(payload?.startup_trial_days),
-    scale: normalizeTrialDays(payload?.scale_trial_days),
+    startup: normalizeNonNegativeInteger(payload?.startup_trial_days),
+    scale: normalizeNonNegativeInteger(payload?.scale_trial_days),
+  }
+}
+
+function normalizePlanTaskCreditsByPlan(payload: UserPlanPayload | null | undefined): PlanTaskCreditsByPlan {
+  return {
+    startup: normalizeNonNegativeInteger(payload?.startup_task_credits, 500),
+    scale: normalizeNonNegativeInteger(payload?.scale_task_credits, 10000),
   }
 }
 
@@ -277,6 +298,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         personalSignupPreviewAvailable: false,
         personalSignupPreviewProcessingAvailable: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
+        planTaskCreditsByPlan: { startup: 500, scale: 10000 },
         trialEligible: false,
         authenticated: false,
       }
@@ -295,6 +317,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       personalSignupPreviewAvailable: normalizeBoolean(data?.personal_signup_preview_available),
       personalSignupPreviewProcessingAvailable: normalizeBoolean(data?.personal_signup_preview_processing_available),
       trialDaysByPlan: normalizeTrialDaysByPlan(data),
+      planTaskCreditsByPlan: normalizePlanTaskCreditsByPlan(data),
       trialEligible: normalizeBoolean(data?.trial_eligible),
       authenticated: true,
     }
@@ -313,6 +336,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
         personalSignupPreviewAvailable: false,
         personalSignupPreviewProcessingAvailable: false,
         trialDaysByPlan: { startup: 0, scale: 0 },
+        planTaskCreditsByPlan: { startup: 500, scale: 10000 },
         trialEligible: false,
         authenticated: false,
       }
@@ -330,6 +354,7 @@ async function fetchUserPlan(): Promise<UserPlanResponse> {
       personalSignupPreviewAvailable: false,
       personalSignupPreviewProcessingAvailable: false,
       trialDaysByPlan: { startup: 0, scale: 0 },
+      planTaskCreditsByPlan: { startup: 500, scale: 10000 },
       trialEligible: false,
       authenticated: true,
     }
@@ -356,11 +381,16 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
   const planAttr = mountElement.dataset.userPlan
   const trialEligibleAttr = mountElement.dataset.trialEligible
   const trialDaysByPlan: TrialDaysByPlan = {
-    startup: normalizeTrialDays(mountElement.dataset.startupTrialDays),
-    scale: normalizeTrialDays(mountElement.dataset.scaleTrialDays),
+    startup: normalizeNonNegativeInteger(mountElement.dataset.startupTrialDays),
+    scale: normalizeNonNegativeInteger(mountElement.dataset.scaleTrialDays),
+  }
+  const planTaskCreditsByPlan: PlanTaskCreditsByPlan = {
+    startup: normalizeNonNegativeInteger(mountElement.dataset.startupTaskCredits, 500),
+    scale: normalizeNonNegativeInteger(mountElement.dataset.scaleTaskCredits, 10000),
   }
 
   useSubscriptionStore.getState().setTrialDaysByPlan(trialDaysByPlan)
+  useSubscriptionStore.getState().setPlanTaskCreditsByPlan(planTaskCreditsByPlan)
   useSubscriptionStore.getState().setPricingModalAlmostFullScreen(
     normalizeBoolean(pricingModalAlmostFullScreenAttr, true),
   )
@@ -399,6 +429,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       personalSignupPreviewAvailable: normalizeBoolean(personalSignupPreviewAvailableAttr),
       personalSignupPreviewProcessingAvailable: normalizeBoolean(personalSignupPreviewProcessingAvailableAttr),
       trialDaysByPlan,
+      planTaskCreditsByPlan,
       trialEligible: normalizeBoolean(trialEligibleAttr),
     }))
     return
@@ -419,6 +450,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
     personalSignupPreviewAvailable,
     personalSignupPreviewProcessingAvailable,
     trialDaysByPlan: apiTrialDaysByPlan,
+    planTaskCreditsByPlan: apiPlanTaskCreditsByPlan,
     trialEligible,
   }) => {
     useSubscriptionStore.setState(buildHydratedSubscriptionState({
@@ -434,6 +466,7 @@ export function initializeSubscriptionStore(mountElement: HTMLElement): void {
       personalSignupPreviewAvailable,
       personalSignupPreviewProcessingAvailable,
       trialDaysByPlan: apiTrialDaysByPlan,
+      planTaskCreditsByPlan: apiPlanTaskCreditsByPlan,
       trialEligible,
     }))
   })

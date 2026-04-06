@@ -20,6 +20,8 @@
        data-user-plan="{{ user_plan|default:'' }}"
        data-startup-trial-days="{{ startup_trial_days|default:0 }}"
        data-scale-trial-days="{{ scale_trial_days|default:0 }}"
+       data-startup-task-credits="{{ startup_task_credits|default:0 }}"
+       data-scale-task-credits="{{ scale_task_credits|default:0 }}"
        data-trial-eligible="{% if trial_eligible %}true{% else %}false{% endif %}"
        data-pricing-modal-almost-full-screen="{% if pricing_modal_almost_full_screen %}true{% else %}false{% endif %}"
        data-cta-pricing-cancel-text-under-btn="{% if cta_pricing_cancel_text_under_btn %}true{% else %}false{% endif %}"
