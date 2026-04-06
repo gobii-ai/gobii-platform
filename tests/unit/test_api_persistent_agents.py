@@ -661,6 +661,70 @@ class PersistentAgentAPITests(TestCase):
         events = timeline_response.json().get('events', [])
         self.assertTrue(any(evt.get('kind') == 'message' for evt in events))
 
+    def test_message_resolves_non_primary_endpoint(self):
+        payload = self._create_agent_via_api({'name': 'Non-Primary EP Agent'})
+        agent = PersistentAgent.objects.get(id=payload['id'])
+
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address='non-primary@example.com',
+            is_primary=False,
+        )
+
+        message_body = {
+            'channel': 'email',
+            'sender': self.user.email,
+            'body': 'Should resolve non-primary endpoint.',
+        }
+        response = self.client.post(
+            f"{PERSISTENT_AGENT_BASE_URL}{agent.id}/messages/",
+            data=json.dumps(message_body),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+
+    def test_message_no_endpoint_returns_400(self):
+        payload = self._create_agent_via_api({'name': 'No Endpoint Agent'})
+        agent = PersistentAgent.objects.get(id=payload['id'])
+
+        message_body = {
+            'channel': 'email',
+            'sender': self.user.email,
+            'body': 'Should fail with 400.',
+        }
+        response = self.client.post(
+            f"{PERSISTENT_AGENT_BASE_URL}{agent.id}/messages/",
+            data=json.dumps(message_body),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn('endpoint', response.json()['recipient'][0].lower())
+
+    def test_message_explicit_recipient_skips_resolution(self):
+        payload = self._create_agent_via_api({'name': 'Explicit Recipient Agent'})
+        agent = PersistentAgent.objects.get(id=payload['id'])
+
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address='agent-ep@example.com',
+            is_primary=True,
+        )
+
+        message_body = {
+            'channel': 'email',
+            'sender': self.user.email,
+            'recipient': 'agent-ep@example.com',
+            'body': 'Explicit recipient provided.',
+        }
+        response = self.client.post(
+            f"{PERSISTENT_AGENT_BASE_URL}{agent.id}/messages/",
+            data=json.dumps(message_body),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+
     def test_processing_status_and_web_tasks(self):
         payload = self._create_agent_via_api()
         agent = PersistentAgent.objects.get(id=payload['id'])
