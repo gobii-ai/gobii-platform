@@ -32,6 +32,11 @@
       <i aria-hidden="true" data-lucide="key-round" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
       API Keys
     </a>
+    <a href="{% url 'global_secrets' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'global_secrets' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <i aria-hidden="true" data-lucide="shield" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'global_secrets' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
+      Secrets
+    </a>
     {% if current_context.type == 'organization' and current_context.id %}
       <a href="{% url 'organization_detail' org_id=current_context.id %}"
          class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'organization_detail' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">

@@ -196,11 +196,21 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             requested=False,
             secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
         )
+
+        # Include global credential secrets from user/org
+        global_credential_qs = PersistentAgentSecret.objects.filter(
+            visibility=PersistentAgentSecret.Visibility.GLOBAL,
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+        )
+        if agent.organization_id:
+            global_credential_qs = global_credential_qs.filter(organization_id=agent.organization_id)
+        else:
+            global_credential_qs = global_credential_qs.filter(user_id=agent.user_id, organization__isnull=True)
         
         # Filter secrets if specific ones were requested
         if requested_secrets:
-            # Validate that all requested secret keys exist
-            available_secret_keys = set(agent_secrets.values_list('key', flat=True))
+            available_secret_keys = set(agent_secrets.values_list('key', flat=True)) | set(global_credential_qs.values_list('key', flat=True))
             missing_secrets = set(requested_secrets) - available_secret_keys
             
             if missing_secrets:
@@ -209,12 +219,19 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
                     "message": f"Requested secret keys not found: {', '.join(sorted(missing_secrets))}. Available secret keys: {', '.join(sorted(available_secret_keys)) if available_secret_keys else 'none'}"
                 }
             
-            # Filter to only requested secrets
             agent_secrets = agent_secrets.filter(key__in=requested_secrets)
+            global_credential_qs = global_credential_qs.filter(key__in=requested_secrets)
+
+        # Merge agent + global secrets; agent-level takes precedence
+        all_secrets = list(agent_secrets)
+        agent_keys = {(s.domain_pattern, s.key) for s in all_secrets}
+        for gs in global_credential_qs:
+            if (gs.domain_pattern, gs.key) not in agent_keys:
+                all_secrets.append(gs)
 
         encrypted_secrets, secret_keys_by_domain, invalid_secrets = build_browser_task_secret_payload(
             agent,
-            list(agent_secrets),
+            all_secrets,
         )
 
         if invalid_secrets:

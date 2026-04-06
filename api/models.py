@@ -7203,12 +7203,17 @@ class PersistentAgentSkill(models.Model):
 
 class PersistentAgentSecret(models.Model):
     """
-    A secret (encrypted key-value pair) for a persistent agent, scoped to a domain pattern.
+    A secret (encrypted key-value pair), either scoped to a specific agent or
+    global (user/org level) and shared across all agents.
     """
 
     class SecretType(models.TextChoices):
         CREDENTIAL = "credential", "Credential"
         ENV_VAR = "env_var", "Environment Variable"
+
+    class Visibility(models.TextChoices):
+        AGENT = "agent", "Agent"
+        GLOBAL = "global", "Global"
 
     ENV_VAR_DOMAIN_SENTINEL = "__gobii_env_var__"
     ENV_VAR_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
@@ -7217,7 +7222,32 @@ class PersistentAgentSecret(models.Model):
     agent = models.ForeignKey(
         PersistentAgent,
         on_delete=models.CASCADE,
-        related_name="secrets"
+        related_name="secrets",
+        null=True,
+        blank=True,
+        help_text="Owning agent. Null for global secrets.",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="global_secrets",
+        null=True,
+        blank=True,
+        help_text="Owning user for global secrets (when no organization).",
+    )
+    organization = models.ForeignKey(
+        'Organization',
+        on_delete=models.CASCADE,
+        related_name="global_secrets",
+        null=True,
+        blank=True,
+        help_text="Owning organization for global secrets.",
+    )
+    visibility = models.CharField(
+        max_length=8,
+        choices=Visibility.choices,
+        default=Visibility.AGENT,
+        help_text="Whether this secret is agent-scoped or globally shared.",
     )
     domain_pattern = models.CharField(
         max_length=256,
@@ -7254,34 +7284,88 @@ class PersistentAgentSecret(models.Model):
 
     class Meta:
         constraints = [
+            # Agent-scoped secrets: unique per agent + type + domain + name/key
             models.UniqueConstraint(
                 fields=['agent', 'secret_type', 'domain_pattern', 'name'],
+                condition=models.Q(visibility='agent'),
                 name='unique_agent_type_domain_secret_name'
             ),
             models.UniqueConstraint(
                 fields=['agent', 'secret_type', 'domain_pattern', 'key'],
+                condition=models.Q(visibility='agent'),
                 name='unique_agent_type_domain_secret_key'
-            )
+            ),
+            # Global secrets scoped to user (no org)
+            models.UniqueConstraint(
+                fields=['user', 'secret_type', 'domain_pattern', 'name'],
+                condition=models.Q(visibility='global', organization__isnull=True),
+                name='unique_global_user_type_domain_secret_name'
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'secret_type', 'domain_pattern', 'key'],
+                condition=models.Q(visibility='global', organization__isnull=True),
+                name='unique_global_user_type_domain_secret_key'
+            ),
+            # Global secrets scoped to organization
+            models.UniqueConstraint(
+                fields=['organization', 'secret_type', 'domain_pattern', 'name'],
+                condition=models.Q(visibility='global', organization__isnull=False),
+                name='unique_global_org_type_domain_secret_name'
+            ),
+            models.UniqueConstraint(
+                fields=['organization', 'secret_type', 'domain_pattern', 'key'],
+                condition=models.Q(visibility='global', organization__isnull=False),
+                name='unique_global_org_type_domain_secret_key'
+            ),
+            # Integrity: global secrets must not have an agent
+            models.CheckConstraint(
+                condition=(
+                    models.Q(visibility='agent', agent__isnull=False)
+                    | models.Q(visibility='global', agent__isnull=True)
+                ),
+                name='secret_visibility_agent_integrity'
+            ),
+            # Integrity: global secrets must have a user or org
+            models.CheckConstraint(
+                condition=(
+                    models.Q(visibility='agent')
+                    | (models.Q(visibility='global') & (models.Q(user__isnull=False) | models.Q(organization__isnull=False)))
+                ),
+                name='secret_global_must_have_owner'
+            ),
         ]
         indexes = [
             models.Index(fields=['agent', 'secret_type', 'domain_pattern'], name='pa_secret_agent_type_dom_idx'),
             models.Index(fields=['agent'], name='pa_secret_agent_idx'),
+            models.Index(fields=['user', 'visibility'], name='pa_secret_user_vis_idx'),
+            models.Index(fields=['organization', 'visibility'], name='pa_secret_org_vis_idx'),
         ]
         ordering = ['domain_pattern', 'name']
 
     def generate_key_from_name(self):
-        """Generate a unique key from the name within this agent and domain."""
+        """Generate a unique key from the name within the appropriate scope."""
         if not self.name:
             raise ValueError("Name is required to generate key")
         
         from .secret_key_generator import SecretKeyGenerator
         
-        # Get existing keys for this agent and domain (excluding self if updating)
-        existing_secrets = PersistentAgentSecret.objects.filter(
-            agent=self.agent,
-            secret_type=self.secret_type,
-            domain_pattern=self.domain_pattern,
-        )
+        if self.visibility == self.Visibility.GLOBAL:
+            # Scope key uniqueness to the user/org
+            existing_secrets = PersistentAgentSecret.objects.filter(
+                visibility=self.Visibility.GLOBAL,
+                secret_type=self.secret_type,
+                domain_pattern=self.domain_pattern,
+            )
+            if self.organization_id:
+                existing_secrets = existing_secrets.filter(organization_id=self.organization_id)
+            else:
+                existing_secrets = existing_secrets.filter(user_id=self.user_id, organization__isnull=True)
+        else:
+            existing_secrets = PersistentAgentSecret.objects.filter(
+                agent=self.agent,
+                secret_type=self.secret_type,
+                domain_pattern=self.domain_pattern,
+            )
         if self.pk:
             existing_secrets = existing_secrets.exclude(pk=self.pk)
         
@@ -7293,9 +7377,18 @@ class PersistentAgentSecret(models.Model):
         """Validate the secret fields."""
         super().clean()
 
+        # Validate visibility integrity
+        if self.visibility == self.Visibility.GLOBAL:
+            if self.agent_id is not None:
+                raise ValidationError({'agent': "Global secrets must not be attached to an agent."})
+            if not self.user_id and not self.organization_id:
+                raise ValidationError("Global secrets must have an owning user or organization.")
+        elif self.visibility == self.Visibility.AGENT:
+            if self.agent_id is None:
+                raise ValidationError({'agent': "Agent-scoped secrets must be attached to an agent."})
+
         # Validate type-specific scope
         if self.secret_type == self.SecretType.ENV_VAR:
-            # Env vars are global per-agent and intentionally not domain-scoped.
             self.domain_pattern = self.ENV_VAR_DOMAIN_SENTINEL
         elif self.domain_pattern:
             from .domain_validation import DomainPatternValidator
@@ -7307,10 +7400,10 @@ class PersistentAgentSecret(models.Model):
         else:
             raise ValidationError({'domain_pattern': "Domain pattern is required for credential secrets."})
 
-        # Generate key from name only when key is empty. Some flows (agent requests)
-        # intentionally provide an explicit key.
-        if self.name and self.agent and not self.key:
-            self.key = self.generate_key_from_name()
+        # Generate key from name when key is empty
+        if self.name and not self.key:
+            if self.visibility == self.Visibility.GLOBAL or self.agent:
+                self.key = self.generate_key_from_name()
 
         # Validate secret key
         if self.key:
@@ -7370,6 +7463,11 @@ class PersistentAgentSecret(models.Model):
         return self.requested
 
     def __str__(self):
+        if self.visibility == self.Visibility.GLOBAL:
+            owner = self.organization or self.user
+            if self.secret_type == self.SecretType.ENV_VAR:
+                return f"Global Env Var '{self.name}' ({self.key}) for {owner}"
+            return f"Global Secret '{self.name}' ({self.key}) for {owner} on {self.domain_pattern}"
         if self.secret_type == self.SecretType.ENV_VAR:
             return f"Env Var '{self.name}' ({self.key}) for {self.agent.name}"
         return f"Secret '{self.name}' ({self.key}) for {self.agent.name} on {self.domain_pattern}"

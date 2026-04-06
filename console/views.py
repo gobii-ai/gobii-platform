@@ -6042,6 +6042,16 @@ class AgentDeleteView(LoginRequiredMixin, View):
         except PermissionDenied:
             raise
 
+class GlobalSecretsView(LoginRequiredMixin, TemplateView):
+    """React shell page for managing global (user/org) secrets."""
+    template_name = "console/global_secrets.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["page_name"] = "Global Secrets"
+        return context
+
+
 class AgentSecretsView(LoginRequiredMixin, TemplateView):
     """Secrets management page for a single agent."""
     template_name = "console/agent_secrets.html"

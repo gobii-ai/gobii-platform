@@ -5522,8 +5522,25 @@ def _format_env_var_secrets(secrets_qs, is_pending: bool) -> list[str]:
     return secret_lines
 
 
+def _get_global_secrets_qs(agent: PersistentAgent):
+    """Return queryset of global secrets for the agent's owner (user or org)."""
+    if agent.organization_id:
+        return PersistentAgentSecret.objects.filter(
+            visibility=PersistentAgentSecret.Visibility.GLOBAL,
+            organization_id=agent.organization_id,
+            requested=False,
+        )
+    return PersistentAgentSecret.objects.filter(
+        visibility=PersistentAgentSecret.Visibility.GLOBAL,
+        user_id=agent.user_id,
+        organization__isnull=True,
+        requested=False,
+    )
+
+
 def _get_secrets_block(agent: PersistentAgent) -> str:
     """Return a formatted list of available secrets for this agent.
+    Includes both agent-scoped secrets and inherited global secrets.
     The caller is responsible for adding any surrounding instructional text and for
     wrapping the section with <secrets> tags via Prompt.section_text().
     """
@@ -5556,7 +5573,21 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
         ).order_by('name')
     )
 
-    if not available_credentials and not pending_credentials and not available_env_vars and not pending_env_vars:
+    # Global secrets inherited from user/org
+    global_qs = _get_global_secrets_qs(agent)
+    global_credentials = global_qs.filter(
+        secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+    ).order_by('domain_pattern', 'name')
+    global_env_vars = global_qs.filter(
+        secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+    ).order_by('name')
+
+    has_anything = (
+        available_credentials or pending_credentials
+        or available_env_vars or pending_env_vars
+        or global_credentials or global_env_vars
+    )
+    if not has_anything:
         return "No secrets configured."
 
     lines: list[str] = []
@@ -5570,6 +5601,19 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
             lines.append("")
         lines.append("These global sandbox environment variable secrets are available to you:")
         lines.extend(_format_env_var_secrets(available_env_vars, is_pending=False))
+
+    # Global secrets (shared across all agents)
+    if global_credentials:
+        if lines:
+            lines.append("")
+        lines.append("Global credential secrets (shared across all agents):")
+        lines.extend(_format_credential_secrets(global_credentials, is_pending=False))
+
+    if global_env_vars:
+        if lines:
+            lines.append("")
+        lines.append("Global environment variable secrets (shared across all agents):")
+        lines.extend(_format_env_var_secrets(global_env_vars, is_pending=False))
 
     if pending_credentials or pending_env_vars:
         if lines:

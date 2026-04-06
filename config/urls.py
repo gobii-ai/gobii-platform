@@ -151,6 +151,13 @@ from console.usage_views import (
     UsageAgentsAPIView,
 )
 from console.insight_views import AgentInsightsAPIView
+from console.secrets_api_views import (
+    GlobalSecretsListCreateAPIView,
+    GlobalSecretDetailAPIView,
+    AgentSecretsListCreateAPIView,
+    AgentSecretDetailAPIView,
+    AgentSecretPromoteAPIView,
+)
 from console.views import (
     ConsoleHome,
     ApiKeyListView,
@@ -177,6 +184,7 @@ from console.views import (
     AgentEnableSmsView,
     AgentDailyLimitEmailActionView,
     AgentDeleteView,
+    GlobalSecretsView,
     AgentSecretsView,
     AgentSecretsAddView,
     AgentSecretsAddFormView,
@@ -475,6 +483,11 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/delete/", AgentDeleteView.as_view(), name="agent_delete"),
     path("console/agents/<uuid:pk>/email/", AgentEmailSettingsView.as_view(), name="agent_email_settings"),
     path("console/agents/<uuid:pk>/files/", AgentFilesView.as_view(), name="agent_files"),
+    # Global secrets management
+    path("console/secrets/", GlobalSecretsView.as_view(), name="global_secrets"),
+    path("console/secrets/api/", GlobalSecretsListCreateAPIView.as_view(), name="console_global_secrets_api"),
+    path("console/secrets/api/<uuid:secret_id>/", GlobalSecretDetailAPIView.as_view(), name="console_global_secret_detail_api"),
+
     # Agent secrets management
     path("console/agents/<uuid:pk>/secrets/", AgentSecretsView.as_view(), name="agent_secrets"),
     path("console/agents/<uuid:pk>/secrets/add/", AgentSecretsAddView.as_view(), name="agent_secrets_add"),
@@ -486,6 +499,9 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/secrets/request/remove/", AgentSecretsRequestView.as_view(), name="agent_requested_secrets_remove"),
     path("console/agents/<uuid:pk>/secrets/request/remove/<uuid:secret_id>/", AgentSecretsRequestView.as_view(), name="agent_requested_secret_remove"),
     path("console/agents/<uuid:pk>/secrets/rerequest/<uuid:secret_id>/", AgentSecretRerequestView.as_view(), name="agent_secret_rerequest"),
+    path("console/agents/<uuid:pk>/secrets/api/", AgentSecretsListCreateAPIView.as_view(), name="console_agent_secrets_api"),
+    path("console/agents/<uuid:pk>/secrets/api/<uuid:secret_id>/", AgentSecretDetailAPIView.as_view(), name="console_agent_secret_detail_api"),
+    path("console/agents/<uuid:pk>/secrets/api/<uuid:secret_id>/promote/", AgentSecretPromoteAPIView.as_view(), name="console_agent_secret_promote_api"),
     path("console/agents/<uuid:pk>/contact-requests/", AgentContactRequestsView.as_view(), name="agent_contact_requests"),
     path("console/agents/<uuid:pk>/contact-requests/thanks/", AgentContactRequestsThanksView.as_view(), name="agent_contact_requests_thanks"),
     path("console/agents/<uuid:pk>/allowlist/", AgentAllowlistView.as_view(), name="agent_allowlist"),

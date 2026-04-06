@@ -26,6 +26,8 @@ const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/A
 const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
 const AgentEmailSettingsScreen = lazy(async () => ({ default: (await import('./screens/AgentEmailSettingsScreen')).AgentEmailSettingsScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
+const GlobalSecretsScreen = lazy(async () => ({ default: (await import('./screens/GlobalSecretsScreen')).GlobalSecretsScreen }))
+const AgentSecretsScreen = lazy(async () => ({ default: (await import('./screens/AgentSecretsScreen')).AgentSecretsScreen }))
 
 const LoadingFallback = () => (
   <div className="app-loading" role="status" aria-live="polite" aria-label="Loading">
@@ -271,6 +273,37 @@ switch (appName) {
   case 'immersive-app':
     screen = <ImmersiveApp maxChatUploadSizeBytes={maxChatUploadSizeBytes} />
     break
+  case 'global-secrets': {
+    const secretsApiUrl = mountNode.dataset.secretsApiUrl
+    if (!secretsApiUrl) {
+      throw new Error('Secrets API URL is required for global secrets screen')
+    }
+    screen = <GlobalSecretsScreen secretsApiUrl={secretsApiUrl} />
+    break
+  }
+  case 'agent-secrets': {
+    if (!agentId) {
+      throw new Error('Agent identifier is required for agent secrets screen')
+    }
+    const secretsApiUrl = mountNode.dataset.secretsApiUrl
+    const globalSecretsUrl = mountNode.dataset.globalSecretsUrl
+    const agentDetailUrl = mountNode.dataset.agentDetailUrl
+    const secretsRequestUrl = mountNode.dataset.secretsRequestUrl
+    if (!secretsApiUrl || !globalSecretsUrl || !agentDetailUrl || !secretsRequestUrl) {
+      throw new Error('Required URLs are missing for agent secrets screen')
+    }
+    screen = (
+      <AgentSecretsScreen
+        agentId={agentId}
+        agentName={agentName ?? ''}
+        secretsApiUrl={secretsApiUrl}
+        globalSecretsUrl={globalSecretsUrl}
+        agentDetailUrl={agentDetailUrl}
+        secretsRequestUrl={secretsRequestUrl}
+      />
+    )
+    break
+  }
   default:
     throw new Error(`Unsupported console React app: ${appName}`)
 }

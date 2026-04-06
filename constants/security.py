@@ -9,6 +9,9 @@ class SecretLimits:
     
     # Maximum number of secrets per persistent agent
     MAX_SECRETS_PER_AGENT = 50
+
+    # Maximum number of global secrets per user/org
+    MAX_GLOBAL_SECRETS = 50
     
     # Maximum number of domains per persistent agent
     MAX_DOMAINS_PER_AGENT = 20
@@ -38,6 +41,7 @@ class ValidationMessages:
     """User-friendly validation error messages."""
     
     TOO_MANY_SECRETS = f"Maximum {SecretLimits.MAX_SECRETS_PER_AGENT} secrets allowed per agent"
+    TOO_MANY_GLOBAL_SECRETS = f"Maximum {SecretLimits.MAX_GLOBAL_SECRETS} global secrets allowed"
     TOO_MANY_DOMAINS = f"Maximum {SecretLimits.MAX_DOMAINS_PER_AGENT} domains allowed per agent"
     SECRET_VALUE_TOO_LARGE = f"Secret value too large (max {SecretLimits.MAX_SECRET_VALUE_BYTES} bytes)"
     SECRET_KEY_TOO_LONG = f"Secret key too long (max {SecretLimits.MAX_SECRET_KEY_LENGTH} characters)"

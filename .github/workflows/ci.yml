@@ -70,6 +70,8 @@ jobs:
             tag: batch_outbound_email
           - batch: secrets
             tag: batch_secrets
+          - batch: global_secrets
+            tag: batch_global_secrets
           - batch: proxy_selection
             tag: batch_proxy_selection
           - batch: compaction
