@@ -54,6 +54,7 @@ class ConsoleViewsTest(TestCase):
         return json.loads(script.string)
 
     @tag("batch_console_agents")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_staff_agent_audit_page_exposes_admin_settings_url(self):
         from api.models import BrowserUseAgent, PersistentAgent
 
@@ -82,6 +83,7 @@ class ConsoleViewsTest(TestCase):
             response,
             f'data-admin-agent-url="/admin/api/persistentagent/{persistent_agent.id}/change/"',
         )
+        self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
     @tag("batch_console_agents")
     def test_staff_agent_audit_page_accessible_for_soft_deleted_agent(self):

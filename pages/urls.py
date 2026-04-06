@@ -32,7 +32,6 @@ from .views import (
     SolutionView,
     MarketingContactRequestView,
     SolutionsSitemap,
-    StripeRadarSessionCaptureView,
     WebManifestView,
 )
 
@@ -77,7 +76,6 @@ urlpatterns = [
     path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
     path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),
     path("api/homepage/integrations/search/", HomepageIntegrationsSearchView.as_view(), name="homepage_integrations_search"),
-    path("api/stripe/radar-session/", StripeRadarSessionCaptureView.as_view(), name="stripe_radar_session"),
     path("spawn-agent/", HomeAgentSpawnView.as_view(), name="home_agent_spawn"),
     path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
     path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
