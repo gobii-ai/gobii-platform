@@ -12,6 +12,7 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         )[0]
         self.assertIn("result_text", section)
         self.assertIn("analysis_json", section)
+        self.assertIn("json_extract(result_json,'$.result')", section)
         self.assertIn("do not invent columns", section)
 
     def test_csv_parsing_requires_inspection_and_result_text(self):

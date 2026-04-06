@@ -359,6 +359,7 @@ result_text   → always populated (use this to inspect unknown/plain-text outpu
 result_json   → populated when is_json=1 (prefer this for json_extract/json_each extraction)
 analysis_json → optional hints (not the data)
 if is_json=1  → extract from result_json before falling back to regexp_extract(result_text)
+scrape_as_markdown → prefer json_extract(result_json,'$.result') when you want the original markdown field; result_text may already be flattened to that markdown for easier grep/substr work
 do not invent columns; only use those listed above
 
 # __messages (special table)
