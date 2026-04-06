@@ -4,8 +4,11 @@ from smtplib import SMTPException
 from email.utils import formataddr
 
 from anymail.exceptions import AnymailAPIError
+from billing.plan_resolver import get_plan_context_for_version
+from django.apps import apps
 from django.conf import settings
 from django.contrib import sitemaps
+from django.db import OperationalError, ProgrammingError
 from django.http import HttpResponse, Http404, JsonResponse
 from django.template.loader import render_to_string
 from django.templatetags.static import static
@@ -29,8 +32,7 @@ from constants.feature_flags import (
     SUPPORT_INTERCOM,
 )
 from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
-from constants.feature_flags import CTA_PRICING_CANCEL_TEXT_UNDER_BTN, CTA_START_FREE_TRIAL, SUPPORT_INTERCOM
-from constants.plans import PlanNames
+from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings
 from waffle import flag_is_active, get_waffle_flag_model
@@ -45,6 +47,40 @@ class ProprietaryModeRequiredMixin:
         if not settings.GOBII_PROPRIETARY_MODE:
             raise Http404()
         return super().dispatch(request, *args, **kwargs)
+
+
+def _get_public_plan_context(plan_code: str) -> dict:
+    """Resolve the active public plan version and fall back to legacy plan config."""
+    fallback = dict(get_plan_config(plan_code) or {})
+    plan_slug = PLAN_SLUG_BY_LEGACY_CODE.get(plan_code, plan_code)
+
+    try:
+        PlanVersion = apps.get_model("api", "PlanVersion")
+        plan_version = (
+            PlanVersion.objects
+            .select_related("plan")
+            .filter(
+                plan__slug__iexact=plan_slug,
+                plan__is_org=False,
+                is_active_for_new_subs=True,
+            )
+            .first()
+        )
+    except (LookupError, OperationalError, ProgrammingError):
+        return fallback
+
+    if plan_version is None:
+        return fallback
+
+    try:
+        plan_context = get_plan_context_for_version(plan_version)
+    except (LookupError, OperationalError, ProgrammingError):
+        return fallback
+
+    if plan_context.get("monthly_task_credits") is None:
+        return fallback
+
+    return plan_context
 
 class PricingView(ProprietaryModeRequiredMixin, TemplateView):
     template_name = "pricing.html"
@@ -169,6 +205,13 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             limit = PLAN_CONFIG.get(plan_name, {}).get("max_contacts_per_agent")
             return f"{limit} contacts/agent" if limit is not None else "Contacts/agent: —"
 
+        startup_plan_context = _get_public_plan_context(PlanNames.STARTUP)
+        scale_plan_context = _get_public_plan_context(PlanNames.SCALE)
+        startup_task_credits = int(startup_plan_context.get("monthly_task_credits") or 0)
+        scale_task_credits = int(scale_plan_context.get("monthly_task_credits") or 0)
+        startup_task_credits_display = f"{startup_task_credits:,}"
+        scale_task_credits_display = f"{scale_task_credits:,}"
+
         # Get plan prices from config (refreshed from StripeConfig)
         startup_config = get_plan_config(PlanNames.STARTUP) or {}
         scale_config = get_plan_config(PlanNames.SCALE) or {}
@@ -185,7 +228,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "Unlimited always-on agents",
                 "No time limit for always-on agents",
                 "Agents never expire or turn off",
-                "$0.10 per task beyond 500",
+                f"$0.10 per task beyond {startup_task_credits_display}",
                 "Priority support",
                 "Higher rate limits",
             ]
@@ -200,7 +243,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "Unlimited always-on agents",
                 "Agents never expire or turn off",
                 "Highest intelligence levels available",
-                "$0.04 per task beyond 10,000",
+                f"$0.04 per task beyond {scale_task_credits_display}",
                 "Priority work queue",
                 "1,500 requests/min API throughput",
             ]
@@ -213,7 +256,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "price": startup_price,
                 "price_label": f"${startup_price}",
                 "desc": "For growing teams",
-                "tasks": "500",
+                "task_credits": startup_task_credits,
+                "tasks": startup_task_credits_display,
                 "pricing_model": _trial_pricing_model(startup_trial_days),
                 "highlight": False,
                 "badge": "Most teams",
@@ -231,7 +275,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "price": scale_price,
                 "price_label": f"${scale_price}",
                 "desc": "For teams scaling fast",
-                "tasks": "10,000",
+                "task_credits": scale_task_credits,
+                "tasks": scale_task_credits_display,
                 "pricing_model": _trial_pricing_model(scale_trial_days),
                 "highlight": True,
                 "badge": "Best value",
@@ -253,7 +298,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         # Comparison table rows - updated for new tiers
         context["comparison_rows"] = [
-            ["Tasks included", "500/month", "10,000/month"],
+            ["Tasks included", f"{startup_task_credits_display}/month", f"{scale_task_credits_display}/month"],
             ["Cost per additional task", "$0.10", "$0.04"],
             ["API rate limit (requests/min)", "600", "1,500"],
             ["Max contacts per agent", *max_contacts_per_agent],
@@ -271,7 +316,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ),
             (
                 "How does the pricing work?",
-                "Pro includes 500 tasks per month, then charges $0.10 for each additional task. Scale includes 10,000 tasks per month with $0.04 pricing after that.",
+                (
+                    f"Pro includes {startup_task_credits_display} tasks per month, then charges "
+                    f"$0.10 for each additional task. Scale includes {scale_task_credits_display} "
+                    "tasks per month with $0.04 pricing after that."
+                ),
             ),
             (
                 "Is there any commitment?",
@@ -279,7 +328,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ),
             (
                 "What happens if I exceed my included tasks?",
-                "On the Pro tier, additional tasks are $0.10 each, while Scale brings that down to $0.04 once you pass the included 10,000 tasks.",
+                (
+                    "On the Pro tier, additional tasks are $0.10 each, while Scale brings that "
+                    f"down to $0.04 once you pass the included {scale_task_credits_display} tasks."
+                ),
             ),
             (
                 "Do you offer enterprise features?",
