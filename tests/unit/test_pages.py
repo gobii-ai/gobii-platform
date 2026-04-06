@@ -2216,7 +2216,7 @@ class CheckoutRedirectTests(TestCase):
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
-    @patch("pages.views._is_individual_trial_eligible", return_value=False)
+    @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.record_checkout_context")
@@ -2225,7 +2225,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
     @patch("pages.views.get_stripe_settings")
-    def test_scale_checkout_applies_trial_checkout_fields_when_trial_configured(
+    def test_scale_checkout_applies_trial_checkout_fields_when_trial_eligible(
         self,
         mock_stripe_settings,
         mock_customer,
@@ -2338,6 +2338,9 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")
         self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
+        self.assertNotIn("billing_address_collection", kwargs)
+        self.assertNotIn("name_collection", kwargs)
+        self.assertNotIn("custom_text", kwargs)
         self.assertEqual(
             kwargs["line_items"],
             [{"price": "price_scale", "quantity": 1}],
