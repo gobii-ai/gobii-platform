@@ -45,6 +45,11 @@
         Profile
       </a>
     {% endif %}
+    <a href="{% url 'global_secrets' %}"
+       class="flex items-center px-3 py-2.5 text-sm font-medium rounded-lg transition-colors {% if request.resolver_match.url_name == 'global_secrets' %}bg-blue-50/70 text-blue-600{% else %}text-slate-700 hover:bg-white/80 hover:text-blue-600{% endif %}">
+      <i aria-hidden="true" data-lucide="globe" class="flex-shrink-0 size-5 me-2 {% if request.resolver_match.url_name == 'global_secrets' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
+      Global Secrets
+    </a>
     {% if stripe_enabled %}
       <a href="{% url 'billing' %}"
          x-show="showBilling"

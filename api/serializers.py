@@ -703,3 +703,49 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         if personal_servers is not None:
             self._apply_personal_servers(instance, personal_servers)
         return instance
+
+
+class PersistentAgentSecretSerializer(serializers.ModelSerializer):
+    value = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    is_global = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PersistentAgentSecret
+        fields = [
+            'id',
+            'agent',
+            'user',
+            'organization',
+            'domain_pattern',
+            'name',
+            'description',
+            'key',
+            'secret_type',
+            'requested',
+            'created_at',
+            'updated_at',
+            'value',
+            'is_global',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'key']
+
+    def get_is_global(self, obj):
+        return bool(obj.user_id or obj.organization_id)
+
+    def create(self, validated_data):
+        value = validated_data.pop('value', None)
+        instance = super().create(validated_data)
+        if value:
+            instance.set_value(value)
+            instance.requested = False
+            instance.save(update_fields=['encrypted_value', 'requested'])
+        return instance
+
+    def update(self, instance, validated_data):
+        value = validated_data.pop('value', None)
+        instance = super().update(instance, validated_data)
+        if value:
+            instance.set_value(value)
+            instance.requested = False
+            instance.save(update_fields=['encrypted_value', 'requested'])
+        return instance

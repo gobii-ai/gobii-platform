@@ -122,7 +122,7 @@ def _fetch_decodo_ip_data(username: str, password: str, endpoint: str, port: int
     with traced("PROXY Fetch Decodo IP Data", endpoint=endpoint, port=port):
         try:
             # Configure proxy and authentication
-            proxy_url = f"http://{username}:{password}@{endpoint}:{port}"
+            proxy_url = "http://" + username + ":" + password + f"@{endpoint}:{port}"
             proxies = {
                 "http": proxy_url,
                 "https": proxy_url

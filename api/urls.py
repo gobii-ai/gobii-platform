@@ -7,6 +7,7 @@ from .views import (
     BrowserUseAgentViewSet,
     BrowserUseAgentTaskViewSet,
     PersistentAgentViewSet,
+    SecretViewSet,
 )
 from .webhooks import (
     sms_webhook,
@@ -25,6 +26,7 @@ router = SimpleRouter()
 # specific path does not get shadowed by the base "agents/<pk>/" pattern.
 router.register(r'agents/browser-use', BrowserUseAgentViewSet, basename='browseruseagent')
 router.register(r'agents', PersistentAgentViewSet, basename='persistentagent')
+router.register(r'secrets', SecretViewSet, basename='secret')
 
 urlpatterns = [
     # Utility endpoints

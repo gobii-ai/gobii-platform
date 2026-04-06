@@ -5527,30 +5527,33 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
     The caller is responsible for adding any surrounding instructional text and for
     wrapping the section with <secrets> tags via Prompt.section_text().
     """
+    from api.services.persistent_agent_secrets import get_secrets_q_for_agent
+    secrets_q = get_secrets_q_for_agent(agent)
+    
     available_credentials = (
         PersistentAgentSecret.objects.filter(
-            agent=agent,
+            secrets_q,
             requested=False,
             secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
         ).order_by('domain_pattern', 'name')
     )
     pending_credentials = (
         PersistentAgentSecret.objects.filter(
-            agent=agent,
+            secrets_q,
             requested=True,
             secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
         ).order_by('domain_pattern', 'name')
     )
     available_env_vars = (
         PersistentAgentSecret.objects.filter(
-            agent=agent,
+            secrets_q,
             requested=False,
             secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
         ).order_by('name')
     )
     pending_env_vars = (
         PersistentAgentSecret.objects.filter(
-            agent=agent,
+            secrets_q,
             requested=True,
             secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
         ).order_by('name')

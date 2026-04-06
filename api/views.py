@@ -24,6 +24,7 @@ from .models import (
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentSecret,
     CommsChannel,
 )
 from .serializers import (
@@ -33,6 +34,7 @@ from .serializers import (
     BrowserUseAgentTaskListSerializer,
     PersistentAgentSerializer,
     PersistentAgentListSerializer,
+    PersistentAgentSecretSerializer,
 )
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -1129,3 +1131,84 @@ class PipedreamConnectRedirectView(View):
         )
 
         return HttpResponseRedirect(connect_url)
+
+
+class SecretViewSet(viewsets.ModelViewSet):
+    serializer_class = PersistentAgentSecretSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def _request_organization(self):
+        auth = getattr(self.request, 'auth', None)
+        if isinstance(auth, ApiKey) and getattr(auth, 'organization_id', None):
+            return auth.organization
+        return None
+
+    def get_queryset(self):
+        user = self.request.user
+        agent_id = self.request.query_params.get('agent_id')
+        global_only = self.request.query_params.get('global') == 'true'
+
+        if agent_id:
+            try:
+                agent = PersistentAgent.objects.get(id=agent_id)
+                # Verify access
+                if agent.organization_id:
+                    if not OrganizationMembership.objects.filter(org_id=agent.organization_id, user=user).exists():
+                        return PersistentAgentSecret.objects.none()
+                elif agent.user != user:
+                    return PersistentAgentSecret.objects.none()
+                
+                return PersistentAgentSecret.objects.filter(agent=agent).order_by('domain_pattern', 'name')
+            except PersistentAgent.DoesNotExist:
+                return PersistentAgentSecret.objects.none()
+
+        org = self._request_organization()
+        if not org:
+            org_id = self.request.query_params.get('organization_id') or self.request.headers.get('X-Organization-Id')
+            if org_id:
+                try:
+                    org = Organization.objects.get(id=org_id)
+                    if not OrganizationMembership.objects.filter(org_id=org.id, user=user).exists():
+                        org = None
+                except Organization.DoesNotExist:
+                    pass
+
+        if org:
+            return PersistentAgentSecret.objects.filter(organization=org).order_by('domain_pattern', 'name')
+        
+        return PersistentAgentSecret.objects.filter(user=user, organization__isnull=True).order_by('domain_pattern', 'name')
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        agent_id = self.request.data.get('agent')
+        is_global = self.request.data.get('is_global') or self.request.data.get('visibility') == 'global'
+
+        if agent_id and not is_global:
+            try:
+                agent = PersistentAgent.objects.get(id=agent_id)
+                # Verify access
+                if agent.organization_id:
+                    if not OrganizationMembership.objects.filter(org_id=agent.organization_id, user=user).exists():
+                        raise PermissionDenied("Not authorized to access this agent.")
+                elif agent.user != user:
+                    raise PermissionDenied("Not authorized to access this agent.")
+                serializer.save(agent=agent, user=None, organization=None)
+            except PersistentAgent.DoesNotExist:
+                raise DRFValidationError("Agent not found.")
+        else:
+            # Global secret
+            org = self._request_organization()
+            if not org:
+                org_id = self.request.data.get('organization') or self.request.headers.get('X-Organization-Id')
+                if org_id:
+                    try:
+                        org = Organization.objects.get(id=org_id)
+                        if not OrganizationMembership.objects.filter(org_id=org.id, user=user).exists():
+                            raise PermissionDenied("Not authorized for this organization.")
+                    except Organization.DoesNotExist:
+                        raise DRFValidationError("Organization not found.")
+            
+            if org:
+                serializer.save(agent=None, user=None, organization=org)
+            else:
+                serializer.save(agent=None, user=user, organization=None)

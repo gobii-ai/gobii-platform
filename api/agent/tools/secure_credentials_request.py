@@ -136,9 +136,12 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
                     continue
                 normalized_key = str(key).strip()
 
-            # Check if a credential with this key already exists for this agent
+            from api.services.persistent_agent_secrets import get_secrets_q_for_agent
+            secrets_q = get_secrets_q_for_agent(agent)
+            
+            # Check if a credential with this key already exists for this agent (or globally for user/org)
             existing = PersistentAgentSecret.objects.filter(
-                agent=agent, 
+                secrets_q, 
                 key=normalized_key,
                 secret_type=secret_type,
                 domain_pattern=normalized_domain,

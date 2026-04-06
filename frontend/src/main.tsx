@@ -25,6 +25,8 @@ const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
 const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
 const AgentEmailSettingsScreen = lazy(async () => ({ default: (await import('./screens/AgentEmailSettingsScreen')).AgentEmailSettingsScreen }))
+const AgentSecretsScreen = lazy(async () => ({ default: (await import('./screens/AgentSecretsScreen')).AgentSecretsScreen }))
+const GlobalSecretsScreen = lazy(async () => ({ default: (await import('./screens/GlobalSecretsScreen')).GlobalSecretsScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
 const LoadingFallback = () => (
@@ -267,6 +269,15 @@ switch (appName) {
         adminAgentUrl={mountNode.dataset.adminAgentUrl}
       />
     )
+    break
+  case 'agent-secrets':
+    if (!agentId) {
+      throw new Error('Agent identifier is required for secrets screen')
+    }
+    screen = <AgentSecretsScreen agentId={agentId} agentName={agentName} />
+    break
+  case 'global-secrets':
+    screen = <GlobalSecretsScreen />
     break
   case 'immersive-app':
     screen = <ImmersiveApp maxChatUploadSizeBytes={maxChatUploadSizeBytes} />

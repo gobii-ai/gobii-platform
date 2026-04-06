@@ -7217,7 +7217,23 @@ class PersistentAgentSecret(models.Model):
     agent = models.ForeignKey(
         PersistentAgent,
         on_delete=models.CASCADE,
-        related_name="secrets"
+        related_name="secrets",
+        null=True,
+        blank=True
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="global_secrets",
+        null=True,
+        blank=True
+    )
+    organization = models.ForeignKey(
+        'Organization',
+        on_delete=models.CASCADE,
+        related_name='global_secrets',
+        null=True,
+        blank=True
     )
     domain_pattern = models.CharField(
         max_length=256,
@@ -7254,18 +7270,54 @@ class PersistentAgentSecret(models.Model):
 
     class Meta:
         constraints = [
+            # Agent-level uniqueness
             models.UniqueConstraint(
                 fields=['agent', 'secret_type', 'domain_pattern', 'name'],
+                condition=models.Q(agent__isnull=False),
                 name='unique_agent_type_domain_secret_name'
             ),
             models.UniqueConstraint(
                 fields=['agent', 'secret_type', 'domain_pattern', 'key'],
+                condition=models.Q(agent__isnull=False),
                 name='unique_agent_type_domain_secret_key'
+            ),
+            # User-level uniqueness
+            models.UniqueConstraint(
+                fields=['user', 'secret_type', 'domain_pattern', 'name'],
+                condition=models.Q(user__isnull=False, organization__isnull=True),
+                name='unique_user_type_domain_secret_name'
+            ),
+            models.UniqueConstraint(
+                fields=['user', 'secret_type', 'domain_pattern', 'key'],
+                condition=models.Q(user__isnull=False, organization__isnull=True),
+                name='unique_user_type_domain_secret_key'
+            ),
+            # Org-level uniqueness
+            models.UniqueConstraint(
+                fields=['organization', 'secret_type', 'domain_pattern', 'name'],
+                condition=models.Q(organization__isnull=False),
+                name='unique_org_type_domain_secret_name'
+            ),
+            models.UniqueConstraint(
+                fields=['organization', 'secret_type', 'domain_pattern', 'key'],
+                condition=models.Q(organization__isnull=False),
+                name='unique_org_type_domain_secret_key'
+            ),
+            # Check constraint for ownership
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(agent__isnull=False) & models.Q(user__isnull=True) & models.Q(organization__isnull=True)) |
+                    (models.Q(agent__isnull=True) & models.Q(user__isnull=False) & models.Q(organization__isnull=True)) |
+                    (models.Q(agent__isnull=True) & models.Q(user__isnull=True) & models.Q(organization__isnull=False))
+                ),
+                name="secret_exactly_one_owner"
             )
         ]
         indexes = [
             models.Index(fields=['agent', 'secret_type', 'domain_pattern'], name='pa_secret_agent_type_dom_idx'),
             models.Index(fields=['agent'], name='pa_secret_agent_idx'),
+            models.Index(fields=['user'], name='pa_secret_user_idx'),
+            models.Index(fields=['organization'], name='pa_secret_org_idx'),
         ]
         ordering = ['domain_pattern', 'name']
 

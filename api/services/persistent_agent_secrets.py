@@ -4,7 +4,16 @@ from django.core.exceptions import ValidationError
 
 from api.domain_validation import DomainPatternValidator
 from api.models import PersistentAgent, PersistentAgentSecret
+from django.db.models import Q
 
+def get_secrets_q_for_agent(agent: PersistentAgent) -> Q:
+    """Return a Q object matching all secrets visible to this agent (agent-owned + org/user-owned global secrets)."""
+    agent_condition = Q(agent=agent)
+    if agent.organization_id:
+        owner_condition = Q(organization_id=agent.organization_id)
+    else:
+        owner_condition = Q(user_id=agent.user_id, organization__isnull=True)
+    return agent_condition | owner_condition
 
 def format_validation_error(exc: ValidationError) -> str:
     if hasattr(exc, "message_dict"):

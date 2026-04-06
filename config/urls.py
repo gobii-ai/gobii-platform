@@ -178,6 +178,7 @@ from console.views import (
     AgentDailyLimitEmailActionView,
     AgentDeleteView,
     AgentSecretsView,
+    GlobalSecretsView,
     AgentSecretsAddView,
     AgentSecretsAddFormView,
     AgentSecretsEditView,
@@ -476,6 +477,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/email/", AgentEmailSettingsView.as_view(), name="agent_email_settings"),
     path("console/agents/<uuid:pk>/files/", AgentFilesView.as_view(), name="agent_files"),
     # Agent secrets management
+    path("console/secrets/", GlobalSecretsView.as_view(), name="global_secrets"),
     path("console/agents/<uuid:pk>/secrets/", AgentSecretsView.as_view(), name="agent_secrets"),
     path("console/agents/<uuid:pk>/secrets/add/", AgentSecretsAddView.as_view(), name="agent_secrets_add"),
     path("console/agents/<uuid:pk>/secrets/add/form/", AgentSecretsAddFormView.as_view(), name="agent_secrets_add_form"),

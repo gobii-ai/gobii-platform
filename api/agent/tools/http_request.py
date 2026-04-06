@@ -346,10 +346,13 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     # ---------------- Secret placeholder substitution ---------------- #
     # Build a mapping of secret_key -> decrypted value for this agent (exclude requested secrets)
+    from api.services.persistent_agent_secrets import get_secrets_q_for_agent
+    secrets_q = get_secrets_q_for_agent(agent)
+    
     secret_map = {
         s.key: s.get_value()
         for s in PersistentAgentSecret.objects.filter(
-            agent=agent,
+            secrets_q,
             requested=False,
             secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
         )
