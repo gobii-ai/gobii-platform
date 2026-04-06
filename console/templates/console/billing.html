@@ -1,11 +1,6 @@
 {% extends "console_page.html" %}
 {% load vite_tags %}
 
-{% block head_extras %}
-  {{ block.super }}
-  {% include "partials/_stripe_radar.html" %}
-{% endblock %}
-
 {% block console_content %}
 <div id="gobii-frontend-root"
      class="space-y-6 pb-6"

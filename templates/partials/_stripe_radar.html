@@ -1,6 +1,0 @@
-{% load static %}
-{% if stripe_radar %}
-  <script src="https://js.stripe.com/dahlia/stripe.js"></script>
-  {{ stripe_radar|json_script:"stripe-radar-config" }}
-  <script src="{% static 'js/stripe_radar.js' %}"></script>
-{% endif %}
