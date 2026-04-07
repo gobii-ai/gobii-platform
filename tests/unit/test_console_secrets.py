@@ -166,6 +166,27 @@ class ConsoleSecretsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(GlobalSecret.objects.filter(id=secret.id).exists())
 
+    def test_update_global_secret_keeps_key_when_name_changes(self):
+        secret = self._make_global_secret(name="Original Global Name")
+        original_key = secret.key
+
+        response = self.client.patch(
+            reverse("console-global-secret-detail", args=[secret.id]),
+            data=json.dumps(
+                {
+                    "name": "Updated Global Name",
+                    "description": "updated description",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["secret"]["key"], original_key)
+        secret.refresh_from_db()
+        self.assertEqual(secret.name, "Updated Global Name")
+        self.assertEqual(secret.key, original_key)
+
     def test_create_agent_secret_returns_created(self):
         self._set_org_context()
 
@@ -223,6 +244,28 @@ class ConsoleSecretsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(PersistentAgentSecret.objects.filter(id=secret.id).exists())
+
+    def test_update_agent_secret_keeps_key_when_name_changes(self):
+        secret = self._make_agent_secret(name="Original Agent Name")
+        original_key = secret.key
+        self._set_org_context()
+
+        response = self.client.patch(
+            reverse("console-agent-secret-detail", args=[self.org_agent.id, secret.id]),
+            data=json.dumps(
+                {
+                    "name": "Updated Agent Name",
+                    "description": "updated description",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["secret"]["key"], original_key)
+        secret.refresh_from_db()
+        self.assertEqual(secret.name, "Updated Agent Name")
+        self.assertEqual(secret.key, original_key)
 
     def test_promote_agent_secret_returns_created_and_moves_secret(self):
         secret = self._make_agent_secret(name="Promote Me")

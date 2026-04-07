@@ -24,7 +24,7 @@ def validate_secret_for_runtime_use(secret) -> str:
 
     Accepts both PersistentAgentSecret and GlobalSecret instances.
     """
-    if secret.secret_type != "credential":
+    if secret.secret_type != GlobalSecret.SecretType.CREDENTIAL:
         raise ValidationError({"secret_type": "Only credential secrets may be injected into browser tasks."})
 
     if getattr(secret, "requested", False):

@@ -11,7 +11,11 @@ from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.views import View
 
 from api.models import GlobalSecret, PersistentAgentSecret
-from api.services.persistent_agent_secrets import move_agent_secret_to_global
+from api.services.persistent_agent_secrets import (
+    global_secrets_queryset_for_agent,
+    move_agent_secret_to_global,
+    resolve_global_secret_owner_for_agent,
+)
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.context_helpers import build_console_context
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -175,7 +179,6 @@ class GlobalSecretDetailAPIView(LoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        old_name = secret.name
         if "name" in payload:
             secret.name = (payload["name"] or "").strip()
         if "description" in payload:
@@ -186,9 +189,6 @@ class GlobalSecretDetailAPIView(LoginRequiredMixin, View):
             secret.secret_type = payload["secret_type"]
         if "value" in payload and payload["value"]:
             secret.set_value(payload["value"])
-        # Only regenerate key when the name actually changed
-        if secret.name != old_name:
-            secret.key = ""
 
         try:
             secret.save()
@@ -232,13 +232,7 @@ class AgentSecretListAPIView(LoginRequiredMixin, View):
         agent_secrets = PersistentAgentSecret.objects.filter(agent=agent, requested=False).order_by("secret_type", "domain_pattern", "name")
         requested_secrets = PersistentAgentSecret.objects.filter(agent=agent, requested=True).order_by("secret_type", "domain_pattern", "name")
 
-        # Global secrets for this agent's owner
-        from django.db.models import Q
-        if agent.organization_id:
-            global_filter = Q(organization=agent.organization)
-        else:
-            global_filter = Q(user=agent.user, organization__isnull=True)
-        global_secrets = GlobalSecret.objects.filter(global_filter).order_by("secret_type", "domain_pattern", "name")
+        global_secrets = global_secrets_queryset_for_agent(agent).order_by("secret_type", "domain_pattern", "name")
 
         return JsonResponse({
             "agent_secrets": [_serialize_agent_secret(s) for s in agent_secrets],
@@ -257,9 +251,7 @@ class AgentSecretListAPIView(LoginRequiredMixin, View):
         is_global = payload.get("is_global", False)
 
         if is_global:
-            # Create as a global secret for the agent's owner
-            owner_user = agent.user if not agent.organization_id else None
-            owner_org = agent.organization if agent.organization_id else None
+            owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
             try:
                 with transaction.atomic():
                     secret = _create_global_secret(payload, owner_user, owner_org)
@@ -337,7 +329,6 @@ class AgentSecretDetailAPIView(LoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        old_name = secret.name
         if "name" in payload:
             secret.name = (payload["name"] or "").strip()
         if "description" in payload:
@@ -348,9 +339,6 @@ class AgentSecretDetailAPIView(LoginRequiredMixin, View):
             secret.secret_type = payload["secret_type"]
         if "value" in payload and payload["value"]:
             secret.set_value(payload["value"])
-        # Only regenerate key when the name actually changed
-        if secret.name != old_name:
-            secret.key = ""
 
         try:
             secret.save()
