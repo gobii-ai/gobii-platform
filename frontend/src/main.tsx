@@ -287,7 +287,6 @@ switch (appName) {
       <GlobalSecretsScreen
         listUrl={listUrl}
         ownerScope={mountNode.dataset.ownerScope}
-        ownerLabel={mountNode.dataset.ownerLabel}
       />
     )
     break

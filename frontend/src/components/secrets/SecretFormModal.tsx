@@ -110,7 +110,7 @@ export function SecretFormModal({
       iconBgClass="bg-blue-100"
       iconColorClass="text-blue-600"
     >
-      <form id="secret-form" onSubmit={handleSubmit} className="space-y-4">
+      <form id="secret-form" onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
         {allErrors.length > 0 && (
           <div className="rounded-md bg-red-50 p-3">
             {allErrors.map((msg, i) => (
@@ -162,6 +162,10 @@ export function SecretFormModal({
               onChange={(e) => setDomainPattern(e.target.value)}
               className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
               placeholder="e.g. https://example.com, *.google.com"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
             />
           </div>
         )}
@@ -178,7 +182,7 @@ export function SecretFormModal({
             onChange={(e) => setValue(e.target.value)}
             className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder={isEdit ? 'Leave blank to keep current value' : 'Enter secret value'}
-            autoComplete="off"
+            autoComplete="new-password"
           />
         </div>
 

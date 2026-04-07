@@ -20,10 +20,9 @@ import { useModal } from '../hooks/useModal'
 type GlobalSecretsScreenProps = {
   listUrl: string
   ownerScope?: string
-  ownerLabel?: string
 }
 
-export function GlobalSecretsScreen({ listUrl, ownerLabel }: GlobalSecretsScreenProps) {
+export function GlobalSecretsScreen({ listUrl, ownerScope }: GlobalSecretsScreenProps) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['global-secrets', listUrl] as const, [listUrl])
   const [modal, showModal] = useModal()
@@ -37,7 +36,13 @@ export function GlobalSecretsScreen({ listUrl, ownerLabel }: GlobalSecretsScreen
 
   const secrets = data?.secrets ?? []
   const listError = error instanceof Error ? error.message : null
-  const ownerText = ownerLabel || 'your workspace'
+  const isOrganizationScope = ownerScope === 'organization'
+  const description = isOrganizationScope
+    ? 'Manage encrypted secrets for this organization.'
+    : 'Manage encrypted secrets for your account.'
+  const subtitle = isOrganizationScope
+    ? 'Shared across all agents in this organization'
+    : 'Shared across all agents in your account'
 
   const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey })
@@ -108,9 +113,7 @@ export function GlobalSecretsScreen({ listUrl, ownerLabel }: GlobalSecretsScreen
         <div className="px-6 py-4 border-b border-gray-200/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold text-gray-800">Secrets</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Manage encrypted secrets for {ownerText}. Global secrets are shared across all agents.
-            </p>
+            <p className="text-sm text-gray-500 mt-1">{description}</p>
           </div>
           <button
             type="button"
@@ -166,7 +169,7 @@ export function GlobalSecretsScreen({ listUrl, ownerLabel }: GlobalSecretsScreen
         <SecretTable
           secrets={secrets}
           title="Global Secrets"
-          subtitle={`Shared across all agents in ${ownerText}`}
+          subtitle={subtitle}
           emptyMessage="No global secrets configured yet. Add your first secret to get started."
           onEdit={handleEdit}
           onDelete={handleDelete}

@@ -14,13 +14,15 @@ from api.models import (
     PersistentAgent,
     PersistentAgentSecret,
     BrowserUseAgent,
+    Organization,
+    OrganizationMembership,
 )
 from api.agent.core.prompt_context import _get_secrets_block
 from api.agent.tools.secure_credentials_request import (
     execute_secure_credentials_request,
     get_secure_credentials_request_tool,
 )
-from console.forms import PersistentAgentAddSecretForm, PersistentAgentEditSecretForm
+from console.forms import PersistentAgentAddSecretForm, PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm
 
 User = get_user_model()
 
@@ -548,17 +550,35 @@ class AgentSecretsRequestViewTests(TestCase):
             email="test2@example.com",
             password="password"
         )
+        self.org = Organization.objects.create(
+            name="Secrets Org",
+            slug="secrets-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
         self.browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
             name="BrowserAgent2"
         )
-        self.agent = PersistentAgent.objects.create(
-            user=self.user,
-            browser_use_agent=self.browser_agent,
-            name="Agent2"
-        )
+        with patch.object(PersistentAgent, "_validate_org_seats", return_value=None):
+            self.agent = PersistentAgent.objects.create(
+                user=self.user,
+                organization=self.org,
+                browser_use_agent=self.browser_agent,
+                name="Agent2"
+            )
         self.client = Client()
         assert self.client.login(username="test2@example.com", password="password")
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session.save()
 
     def test_partial_request_save_updates_only_provided(self):
         # Two requested secrets
@@ -588,6 +608,24 @@ class AgentSecretsRequestViewTests(TestCase):
         s2.refresh_from_db()
         self.assertFalse(s1.requested)
         self.assertTrue(s2.requested)
+
+    def test_request_page_disables_autofill_for_secret_inputs(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Password",
+            key="password",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.get(reverse('agent_secrets_request', kwargs={"pk": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<form method="post" autocomplete="off">', html=False)
+        self.assertContains(response, f'name="secret_{secret.id}"', html=False)
+        self.assertContains(response, 'type="password"', html=False)
+        self.assertContains(response, 'autocomplete="new-password"', html=False)
 
     def test_edit_secret_keeps_existing_key_when_name_changes(self):
         secret = PersistentAgentSecret(
@@ -797,6 +835,15 @@ class AgentSecretFormsTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("domain", form.errors)
 
+    def test_add_form_widgets_disable_autofill(self):
+        form = PersistentAgentAddSecretForm(agent=self.agent)
+
+        self.assertEqual(form.fields["domain"].widget.attrs["autocomplete"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocorrect"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocapitalize"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["spellcheck"], "false")
+        self.assertEqual(form.fields["value"].widget.attrs["autocomplete"], "new-password")
+
     @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
     def test_add_form_env_var_allows_blank_domain_and_uses_sentinel(self, _mock_sandbox_enabled):
         form = PersistentAgentAddSecretForm(
@@ -855,6 +902,32 @@ class AgentSecretFormsTests(TestCase):
         self.assertEqual(
             form.cleaned_data["domain"],
             PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+        )
+
+    def test_edit_form_widgets_disable_autofill(self):
+        form = PersistentAgentEditSecretForm(agent=self.agent, secret=self.existing_secret)
+
+        self.assertEqual(form.fields["domain"].widget.attrs["autocomplete"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocorrect"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocapitalize"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["spellcheck"], "false")
+        self.assertEqual(form.fields["value"].widget.attrs["autocomplete"], "new-password")
+
+    def test_requested_secret_form_widgets_use_new_password_autocomplete(self):
+        requested_secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Requested Secret",
+            key="requested_secret",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        form = PersistentAgentSecretsRequestForm(requested_secrets=[requested_secret])
+
+        self.assertEqual(
+            form.fields[f"secret_{requested_secret.id}"].widget.attrs["autocomplete"],
+            "new-password",
         )
 
 

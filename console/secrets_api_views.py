@@ -144,7 +144,7 @@ class GlobalSecretListAPIView(LoginRequiredMixin, View):
 
         Analytics.track_event(
             user_id=request.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_ADDED,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_ADDED,
             source=AnalyticsSource.WEB,
             properties={"secret_id": str(secret.id), "scope": "global"},
         )
@@ -205,7 +205,7 @@ class GlobalSecretDetailAPIView(LoginRequiredMixin, View):
         secret.delete()
         Analytics.track_event(
             user_id=request.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_DELETED,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_DELETED,
             source=AnalyticsSource.WEB,
             properties={"secret_id": str(secret_id), "scope": "global"},
         )
@@ -304,7 +304,7 @@ class AgentSecretListAPIView(LoginRequiredMixin, View):
 
         Analytics.track_event(
             user_id=request.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_ADDED,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_ADDED,
             source=AnalyticsSource.WEB,
             properties={"agent_id": str(agent.pk), "secret_id": str(secret.id), "scope": "agent"},
         )
@@ -365,7 +365,7 @@ class AgentSecretDetailAPIView(LoginRequiredMixin, View):
         secret.delete()
         Analytics.track_event(
             user_id=request.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_DELETED,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_DELETED,
             source=AnalyticsSource.WEB,
             properties={"agent_id": str(agent.pk), "secret_id": str(secret_id), "scope": "agent"},
         )
@@ -415,7 +415,7 @@ class AgentSecretPromoteAPIView(LoginRequiredMixin, View):
 
         Analytics.track_event(
             user_id=request.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_ADDED,
+            event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_ADDED,
             source=AnalyticsSource.WEB,
             properties={"agent_id": str(agent.pk), "secret_id": str(global_secret.id), "scope": "global", "promoted": True},
         )

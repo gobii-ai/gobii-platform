@@ -6036,7 +6036,6 @@ class GlobalSecretsView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["owner_scope"] = self.owner_scope
-        context["owner_label"] = self.get_owner_label()
         return context
 
 
