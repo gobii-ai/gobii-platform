@@ -55,6 +55,10 @@ PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT = (
 # Controls whether UserTrialEligibility decisions block trial CTAs and checkout trial periods.
 USER_TRIAL_ELIGIBILITY_ENFORCEMENT = "user_trial_eligibility_enforcement"
 
+# Controls whether "review" trial eligibility decisions are treated as trial-allowed
+# while still blocking explicit "no_trial" decisions.
+USER_TRIAL_REVIEW_ALLOWS_TRIAL = "user_trial_review_allows_trial"
+
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
 # switch not flag
