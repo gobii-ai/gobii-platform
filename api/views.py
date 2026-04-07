@@ -850,8 +850,10 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
             return explicit
 
         endpoint = (
-            PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent, channel=channel.value, is_primary=True).first()
-            or PersistentAgentCommsEndpoint.objects.filter(owner_agent=agent, channel=channel.value).order_by('-is_primary', 'created_at').first()
+            PersistentAgentCommsEndpoint.objects
+            .filter(owner_agent=agent, channel=channel.value)
+            .order_by('-is_primary', 'address')
+            .first()
         )
         if endpoint is None:
             raise DRFValidationError({'recipient': [f'Agent has no {channel.value} endpoint.']})
