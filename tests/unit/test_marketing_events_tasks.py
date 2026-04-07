@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import SimpleTestCase, tag, override_settings
 
+from api.models import UserTrialEligibilityAutoStatusChoices
 from marketing_events.providers.base import PermanentError
 from marketing_events.tasks import (
     _analytics_user_id,
@@ -9,6 +10,7 @@ from marketing_events.tasks import (
     enqueue_marketing_event,
     enqueue_start_trial_marketing_event,
 )
+from util.analytics import AnalyticsEvent
 
 
 @tag("batch_marketing_events")
@@ -40,7 +42,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         kwargs = mock_track.call_args.kwargs
         self.assertEqual(kwargs["user_id"], 42)
-        self.assertEqual(kwargs["event"], "CAPI Event Sent")
+        self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_SENT)
         self.assertEqual(kwargs["properties"]["provider"], "MetaCAPI")
         self.assertEqual(kwargs["properties"]["event_id"], "evt-123")
 
@@ -65,7 +67,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         kwargs = mock_track.call_args.kwargs
         self.assertEqual(kwargs["user_id"], 77)
-        self.assertEqual(kwargs["event"], "CAPI Event Failed")
+        self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_FAILED)
         self.assertEqual(kwargs["properties"]["provider"], "MetaCAPI")
         self.assertEqual(kwargs["properties"]["event_id"], "evt-456")
         self.assertEqual(kwargs["properties"]["error_type"], "permanent")
@@ -100,7 +102,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         kwargs = mock_track.call_args.kwargs
         self.assertEqual(kwargs["user_id"], 88)
-        self.assertEqual(kwargs["event"], "CAPI Event Sent")
+        self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_SENT)
         self.assertEqual(kwargs["properties"]["provider"], "GoogleAnalyticsMP")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -132,7 +134,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
         self.assertEqual(track_kwargs["user_id"], 42)
-        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
         self.assertEqual(track_kwargs["properties"]["event_name"], "StartTrial")
         self.assertEqual(
             track_kwargs["properties"]["reason"],
@@ -197,7 +199,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_dispatch.assert_not_called()
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
-        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
         self.assertEqual(
             track_kwargs["properties"]["reason"],
             "subscription_canceled_or_cancel_at_period_end",
@@ -233,7 +235,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_dispatch.assert_not_called()
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
-        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
         self.assertEqual(track_kwargs["properties"]["event_name"], "AgentCreated")
         self.assertEqual(track_kwargs["properties"]["subscription_id"], "sub_126")
         self.assertEqual(
@@ -266,6 +268,102 @@ class MarketingEventsTaskTests(SimpleTestCase):
         }
 
         enqueue_delayed_subscription_guarded_marketing_event(payload)
+
+        mock_dispatch.assert_called_once_with(payload)
+        mock_track.assert_not_called()
+
+
+@tag("batch_marketing_events")
+class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
+    def setUp(self):
+        self.payload = {
+            "event_name": "StartTrial",
+            "properties": {
+                "event_time": 1_900_000_000,
+                "event_id": "evt-eligibility",
+                "subscription_id": "sub_eligibility",
+            },
+            "user": {"id": "42", "email": "trial-capi-user@example.com"},
+            "context": {},
+        }
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
+    def test_missing_snapshot_does_not_suppress_start_trial(
+        self,
+        _mock_subscription_guard,
+        mock_track,
+        mock_dispatch,
+    ):
+        enqueue_start_trial_marketing_event(self.payload)
+
+        mock_dispatch.assert_called_once_with(self.payload)
+        mock_track.assert_not_called()
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
+    def test_snapshot_disallow_skips_start_trial(
+        self,
+        _mock_subscription_guard,
+        mock_track,
+        mock_dispatch,
+    ):
+        payload = self.payload | {
+            "start_trial_eligibility": {
+                "decision": UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+                "manual_action": "inherit",
+                "reason_codes": ["fpjs_history_match"],
+                "send_allowed": False,
+                "decision_source": "stored_trial_eligibility_snapshot",
+            }
+        }
+
+        enqueue_start_trial_marketing_event(payload)
+
+        mock_dispatch.assert_not_called()
+        mock_track.assert_called_once()
+        track_kwargs = mock_track.call_args.kwargs
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
+        self.assertEqual(track_kwargs["properties"]["reason"], "trial_eligibility_disallowed")
+        self.assertEqual(
+            track_kwargs["properties"]["decision_source"],
+            "stored_trial_eligibility_snapshot",
+        )
+        self.assertEqual(
+            track_kwargs["properties"]["trial_eligibility_decision"],
+            UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+        )
+        self.assertEqual(
+            track_kwargs["properties"]["trial_eligibility_reason_codes"],
+            ["fpjs_history_match"],
+        )
+        self.assertFalse(track_kwargs["properties"]["trial_eligibility_policy_send_allowed"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks._dispatch_marketing_event")
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
+    def test_snapshot_allow_review_dispatches_start_trial(
+        self,
+        _mock_subscription_guard,
+        mock_track,
+        mock_dispatch,
+    ):
+        payload = self.payload | {
+            "start_trial_eligibility": {
+                "decision": UserTrialEligibilityAutoStatusChoices.REVIEW,
+                "manual_action": "inherit",
+                "reason_codes": ["multi_signal_history_match"],
+                "send_allowed": True,
+                "decision_source": "stored_trial_eligibility_snapshot",
+            }
+        }
+
+        enqueue_start_trial_marketing_event(payload)
 
         mock_dispatch.assert_called_once_with(payload)
         mock_track.assert_not_called()

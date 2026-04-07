@@ -219,6 +219,9 @@ class AnalyticsEvent(StrEnum):
     ACTIVATION_ASSESSED = 'Activation Assessed'
     ACCOUNT_EXECUTION_PAUSED = 'Account Execution Paused'
     PERSONAL_TRIAL_ELIGIBILITY_ASSESSED = 'Personal Trial Eligibility Assessed'
+    CAPI_EVENT_SENT = 'CAPI Event Sent'
+    CAPI_EVENT_FAILED = 'CAPI Event Failed'
+    CAPI_EVENT_SKIPPED = 'CAPI Event Skipped'
 
     # API Key Events
     API_KEY_CREATED = 'API Key Created'

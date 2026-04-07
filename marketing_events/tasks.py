@@ -5,7 +5,7 @@ from typing import Any
 from celery import shared_task
 from django.conf import settings
 
-from util.analytics import Analytics
+from util.analytics import Analytics, AnalyticsEvent
 from util.integrations import stripe_status
 from util.payments_helper import PaymentsHelper
 from .providers import get_providers
@@ -146,6 +146,22 @@ def _payload_event_name(payload: dict) -> str:
     return str((payload or {}).get("event_name") or "").strip() or "UnknownEvent"
 
 
+def _start_trial_ineligibility_skip_properties(payload: dict) -> dict[str, Any] | None:
+    snapshot = (payload or {}).get("start_trial_eligibility")
+    if not isinstance(snapshot, dict):
+        return None
+
+    if snapshot.get("send_allowed") is not False:
+        return None
+
+    return {
+        "trial_eligibility_decision": snapshot.get("decision"),
+        "trial_eligibility_manual_action": snapshot.get("manual_action"),
+        "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
+        "trial_eligibility_policy_send_allowed": False,
+    }
+
+
 def _should_send_subscription_guarded_event(payload: dict) -> tuple[bool, str | None]:
     normalized_subscription_id = _subscription_guard_id_from_payload(payload)
     if not normalized_subscription_id:
@@ -179,7 +195,13 @@ def _should_send_subscription_guarded_event(payload: dict) -> tuple[bool, str | 
     return True, decision_source
 
 
-def _track_subscription_guarded_skip(payload: dict, *, reason: str, decision_source: str | None = None) -> None:
+def _track_marketing_skip(
+    payload: dict,
+    *,
+    reason: str,
+    decision_source: str | None = None,
+    extra_properties: dict[str, Any] | None = None,
+) -> None:
     user_payload = (payload or {}).get("user") or {}
     analytics_user_id = _analytics_user_id(user_payload.get("id"), None)
     properties_payload = (payload or {}).get("properties") or {}
@@ -194,10 +216,12 @@ def _track_subscription_guarded_skip(payload: dict, *, reason: str, decision_sou
         skip_properties["subscription_id"] = str(subscription_id)
     if decision_source:
         skip_properties["decision_source"] = decision_source
+    if extra_properties:
+        skip_properties.update(extra_properties)
 
     Analytics.track(
         user_id=analytics_user_id,
-        event="CAPI Event Skipped",
+        event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
         properties=skip_properties,
     )
 
@@ -264,7 +288,7 @@ def _dispatch_marketing_event(payload: dict):
                 # Track successful CAPI send for observability
                 Analytics.track(
                     user_id=analytics_user_id,
-                    event="CAPI Event Sent",
+                    event=AnalyticsEvent.CAPI_EVENT_SENT,
                     properties={
                         "provider": provider_name,
                         "event_name": evt["event_name"],
@@ -281,7 +305,7 @@ def _dispatch_marketing_event(payload: dict):
                 # Track CAPI failure for observability
                 Analytics.track(
                     user_id=analytics_user_id,
-                    event="CAPI Event Failed",
+                    event=AnalyticsEvent.CAPI_EVENT_FAILED,
                     properties={
                         "provider": provider_name,
                         "event_name": evt["event_name"],
@@ -316,9 +340,18 @@ def enqueue_marketing_event(self, payload: dict):
 def enqueue_start_trial_marketing_event(self, payload: dict):
     if not settings.GOBII_PROPRIETARY_MODE:
         return
+    ineligibility_skip_properties = _start_trial_ineligibility_skip_properties(payload)
+    if ineligibility_skip_properties is not None:
+        _track_marketing_skip(
+            payload,
+            reason="trial_eligibility_disallowed",
+            decision_source=((payload or {}).get("start_trial_eligibility") or {}).get("decision_source"),
+            extra_properties=ineligibility_skip_properties,
+        )
+        return
     should_send, decision_source = _should_send_subscription_guarded_event(payload)
     if not should_send:
-        _track_subscription_guarded_skip(
+        _track_marketing_skip(
             payload,
             reason="subscription_canceled_or_cancel_at_period_end",
             decision_source=decision_source,
@@ -339,7 +372,7 @@ def enqueue_delayed_subscription_guarded_marketing_event(self, payload: dict):
         return
     should_send, decision_source = _should_send_subscription_guarded_event(payload)
     if not should_send:
-        _track_subscription_guarded_skip(
+        _track_marketing_skip(
             payload,
             reason="subscription_canceled_or_cancel_at_period_end",
             decision_source=decision_source,
