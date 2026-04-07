@@ -880,27 +880,31 @@ def _run_video_generation_test(endpoint: VideoGenerationModelEndpoint) -> dict[s
     if not api_key:
         raise ValueError("Configure an API key or environment variable for this provider before testing")
 
-    gen_kwargs: dict[str, Any] = {
-        "prompt": "A gentle wave rolling onto a sandy beach at sunset.",
-        "model": model,
+    params: dict[str, Any] = {
         "api_key": api_key,
-        "seconds": "5",
         "timeout": 120,
     }
     if api_base:
-        gen_kwargs["api_base"] = api_base
+        params["api_base"] = api_base
+    _apply_provider_overrides(provider, params)
+
+    gen_kwargs: dict[str, Any] = {
+        "prompt": "A gentle wave rolling onto a sandy beach at sunset.",
+        "model": model,
+        "seconds": "5",
+        **params,
+    }
 
     started = time.monotonic()
     video_obj = _litellm.video_generation(**gen_kwargs)
 
-    status_kwargs = {k: v for k, v in gen_kwargs.items() if k in ("api_key", "api_base")}
     poll_count = 0
     while video_obj.status not in ("completed", "failed", "expired"):
         if time.monotonic() - started > 120:
             raise ValueError(f"Video generation timed out (status={video_obj.status})")
         time.sleep(5)
         poll_count += 1
-        video_obj = _litellm.video_status(video_obj.id, **status_kwargs)
+        video_obj = _litellm.video_status(video_obj.id, **params)
 
     if video_obj.status != "completed":
         error_msg = "unknown"

@@ -130,10 +130,7 @@ def _wait_for_video_completion(video_obj, *, params: Dict[str, Any]) -> Any:
             )
         time.sleep(POLL_INTERVAL_SECONDS)
         elapsed += POLL_INTERVAL_SECONDS
-        video_obj = litellm.video_status(
-            video_id,
-            **{k: v for k, v in params.items() if k in ("api_key", "api_base", "extra_headers")},
-        )
+        video_obj = litellm.video_status(video_id, **params)
     if video_obj.status != "completed":
         error_detail = "unknown error"
         if video_obj.error and isinstance(video_obj.error, dict):
@@ -166,10 +163,7 @@ def _generate_video(
     if source_image_bytes is not None:
         gen_kwargs["input_reference"] = source_image_bytes
 
-    # Pass through auth/base params
-    for key in ("api_key", "api_base", "extra_headers"):
-        if key in params:
-            gen_kwargs[key] = params[key]
+    gen_kwargs.update(params)
 
     video_obj = litellm.video_generation(**gen_kwargs)
 
@@ -177,13 +171,7 @@ def _generate_video(
     if video_obj.status != "completed":
         video_obj = _wait_for_video_completion(video_obj, params=params)
 
-    # Fetch the video content bytes
-    content_kwargs: Dict[str, Any] = {}
-    for key in ("api_key", "api_base", "extra_headers"):
-        if key in params:
-            content_kwargs[key] = params[key]
-
-    video_bytes = litellm.video_content(video_obj.id, **content_kwargs)
+    video_bytes = litellm.video_content(video_obj.id, **params)
     if not video_bytes:
         raise VideoGenerationResponseError(
             "Video generation returned empty content",
