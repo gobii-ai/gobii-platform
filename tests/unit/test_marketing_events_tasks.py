@@ -1,13 +1,8 @@
 from unittest.mock import MagicMock, patch
 
-from django.contrib.auth import get_user_model
-from django.test import SimpleTestCase, TestCase, tag, override_settings
+from django.test import SimpleTestCase, tag, override_settings
 
-from api.models import (
-    UserTrialEligibility,
-    UserTrialEligibilityAutoStatusChoices,
-    UserTrialEligibilityManualActionChoices,
-)
+from api.models import UserTrialEligibilityAutoStatusChoices
 from marketing_events.providers.base import PermanentError
 from marketing_events.tasks import (
     _analytics_user_id,
@@ -15,9 +10,6 @@ from marketing_events.tasks import (
     enqueue_marketing_event,
     enqueue_start_trial_marketing_event,
 )
-
-
-User = get_user_model()
 
 
 @tag("batch_marketing_events")
@@ -117,13 +109,8 @@ class MarketingEventsTaskTests(SimpleTestCase):
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._subscription_state_from_db", return_value=(None, None))
     @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(True, "trialing"))
-    @patch(
-        "marketing_events.tasks.is_start_trial_capi_trial_eligibility_enforcement_enabled",
-        return_value=False,
-    )
     def test_enqueue_start_trial_skips_when_cancel_at_period_end(
         self,
-        _mock_flag_enabled,
         _mock_cancel_from_stripe,
         _mock_cancel_from_db,
         mock_track,
@@ -160,13 +147,8 @@ class MarketingEventsTaskTests(SimpleTestCase):
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._subscription_state_from_db", return_value=(False, "trialing"))
     @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(None, None))
-    @patch(
-        "marketing_events.tasks.is_start_trial_capi_trial_eligibility_enforcement_enabled",
-        return_value=False,
-    )
     def test_enqueue_start_trial_uses_db_fallback_and_dispatches(
         self,
-        _mock_flag_enabled,
         _mock_cancel_from_stripe,
         _mock_cancel_from_db,
         mock_track,
@@ -193,13 +175,8 @@ class MarketingEventsTaskTests(SimpleTestCase):
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._subscription_state_from_db", return_value=(None, None))
     @patch("marketing_events.tasks._subscription_state_from_stripe", return_value=(False, "canceled"))
-    @patch(
-        "marketing_events.tasks.is_start_trial_capi_trial_eligibility_enforcement_enabled",
-        return_value=False,
-    )
     def test_enqueue_start_trial_skips_when_subscription_already_canceled(
         self,
-        _mock_flag_enabled,
         _mock_state_from_stripe,
         _mock_state_from_db,
         mock_track,
@@ -296,13 +273,8 @@ class MarketingEventsTaskTests(SimpleTestCase):
 
 
 @tag("batch_marketing_events")
-class StartTrialEligibilityEnforcementTaskTests(TestCase):
+class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
     def setUp(self):
-        self.user = User.objects.create_user(
-            username="trial-capi-user@example.com",
-            email="trial-capi-user@example.com",
-            password="pw",
-        )
         self.payload = {
             "event_name": "StartTrial",
             "properties": {
@@ -310,7 +282,7 @@ class StartTrialEligibilityEnforcementTaskTests(TestCase):
                 "event_id": "evt-eligibility",
                 "subscription_id": "sub_eligibility",
             },
-            "user": {"id": str(self.user.id), "email": self.user.email},
+            "user": {"id": "42", "email": "trial-capi-user@example.com"},
             "context": {},
         }
 
@@ -318,18 +290,12 @@ class StartTrialEligibilityEnforcementTaskTests(TestCase):
     @patch("marketing_events.tasks._dispatch_marketing_event")
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
-    def test_flag_off_does_not_suppress_ineligible_start_trial(
+    def test_missing_snapshot_does_not_suppress_start_trial(
         self,
         _mock_subscription_guard,
         mock_track,
         mock_dispatch,
     ):
-        UserTrialEligibility.objects.create(
-            user=self.user,
-            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
-            reason_codes=["fpjs_history_match"],
-        )
-
         enqueue_start_trial_marketing_event(self.payload)
 
         mock_dispatch.assert_called_once_with(self.payload)
@@ -339,33 +305,32 @@ class StartTrialEligibilityEnforcementTaskTests(TestCase):
     @patch("marketing_events.tasks._dispatch_marketing_event")
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
-    @patch(
-        "marketing_events.tasks.is_start_trial_capi_trial_eligibility_enforcement_enabled",
-        return_value=True,
-    )
-    def test_flag_on_skips_ineligible_start_trial(
+    def test_snapshot_disallow_skips_start_trial(
         self,
-        _mock_flag_enabled,
         _mock_subscription_guard,
         mock_track,
         mock_dispatch,
     ):
-        UserTrialEligibility.objects.create(
-            user=self.user,
-            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
-            reason_codes=["fpjs_history_match"],
-        )
+        payload = self.payload | {
+            "start_trial_eligibility": {
+                "decision": UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+                "manual_action": "inherit",
+                "reason_codes": ["fpjs_history_match"],
+                "send_allowed": False,
+                "decision_source": "stored_trial_eligibility_snapshot",
+            }
+        }
 
-        enqueue_start_trial_marketing_event(self.payload)
+        enqueue_start_trial_marketing_event(payload)
 
         mock_dispatch.assert_not_called()
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
         self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
-        self.assertEqual(track_kwargs["properties"]["reason"], "trial_ineligible")
+        self.assertEqual(track_kwargs["properties"]["reason"], "trial_eligibility_disallowed")
         self.assertEqual(
             track_kwargs["properties"]["decision_source"],
-            "stored_trial_eligibility",
+            "stored_trial_eligibility_snapshot",
         )
         self.assertEqual(
             track_kwargs["properties"]["trial_eligibility_decision"],
@@ -375,30 +340,29 @@ class StartTrialEligibilityEnforcementTaskTests(TestCase):
             track_kwargs["properties"]["trial_eligibility_reason_codes"],
             ["fpjs_history_match"],
         )
+        self.assertFalse(track_kwargs["properties"]["trial_eligibility_policy_send_allowed"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks._dispatch_marketing_event")
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._should_send_subscription_guarded_event", return_value=(True, None))
-    @patch(
-        "marketing_events.tasks.is_start_trial_capi_trial_eligibility_enforcement_enabled",
-        return_value=True,
-    )
-    def test_flag_on_respects_manual_allow_override(
+    def test_snapshot_allow_review_dispatches_start_trial(
         self,
-        _mock_flag_enabled,
         _mock_subscription_guard,
         mock_track,
         mock_dispatch,
     ):
-        UserTrialEligibility.objects.create(
-            user=self.user,
-            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
-            manual_action=UserTrialEligibilityManualActionChoices.ALLOW_TRIAL,
-            reason_codes=["fpjs_history_match"],
-        )
+        payload = self.payload | {
+            "start_trial_eligibility": {
+                "decision": UserTrialEligibilityAutoStatusChoices.REVIEW,
+                "manual_action": "inherit",
+                "reason_codes": ["multi_signal_history_match"],
+                "send_allowed": True,
+                "decision_source": "stored_trial_eligibility_snapshot",
+            }
+        }
 
-        enqueue_start_trial_marketing_event(self.payload)
+        enqueue_start_trial_marketing_event(payload)
 
-        mock_dispatch.assert_called_once_with(self.payload)
+        mock_dispatch.assert_called_once_with(payload)
         mock_track.assert_not_called()

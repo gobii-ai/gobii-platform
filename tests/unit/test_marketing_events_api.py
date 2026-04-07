@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings, tag
+from waffle.testutils import override_flag
 
 from marketing_events.api import capi, capi_delay_subscription_guarded
 from marketing_events.custom_events import (
@@ -10,18 +11,30 @@ from marketing_events.custom_events import (
     _is_first_workspace_agent_creation,
     emit_configured_custom_capi_event,
 )
-from api.models import BrowserUseAgent, Organization, PersistentAgent
+from api.models import (
+    BrowserUseAgent,
+    Organization,
+    PersistentAgent,
+    UserTrialEligibility,
+    UserTrialEligibilityAutoStatusChoices,
+    UserTrialEligibilityManualActionChoices,
+)
 
 
 @tag("batch_marketing_events")
 class MarketingEventsApiTests(SimpleTestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
+    @patch(
+        "marketing_events.api.is_start_trial_capi_trial_eligibility_enforcement_enabled",
+        return_value=False,
+    )
     @patch("marketing_events.api.time.time", return_value=1_700_000_000)
     @patch("marketing_events.api.enqueue_start_trial_marketing_event.apply_async")
     def test_capi_start_trial_delays_with_original_event_time(
         self,
         mock_apply_async,
         _mock_time,
+        _mock_enforcement_disabled,
     ):
         user = SimpleNamespace(id=42, email="test@example.com", phone="+15555550123")
 
@@ -41,6 +54,7 @@ class MarketingEventsApiTests(SimpleTestCase):
         self.assertEqual(payload["event_name"], "StartTrial")
         self.assertEqual(payload["properties"]["subscription_id"], "sub_123")
         self.assertEqual(payload["properties"]["event_time"], 1_700_000_000)
+        self.assertNotIn("start_trial_eligibility", payload)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
     @patch("marketing_events.api.enqueue_marketing_event.delay")
@@ -417,6 +431,143 @@ class MarketingEventsApiTests(SimpleTestCase):
             context={"consent": True},
             provider_targets=["meta", "reddit", "tiktok"],
         )
+
+
+@tag("batch_marketing_events")
+class StartTrialEligibilitySnapshotApiTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="start-trial-capi@example.com",
+            email="start-trial-capi@example.com",
+            password="pw",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
+    @patch("marketing_events.api.time.time", return_value=1_700_000_000)
+    @patch("marketing_events.api.enqueue_start_trial_marketing_event.apply_async")
+    def test_capi_start_trial_snapshots_no_trial_as_disallowed(
+        self,
+        mock_apply_async,
+        _mock_time,
+    ):
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+            reason_codes=["fpjs_history_match"],
+        )
+
+        with override_flag("start_trial_capi_trial_eligibility_enforcement", active=True):
+            capi(
+                user=self.user,
+                event_name="StartTrial",
+                properties={"subscription_id": "sub_123"},
+                request=None,
+                context={"consent": True},
+            )
+
+        payload = mock_apply_async.call_args.kwargs["args"][0]
+        self.assertEqual(
+            payload["start_trial_eligibility"]["decision"],
+            UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+        )
+        self.assertFalse(payload["start_trial_eligibility"]["send_allowed"])
+        self.assertEqual(
+            payload["start_trial_eligibility"]["reason_codes"],
+            ["fpjs_history_match"],
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
+    @patch("marketing_events.api.time.time", return_value=1_700_000_000)
+    @patch("marketing_events.api.enqueue_start_trial_marketing_event.apply_async")
+    def test_capi_start_trial_snapshots_no_trial_as_allowed_when_override_enabled(
+        self,
+        mock_apply_async,
+        _mock_time,
+    ):
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+            reason_codes=["fpjs_history_match"],
+        )
+
+        with override_flag("start_trial_capi_trial_eligibility_enforcement", active=True):
+            with override_flag("start_trial_capi_send_no_trial", active=True):
+                capi(
+                    user=self.user,
+                    event_name="StartTrial",
+                    properties={"subscription_id": "sub_123"},
+                    request=None,
+                    context={"consent": True},
+                )
+
+        payload = mock_apply_async.call_args.kwargs["args"][0]
+        self.assertEqual(
+            payload["start_trial_eligibility"]["decision"],
+            UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+        )
+        self.assertTrue(payload["start_trial_eligibility"]["send_allowed"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
+    @patch("marketing_events.api.time.time", return_value=1_700_000_000)
+    @patch("marketing_events.api.enqueue_start_trial_marketing_event.apply_async")
+    def test_capi_start_trial_snapshots_review_as_allowed_when_override_enabled(
+        self,
+        mock_apply_async,
+        _mock_time,
+    ):
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.REVIEW,
+            reason_codes=["multi_signal_history_match"],
+        )
+
+        with override_flag("start_trial_capi_trial_eligibility_enforcement", active=True):
+            with override_flag("start_trial_capi_send_review", active=True):
+                capi(
+                    user=self.user,
+                    event_name="StartTrial",
+                    properties={"subscription_id": "sub_123"},
+                    request=None,
+                    context={"consent": True},
+                )
+
+        payload = mock_apply_async.call_args.kwargs["args"][0]
+        self.assertEqual(
+            payload["start_trial_eligibility"]["decision"],
+            UserTrialEligibilityAutoStatusChoices.REVIEW,
+        )
+        self.assertTrue(payload["start_trial_eligibility"]["send_allowed"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
+    @patch("marketing_events.api.time.time", return_value=1_700_000_000)
+    @patch("marketing_events.api.enqueue_start_trial_marketing_event.apply_async")
+    def test_capi_start_trial_snapshots_effective_status_for_manual_allow_override(
+        self,
+        mock_apply_async,
+        _mock_time,
+    ):
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+            manual_action=UserTrialEligibilityManualActionChoices.ALLOW_TRIAL,
+            reason_codes=["fpjs_history_match"],
+        )
+
+        with override_flag("start_trial_capi_trial_eligibility_enforcement", active=True):
+            capi(
+                user=self.user,
+                event_name="StartTrial",
+                properties={"subscription_id": "sub_123"},
+                request=None,
+                context={"consent": True},
+            )
+
+        payload = mock_apply_async.call_args.kwargs["args"][0]
+        self.assertEqual(
+            payload["start_trial_eligibility"]["decision"],
+            UserTrialEligibilityAutoStatusChoices.ELIGIBLE,
+        )
+        self.assertTrue(payload["start_trial_eligibility"]["send_allowed"])
 
 
 @tag("batch_marketing_events")

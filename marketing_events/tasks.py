@@ -4,12 +4,10 @@ from typing import Any
 
 from celery import shared_task
 from django.conf import settings
-from django.db import DatabaseError
 
 from util.analytics import Analytics
 from util.integrations import stripe_status
 from util.payments_helper import PaymentsHelper
-from util.trial_eligibility import is_start_trial_capi_trial_eligibility_enforcement_enabled
 from .providers import get_providers
 from .providers.base import TemporaryError, PermanentError
 from .schema import normalize_event
@@ -148,50 +146,19 @@ def _payload_event_name(payload: dict) -> str:
     return str((payload or {}).get("event_name") or "").strip() or "UnknownEvent"
 
 
-def _payload_user_id(payload: dict) -> str | None:
-    raw_user_id = ((payload or {}).get("user") or {}).get("id")
-    if raw_user_id is None:
-        return None
-
-    normalized_user_id = str(raw_user_id).strip()
-    return normalized_user_id or None
-
-
 def _start_trial_ineligibility_skip_properties(payload: dict) -> dict[str, Any] | None:
-    if not is_start_trial_capi_trial_eligibility_enforcement_enabled():
+    snapshot = (payload or {}).get("start_trial_eligibility")
+    if not isinstance(snapshot, dict):
         return None
 
-    normalized_user_id = _payload_user_id(payload)
-    if not normalized_user_id:
-        return None
-
-    try:
-        from api.models import UserTrialEligibility, UserTrialEligibilityAutoStatusChoices
-
-        eligibility = UserTrialEligibility.objects.filter(user_id=normalized_user_id).only(
-            "auto_status",
-            "manual_action",
-            "reason_codes",
-        ).first()
-    except DatabaseError:
-        logger.warning(
-            "Failed to load stored trial eligibility for StartTrial CAPI user %s",
-            normalized_user_id,
-            exc_info=True,
-        )
-        return None
-
-    if eligibility is None:
-        return None
-
-    decision = eligibility.effective_status
-    if decision == UserTrialEligibilityAutoStatusChoices.ELIGIBLE:
+    if snapshot.get("send_allowed") is not False:
         return None
 
     return {
-        "trial_eligibility_decision": decision,
-        "trial_eligibility_manual_action": eligibility.manual_action,
-        "trial_eligibility_reason_codes": list(eligibility.reason_codes or []),
+        "trial_eligibility_decision": snapshot.get("decision"),
+        "trial_eligibility_manual_action": snapshot.get("manual_action"),
+        "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
+        "trial_eligibility_policy_send_allowed": False,
     }
 
 
@@ -377,8 +344,8 @@ def enqueue_start_trial_marketing_event(self, payload: dict):
     if ineligibility_skip_properties is not None:
         _track_marketing_skip(
             payload,
-            reason="trial_ineligible",
-            decision_source="stored_trial_eligibility",
+            reason="trial_eligibility_disallowed",
+            decision_source=((payload or {}).get("start_trial_eligibility") or {}).get("decision_source"),
             extra_properties=ineligibility_skip_properties,
         )
         return
