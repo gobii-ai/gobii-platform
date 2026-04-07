@@ -7527,7 +7527,16 @@ class SecretModelMixin:
         from .secret_key_generator import SecretKeyGenerator
 
         existing_keys = set(self._get_existing_keys_queryset().values_list("key", flat=True))
-        return SecretKeyGenerator.generate_unique_key_from_name(self.name, existing_keys)
+
+        name_for_key = self.name
+        if self.secret_type == self.SecretType.ENV_VAR:
+            # Pre-transform to valid env var format so the generator produces
+            # uppercase underscore-delimited keys that pass ENV_VAR_KEY_PATTERN.
+            name_for_key = re.sub(r"[^a-zA-Z0-9_]", "_", self.name).upper()
+            # Case-insensitive uniqueness: existing DB keys are already upper.
+            existing_keys = {k.upper() for k in existing_keys}
+
+        return SecretKeyGenerator.generate_unique_key_from_name(name_for_key, existing_keys)
 
     def _clean_secret_fields(self):
         """Validate type-specific scope, domain, and key formatting."""

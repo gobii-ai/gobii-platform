@@ -172,6 +172,7 @@ class GlobalSecretDetailAPIView(LoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
+        old_name = secret.name
         if "name" in payload:
             secret.name = (payload["name"] or "").strip()
         if "description" in payload:
@@ -182,8 +183,8 @@ class GlobalSecretDetailAPIView(LoginRequiredMixin, View):
             secret.secret_type = payload["secret_type"]
         if "value" in payload and payload["value"]:
             secret.set_value(payload["value"])
-        # Re-generate key from name on edit
-        if "name" in payload:
+        # Only regenerate key when the name actually changed
+        if secret.name != old_name:
             secret.key = ""
 
         try:
@@ -331,6 +332,7 @@ class AgentSecretDetailAPIView(LoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
+        old_name = secret.name
         if "name" in payload:
             secret.name = (payload["name"] or "").strip()
         if "description" in payload:
@@ -341,7 +343,8 @@ class AgentSecretDetailAPIView(LoginRequiredMixin, View):
             secret.secret_type = payload["secret_type"]
         if "value" in payload and payload["value"]:
             secret.set_value(payload["value"])
-        if "name" in payload:
+        # Only regenerate key when the name actually changed
+        if secret.name != old_name:
             secret.key = ""
 
         try:
@@ -382,6 +385,13 @@ class AgentSecretPromoteAPIView(LoginRequiredMixin, View):
 
         owner_user = agent.user if not agent.organization_id else None
         owner_org = agent.organization if agent.organization_id else None
+
+        # Enforce the same per-owner cap as the create endpoint
+        if _global_secrets_queryset(owner_user, owner_org).count() >= GlobalSecret.MAX_GLOBAL_SECRETS_PER_OWNER:
+            return JsonResponse(
+                {"errors": {"__all__": [f"Maximum {GlobalSecret.MAX_GLOBAL_SECRETS_PER_OWNER} global secrets allowed."]}},
+                status=400,
+            )
 
         try:
             with transaction.atomic():

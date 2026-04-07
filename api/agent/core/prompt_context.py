@@ -5757,7 +5757,6 @@ def _format_env_var_secrets(secrets_qs, is_pending: bool) -> list[str]:
 
 def _get_global_secrets_for_agent(agent: PersistentAgent):
     """Return the global secrets queryset for an agent's owner (user or org)."""
-    from django.db.models import Q
     if agent.organization_id:
         owner_filter = Q(organization=agent.organization)
     else:
