@@ -1162,7 +1162,7 @@ def _sandbox_pod_matches(
     }
     if env.get("SANDBOX_RUNTIME_CACHE_ROOT", "") != "/runtime-cache":
         return False
-    if env.get("SANDBOX_AGENT_WORKSPACE_LAYOUT", "") != "shared":
+    if env.get("SANDBOX_AGENT_WORKSPACE_LAYOUT", "") != "isolated":
         return False
 
     expected_proxy_env = {
