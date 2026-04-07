@@ -4,10 +4,12 @@ from typing import Any
 
 from celery import shared_task
 from django.conf import settings
+from django.db import DatabaseError
 
 from util.analytics import Analytics
 from util.integrations import stripe_status
 from util.payments_helper import PaymentsHelper
+from util.trial_eligibility import is_start_trial_capi_trial_eligibility_enforcement_enabled
 from .providers import get_providers
 from .providers.base import TemporaryError, PermanentError
 from .schema import normalize_event
@@ -146,6 +148,53 @@ def _payload_event_name(payload: dict) -> str:
     return str((payload or {}).get("event_name") or "").strip() or "UnknownEvent"
 
 
+def _payload_user_id(payload: dict) -> str | None:
+    raw_user_id = ((payload or {}).get("user") or {}).get("id")
+    if raw_user_id is None:
+        return None
+
+    normalized_user_id = str(raw_user_id).strip()
+    return normalized_user_id or None
+
+
+def _start_trial_ineligibility_skip_properties(payload: dict) -> dict[str, Any] | None:
+    if not is_start_trial_capi_trial_eligibility_enforcement_enabled():
+        return None
+
+    normalized_user_id = _payload_user_id(payload)
+    if not normalized_user_id:
+        return None
+
+    try:
+        from api.models import UserTrialEligibility, UserTrialEligibilityAutoStatusChoices
+
+        eligibility = UserTrialEligibility.objects.filter(user_id=normalized_user_id).only(
+            "auto_status",
+            "manual_action",
+            "reason_codes",
+        ).first()
+    except DatabaseError:
+        logger.warning(
+            "Failed to load stored trial eligibility for StartTrial CAPI user %s",
+            normalized_user_id,
+            exc_info=True,
+        )
+        return None
+
+    if eligibility is None:
+        return None
+
+    decision = eligibility.effective_status
+    if decision == UserTrialEligibilityAutoStatusChoices.ELIGIBLE:
+        return None
+
+    return {
+        "trial_eligibility_decision": decision,
+        "trial_eligibility_manual_action": eligibility.manual_action,
+        "trial_eligibility_reason_codes": list(eligibility.reason_codes or []),
+    }
+
+
 def _should_send_subscription_guarded_event(payload: dict) -> tuple[bool, str | None]:
     normalized_subscription_id = _subscription_guard_id_from_payload(payload)
     if not normalized_subscription_id:
@@ -179,7 +228,13 @@ def _should_send_subscription_guarded_event(payload: dict) -> tuple[bool, str | 
     return True, decision_source
 
 
-def _track_subscription_guarded_skip(payload: dict, *, reason: str, decision_source: str | None = None) -> None:
+def _track_marketing_skip(
+    payload: dict,
+    *,
+    reason: str,
+    decision_source: str | None = None,
+    extra_properties: dict[str, Any] | None = None,
+) -> None:
     user_payload = (payload or {}).get("user") or {}
     analytics_user_id = _analytics_user_id(user_payload.get("id"), None)
     properties_payload = (payload or {}).get("properties") or {}
@@ -194,6 +249,8 @@ def _track_subscription_guarded_skip(payload: dict, *, reason: str, decision_sou
         skip_properties["subscription_id"] = str(subscription_id)
     if decision_source:
         skip_properties["decision_source"] = decision_source
+    if extra_properties:
+        skip_properties.update(extra_properties)
 
     Analytics.track(
         user_id=analytics_user_id,
@@ -316,9 +373,18 @@ def enqueue_marketing_event(self, payload: dict):
 def enqueue_start_trial_marketing_event(self, payload: dict):
     if not settings.GOBII_PROPRIETARY_MODE:
         return
+    ineligibility_skip_properties = _start_trial_ineligibility_skip_properties(payload)
+    if ineligibility_skip_properties is not None:
+        _track_marketing_skip(
+            payload,
+            reason="trial_ineligible",
+            decision_source="stored_trial_eligibility",
+            extra_properties=ineligibility_skip_properties,
+        )
+        return
     should_send, decision_source = _should_send_subscription_guarded_event(payload)
     if not should_send:
-        _track_subscription_guarded_skip(
+        _track_marketing_skip(
             payload,
             reason="subscription_canceled_or_cancel_at_period_end",
             decision_source=decision_source,
@@ -339,7 +405,7 @@ def enqueue_delayed_subscription_guarded_marketing_event(self, payload: dict):
         return
     should_send, decision_source = _should_send_subscription_guarded_event(payload)
     if not should_send:
-        _track_subscription_guarded_skip(
+        _track_marketing_skip(
             payload,
             reason="subscription_canceled_or_cancel_at_period_end",
             decision_source=decision_source,

@@ -55,6 +55,11 @@ PERSONAL_AGENT_SIGNUP_PREVIEW_PROCESSING_LIMIT = (
 # Controls whether UserTrialEligibility decisions block trial CTAs and checkout trial periods.
 USER_TRIAL_ELIGIBILITY_ENFORCEMENT = "user_trial_eligibility_enforcement"
 
+# Controls whether StartTrial CAPI is skipped when UserTrialEligibility is not eligible.
+START_TRIAL_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT = (
+    "start_trial_capi_trial_eligibility_enforcement"
+)
+
 # Controls whether "review" trial eligibility decisions are treated as trial-allowed
 # while still blocking explicit "no_trial" decisions.
 USER_TRIAL_REVIEW_ALLOWS_TRIAL = "user_trial_review_allows_trial"
