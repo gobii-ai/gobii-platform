@@ -1,4 +1,3 @@
-import base64
 import logging
 import time
 from dataclasses import dataclass
