@@ -92,6 +92,8 @@ def _create_global_secret(payload: dict, owner_user, owner_org) -> GlobalSecret:
     domain = (payload.get("domain_pattern") or "").strip()
     description = (payload.get("description") or "").strip()
     value = payload.get("value") or ""
+    if secret_type == GlobalSecret.SecretType.ENV_VAR:
+        domain = GlobalSecret.ENV_VAR_DOMAIN_SENTINEL
 
     if not value:
         raise ValidationError({"value": "Secret value is required."})
@@ -278,6 +280,8 @@ class AgentSecretListAPIView(LoginRequiredMixin, View):
         domain = (payload.get("domain_pattern") or "").strip()
         description = (payload.get("description") or "").strip()
         value = payload.get("value") or ""
+        if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
+            domain = PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL
 
         if not value:
             return JsonResponse({"errors": {"value": ["Secret value is required."]}}, status=400)

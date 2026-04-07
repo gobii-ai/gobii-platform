@@ -135,6 +135,29 @@ class ConsoleSecretsTests(TestCase):
         self.assertEqual(payload["message"], "Global secret created.")
         self.assertTrue(GlobalSecret.objects.filter(user=self.user, name="API Key").exists())
 
+    def test_create_global_env_var_secret_returns_created(self):
+        response = self.client.post(
+            reverse("console-global-secret-list"),
+            data=json.dumps(
+                {
+                    "name": "DB User",
+                    "secret_type": "env_var",
+                    "value": "db-user",
+                    "description": "Sandbox username",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["message"], "Global secret created.")
+        secret = GlobalSecret.objects.get(user=self.user, name="DB User")
+        self.assertEqual(secret.secret_type, GlobalSecret.SecretType.ENV_VAR)
+        self.assertEqual(secret.domain_pattern, GlobalSecret.ENV_VAR_DOMAIN_SENTINEL)
+        self.assertEqual(secret.get_value(), "db-user")
+        self.assertEqual(payload["secret"]["domain_pattern"], GlobalSecret.ENV_VAR_DOMAIN_SENTINEL)
+
     def test_delete_global_secret_returns_ok(self):
         secret = self._make_global_secret()
 
@@ -166,6 +189,31 @@ class ConsoleSecretsTests(TestCase):
         self.assertTrue(
             PersistentAgentSecret.objects.filter(agent=self.org_agent, name="Database Password").exists()
         )
+
+    def test_create_agent_env_var_secret_returns_created(self):
+        self._set_org_context()
+
+        response = self.client.post(
+            reverse("console-agent-secret-list", args=[self.org_agent.id]),
+            data=json.dumps(
+                {
+                    "name": "DB User",
+                    "secret_type": "env_var",
+                    "value": "db-user",
+                    "description": "Sandbox username",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["message"], "Agent secret created.")
+        secret = PersistentAgentSecret.objects.get(agent=self.org_agent, name="DB User")
+        self.assertEqual(secret.secret_type, PersistentAgentSecret.SecretType.ENV_VAR)
+        self.assertEqual(secret.domain_pattern, PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL)
+        self.assertEqual(secret.get_value(), "db-user")
+        self.assertEqual(payload["secret"]["domain_pattern"], PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL)
 
     def test_delete_agent_secret_returns_ok(self):
         secret = self._make_agent_secret()
