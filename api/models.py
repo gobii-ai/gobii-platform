@@ -7500,7 +7500,92 @@ class PersistentAgentSkill(models.Model):
         return f"Skill<{self.name}@v{self.version}> for {getattr(self.agent, 'name', 'agent')}"
 
 
-class PersistentAgentSecret(models.Model):
+class SecretModelMixin:
+    """Shared validation and encryption helpers for secret models.
+
+    Both ``PersistentAgentSecret`` and ``GlobalSecret`` store encrypted
+    key-value pairs with the same field semantics.  This mixin extracts
+    the common ``set_value`` / ``get_value`` / ``clean`` logic so it
+    lives in one place.
+
+    Subclasses must define:
+      - ``SecretType`` TextChoices with CREDENTIAL and ENV_VAR members
+      - ``ENV_VAR_DOMAIN_SENTINEL`` and ``ENV_VAR_KEY_PATTERN`` class attrs
+      - ``secret_type``, ``domain_pattern``, ``name``, ``key``,
+        ``encrypted_value`` fields
+    They must also implement ``_get_existing_keys_queryset()`` which
+    returns a queryset of sibling secrets (excluding self) filtered to
+    the same (owner, secret_type, domain_pattern) scope.
+    """
+
+    def _get_existing_keys_queryset(self):
+        raise NotImplementedError
+
+    def generate_key_from_name(self):
+        if not self.name:
+            raise ValueError("Name is required to generate key")
+        from .secret_key_generator import SecretKeyGenerator
+
+        existing_keys = set(self._get_existing_keys_queryset().values_list("key", flat=True))
+
+        name_for_key = self.name
+        if self.secret_type == self.SecretType.ENV_VAR:
+            # Pre-transform to valid env var format so the generator produces
+            # uppercase underscore-delimited keys that pass ENV_VAR_KEY_PATTERN.
+            name_for_key = re.sub(r"[^a-zA-Z0-9_]", "_", self.name).upper()
+            # Case-insensitive uniqueness: existing DB keys are already upper.
+            existing_keys = {k.upper() for k in existing_keys}
+
+        return SecretKeyGenerator.generate_unique_key_from_name(name_for_key, existing_keys)
+
+    def _clean_secret_fields(self):
+        """Validate type-specific scope, domain, and key formatting."""
+        if self.secret_type == self.SecretType.ENV_VAR:
+            self.domain_pattern = self.ENV_VAR_DOMAIN_SENTINEL
+        elif self.domain_pattern:
+            from .domain_validation import DomainPatternValidator
+            try:
+                DomainPatternValidator.validate_domain_pattern(self.domain_pattern)
+                self.domain_pattern = DomainPatternValidator.normalize_domain_pattern(self.domain_pattern)
+            except ValueError as e:
+                raise ValidationError({"domain_pattern": str(e)})
+        else:
+            raise ValidationError({"domain_pattern": "Domain pattern is required for credential secrets."})
+
+        if self.name and not self.key and self._can_generate_key():
+            self.key = self.generate_key_from_name()
+
+        if self.key:
+            if self.secret_type == self.SecretType.ENV_VAR:
+                key = str(self.key).strip().upper()
+                if not self.ENV_VAR_KEY_PATTERN.match(key):
+                    raise ValidationError({"key": "Environment variable key must match ^[A-Z_][A-Z0-9_]*$."})
+                self.key = key
+            else:
+                from .domain_validation import DomainPatternValidator
+                try:
+                    DomainPatternValidator._validate_secret_key(self.key)
+                except ValueError as e:
+                    raise ValidationError({"key": str(e)})
+
+    def _can_generate_key(self):
+        """Override in subclass if extra conditions are needed."""
+        return True
+
+    def set_value(self, value: str):
+        from .domain_validation import DomainPatternValidator
+        DomainPatternValidator._validate_secret_value(value)
+        from .encryption import SecretsEncryption
+        self.encrypted_value = SecretsEncryption.encrypt_value(value)
+
+    def get_value(self) -> str:
+        if not self.encrypted_value:
+            return ""
+        from .encryption import SecretsEncryption
+        return SecretsEncryption.decrypt_value(self.encrypted_value)
+
+
+class PersistentAgentSecret(SecretModelMixin, models.Model):
     """
     A secret (encrypted key-value pair) for a persistent agent, scoped to a domain pattern.
     """
@@ -7568,95 +7653,26 @@ class PersistentAgentSecret(models.Model):
         ]
         ordering = ['domain_pattern', 'name']
 
-    def generate_key_from_name(self):
-        """Generate a unique key from the name within this agent and domain."""
-        if not self.name:
-            raise ValueError("Name is required to generate key")
-        
-        from .secret_key_generator import SecretKeyGenerator
-        
-        # Get existing keys for this agent and domain (excluding self if updating)
-        existing_secrets = PersistentAgentSecret.objects.filter(
+    def _get_existing_keys_queryset(self):
+        qs = PersistentAgentSecret.objects.filter(
             agent=self.agent,
             secret_type=self.secret_type,
             domain_pattern=self.domain_pattern,
         )
         if self.pk:
-            existing_secrets = existing_secrets.exclude(pk=self.pk)
-        
-        existing_keys = set(existing_secrets.values_list('key', flat=True))
-        
-        return SecretKeyGenerator.generate_unique_key_from_name(self.name, existing_keys)
+            qs = qs.exclude(pk=self.pk)
+        return qs
+
+    def _can_generate_key(self):
+        return bool(self.agent)
 
     def clean(self):
-        """Validate the secret fields."""
         super().clean()
-
-        # Validate type-specific scope
-        if self.secret_type == self.SecretType.ENV_VAR:
-            # Env vars are global per-agent and intentionally not domain-scoped.
-            self.domain_pattern = self.ENV_VAR_DOMAIN_SENTINEL
-        elif self.domain_pattern:
-            from .domain_validation import DomainPatternValidator
-            try:
-                DomainPatternValidator.validate_domain_pattern(self.domain_pattern)
-                self.domain_pattern = DomainPatternValidator.normalize_domain_pattern(self.domain_pattern)
-            except ValueError as e:
-                raise ValidationError({'domain_pattern': str(e)})
-        else:
-            raise ValidationError({'domain_pattern': "Domain pattern is required for credential secrets."})
-
-        # Generate key from name only when key is empty. Some flows (agent requests)
-        # intentionally provide an explicit key.
-        if self.name and self.agent and not self.key:
-            self.key = self.generate_key_from_name()
-
-        # Validate secret key
-        if self.key:
-            if self.secret_type == self.SecretType.ENV_VAR:
-                key = str(self.key).strip().upper()
-                if not self.ENV_VAR_KEY_PATTERN.match(key):
-                    raise ValidationError({'key': "Environment variable key must match ^[A-Z_][A-Z0-9_]*$."})
-                self.key = key
-            else:
-                from .domain_validation import DomainPatternValidator
-                try:
-                    DomainPatternValidator._validate_secret_key(self.key)
-                except ValueError as e:
-                    raise ValidationError({'key': str(e)})
+        self._clean_secret_fields()
 
     def save(self, *args, **kwargs):
         self.full_clean()
         return super().save(*args, **kwargs)
-
-    def set_value(self, value: str):
-        """
-        Encrypt and set the secret value.
-        
-        Args:
-            value: Plain text secret value to encrypt
-        """
-        from .domain_validation import DomainPatternValidator
-        
-        # Validate the value before encryption
-        DomainPatternValidator._validate_secret_value(value)
-        
-        # Encrypt the value
-        from .encryption import SecretsEncryption
-        self.encrypted_value = SecretsEncryption.encrypt_value(value)
-
-    def get_value(self) -> str:
-        """
-        Decrypt and return the secret value.
-        
-        Returns:
-            Plain text secret value
-        """
-        if not self.encrypted_value:
-            return ""
-        
-        from .encryption import SecretsEncryption
-        return SecretsEncryption.decrypt_value(self.encrypted_value)
 
     @property
     def is_requested(self) -> bool:
@@ -7672,6 +7688,125 @@ class PersistentAgentSecret(models.Model):
         if self.secret_type == self.SecretType.ENV_VAR:
             return f"Env Var '{self.name}' ({self.key}) for {self.agent.name}"
         return f"Secret '{self.name}' ({self.key}) for {self.agent.name} on {self.domain_pattern}"
+
+
+class GlobalSecret(SecretModelMixin, models.Model):
+    """An encrypted secret owned by a user or organization, shared across all their agents."""
+
+    class SecretType(models.TextChoices):
+        CREDENTIAL = "credential", "Credential"
+        ENV_VAR = "env_var", "Environment Variable"
+
+    ENV_VAR_DOMAIN_SENTINEL = "__gobii_env_var__"
+    ENV_VAR_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+    MAX_GLOBAL_SECRETS_PER_OWNER = 100
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="global_secrets",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="global_secrets",
+    )
+    domain_pattern = models.CharField(
+        max_length=256,
+        help_text="Domain pattern where this secret can be used (e.g., 'https://example.com', '*.google.com')",
+    )
+    name = models.CharField(max_length=128, help_text="Human-readable name for this secret")
+    description = models.TextField(blank=True, help_text="Optional description of what this secret is used for")
+    key = models.CharField(max_length=64, blank=True, help_text="Secret key name (auto-generated from name)")
+    secret_type = models.CharField(
+        max_length=16,
+        choices=SecretType.choices,
+        default=SecretType.CREDENTIAL,
+    )
+    encrypted_value = models.BinaryField(help_text="AES-256-GCM encrypted secret value")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(user__isnull=False, organization__isnull=True))
+                    | (models.Q(user__isnull=True, organization__isnull=False))
+                ),
+                name="global_secret_exactly_one_owner",
+            ),
+            UniqueConstraint(
+                fields=["user", "secret_type", "domain_pattern", "name"],
+                name="unique_global_secret_user_name",
+                condition=models.Q(user__isnull=False),
+            ),
+            UniqueConstraint(
+                fields=["user", "secret_type", "domain_pattern", "key"],
+                name="unique_global_secret_user_key",
+                condition=models.Q(user__isnull=False),
+            ),
+            UniqueConstraint(
+                fields=["organization", "secret_type", "domain_pattern", "name"],
+                name="unique_global_secret_org_name",
+                condition=models.Q(organization__isnull=False),
+            ),
+            UniqueConstraint(
+                fields=["organization", "secret_type", "domain_pattern", "key"],
+                name="unique_global_secret_org_key",
+                condition=models.Q(organization__isnull=False),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "secret_type"], name="gs_user_type_idx"),
+            models.Index(fields=["organization", "secret_type"], name="gs_org_type_idx"),
+        ]
+        ordering = ["domain_pattern", "name"]
+
+    def _get_existing_keys_queryset(self):
+        if self.user_id:
+            qs = GlobalSecret.objects.filter(
+                user=self.user,
+                secret_type=self.secret_type,
+                domain_pattern=self.domain_pattern,
+            )
+        else:
+            qs = GlobalSecret.objects.filter(
+                organization=self.organization,
+                secret_type=self.secret_type,
+                domain_pattern=self.domain_pattern,
+            )
+        if self.pk:
+            qs = qs.exclude(pk=self.pk)
+        return qs
+
+    def clean(self):
+        super().clean()
+        if not self.user_id and not self.organization_id:
+            raise ValidationError("A global secret must belong to either a user or an organization.")
+        if self.user_id and self.organization_id:
+            raise ValidationError("A global secret cannot belong to both a user and an organization.")
+        self._clean_secret_fields()
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    @property
+    def owner_scope(self) -> str:
+        return "organization" if self.organization_id else "user"
+
+    def __str__(self):
+        owner = self.organization.name if self.organization_id else f"user {self.user_id}"
+        if self.secret_type == self.SecretType.ENV_VAR:
+            return f"Global Env Var '{self.name}' ({self.key}) for {owner}"
+        return f"Global Secret '{self.name}' ({self.key}) for {owner} on {self.domain_pattern}"
 
 
 class PersistentAgentWebhook(models.Model):

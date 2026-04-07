@@ -24,6 +24,9 @@ class SecretLimits:
     
     # Maximum total size of all secrets per agent in bytes (compressed)
     MAX_TOTAL_SECRETS_SIZE_BYTES = 102400  # 100KB total per agent
+
+    # Maximum number of global secrets per user or organization
+    MAX_GLOBAL_SECRETS_PER_OWNER = 100
     
     # Key name validation patterns
     SECRET_KEY_MIN_LENGTH = 1

@@ -141,6 +141,8 @@ jobs:
             tag: batch_outbound_email
           - batch: secrets
             tag: batch_secrets
+          - batch: global_secrets
+            tag: global_secrets_batch
           - batch: proxy_selection
             tag: batch_proxy_selection
           - batch: compaction

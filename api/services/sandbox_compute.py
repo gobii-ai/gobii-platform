@@ -17,11 +17,12 @@ from celery.exceptions import CeleryError
 from django.conf import settings
 from django.utils.dateparse import parse_datetime
 from django.db import DatabaseError
+from django.db.models import Q
 from django.utils import timezone
 from redis.exceptions import RedisError
 from kombu.exceptions import OperationalError as KombuOperationalError
 
-from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent, MCPServerConfig, PersistentAgentSecret
+from api.models import AgentComputeSession, ComputeSnapshot, GlobalSecret, PersistentAgent, MCPServerConfig, PersistentAgentSecret
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
@@ -195,7 +196,35 @@ def _resolved_env_var_secrets_for_agent(agent: Optional[PersistentAgent]) -> Dic
         return {}
 
     merged: Dict[str, str] = {}
-    secrets = (
+
+    # Global secrets first (lower precedence — agent secrets override)
+    global_filter = (
+        Q(organization=agent.organization) if agent.organization_id
+        else Q(user=agent.user, organization__isnull=True)
+    )
+    global_secrets = (
+        GlobalSecret.objects.filter(
+            global_filter,
+            secret_type=GlobalSecret.SecretType.ENV_VAR,
+        )
+        .order_by("updated_at", "created_at")
+        .only("key", "encrypted_value")
+    )
+    for secret in global_secrets:
+        key = str(secret.key or "").strip()
+        if not key:
+            continue
+        try:
+            merged[key] = secret.get_value()
+        except Exception:
+            logger.warning(
+                "Failed to decrypt global env_var secret key=%s",
+                key,
+                exc_info=True,
+            )
+
+    # Agent-level secrets (higher precedence)
+    agent_secrets = (
         PersistentAgentSecret.objects.filter(
             agent=agent,
             requested=False,
@@ -204,7 +233,7 @@ def _resolved_env_var_secrets_for_agent(agent: Optional[PersistentAgent]) -> Dic
         .order_by("updated_at", "created_at")
         .only("key", "encrypted_value")
     )
-    for secret in secrets:
+    for secret in agent_secrets:
         key = str(secret.key or "").strip()
         if not key:
             continue

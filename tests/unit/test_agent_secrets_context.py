@@ -6,6 +6,7 @@ Tests the core logic around:
 2. secure_credentials_request tool execution
 3. Proper filtering of requested vs fulfilled secrets
 """
+import re
 from unittest.mock import Mock, patch
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
@@ -13,14 +14,17 @@ from django.contrib.auth import get_user_model
 from api.models import (
     PersistentAgent,
     PersistentAgentSecret,
+    GlobalSecret,
     BrowserUseAgent,
+    Organization,
+    OrganizationMembership,
 )
 from api.agent.core.prompt_context import _get_secrets_block
 from api.agent.tools.secure_credentials_request import (
     execute_secure_credentials_request,
     get_secure_credentials_request_tool,
 )
-from console.forms import PersistentAgentAddSecretForm, PersistentAgentEditSecretForm
+from console.forms import PersistentAgentAddSecretForm, PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm
 
 User = get_user_model()
 
@@ -150,10 +154,10 @@ class GetSecretsBlockTests(TestCase):
 
         result = _get_secrets_block(self.agent)
 
-        self.assertIn("These domain-scoped credential secrets are available to you", result)
+        self.assertIn("Agent-specific domain-scoped credential secrets", result)
         self.assertIn("not readable via os.environ", result)
-        self.assertIn("These global sandbox environment variable secrets are available to you", result)
-        self.assertIn("these ARE readable via os.environ", result)
+        self.assertIn("Agent-specific sandbox environment variable secrets", result)
+        self.assertIn("ARE readable via os.environ", result)
         self.assertIn("Pending domain-scoped credentials", result)
         self.assertIn("Pending sandbox environment variables", result)
         self.assertIn("Key: api_credential", result)
@@ -548,17 +552,49 @@ class AgentSecretsRequestViewTests(TestCase):
             email="test2@example.com",
             password="password"
         )
+        self.org = Organization.objects.create(
+            name="Secrets Org",
+            slug="secrets-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
         self.browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
             name="BrowserAgent2"
         )
-        self.agent = PersistentAgent.objects.create(
-            user=self.user,
-            browser_use_agent=self.browser_agent,
-            name="Agent2"
-        )
+        with patch.object(PersistentAgent, "_validate_org_seats", return_value=None):
+            self.agent = PersistentAgent.objects.create(
+                user=self.user,
+                organization=self.org,
+                browser_use_agent=self.browser_agent,
+                name="Agent2"
+            )
         self.client = Client()
         assert self.client.login(username="test2@example.com", password="password")
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session.save()
+
+    def _make_global_secret(self, **kwargs):
+        defaults = {
+            "organization": self.org,
+            "name": "Existing Global Secret",
+            "secret_type": GlobalSecret.SecretType.CREDENTIAL,
+            "domain_pattern": "https://example.com",
+            "description": "shared secret",
+        }
+        defaults.update(kwargs)
+        secret = GlobalSecret(**defaults)
+        secret.set_value("shared-value")
+        secret.save()
+        return secret
 
     def test_partial_request_save_updates_only_provided(self):
         # Two requested secrets
@@ -588,6 +624,161 @@ class AgentSecretsRequestViewTests(TestCase):
         s2.refresh_from_db()
         self.assertFalse(s1.requested)
         self.assertTrue(s2.requested)
+        self.assertFalse(GlobalSecret.objects.filter(organization=self.org, name="Username").exists())
+
+    def test_request_page_renders_make_global_option_for_organization(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Password",
+            key="password",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.get(reverse('agent_secrets_request', kwargs={"pk": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Make global for this organization")
+        self.assertContains(response, "Shared across all agents in this organization")
+        self.assertContains(response, 'name="make_global"', html=False)
+        checkbox = re.search(
+            r'<input[^>]*name="make_global"[^>]*>',
+            response.content.decode(),
+        )
+        self.assertIsNotNone(checkbox)
+        self.assertNotIn("checked", checkbox.group(0))
+        self.assertEqual(response.content.decode().count('name="make_global"'), 1)
+
+    def test_request_page_disables_autofill_for_secret_inputs(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Password",
+            key="password",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.get(reverse('agent_secrets_request', kwargs={"pk": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<form method="post" autocomplete="off">', html=False)
+        self.assertContains(response, f'name="secret_{secret.id}"', html=False)
+        self.assertContains(response, 'type="password"', html=False)
+        self.assertContains(response, 'autocomplete="new-password"', html=False)
+
+    def test_request_save_can_make_credential_global(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Shared Password",
+            key="shared_password",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.post(
+            reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+            data={
+                f"secret_{secret.id}": "top-secret",
+                "make_global": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            reverse('agent_secrets_request_thanks', kwargs={"pk": self.agent.id}),
+        )
+        self.assertFalse(PersistentAgentSecret.objects.filter(id=secret.id).exists())
+        global_secret = GlobalSecret.objects.get(organization=self.org, name="Shared Password")
+        self.assertEqual(global_secret.secret_type, GlobalSecret.SecretType.CREDENTIAL)
+        self.assertEqual(global_secret.domain_pattern, "https://example.com")
+        self.assertEqual(global_secret.get_value(), "top-secret")
+
+    def test_request_save_can_make_env_var_global(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="Sandbox Token",
+            key="SANDBOX_TOKEN",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.post(
+            reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+            data={
+                f"secret_{secret.id}": "env-secret",
+                "make_global": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(PersistentAgentSecret.objects.filter(id=secret.id).exists())
+        global_secret = GlobalSecret.objects.get(organization=self.org, name="Sandbox Token")
+        self.assertEqual(global_secret.secret_type, GlobalSecret.SecretType.ENV_VAR)
+        self.assertEqual(global_secret.domain_pattern, GlobalSecret.ENV_VAR_DOMAIN_SENTINEL)
+        self.assertEqual(global_secret.key, "SANDBOX_TOKEN")
+        self.assertEqual(global_secret.get_value(), "env-secret")
+
+    def test_request_save_make_global_duplicate_rerenders_without_changes(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Shared Password",
+            key="shared_password",
+            requested=True,
+            encrypted_value=b"",
+        )
+        self._make_global_secret(
+            name="Shared Password",
+            key="shared_password",
+            domain_pattern="https://example.com",
+        )
+
+        response = self.client.post(
+            reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+            data={
+                f"secret_{secret.id}": "top-secret",
+                "make_global": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already exists")
+        secret.refresh_from_db()
+        self.assertTrue(secret.requested)
+        self.assertEqual(secret.encrypted_value, b"")
+        self.assertEqual(GlobalSecret.objects.filter(organization=self.org, name="Shared Password").count(), 1)
+
+    def test_request_save_make_global_respects_global_secret_limit(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Overflow Secret",
+            key="overflow_secret",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        with patch.object(GlobalSecret, "MAX_GLOBAL_SECRETS_PER_OWNER", 1):
+            self._make_global_secret(name="Existing One", key="existing_one")
+            response = self.client.post(
+                reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+                data={
+                    f"secret_{secret.id}": "top-secret",
+                    "make_global": "on",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Maximum 1 global secrets allowed.")
+        secret.refresh_from_db()
+        self.assertTrue(secret.requested)
+        self.assertEqual(GlobalSecret.objects.filter(organization=self.org).count(), 1)
 
     def test_edit_secret_keeps_existing_key_when_name_changes(self):
         secret = PersistentAgentSecret(
@@ -797,6 +988,15 @@ class AgentSecretFormsTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("domain", form.errors)
 
+    def test_add_form_widgets_disable_autofill(self):
+        form = PersistentAgentAddSecretForm(agent=self.agent)
+
+        self.assertEqual(form.fields["domain"].widget.attrs["autocomplete"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocorrect"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocapitalize"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["spellcheck"], "false")
+        self.assertEqual(form.fields["value"].widget.attrs["autocomplete"], "new-password")
+
     @patch("api.services.sandbox_compute.sandbox_compute_enabled_for_agent", return_value=True)
     def test_add_form_env_var_allows_blank_domain_and_uses_sentinel(self, _mock_sandbox_enabled):
         form = PersistentAgentAddSecretForm(
@@ -856,6 +1056,34 @@ class AgentSecretFormsTests(TestCase):
             form.cleaned_data["domain"],
             PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
         )
+
+    def test_edit_form_widgets_disable_autofill(self):
+        form = PersistentAgentEditSecretForm(agent=self.agent, secret=self.existing_secret)
+
+        self.assertEqual(form.fields["domain"].widget.attrs["autocomplete"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocorrect"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["autocapitalize"], "off")
+        self.assertEqual(form.fields["domain"].widget.attrs["spellcheck"], "false")
+        self.assertEqual(form.fields["value"].widget.attrs["autocomplete"], "new-password")
+
+    def test_requested_secret_form_widgets_use_new_password_autocomplete(self):
+        requested_secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Requested Secret",
+            key="requested_secret",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        form = PersistentAgentSecretsRequestForm(requested_secrets=[requested_secret])
+
+        self.assertEqual(
+            form.fields[f"secret_{requested_secret.id}"].widget.attrs["autocomplete"],
+            "new-password",
+        )
+        self.assertIn("make_global", form.fields)
+        self.assertFalse(form.fields["make_global"].initial)
 
 
 @tag("batch_agent_secrets_ctx")

@@ -654,7 +654,11 @@ class PersistentAgentAddSecretForm(forms.Form):
         required=False,
         widget=forms.TextInput(attrs={
             'placeholder': 'e.g., https://example.com, *.google.com, chrome-extension://abcd1234',
-            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none',
+            'autocomplete': 'off',
+            'autocorrect': 'off',
+            'autocapitalize': 'off',
+            'spellcheck': 'false',
         }),
         label='Domain Pattern',
         help_text='Required only for credential secrets.'
@@ -684,7 +688,8 @@ class PersistentAgentAddSecretForm(forms.Form):
     value = forms.CharField(
         widget=forms.PasswordInput(attrs={
             'placeholder': 'Enter the secret value',
-            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none',
+            'autocomplete': 'new-password',
         }),
         label='Secret Value',
         help_text='This will be encrypted and stored securely'
@@ -850,7 +855,11 @@ class PersistentAgentEditSecretForm(forms.Form):
         required=False,
         widget=forms.TextInput(attrs={
             'placeholder': 'e.g., https://example.com, *.google.com, chrome-extension://abcd1234',
-            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none',
+            'autocomplete': 'off',
+            'autocorrect': 'off',
+            'autocapitalize': 'off',
+            'spellcheck': 'false',
         }),
         label='Domain Pattern',
         help_text='Required only for credential secrets.'
@@ -880,7 +889,8 @@ class PersistentAgentEditSecretForm(forms.Form):
     value = forms.CharField(
         widget=forms.PasswordInput(attrs={
             'placeholder': 'Enter the new secret value',
-            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+            'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none',
+            'autocomplete': 'new-password',
         }),
         label='Secret Value',
         help_text='This will be encrypted and stored securely'
@@ -1013,6 +1023,7 @@ class PersistentAgentSecretsRequestForm(forms.Form):
     def __init__(self, *args, requested_secrets=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.requested_secrets = requested_secrets or []
+        self.fields['make_global'] = forms.BooleanField(required=False, initial=False)
         
         # Dynamically create fields for each requested secret
         for secret in self.requested_secrets:
@@ -1020,7 +1031,8 @@ class PersistentAgentSecretsRequestForm(forms.Form):
             self.fields[field_name] = forms.CharField(
                 widget=forms.PasswordInput(attrs={
                     'placeholder': f'Enter value for {secret.name}',
-                    'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none'
+                    'class': 'py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500 disabled:opacity-50 disabled:pointer-events-none',
+                    'autocomplete': 'new-password',
                 }),
                 label=secret.name,
                 help_text=secret.description if secret.description else f'Secret key: {secret.key}',
@@ -1039,8 +1051,8 @@ class PersistentAgentSecretsRequestForm(forms.Form):
                 try:
                     from api.domain_validation import DomainPatternValidator
                     DomainPatternValidator._validate_secret_value(value)
-                except Exception as e:
-                    self.add_error(field_name, str(e))
+                except ValueError as exc:
+                    self.add_error(field_name, str(exc))
         
         return cleaned_data
 
