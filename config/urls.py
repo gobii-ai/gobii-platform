@@ -141,6 +141,13 @@ from console.api_views import (
     EvalRunCompareAPIView,
     EvalSuiteRunCompareAPIView,
 )
+from console.secrets_api_views import (
+    GlobalSecretListAPIView,
+    GlobalSecretDetailAPIView,
+    AgentSecretListAPIView,
+    AgentSecretDetailAPIView,
+    AgentSecretPromoteAPIView,
+)
 from console.email_settings.views import (
     AgentEmailSettingsAPIView,
     AgentEmailSettingsEnsureAccountAPIView,
@@ -172,6 +179,7 @@ from console.views import (
     SystemSettingsView,
     ConsoleLLMConfigView,
     MCPServerManagementView,
+    GlobalSecretsView,
     MCPOAuthCallbackPageView,
     AgentEmailOAuthCallbackPageView,
     PersistentAgentChatShellView,
@@ -289,6 +297,7 @@ urlpatterns = [
     path("console/evals/", ConsoleEvalsView.as_view(), name="console-evals"),
     path("console/evals/<uuid:suite_run_id>/", ConsoleEvalsDetailView.as_view(), name="console-evals-detail"),
     path("console/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditView.as_view(), name="console-agent-audit"),
+    path("console/secrets/", GlobalSecretsView.as_view(), name="console-secrets"),
     path("console/advanced/mcp-servers/", MCPServerManagementView.as_view(), name="console-mcp-servers"),
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
     path("console/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="console-email-oauth-callback-view"),
@@ -475,6 +484,12 @@ urlpatterns = [
     path("console/api/email/oauth/callback/", AgentEmailOAuthCallbackView.as_view(), name="console-email-oauth-callback"),
     path("console/api/email/oauth/status/<uuid:account_id>/", AgentEmailOAuthStatusView.as_view(), name="console-email-oauth-status"),
     path("console/api/email/oauth/revoke/<uuid:account_id>/", AgentEmailOAuthRevokeView.as_view(), name="console-email-oauth-revoke"),
+    # Global + agent secrets API
+    path("console/api/secrets/", GlobalSecretListAPIView.as_view(), name="console-global-secret-list"),
+    path("console/api/secrets/<uuid:secret_id>/", GlobalSecretDetailAPIView.as_view(), name="console-global-secret-detail"),
+    path("console/api/agents/<uuid:agent_id>/secrets/", AgentSecretListAPIView.as_view(), name="console-agent-secret-list"),
+    path("console/api/agents/<uuid:agent_id>/secrets/<uuid:secret_id>/", AgentSecretDetailAPIView.as_view(), name="console-agent-secret-detail"),
+    path("console/api/agents/<uuid:agent_id>/secrets/<uuid:secret_id>/promote/", AgentSecretPromoteAPIView.as_view(), name="console-agent-secret-promote"),
     path("console/api/usage/agents/", UsageAgentsAPIView.as_view(), name="console_usage_agents"),
     path("console/agents/create/contact/", AgentCreateContactView.as_view(), name="agent_create_contact"),
     path("console/agents/create/quick/", AgentQuickSpawnView.as_view(), name="agent_quick_spawn"),

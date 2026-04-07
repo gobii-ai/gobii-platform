@@ -62,6 +62,7 @@ from ...models import (
     PersistentAgentPromptArchive,
     PersistentAgentEnabledTool,
     PersistentAgentSecret,
+    GlobalSecret,
     PersistentAgentStep,
     PersistentAgentStepSnapshot,
     PersistentAgentSystemMessage,
@@ -5754,6 +5755,16 @@ def _format_env_var_secrets(secrets_qs, is_pending: bool) -> list[str]:
     return secret_lines
 
 
+def _get_global_secrets_for_agent(agent: PersistentAgent):
+    """Return the global secrets queryset for an agent's owner (user or org)."""
+    from django.db.models import Q
+    if agent.organization_id:
+        owner_filter = Q(organization=agent.organization)
+    else:
+        owner_filter = Q(user=agent.user, organization__isnull=True)
+    return GlobalSecret.objects.filter(owner_filter)
+
+
 def _get_secrets_block(agent: PersistentAgent) -> str:
     """Return a formatted list of available secrets for this agent.
     The caller is responsible for adding any surrounding instructional text and for
@@ -5788,19 +5799,45 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
         ).order_by('name')
     )
 
-    if not available_credentials and not pending_credentials and not available_env_vars and not pending_env_vars:
+    global_qs = _get_global_secrets_for_agent(agent)
+    global_credentials = global_qs.filter(
+        secret_type=GlobalSecret.SecretType.CREDENTIAL,
+    ).order_by('domain_pattern', 'name')
+    global_env_vars = global_qs.filter(
+        secret_type=GlobalSecret.SecretType.ENV_VAR,
+    ).order_by('name')
+
+    has_any = (
+        available_credentials or pending_credentials
+        or available_env_vars or pending_env_vars
+        or global_credentials or global_env_vars
+    )
+    if not has_any:
         return "No secrets configured."
 
     lines: list[str] = []
 
+    # Global secrets (shared across all agents for this user/org)
+    if global_credentials or global_env_vars:
+        lines.append("Global secrets (shared across all your agents):")
+        if global_credentials:
+            lines.append("  Domain-scoped credential secrets (placeholders/web auth only):")
+            lines.extend(_format_credential_secrets(global_credentials, is_pending=False))
+        if global_env_vars:
+            lines.append("  Sandbox environment variable secrets (readable via os.environ):")
+            lines.extend(_format_env_var_secrets(global_env_vars, is_pending=False))
+
+    # Agent-specific secrets (override globals on key conflict)
     if available_credentials:
-        lines.append("These domain-scoped credential secrets are available to you (placeholders/web auth only; not readable via os.environ in sandbox code):")
+        if lines:
+            lines.append("")
+        lines.append("Agent-specific domain-scoped credential secrets (placeholders/web auth only; not readable via os.environ in sandbox code):")
         lines.extend(_format_credential_secrets(available_credentials, is_pending=False))
 
     if available_env_vars:
         if lines:
             lines.append("")
-        lines.append("These global sandbox environment variable secrets are available to you (these ARE readable via os.environ in sandbox code):")
+        lines.append("Agent-specific sandbox environment variable secrets (these ARE readable via os.environ in sandbox code):")
         lines.extend(_format_env_var_secrets(available_env_vars, is_pending=False))
 
     if pending_credentials or pending_env_vars:

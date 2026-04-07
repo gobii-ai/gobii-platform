@@ -26,6 +26,8 @@ const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
 const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
 const AgentEmailSettingsScreen = lazy(async () => ({ default: (await import('./screens/AgentEmailSettingsScreen')).AgentEmailSettingsScreen }))
+const GlobalSecretsScreen = lazy(async () => ({ default: (await import('./screens/GlobalSecretsScreen')).GlobalSecretsScreen }))
+const AgentSecretsScreen = lazy(async () => ({ default: (await import('./screens/AgentSecretsScreen')).AgentSecretsScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
 const LoadingFallback = () => (
@@ -276,6 +278,47 @@ switch (appName) {
       />
     )
     break
+  case 'global-secrets': {
+    const listUrl = mountNode.dataset.listUrl
+    if (!listUrl) {
+      throw new Error('Global secrets list URL is required')
+    }
+    screen = (
+      <GlobalSecretsScreen
+        listUrl={listUrl}
+        ownerScope={mountNode.dataset.ownerScope}
+        ownerLabel={mountNode.dataset.ownerLabel}
+      />
+    )
+    break
+  }
+  case 'agent-secrets': {
+    if (!agentId) {
+      throw new Error('Agent identifier is required for secrets screen')
+    }
+    const listUrl = mountNode.dataset.listUrl
+    const detailUrlTemplate = mountNode.dataset.detailUrlTemplate
+    const promoteUrlTemplate = mountNode.dataset.promoteUrlTemplate
+    const agentDetailUrl = mountNode.dataset.agentDetailUrl
+    const globalSecretsUrl = mountNode.dataset.globalSecretsUrl
+    const requestUrl = mountNode.dataset.requestUrl
+    if (!listUrl || !detailUrlTemplate || !promoteUrlTemplate || !agentDetailUrl || !globalSecretsUrl || !requestUrl) {
+      throw new Error('Agent secrets API endpoints are required')
+    }
+    screen = (
+      <AgentSecretsScreen
+        agentId={agentId}
+        agentName={agentName || 'Agent'}
+        listUrl={listUrl}
+        detailUrlTemplate={detailUrlTemplate}
+        promoteUrlTemplate={promoteUrlTemplate}
+        agentDetailUrl={agentDetailUrl}
+        globalSecretsUrl={globalSecretsUrl}
+        requestUrl={requestUrl}
+      />
+    )
+    break
+  }
   case 'immersive-app':
     screen = (
       <ImmersiveApp

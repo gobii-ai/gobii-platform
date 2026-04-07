@@ -19,12 +19,15 @@ def format_validation_error(exc: ValidationError) -> str:
     return str(exc)
 
 
-def validate_secret_for_runtime_use(secret: PersistentAgentSecret) -> str:
-    """Validate only the fields needed to inject a secret into a running task."""
-    if secret.secret_type != PersistentAgentSecret.SecretType.CREDENTIAL:
+def validate_secret_for_runtime_use(secret) -> str:
+    """Validate only the fields needed to inject a secret into a running task.
+
+    Accepts both PersistentAgentSecret and GlobalSecret instances.
+    """
+    if secret.secret_type != "credential":
         raise ValidationError({"secret_type": "Only credential secrets may be injected into browser tasks."})
 
-    if secret.requested:
+    if getattr(secret, "requested", False):
         raise ValidationError({"requested": "Requested secrets do not have a usable value yet."})
 
     if not secret.domain_pattern:
@@ -50,9 +53,14 @@ def validate_secret_for_runtime_use(secret: PersistentAgentSecret) -> str:
 
 def build_browser_task_secret_payload(
     agent: PersistentAgent,
-    secrets: list[PersistentAgentSecret],
+    secrets: list,
 ) -> tuple[Optional[bytes], Optional[dict[str, list[str]]], list[dict[str, str]]]:
-    """Build the encrypted secret payload for a browser task plus any invalid rows."""
+    """Build the encrypted secret payload for a browser task plus any invalid rows.
+
+    *secrets* may contain both ``PersistentAgentSecret`` and ``GlobalSecret``
+    instances — both share the ``domain_pattern``, ``key``, ``get_value()``,
+    ``secret_type``, ``id``, and ``created_at`` interface.
+    """
     from api.encryption import SecretsEncryption
 
     secrets_by_domain: dict[str, dict[str, str]] = {}

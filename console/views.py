@@ -6029,6 +6029,17 @@ class MCPServerManagementView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateVie
         return context
 
 
+class GlobalSecretsView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateView):
+    """React-based global secrets management page."""
+    template_name = "console/global_secrets.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["owner_scope"] = self.owner_scope
+        context["owner_label"] = self.get_owner_label()
+        return context
+
+
 class MCPOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     """Landing page shown after external OAuth redirects back to Gobii."""
 
@@ -6388,8 +6399,8 @@ class AgentDeleteView(LoginRequiredMixin, View):
             raise
 
 class AgentSecretsView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
-    """Secrets management page for a single agent."""
-    template_name = "console/agent_secrets.html"
+    """React-based secrets management page for a single agent."""
+    template_name = "console/agent_secrets_react.html"
 
     @tracer.start_as_current_span("CONSOLE Agent Secrets View - get_object")
     def get_object(self):

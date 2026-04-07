@@ -14,6 +14,7 @@ from ...models import (
     PersistentAgent,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
+    GlobalSecret,
     PersistentAgentSecret,
 )
 from ..core.budget import get_current_context as get_budget_context, AgentBudgetManager
@@ -191,30 +192,50 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             # Simply calculate the next depth without mutating shared state
             next_depth = current_depth + 1
 
-        # Copy credential secrets from persistent agent to browser task (exclude requested secrets)
-        agent_secrets = agent.secrets.filter(
+        # Merge global + agent credential secrets (agent-level wins on key+domain conflict)
+        from django.db.models import Q
+        global_filter = (
+            Q(organization=agent.organization) if agent.organization_id
+            else Q(user=agent.user, organization__isnull=True)
+        )
+        global_credential_secrets = list(
+            GlobalSecret.objects.filter(
+                global_filter,
+                secret_type=GlobalSecret.SecretType.CREDENTIAL,
+            )
+        )
+        agent_secrets_qs = agent.secrets.filter(
             requested=False,
             secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
         )
-        
+
+        # Build a combined list: global first, agent overrides
+        agent_secret_keys = set()
+        agent_secrets_list = list(agent_secrets_qs)
+        for s in agent_secrets_list:
+            agent_secret_keys.add((s.domain_pattern, s.key))
+
+        combined_secrets = [
+            s for s in global_credential_secrets
+            if (s.domain_pattern, s.key) not in agent_secret_keys
+        ] + agent_secrets_list
+
         # Filter secrets if specific ones were requested
         if requested_secrets:
-            # Validate that all requested secret keys exist
-            available_secret_keys = set(agent_secrets.values_list('key', flat=True))
+            available_secret_keys = {s.key for s in combined_secrets}
             missing_secrets = set(requested_secrets) - available_secret_keys
-            
+
             if missing_secrets:
                 return {
-                    "status": "error", 
+                    "status": "error",
                     "message": f"Requested secret keys not found: {', '.join(sorted(missing_secrets))}. Available secret keys: {', '.join(sorted(available_secret_keys)) if available_secret_keys else 'none'}"
                 }
-            
-            # Filter to only requested secrets
-            agent_secrets = agent_secrets.filter(key__in=requested_secrets)
+
+            combined_secrets = [s for s in combined_secrets if s.key in requested_secrets]
 
         encrypted_secrets, secret_keys_by_domain, invalid_secrets = build_browser_task_secret_payload(
             agent,
-            list(agent_secrets),
+            combined_secrets,
         )
 
         if invalid_secrets:
