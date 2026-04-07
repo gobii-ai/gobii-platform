@@ -287,6 +287,8 @@ jobs:
             tag: batch_agent_lifecycle
           - batch: agent_short_description
             tag: batch_agent_short_description
+          - batch: video_generation
+            tag: batch_video_generation
           - batch: agent_colors
             tag: batch_agent_colors
           - batch: agent_tags

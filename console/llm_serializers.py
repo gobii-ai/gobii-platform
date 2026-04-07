@@ -35,6 +35,9 @@ from api.models import (
     ProfilePersistentTier,
     ProfilePersistentTierEndpoint,
     ProfileTokenRange,
+    VideoGenerationLLMTier,
+    VideoGenerationTierEndpoint,
+    VideoGenerationModelEndpoint,
 )
 
 
@@ -105,7 +108,7 @@ def _serialize_embedding_endpoint(endpoint: EmbeddingsModelEndpoint) -> dict[str
 
 
 def _serialize_aux_endpoint(
-    endpoint: EmbeddingsModelEndpoint | FileHandlerModelEndpoint | ImageGenerationModelEndpoint,
+    endpoint: EmbeddingsModelEndpoint | FileHandlerModelEndpoint | ImageGenerationModelEndpoint | VideoGenerationModelEndpoint,
     *,
     endpoint_type: str,
 ) -> dict[str, Any]:
@@ -124,6 +127,8 @@ def _serialize_aux_endpoint(
         data["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
     if endpoint_type == "image_generation":
         data["supports_image_to_image"] = bool(getattr(endpoint, "supports_image_to_image", False))
+    if endpoint_type == "video_generation":
+        data["supports_image_to_video"] = bool(getattr(endpoint, "supports_image_to_video", False))
     return data
 
 
@@ -133,6 +138,10 @@ def _serialize_file_handler_endpoint(endpoint: FileHandlerModelEndpoint) -> dict
 
 def _serialize_image_generation_endpoint(endpoint: ImageGenerationModelEndpoint) -> dict[str, Any]:
     return _serialize_aux_endpoint(endpoint, endpoint_type="image_generation")
+
+
+def _serialize_video_generation_endpoint(endpoint: VideoGenerationModelEndpoint) -> dict[str, Any]:
+    return _serialize_aux_endpoint(endpoint, endpoint_type="video_generation")
 
 
 def _serialize_weighted_endpoint_reference(endpoint, tier_endpoint) -> dict[str, Any]:
@@ -175,6 +184,7 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("embedding_endpoints", queryset=EmbeddingsModelEndpoint.objects.select_related("provider")),
             Prefetch("file_handler_endpoints", queryset=FileHandlerModelEndpoint.objects.select_related("provider")),
             Prefetch("image_generation_endpoints", queryset=ImageGenerationModelEndpoint.objects.select_related("provider")),
+            Prefetch("video_generation_endpoints", queryset=VideoGenerationModelEndpoint.objects.select_related("provider")),
         )
     )
 
@@ -184,6 +194,7 @@ def build_llm_overview() -> dict[str, Any]:
     embedding_choices: list[dict[str, Any]] = []
     file_handler_choices: list[dict[str, Any]] = []
     image_generation_choices: list[dict[str, Any]] = []
+    video_generation_choices: list[dict[str, Any]] = []
 
     for provider in providers:
         persistent_endpoints = [
@@ -206,12 +217,17 @@ def build_llm_overview() -> dict[str, Any]:
             _serialize_image_generation_endpoint(endpoint)
             for endpoint in provider.image_generation_endpoints.all()
         ]
+        video_generation_endpoints = [
+            _serialize_video_generation_endpoint(endpoint)
+            for endpoint in provider.video_generation_endpoints.all()
+        ]
 
         persistent_choices.extend(persistent_endpoints)
         browser_choices.extend(browser_endpoints)
         embedding_choices.extend(embedding_endpoints)
         file_handler_choices.extend(file_handler_endpoints)
         image_generation_choices.extend(image_generation_endpoints)
+        video_generation_choices.extend(video_generation_endpoints)
 
         provider_payload.append(
             {
@@ -231,6 +247,7 @@ def build_llm_overview() -> dict[str, Any]:
                     + embedding_endpoints
                     + file_handler_endpoints
                     + image_generation_endpoints
+                    + video_generation_endpoints
                 ),
             }
         )
@@ -391,6 +408,16 @@ def build_llm_overview() -> dict[str, Any]:
         image_generation_tiers.filter(use_case=ImageGenerationLLMTier.UseCase.AVATAR)
     )
 
+    video_generation_tiers = VideoGenerationLLMTier.objects.prefetch_related(
+        Prefetch(
+            "tier_endpoints",
+            queryset=VideoGenerationTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
+        )
+    ).order_by("use_case", "order")
+    create_video_generation_payload = _serialize_weighted_tier_payload(
+        video_generation_tiers.filter(use_case=VideoGenerationLLMTier.UseCase.CREATE_VIDEO)
+    )
+
     stats = {
         "active_providers": LLMProvider.objects.filter(enabled=True).count(),
         "persistent_endpoints": PersistentModelEndpoint.objects.filter(enabled=True).count(),
@@ -419,12 +446,16 @@ def build_llm_overview() -> dict[str, Any]:
             "create_image_tiers": create_image_generation_payload,
             "avatar_tiers": avatar_image_generation_payload,
         },
+        "video_generations": {
+            "create_video_tiers": create_video_generation_payload,
+        },
         "choices": {
             "persistent_endpoints": persistent_choices,
             "browser_endpoints": browser_choices,
             "embedding_endpoints": embedding_choices,
             "file_handler_endpoints": file_handler_choices,
             "image_generation_endpoints": image_generation_choices,
+            "video_generation_endpoints": video_generation_choices,
         },
     }
 
