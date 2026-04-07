@@ -30,7 +30,10 @@ from constants.feature_flags import (
     CTA_UNLOCK_AGENT_COPY,
     SUPPORT_INTERCOM,
 )
-from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
+from util.trial_eligibility import (
+    is_trial_decision_allowed,
+    is_user_trial_eligibility_enforcement_enabled,
+)
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
 from config.stripe_config import get_stripe_settings
@@ -65,7 +68,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             if not is_user_trial_eligibility_enforcement_enabled(self.request):
                 return True
             try:
-                return evaluate_user_trial_eligibility(self.request.user).eligible
+                result = evaluate_user_trial_eligibility(self.request.user)
+                return is_trial_decision_allowed(result.decision, request=self.request)
             except Exception:
                 logger.warning(
                     "Failed to resolve trial eligibility; defaulting to no trial for user %s",

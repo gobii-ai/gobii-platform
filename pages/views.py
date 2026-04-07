@@ -59,7 +59,10 @@ from util.onboarding import (
     normalize_trial_onboarding_target,
     set_trial_onboarding_intent,
 )
-from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
+from util.trial_eligibility import (
+    is_trial_decision_allowed,
+    is_user_trial_eligibility_enforcement_enabled,
+)
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
@@ -431,12 +434,13 @@ def _is_individual_trial_eligible(user, *, request=None, capture_source: str | N
         return True
     if not is_user_trial_eligibility_enforcement_enabled(request):
         return True
-    return evaluate_user_trial_eligibility(
+    result = evaluate_user_trial_eligibility(
         user,
         request=request,
         capture_source=capture_source,
         assessment_source=capture_source,
-    ).eligible
+    )
+    return is_trial_decision_allowed(result.decision, request=request)
 
 
 def _pop_post_checkout_redirect(request) -> str | None:
