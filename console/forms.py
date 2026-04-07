@@ -1023,6 +1023,7 @@ class PersistentAgentSecretsRequestForm(forms.Form):
     def __init__(self, *args, requested_secrets=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.requested_secrets = requested_secrets or []
+        self.fields['make_global'] = forms.BooleanField(required=False, initial=False)
         
         # Dynamically create fields for each requested secret
         for secret in self.requested_secrets:
@@ -1050,8 +1051,8 @@ class PersistentAgentSecretsRequestForm(forms.Form):
                 try:
                     from api.domain_validation import DomainPatternValidator
                     DomainPatternValidator._validate_secret_value(value)
-                except Exception as e:
-                    self.add_error(field_name, str(e))
+                except ValueError as exc:
+                    self.add_error(field_name, str(exc))
         
         return cleaned_data
 

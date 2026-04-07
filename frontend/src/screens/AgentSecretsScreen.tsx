@@ -175,8 +175,7 @@ export function AgentSecretsScreen({
               <h3 className="text-sm font-semibold text-blue-800 mb-1">Secure Encryption</h3>
               <p className="text-sm text-blue-700">
                 All secrets are encrypted with AES-256-GCM before storage. Credential secrets can be used via
-                placeholders. Environment variable secrets are injected into sandbox execution.
-                Agent-specific secrets override global secrets when they share the same key.
+                placeholders.
               </p>
             </div>
           </div>

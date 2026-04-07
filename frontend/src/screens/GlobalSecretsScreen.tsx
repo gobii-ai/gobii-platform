@@ -137,8 +137,7 @@ export function GlobalSecretsScreen({ listUrl, ownerScope }: GlobalSecretsScreen
               <h3 className="text-sm font-semibold text-blue-800 mb-1">Secure Encryption</h3>
               <p className="text-sm text-blue-700">
                 All secrets are encrypted with AES-256-GCM before storage. Global secrets are automatically
-                available to all your agents. Agent-specific secrets override global secrets when they share
-                the same key.
+                available to all your agents.
               </p>
             </div>
           </div>

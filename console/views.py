@@ -89,6 +89,11 @@ from api.services.daily_credit_limits import (
     scale_daily_credit_limit_for_tier_change,
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.persistent_agent_secrets import (
+    ensure_global_secret_capacity_for_agent,
+    move_agent_secret_to_global,
+    validate_agent_secret_globalization,
+)
 from api.services.agent_settings_resume import (
     queue_owner_task_pack_resume,
     queue_settings_change_resume,
@@ -7316,24 +7321,62 @@ class AgentSecretsRequestView(ManagedAgentAccessMixin, ConsoleViewMixin, Templat
     def get_object(self):
         return super().get_object()
 
+    def _get_requested_secrets(self, agent):
+        from api.models import PersistentAgentSecret
+
+        return list(
+            PersistentAgentSecret.objects.filter(
+                agent=agent,
+                requested=True,
+            ).order_by("secret_type", "domain_pattern", "name")
+        )
+
+    def _build_request_form(self, requested_secrets, data=None):
+        if data is None:
+            return PersistentAgentSecretsRequestForm(requested_secrets=requested_secrets)
+        return PersistentAgentSecretsRequestForm(data, requested_secrets=requested_secrets)
+
+    def _build_requested_secret_rows(self, requested_secrets, form):
+        return [
+            {
+                "secret": secret,
+                "value_field": form[f"secret_{secret.id}"],
+            }
+            for secret in requested_secrets
+        ]
+
+    def _build_request_context(self, agent, requested_secrets, form):
+        return {
+            "agent": agent,
+            "requested_secrets": requested_secrets,
+            "requested_secret_rows": self._build_requested_secret_rows(requested_secrets, form),
+            "has_requested_secrets": bool(requested_secrets),
+            "form": form,
+            "make_global_field": form["make_global"],
+            "make_global_label": (
+                "Make global for this organization"
+                if agent.organization_id
+                else "Make global for your account"
+            ),
+            "make_global_help_text": (
+                "Shared across all agents in this organization"
+                if agent.organization_id
+                else "Shared across all agents in your account"
+            ),
+        }
+
     @tracer.start_as_current_span("CONSOLE Agent Secrets Request View - get_context_data")
     def get_context_data(self, **kwargs):
         """Add agent and requested secrets to context."""
+        agent = kwargs.pop("agent", None) or self.get_object()
+        requested_secrets = kwargs.pop("requested_secrets", None)
+        form = kwargs.pop("form", None)
         context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-        context['agent'] = agent
-
-        # Get requested secrets (those that have requested=True)
-        from api.models import PersistentAgentSecret
-        requested_secrets = PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=True
-        ).order_by('secret_type', 'domain_pattern', 'name')
-
-        context['requested_secrets'] = requested_secrets
-        context['has_requested_secrets'] = requested_secrets.exists()
-        context['form'] = PersistentAgentSecretsRequestForm(requested_secrets=requested_secrets)
-
+        if requested_secrets is None:
+            requested_secrets = self._get_requested_secrets(agent)
+        if form is None:
+            form = self._build_request_form(requested_secrets)
+        context.update(self._build_request_context(agent, requested_secrets, form))
         return context
 
     def post(self, request, *args, **kwargs):
@@ -7377,14 +7420,42 @@ class AgentSecretsRequestView(ManagedAgentAccessMixin, ConsoleViewMixin, Templat
             return redirect('agent_secrets_request', pk=agent.pk)
 
         # Default: save provided values (partial allowed)
-        requested_secrets = PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=True
-        ).order_by('secret_type', 'domain_pattern', 'name')
+        requested_secrets = self._get_requested_secrets(agent)
 
-        form = PersistentAgentSecretsRequestForm(request.POST, requested_secrets=requested_secrets)
+        form = self._build_request_form(requested_secrets, request.POST)
 
         if form.is_valid():
+            should_make_global = form.cleaned_data.get("make_global")
+            globalized_secret_ids = [
+                secret.id
+                for secret in requested_secrets
+                if form.cleaned_data.get(f"secret_{secret.id}")
+            ]
+
+            if should_make_global and globalized_secret_ids:
+                try:
+                    ensure_global_secret_capacity_for_agent(agent, additional_count=len(globalized_secret_ids))
+                except ValidationError as exc:
+                    form.add_error("make_global", _format_validation_error(exc))
+
+                for secret in requested_secrets:
+                    field_name = f"secret_{secret.id}"
+                    value = form.cleaned_data.get(field_name)
+                    if not value:
+                        continue
+
+                    secret.set_value(value)
+                    secret.requested = False
+
+                    try:
+                        validate_agent_secret_globalization(secret)
+                    except ValidationError as exc:
+                        form.add_error("make_global", f"{secret.name}: {_format_validation_error(exc)}")
+
+            if form.errors:
+                context = self.get_context_data(agent=agent, requested_secrets=requested_secrets, form=form)
+                return self.render_to_response(context)
+
             try:
                 with transaction.atomic():
                     updated_count = 0
@@ -7393,9 +7464,33 @@ class AgentSecretsRequestView(ManagedAgentAccessMixin, ConsoleViewMixin, Templat
                         field_name = f'secret_{secret.id}'
                         value = form.cleaned_data.get(field_name)
                         if value:
-                            secret.set_value(value)
-                            secret.requested = False
-                            secret.save()
+                            try:
+                                secret.set_value(value)
+                                if should_make_global:
+                                    move_agent_secret_to_global(secret)
+                                else:
+                                    secret.requested = False
+                                    secret.save()
+                            except ValidationError as exc:
+                                form.add_error(
+                                    "make_global" if should_make_global else field_name,
+                                    (
+                                        f"{secret.name}: {_format_validation_error(exc)}"
+                                        if should_make_global
+                                        else _format_validation_error(exc)
+                                    ),
+                                )
+                                raise
+                            except IntegrityError:
+                                form.add_error(
+                                    "make_global" if should_make_global else field_name,
+                                    (
+                                        f"{secret.name}: A global secret with that name already exists in this scope."
+                                        if should_make_global
+                                        else "A secret with that name already exists for this agent."
+                                    ),
+                                )
+                                raise
                             updated_count += 1
                             provided_secret_types.add(secret.secret_type)
 
@@ -7426,12 +7521,12 @@ class AgentSecretsRequestView(ManagedAgentAccessMixin, ConsoleViewMixin, Templat
                         return redirect('agent_secrets_request_thanks', pk=agent.pk)
                     else:
                         messages.info(request, "No changes detected. Enter values to save or remove requests you no longer need.")
-            except Exception as e:
-                logger.error(f"Failed to update requested secrets for agent {agent.id}: {str(e)}")
-                messages.error(request, "Failed to save secrets. Please try again.")
+            except ValidationError as exc:
+                logger.warning(f"Requested secret save validation failed for agent {agent.id}: {exc}")
+            except IntegrityError:
+                logger.warning(f"Requested secret save hit an integrity error for agent {agent.id}")
 
-        context = self.get_context_data(**kwargs)
-        context['form'] = form
+        context = self.get_context_data(agent=agent, requested_secrets=requested_secrets, form=form)
         return self.render_to_response(context)
 
 

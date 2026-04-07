@@ -11,6 +11,7 @@ from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
 from django.views import View
 
 from api.models import GlobalSecret, PersistentAgentSecret
+from api.services.persistent_agent_secrets import move_agent_secret_to_global
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.context_helpers import build_console_context
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -383,30 +384,9 @@ class AgentSecretPromoteAPIView(LoginRequiredMixin, View):
         except PersistentAgentSecret.DoesNotExist:
             return JsonResponse({"error": "Secret not found."}, status=404)
 
-        owner_user = agent.user if not agent.organization_id else None
-        owner_org = agent.organization if agent.organization_id else None
-
-        # Enforce the same per-owner cap as the create endpoint
-        if _global_secrets_queryset(owner_user, owner_org).count() >= GlobalSecret.MAX_GLOBAL_SECRETS_PER_OWNER:
-            return JsonResponse(
-                {"errors": {"__all__": [f"Maximum {GlobalSecret.MAX_GLOBAL_SECRETS_PER_OWNER} global secrets allowed."]}},
-                status=400,
-            )
-
         try:
             with transaction.atomic():
-                global_secret = GlobalSecret(
-                    user=owner_user,
-                    organization=owner_org,
-                    name=secret.name,
-                    secret_type=secret.secret_type,
-                    domain_pattern=secret.domain_pattern,
-                    description=secret.description,
-                    key=secret.key,
-                    encrypted_value=secret.encrypted_value,
-                )
-                global_secret.save()
-                secret.delete()
+                global_secret = move_agent_secret_to_global(secret)
         except ValidationError as exc:
             errors = exc.message_dict if hasattr(exc, "message_dict") else {"__all__": [str(exc)]}
             return JsonResponse({"errors": errors}, status=400)

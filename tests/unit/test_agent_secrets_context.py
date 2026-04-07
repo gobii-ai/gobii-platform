@@ -6,6 +6,7 @@ Tests the core logic around:
 2. secure_credentials_request tool execution
 3. Proper filtering of requested vs fulfilled secrets
 """
+import re
 from unittest.mock import Mock, patch
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
@@ -13,6 +14,7 @@ from django.contrib.auth import get_user_model
 from api.models import (
     PersistentAgent,
     PersistentAgentSecret,
+    GlobalSecret,
     BrowserUseAgent,
     Organization,
     OrganizationMembership,
@@ -580,6 +582,20 @@ class AgentSecretsRequestViewTests(TestCase):
         session["context_name"] = self.org.name
         session.save()
 
+    def _make_global_secret(self, **kwargs):
+        defaults = {
+            "organization": self.org,
+            "name": "Existing Global Secret",
+            "secret_type": GlobalSecret.SecretType.CREDENTIAL,
+            "domain_pattern": "https://example.com",
+            "description": "shared secret",
+        }
+        defaults.update(kwargs)
+        secret = GlobalSecret(**defaults)
+        secret.set_value("shared-value")
+        secret.save()
+        return secret
+
     def test_partial_request_save_updates_only_provided(self):
         # Two requested secrets
         s1 = PersistentAgentSecret.objects.create(
@@ -608,6 +624,31 @@ class AgentSecretsRequestViewTests(TestCase):
         s2.refresh_from_db()
         self.assertFalse(s1.requested)
         self.assertTrue(s2.requested)
+        self.assertFalse(GlobalSecret.objects.filter(organization=self.org, name="Username").exists())
+
+    def test_request_page_renders_make_global_option_for_organization(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Password",
+            key="password",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.get(reverse('agent_secrets_request', kwargs={"pk": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Make global for this organization")
+        self.assertContains(response, "Shared across all agents in this organization")
+        self.assertContains(response, 'name="make_global"', html=False)
+        checkbox = re.search(
+            r'<input[^>]*name="make_global"[^>]*>',
+            response.content.decode(),
+        )
+        self.assertIsNotNone(checkbox)
+        self.assertNotIn("checked", checkbox.group(0))
+        self.assertEqual(response.content.decode().count('name="make_global"'), 1)
 
     def test_request_page_disables_autofill_for_secret_inputs(self):
         secret = PersistentAgentSecret.objects.create(
@@ -626,6 +667,118 @@ class AgentSecretsRequestViewTests(TestCase):
         self.assertContains(response, f'name="secret_{secret.id}"', html=False)
         self.assertContains(response, 'type="password"', html=False)
         self.assertContains(response, 'autocomplete="new-password"', html=False)
+
+    def test_request_save_can_make_credential_global(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Shared Password",
+            key="shared_password",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.post(
+            reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+            data={
+                f"secret_{secret.id}": "top-secret",
+                "make_global": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response.url,
+            reverse('agent_secrets_request_thanks', kwargs={"pk": self.agent.id}),
+        )
+        self.assertFalse(PersistentAgentSecret.objects.filter(id=secret.id).exists())
+        global_secret = GlobalSecret.objects.get(organization=self.org, name="Shared Password")
+        self.assertEqual(global_secret.secret_type, GlobalSecret.SecretType.CREDENTIAL)
+        self.assertEqual(global_secret.domain_pattern, "https://example.com")
+        self.assertEqual(global_secret.get_value(), "top-secret")
+
+    def test_request_save_can_make_env_var_global(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="Sandbox Token",
+            key="SANDBOX_TOKEN",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        response = self.client.post(
+            reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+            data={
+                f"secret_{secret.id}": "env-secret",
+                "make_global": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(PersistentAgentSecret.objects.filter(id=secret.id).exists())
+        global_secret = GlobalSecret.objects.get(organization=self.org, name="Sandbox Token")
+        self.assertEqual(global_secret.secret_type, GlobalSecret.SecretType.ENV_VAR)
+        self.assertEqual(global_secret.domain_pattern, GlobalSecret.ENV_VAR_DOMAIN_SENTINEL)
+        self.assertEqual(global_secret.key, "SANDBOX_TOKEN")
+        self.assertEqual(global_secret.get_value(), "env-secret")
+
+    def test_request_save_make_global_duplicate_rerenders_without_changes(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Shared Password",
+            key="shared_password",
+            requested=True,
+            encrypted_value=b"",
+        )
+        self._make_global_secret(
+            name="Shared Password",
+            key="shared_password",
+            domain_pattern="https://example.com",
+        )
+
+        response = self.client.post(
+            reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+            data={
+                f"secret_{secret.id}": "top-secret",
+                "make_global": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "already exists")
+        secret.refresh_from_db()
+        self.assertTrue(secret.requested)
+        self.assertEqual(secret.encrypted_value, b"")
+        self.assertEqual(GlobalSecret.objects.filter(organization=self.org, name="Shared Password").count(), 1)
+
+    def test_request_save_make_global_respects_global_secret_limit(self):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern="https://example.com",
+            name="Overflow Secret",
+            key="overflow_secret",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        with patch.object(GlobalSecret, "MAX_GLOBAL_SECRETS_PER_OWNER", 1):
+            self._make_global_secret(name="Existing One", key="existing_one")
+            response = self.client.post(
+                reverse('agent_secrets_request', kwargs={"pk": self.agent.id}),
+                data={
+                    f"secret_{secret.id}": "top-secret",
+                    "make_global": "on",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Maximum 1 global secrets allowed.")
+        secret.refresh_from_db()
+        self.assertTrue(secret.requested)
+        self.assertEqual(GlobalSecret.objects.filter(organization=self.org).count(), 1)
 
     def test_edit_secret_keeps_existing_key_when_name_changes(self):
         secret = PersistentAgentSecret(
@@ -929,6 +1082,8 @@ class AgentSecretFormsTests(TestCase):
             form.fields[f"secret_{requested_secret.id}"].widget.attrs["autocomplete"],
             "new-password",
         )
+        self.assertIn("make_global", form.fields)
+        self.assertFalse(form.fields["make_global"].initial)
 
 
 @tag("batch_agent_secrets_ctx")
