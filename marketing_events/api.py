@@ -37,8 +37,8 @@ def _build_payload(user, event_name, properties=None, request=None, context=None
     return payload
 
 
-def _start_trial_eligibility_snapshot(user) -> dict[str, object] | None:
-    if not is_start_trial_capi_trial_eligibility_enforcement_enabled():
+def _start_trial_eligibility_snapshot(user, *, request=None) -> dict[str, object] | None:
+    if not is_start_trial_capi_trial_eligibility_enforcement_enabled(request):
         return None
 
     user_id = getattr(user, "id", None)
@@ -69,7 +69,7 @@ def _start_trial_eligibility_snapshot(user) -> dict[str, object] | None:
         "decision": decision,
         "manual_action": eligibility.manual_action,
         "reason_codes": list(eligibility.reason_codes or []),
-        "send_allowed": is_start_trial_capi_decision_allowed(decision),
+        "send_allowed": is_start_trial_capi_decision_allowed(decision, request=request),
         "decision_source": "stored_trial_eligibility_snapshot",
     }
 
@@ -92,7 +92,7 @@ def capi_start_trial(user, properties=None, request=None, context=None, provider
 
     # Preserve trial start timestamp even when delivery is delayed.
     payload["properties"].setdefault("event_time", int(time.time()))
-    eligibility_snapshot = _start_trial_eligibility_snapshot(user)
+    eligibility_snapshot = _start_trial_eligibility_snapshot(user, request=request)
     if eligibility_snapshot is not None:
         payload["start_trial_eligibility"] = eligibility_snapshot
 

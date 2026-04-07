@@ -2,10 +2,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.test import RequestFactory
 from django.test import SimpleTestCase, TestCase, override_settings, tag
 from waffle.testutils import override_flag
 
-from marketing_events.api import capi, capi_delay_subscription_guarded
+from marketing_events.api import (
+    _start_trial_eligibility_snapshot,
+    capi,
+    capi_delay_subscription_guarded,
+)
 from marketing_events.custom_events import (
     ConfiguredCustomEvent,
     _is_first_workspace_agent_creation,
@@ -23,6 +28,9 @@ from api.models import (
 
 @tag("batch_marketing_events")
 class MarketingEventsApiTests(SimpleTestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
     @patch(
         "marketing_events.api.is_start_trial_capi_trial_eligibility_enforcement_enabled",
@@ -55,6 +63,34 @@ class MarketingEventsApiTests(SimpleTestCase):
         self.assertEqual(payload["properties"]["subscription_id"], "sub_123")
         self.assertEqual(payload["properties"]["event_time"], 1_700_000_000)
         self.assertNotIn("start_trial_eligibility", payload)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
+    @patch("marketing_events.api.time.time", return_value=1_700_000_000)
+    @patch("marketing_events.api.enqueue_start_trial_marketing_event.apply_async")
+    @patch(
+        "marketing_events.api._start_trial_eligibility_snapshot",
+        return_value={"decision": "review", "send_allowed": True},
+    )
+    def test_capi_start_trial_passes_request_to_eligibility_snapshot(
+        self,
+        mock_snapshot,
+        mock_apply_async,
+        _mock_time,
+    ):
+        user = SimpleNamespace(id=42, email="test@example.com", phone="+15555550123")
+        request = self.factory.get("/pricing")
+
+        capi(
+            user=user,
+            event_name="StartTrial",
+            properties={"subscription_id": "sub_123"},
+            request=request,
+            context={"consent": True},
+        )
+
+        mock_snapshot.assert_called_once_with(user, request=request)
+        payload = mock_apply_async.call_args.kwargs["args"][0]
+        self.assertEqual(payload["start_trial_eligibility"]["decision"], "review")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
     @patch("marketing_events.api.enqueue_marketing_event.delay")
@@ -436,6 +472,7 @@ class MarketingEventsApiTests(SimpleTestCase):
 @tag("batch_marketing_events")
 class StartTrialEligibilitySnapshotApiTests(TestCase):
     def setUp(self):
+        self.factory = RequestFactory()
         self.user = get_user_model().objects.create_user(
             username="start-trial-capi@example.com",
             email="start-trial-capi@example.com",
@@ -568,6 +605,35 @@ class StartTrialEligibilitySnapshotApiTests(TestCase):
             UserTrialEligibilityAutoStatusChoices.ELIGIBLE,
         )
         self.assertTrue(payload["start_trial_eligibility"]["send_allowed"])
+
+    @patch(
+        "marketing_events.api.is_start_trial_capi_trial_eligibility_enforcement_enabled",
+        return_value=True,
+    )
+    @patch(
+        "marketing_events.api.is_start_trial_capi_decision_allowed",
+        return_value=False,
+    )
+    def test_start_trial_eligibility_snapshot_passes_request_to_flag_checks(
+        self,
+        mock_decision_allowed,
+        mock_enforcement_enabled,
+    ):
+        request = self.factory.get("/pricing")
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.REVIEW,
+            reason_codes=["multi_signal_history_match"],
+        )
+
+        snapshot = _start_trial_eligibility_snapshot(self.user, request=request)
+
+        mock_enforcement_enabled.assert_called_once_with(request)
+        mock_decision_allowed.assert_called_once_with(
+            UserTrialEligibilityAutoStatusChoices.REVIEW,
+            request=request,
+        )
+        self.assertFalse(snapshot["send_allowed"])
 
 
 @tag("batch_marketing_events")
