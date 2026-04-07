@@ -13,7 +13,7 @@ def add_flag(apps, schema_editor):
     Flag.objects.update_or_create(
         name=FLAG_NAME,
         defaults={
-            "everyone": False,
+            "everyone": None,
             "percent": 0,
             "superusers": False,
             "staff": False,

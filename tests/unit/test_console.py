@@ -900,7 +900,7 @@ class ConsoleViewsTest(TestCase):
         self.assertNotIn("personal_signup_starter_charter_enabled", payload)
 
     @tag("batch_console_agents")
-    @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
+    @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="no_trial"))
     def test_checkout_trial_eligibility_bypasses_service_when_enforcement_flag_disabled(
         self,
         mock_trial_eligibility,
@@ -912,6 +912,19 @@ class ConsoleViewsTest(TestCase):
 
         self.assertTrue(eligible)
         mock_trial_eligibility.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
+    def test_checkout_trial_eligibility_allows_review_when_flag_enabled(
+        self,
+        _mock_trial_eligibility,
+    ):
+        from console.views import _is_checkout_trial_eligible
+
+        with override_flag("user_trial_review_allows_trial", active=True):
+            eligible = _is_checkout_trial_eligible(self.user)
+
+        self.assertTrue(eligible)
 
     @tag("batch_console_agents")
     @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)

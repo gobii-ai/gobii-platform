@@ -108,7 +108,6 @@ from console.daily_credit import (
 )
 from console.home_metrics import get_console_home_metrics
 from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
-from util.trial_eligibility import is_user_trial_eligibility_enforcement_enabled
 from api.models import (
     ApiKey,
     UserBilling,
@@ -498,6 +497,10 @@ from constants.stripe import (
     EXCLUDED_PAYMENT_METHOD_TYPES,
 )
 from util.waffle_flags import is_waffle_flag_active
+from util.trial_eligibility import (
+    is_trial_decision_allowed,
+    is_user_trial_eligibility_enforcement_enabled,
+)
 from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.agent.tasks import process_agent_events_task
@@ -633,7 +636,8 @@ def _is_checkout_trial_eligible(user, request: HttpRequest | None = None) -> boo
     if not is_user_trial_eligibility_enforcement_enabled(request):
         return True
     try:
-        return evaluate_user_trial_eligibility(user).eligible
+        result = evaluate_user_trial_eligibility(user)
+        return is_trial_decision_allowed(result.decision, request=request)
     except (IntegrationDisabledError, stripe.error.StripeError, TypeError, ValueError):
         logger.warning(
             "Failed to resolve trial eligibility for user %s; defaulting to ineligible.",
