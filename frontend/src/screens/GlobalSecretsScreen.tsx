@@ -23,9 +23,7 @@ type GlobalSecretsScreenProps = {
   ownerLabel?: string
 }
 
-const PLACEHOLDER_TOKEN = '00000000-0000-0000-0000-000000000000'
-
-export function GlobalSecretsScreen({ listUrl, ownerScope, ownerLabel }: GlobalSecretsScreenProps) {
+export function GlobalSecretsScreen({ listUrl, ownerLabel }: GlobalSecretsScreenProps) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['global-secrets', listUrl] as const, [listUrl])
   const [modal, showModal] = useModal()
