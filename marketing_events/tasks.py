@@ -5,7 +5,7 @@ from typing import Any
 from celery import shared_task
 from django.conf import settings
 
-from util.analytics import Analytics
+from util.analytics import Analytics, AnalyticsEvent
 from util.integrations import stripe_status
 from util.payments_helper import PaymentsHelper
 from .providers import get_providers
@@ -221,7 +221,7 @@ def _track_marketing_skip(
 
     Analytics.track(
         user_id=analytics_user_id,
-        event="CAPI Event Skipped",
+        event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
         properties=skip_properties,
     )
 
@@ -288,7 +288,7 @@ def _dispatch_marketing_event(payload: dict):
                 # Track successful CAPI send for observability
                 Analytics.track(
                     user_id=analytics_user_id,
-                    event="CAPI Event Sent",
+                    event=AnalyticsEvent.CAPI_EVENT_SENT,
                     properties={
                         "provider": provider_name,
                         "event_name": evt["event_name"],
@@ -305,7 +305,7 @@ def _dispatch_marketing_event(payload: dict):
                 # Track CAPI failure for observability
                 Analytics.track(
                     user_id=analytics_user_id,
-                    event="CAPI Event Failed",
+                    event=AnalyticsEvent.CAPI_EVENT_FAILED,
                     properties={
                         "provider": provider_name,
                         "event_name": evt["event_name"],

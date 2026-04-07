@@ -10,6 +10,7 @@ from marketing_events.tasks import (
     enqueue_marketing_event,
     enqueue_start_trial_marketing_event,
 )
+from util.analytics import AnalyticsEvent
 
 
 @tag("batch_marketing_events")
@@ -41,7 +42,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         kwargs = mock_track.call_args.kwargs
         self.assertEqual(kwargs["user_id"], 42)
-        self.assertEqual(kwargs["event"], "CAPI Event Sent")
+        self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_SENT)
         self.assertEqual(kwargs["properties"]["provider"], "MetaCAPI")
         self.assertEqual(kwargs["properties"]["event_id"], "evt-123")
 
@@ -66,7 +67,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         kwargs = mock_track.call_args.kwargs
         self.assertEqual(kwargs["user_id"], 77)
-        self.assertEqual(kwargs["event"], "CAPI Event Failed")
+        self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_FAILED)
         self.assertEqual(kwargs["properties"]["provider"], "MetaCAPI")
         self.assertEqual(kwargs["properties"]["event_id"], "evt-456")
         self.assertEqual(kwargs["properties"]["error_type"], "permanent")
@@ -101,7 +102,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         kwargs = mock_track.call_args.kwargs
         self.assertEqual(kwargs["user_id"], 88)
-        self.assertEqual(kwargs["event"], "CAPI Event Sent")
+        self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_SENT)
         self.assertEqual(kwargs["properties"]["provider"], "GoogleAnalyticsMP")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -133,7 +134,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
         self.assertEqual(track_kwargs["user_id"], 42)
-        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
         self.assertEqual(track_kwargs["properties"]["event_name"], "StartTrial")
         self.assertEqual(
             track_kwargs["properties"]["reason"],
@@ -198,7 +199,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_dispatch.assert_not_called()
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
-        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
         self.assertEqual(
             track_kwargs["properties"]["reason"],
             "subscription_canceled_or_cancel_at_period_end",
@@ -234,7 +235,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         mock_dispatch.assert_not_called()
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
-        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
         self.assertEqual(track_kwargs["properties"]["event_name"], "AgentCreated")
         self.assertEqual(track_kwargs["properties"]["subscription_id"], "sub_126")
         self.assertEqual(
@@ -326,7 +327,7 @@ class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
         mock_dispatch.assert_not_called()
         mock_track.assert_called_once()
         track_kwargs = mock_track.call_args.kwargs
-        self.assertEqual(track_kwargs["event"], "CAPI Event Skipped")
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
         self.assertEqual(track_kwargs["properties"]["reason"], "trial_eligibility_disallowed")
         self.assertEqual(
             track_kwargs["properties"]["decision_source"],
