@@ -44,7 +44,7 @@ class SandboxAppAndConfigTests(unittest.TestCase):
             {"status": "error", "message": "Sandbox compute request failed."},
         )
 
-    def test_agent_workspace_isolated_per_agent(self):
+    def test_agent_workspace_isolated_per_agent_by_default(self):
         with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
             "os.environ",
             {"SANDBOX_WORKSPACE_ROOT": tmp_dir},
@@ -58,6 +58,22 @@ class SandboxAppAndConfigTests(unittest.TestCase):
             self.assertNotEqual(first, second)
             self.assertTrue(first.is_dir())
             self.assertTrue(second.is_dir())
+
+    def test_agent_workspace_uses_shared_root_when_configured(self):
+        with tempfile.TemporaryDirectory() as tmp_dir, patch.dict(
+            "os.environ",
+            {
+                "SANDBOX_WORKSPACE_ROOT": tmp_dir,
+                "SANDBOX_AGENT_WORKSPACE_LAYOUT": "isolated",
+            },
+            clear=False,
+        ):
+            first = _agent_workspace("agent-1")
+            second = _agent_workspace("agent/2")
+
+            self.assertEqual(first, Path(tmp_dir))
+            self.assertEqual(second, Path(tmp_dir))
+            self.assertTrue(first.is_dir())
 
     def test_sandbox_env_sets_internal_uv_defaults(self):
         with tempfile.TemporaryDirectory() as runtime_cache:

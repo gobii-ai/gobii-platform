@@ -856,7 +856,10 @@ def _build_pod_manifest(
     socks_proxy_port: int,
     no_proxy: Optional[str],
 ) -> Dict[str, Any]:
-    env = [{"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"}]
+    env = [
+        {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
+        {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
+    ]
     env.extend(
         _build_proxy_env(
             egress_service_name=egress_service_name,
@@ -1158,6 +1161,8 @@ def _sandbox_pod_matches(
         if isinstance(entry, dict) and entry.get("name")
     }
     if env.get("SANDBOX_RUNTIME_CACHE_ROOT", "") != "/runtime-cache":
+        return False
+    if env.get("SANDBOX_AGENT_WORKSPACE_LAYOUT", "") != "shared":
         return False
 
     expected_proxy_env = {

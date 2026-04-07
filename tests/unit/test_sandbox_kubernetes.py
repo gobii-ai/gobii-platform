@@ -406,6 +406,12 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
 
         self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
         self.assertNotIn("serviceAccountName", manifest["spec"])
+        env = {
+            entry["name"]: entry["value"]
+            for entry in manifest["spec"]["containers"][0]["env"]
+        }
+        self.assertEqual(env["SANDBOX_RUNTIME_CACHE_ROOT"], "/runtime-cache")
+        self.assertEqual(env["SANDBOX_AGENT_WORKSPACE_LAYOUT"], "isolated")
 
     def test_agent_pod_manifest_keeps_explicit_service_account_opt_in(self):
         manifest = _build_pod_manifest(

@@ -130,6 +130,10 @@ def _workspace_root() -> Path:
     return Path(root)
 
 
+def _workspace_layout() -> str:
+    return (os.environ.get("SANDBOX_AGENT_WORKSPACE_LAYOUT", "").strip().lower() or "shared")
+
+
 def _runtime_cache_root() -> Path:
     root = os.environ.get("SANDBOX_RUNTIME_CACHE_ROOT", "/runtime-cache").strip() or "/runtime-cache"
     return Path(root)
@@ -232,6 +236,8 @@ def _python_max_timeout_seconds() -> int:
 def _agent_workspace(agent_id: str) -> Path:
     root = _workspace_root()
     root.mkdir(parents=True, exist_ok=True)
+    if _workspace_layout() == "isolated":
+        return root
     workspace = root / _safe_identity_segment(agent_id, fallback="agent")
     workspace.mkdir(parents=True, exist_ok=True)
     return workspace
