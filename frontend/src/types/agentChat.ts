@@ -74,6 +74,7 @@ export type ToolCallEntry = {
   cursor?: string
   chartImageUrl?: string | null
   createImageUrl?: string | null
+  createVideoUrl?: string | null
 }
 
 export type ToolClusterEvent = {

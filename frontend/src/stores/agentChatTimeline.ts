@@ -147,6 +147,7 @@ function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallE
     meta: incoming.meta ?? base.meta,
     chartImageUrl: pickNonEmptyString(incoming.chartImageUrl ?? undefined, base.chartImageUrl ?? undefined),
     createImageUrl: pickNonEmptyString(incoming.createImageUrl ?? undefined, base.createImageUrl ?? undefined),
+    createVideoUrl: pickNonEmptyString(incoming.createVideoUrl ?? undefined, base.createVideoUrl ?? undefined),
   }
 }
 

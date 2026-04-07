@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, tag
 
+from api.models import PersistentAgentCompletion
 from api.agent.tools.create_video import (
     GeneratedVideoResult,
     VideoGenerationResponseError,
@@ -246,3 +247,43 @@ class ExecuteCreateVideoTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("does not support image-to-video", result["message"])
         mock_generate.assert_not_called()
+
+    @patch("api.agent.tools.create_video.set_agent_variable")
+    @patch("api.agent.tools.create_video.build_signed_filespace_download_url", return_value="https://signed/url")
+    @patch("api.agent.tools.create_video.write_bytes_to_dir")
+    @patch("api.agent.tools.create_video.log_agent_completion")
+    @patch("api.agent.tools.create_video.litellm")
+    @patch("api.agent.tools.create_video.time.sleep")
+    @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
+    @patch("api.agent.tools.create_video.resolve_export_target")
+    def test_polling_status_checks_do_not_log_extra_completions(
+        self,
+        mock_resolve,
+        mock_configs,
+        mock_sleep,
+        mock_litellm,
+        mock_log_completion,
+        mock_write,
+        mock_signed_url,
+        mock_set_var,
+    ):
+        mock_resolve.return_value = ("/exports/test.mp4", False, None)
+        mock_configs.return_value = [_make_config(model="ltx/ltx-2-3-fast")]
+        pending_obj = _make_video_obj(status="queued")
+        completed_obj = _make_video_obj(status="completed")
+        mock_litellm.video_generation.return_value = pending_obj
+        mock_litellm.video_status.return_value = completed_obj
+        mock_litellm.video_content.return_value = b"video-data"
+        mock_write.return_value = {"status": "ok", "path": "/exports/test.mp4", "node_id": "node-123"}
+
+        agent = MagicMock()
+        agent.id = "agent-123"
+        result = execute_create_video(agent, {"prompt": "a sunset", "file_path": "/exports/test.mp4"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(mock_litellm.video_status.call_count, 1)
+        mock_log_completion.assert_called_once()
+        self.assertEqual(
+            mock_log_completion.call_args.kwargs["completion_type"],
+            PersistentAgentCompletion.CompletionType.VIDEO_GENERATION,
+        )

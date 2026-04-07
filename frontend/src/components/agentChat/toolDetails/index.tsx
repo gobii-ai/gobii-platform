@@ -23,6 +23,7 @@ import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
 import { ChartDetail } from './details/chart'
 import { ImageDetail } from './details/image'
+import { VideoDetail } from './details/video'
 import { KanbanUpdateDetail } from './details/kanban'
 import {
   CreateCustomToolDetail,
@@ -70,6 +71,7 @@ export {
   AmazonProductSearchDetail,
   ChartDetail,
   ImageDetail,
+  VideoDetail,
   KanbanUpdateDetail,
   RunCommandDetail,
   PythonExecDetail,
@@ -113,6 +115,7 @@ export const TOOL_DETAIL_COMPONENTS = {
   redditPosts: RedditPostsDetail,
   chart: ChartDetail,
   image: ImageDetail,
+  video: VideoDetail,
   mcpTool: McpToolDetail,
   runCommand: RunCommandDetail,
   pythonExec: PythonExecDetail,

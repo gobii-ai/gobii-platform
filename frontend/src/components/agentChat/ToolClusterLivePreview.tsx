@@ -25,7 +25,7 @@ type PreviewEntry = {
   relativeTime: string | null
 }
 
-type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'kanban' | 'chart' | 'image' | 'tool'
+type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'kanban' | 'chart' | 'image' | 'video' | 'tool'
 type PreviewState = 'active' | 'complete'
 
 type ActivityDescriptor = {
@@ -43,6 +43,7 @@ type EntryVisual = {
   enabledToolInfos: FriendlyToolInfo[]
   scrapeTargets: ScrapeTargetItem[]
   previewImageUrl: string | null
+  previewVideoUrl: string | null
   pageTitle: string | null
 }
 
@@ -738,6 +739,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
         enabledToolInfos: [],
         scrapeTargets: [],
         previewImageUrl: null,
+        previewVideoUrl: null,
         pageTitle: null,
       }
     }
@@ -762,6 +764,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       enabledToolInfos,
       scrapeTargets: [],
       previewImageUrl: null,
+      previewVideoUrl: null,
       pageTitle: null,
     }
   }
@@ -780,6 +783,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       enabledToolInfos: [],
       scrapeTargets: [],
       previewImageUrl: null,
+      previewVideoUrl: null,
       pageTitle: null,
     }
   }
@@ -796,6 +800,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       enabledToolInfos: [],
       scrapeTargets,
       previewImageUrl: null,
+      previewVideoUrl: null,
       pageTitle,
     }
   }
@@ -811,14 +816,20 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       enabledToolInfos: [],
       scrapeTargets: [],
       previewImageUrl: null,
+      previewVideoUrl: null,
       pageTitle: null,
     }
   }
 
-  if (activity.kind === 'chart' || activity.kind === 'image') {
+  if (activity.kind === 'chart' || activity.kind === 'image' || activity.kind === 'video') {
     const previewImageUrl = activity.kind === 'chart'
       ? (entry.sourceEntry?.chartImageUrl ?? null)
-      : (entry.sourceEntry?.createImageUrl ?? null)
+      : activity.kind === 'image'
+        ? (entry.sourceEntry?.createImageUrl ?? null)
+        : null
+    const previewVideoUrl = activity.kind === 'video'
+      ? (entry.sourceEntry?.createVideoUrl ?? null)
+      : null
     return {
       badge: null,
       snippet: null,
@@ -828,6 +839,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       enabledToolInfos: [],
       scrapeTargets: [],
       previewImageUrl,
+      previewVideoUrl,
       pageTitle: null,
     }
   }
@@ -842,6 +854,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     enabledToolInfos: [],
     scrapeTargets,
     previewImageUrl: null,
+    previewVideoUrl: null,
     pageTitle: null,
   }
 }
@@ -855,6 +868,7 @@ function classifyActivity(entry: ToolEntryDisplay): ActivityKind {
   if (toolName.includes('search') || label.includes('search')) return 'search'
   if (toolName === 'create_chart' || label === 'chart') return 'chart'
   if (toolName === 'create_image' || label === 'image') return 'image'
+  if (toolName === 'create_video' || label === 'video') return 'video'
   if (
     toolName.includes('scrape_as_markdown') ||
     toolName.includes('scrape_as_html') ||
@@ -959,6 +973,15 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
     return {
       kind,
       label: isPending ? 'Creating image' : 'Created image',
+      detail: prompt ? clampText(prompt, 86) : null,
+    }
+  }
+
+  if (kind === 'video') {
+    const prompt = pickText(entry.parameters?.prompt) ?? pickText(entry.caption) ?? pickText(entry.summary) ?? null
+    return {
+      kind,
+      label: isPending ? 'Creating video' : 'Created video',
       detail: prompt ? clampText(prompt, 86) : null,
     }
   }
@@ -1093,16 +1116,24 @@ export function ToolClusterLivePreview({
             const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
             const previewImageUrl = visual.previewImageUrl
-            const isVisualActivity = item.activity.kind === 'chart' || item.activity.kind === 'image'
-            const visualFallbackAlt = item.activity.kind === 'image' ? 'Generated image' : 'Chart'
+            const previewVideoUrl = visual.previewVideoUrl
+            const isVisualActivity = item.activity.kind === 'chart' || item.activity.kind === 'image' || item.activity.kind === 'video'
+            const visualFallbackAlt =
+              item.activity.kind === 'image'
+                ? 'Generated image'
+                : item.activity.kind === 'video'
+                  ? 'Generated video'
+                  : 'Chart'
 
             // Collect all visual entries with images for grid rendering.
             // Keep chart and image groups separate so each tool kind gets its own grid.
-            const visualEntries = previewImageUrl && isVisualActivity
-              ? previewEntries.filter((pe) => pe.activity.kind === item.activity.kind && pe.visual.previewImageUrl)
+            const visualEntries = (previewImageUrl || previewVideoUrl) && isVisualActivity
+              ? previewEntries.filter(
+                (pe) => pe.activity.kind === item.activity.kind && (pe.visual.previewImageUrl || pe.visual.previewVideoUrl),
+              )
               : []
             const isFirstVisualEntry = visualEntries.length > 0 && visualEntries[0].entry.id === entry.id
-            const isSubsequentVisualEntry = previewImageUrl && !isFirstVisualEntry
+            const isSubsequentVisualEntry = Boolean(previewImageUrl || previewVideoUrl) && !isFirstVisualEntry
 
             // Skip subsequent visual entries — they're rendered in the first grid.
             if (isSubsequentVisualEntry) return null
@@ -1148,18 +1179,33 @@ export function ToolClusterLivePreview({
                         </span>
                       </span>
                       <span className="tool-cluster-live-preview__chart-thumb-img-wrap">
-                        <img
-                          src={visualItem.visual.previewImageUrl!}
-                          alt=""
-                          aria-hidden="true"
-                          className="tool-cluster-live-preview__chart-thumb-img-bg"
-                        />
-                        <img
-                          src={visualItem.visual.previewImageUrl!}
-                          alt={visualItem.activity.detail || visualFallbackAlt}
-                          loading="lazy"
-                          className="tool-cluster-live-preview__chart-thumb-img"
-                        />
+                        {visualItem.activity.kind === 'video' ? (
+                          <video
+                            src={visualItem.visual.previewVideoUrl!}
+                            aria-label={visualItem.activity.detail || visualFallbackAlt}
+                            muted
+                            playsInline
+                            autoPlay
+                            loop
+                            preload="metadata"
+                            className="tool-cluster-live-preview__chart-thumb-img"
+                          />
+                        ) : (
+                          <>
+                            <img
+                              src={visualItem.visual.previewImageUrl!}
+                              alt=""
+                              aria-hidden="true"
+                              className="tool-cluster-live-preview__chart-thumb-img-bg"
+                            />
+                            <img
+                              src={visualItem.visual.previewImageUrl!}
+                              alt={visualItem.activity.detail || visualFallbackAlt}
+                              loading="lazy"
+                              className="tool-cluster-live-preview__chart-thumb-img"
+                            />
+                          </>
+                        )}
                       </span>
                       {visualItem.activity.detail && (
                         <span className="tool-cluster-live-preview__chart-thumb-title">

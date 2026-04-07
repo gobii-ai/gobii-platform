@@ -184,6 +184,40 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(payload.get("completionId"), str(completion.id))
 
     @tag("batch_agent_chat")
+    def test_create_video_tool_call_emits_preview_url(self):
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Create video")
+
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="create_video",
+            tool_params={
+                "prompt": "Product teaser reel",
+                "file_path": "/exports/hero.mp4",
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "file": "$[/exports/hero.mp4]",
+                }
+            ),
+        )
+
+        timeline = self._receive_with_timeout()
+        self.assertEqual(timeline.get("type"), "timeline_event")
+        payload = timeline.get("payload", {})
+        self.assertEqual(payload.get("kind"), "steps")
+
+        entries = payload.get("entries", [])
+        self.assertTrue(entries)
+        preview_url = entries[0].get("createVideoUrl")
+        self.assertIsInstance(preview_url, str)
+
+        parsed = urlparse(preview_url)
+        expected_path = reverse("console_agent_fs_download", kwargs={"agent_id": self.agent.id})
+        self.assertEqual(parsed.path, expected_path)
+        self.assertEqual(parse_qs(parsed.query).get("path"), ["/exports/hero.mp4"])
+
+    @tag("batch_agent_chat")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_inbound_webhook_message_emits_webhook_timeline_event(self, mock_delay):
         webhook = PersistentAgentInboundWebhook.objects.create(
