@@ -242,6 +242,38 @@ class GlobalSkillEvalAPITests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    def test_create_skill_eval_rejects_malformed_global_skill_id(self):
+        response = self.client.post(
+            reverse("console_evals_global_skill_runs_create"),
+            data={"global_skill_id": "not-a-uuid", "task_prompt": "Get the weather."},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("global_skill_id must be a valid UUID", response.content.decode("utf-8"))
+
+    def test_create_skill_eval_rejects_malformed_routing_profile_id(self):
+        skill = GlobalAgentSkill.objects.create(
+            name="check-weather",
+            description="Check weather with a dedicated skill.",
+            tools=["weather"],
+            instructions="Use this skill for weather tasks.",
+            is_active=True,
+        )
+
+        response = self.client.post(
+            reverse("console_evals_global_skill_runs_create"),
+            data={
+                "global_skill_id": str(skill.id),
+                "task_prompt": "Get the weather.",
+                "llm_routing_profile_id": "not-a-uuid",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("LLM routing profile not found", response.content.decode("utf-8"))
+
 
 @tag("batch_global_skill_evals")
 class GlobalSkillEvalScenarioTests(TestCase):

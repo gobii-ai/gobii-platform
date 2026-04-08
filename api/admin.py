@@ -3559,13 +3559,13 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
 
     def delete_model(self, request, obj):
         skill = obj
+        super().delete_model(request, obj)
         track_global_agent_skill_event(
             user_id=getattr(request.user, "id", None),
             event=AnalyticsEvent.GLOBAL_AGENT_SKILL_DELETED,
             skill=skill,
             source=AnalyticsSource.WEB,
         )
-        super().delete_model(request, obj)
 
     def delete_queryset(self, request, queryset):
         skills = list(queryset)

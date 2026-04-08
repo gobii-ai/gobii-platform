@@ -257,6 +257,24 @@ class PersistentAgentAdminTests(TestCase):
         self.assertEqual(kwargs["properties"]["global_skill_name"], "ops-report")
 
     @patch("util.analytics.Analytics.track_event")
+    def test_global_agent_skill_admin_delete_does_not_emit_analytics_if_delete_fails(self, mock_track_event):
+        admin_view = admin.site._registry[GlobalAgentSkill]
+        request = self.request_factory.post("/admin/api/globalagentskill/delete/")
+        request.user = self.admin_user
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate operations reports",
+            tools=["sqlite_batch"],
+            instructions="Summarize the latest ops metrics.",
+        )
+
+        with patch.object(admin.ModelAdmin, "delete_model", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                admin_view.delete_model(request, skill)
+
+        mock_track_event.assert_not_called()
+
+    @patch("util.analytics.Analytics.track_event")
     def test_global_agent_skill_admin_bulk_delete_emits_one_event_per_skill(self, mock_track_event):
         admin_view = admin.site._registry[GlobalAgentSkill]
         request = self.request_factory.post("/admin/api/globalagentskill/")

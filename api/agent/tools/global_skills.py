@@ -48,15 +48,10 @@ def _read_bundled_custom_tool_source(tool: GlobalAgentSkillCustomTool) -> tuple[
         return None, f"Bundled custom tool '{tool.tool_name}' is missing source_file."
 
     try:
-        tool.source_file.open("rb")
-        raw = tool.source_file.read()
+        with tool.source_file.open("rb") as source_file:
+            raw = source_file.read()
     except OSError as exc:
         return None, f"Failed reading bundled custom tool '{tool.tool_name}': {exc}"
-    finally:
-        try:
-            tool.source_file.close()
-        except Exception:
-            pass
 
     try:
         return raw.decode("utf-8"), None

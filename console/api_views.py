@@ -12,6 +12,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from uuid import UUID
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -7095,6 +7096,10 @@ class GlobalSkillEvalRunCreateAPIView(SystemAdminAPIView):
         global_skill_id = body.get("global_skill_id")
         if not global_skill_id:
             return HttpResponseBadRequest("global_skill_id is required")
+        try:
+            normalized_global_skill_id = UUID(str(global_skill_id))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("global_skill_id must be a valid UUID")
 
         task_prompt = str(body.get("task_prompt") or "").strip()
         if not task_prompt:
@@ -7113,7 +7118,7 @@ class GlobalSkillEvalRunCreateAPIView(SystemAdminAPIView):
 
         skill = get_object_or_404(
             GlobalAgentSkill.objects.filter(is_active=True).prefetch_related("bundled_custom_tools"),
-            pk=global_skill_id,
+            pk=normalized_global_skill_id,
         )
 
         owner_user, owner_org = _resolve_console_secret_owner(request)
@@ -7138,8 +7143,12 @@ class GlobalSkillEvalRunCreateAPIView(SystemAdminAPIView):
         llm_routing_profile_id = body.get("llm_routing_profile_id")
         if llm_routing_profile_id:
             try:
+                normalized_routing_profile_id = UUID(str(llm_routing_profile_id))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("LLM routing profile not found")
+            try:
                 source_routing_profile = LLMRoutingProfile.objects.get(
-                    id=llm_routing_profile_id,
+                    id=normalized_routing_profile_id,
                     is_eval_snapshot=False,
                 )
             except LLMRoutingProfile.DoesNotExist:
