@@ -17,6 +17,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
+from django.db import DatabaseError
 from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
@@ -37,6 +38,7 @@ from billing.checkout_metadata import (
     build_checkout_flow_metadata,
     clear_checkout_customer_metadata,
 )
+from billing.checkout_context import record_checkout_context
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from config.stripe_config import get_stripe_settings
 
@@ -621,7 +623,7 @@ def _create_checkout_session_with_customer_context(
         )
 
     try:
-        return stripe.checkout.Session.create(**checkout_kwargs)
+        session = stripe.checkout.Session.create(**checkout_kwargs)
     except stripe.error.StripeError as exc:
         if customer_checkout_context_set:
             try:
@@ -636,6 +638,30 @@ def _create_checkout_session_with_customer_context(
                     cleanup_exc,
                 )
         raise
+
+    session_id = getattr(session, "id", None)
+    if isinstance(session_id, str) and session_id.strip():
+        try:
+            record_checkout_context(
+                customer_id=customer_id,
+                checkout_session_id=session_id.strip(),
+                session_created_at=getattr(session, "created", None),
+                flow_type=flow_type,
+                event_id=event_id,
+                plan=plan,
+                plan_label=plan_label,
+                value=value,
+                currency=(currency or "USD").upper(),
+                checkout_source_url=checkout_source_url,
+            )
+        except DatabaseError:
+            logger.warning(
+                "Failed to persist checkout context for session %s",
+                session_id,
+                exc_info=True,
+            )
+
+    return session
 
 
 class HomePage(TemplateView):
