@@ -3,6 +3,7 @@
 from django.test import SimpleTestCase, tag
 
 from api.agent.core.event_processing import (
+    _parse_tool_call_params,
     _normalize_tool_params_unicode_escapes,
     _should_imply_continue,
 )
@@ -98,3 +99,22 @@ class ToolParamUnicodeNormalizationTests(SimpleTestCase):
         normalized = _normalize_tool_params_unicode_escapes(params)
 
         self.assertEqual(normalized, params)
+
+
+@tag('batch_event_processing')
+class ToolParamParsingTests(SimpleTestCase):
+    def test_preserves_escaped_newlines_inside_nested_json_string_payload(self):
+        raw_args = (
+            '{"content":"{\\n'
+            '  \\"instructions\\": \\"line1\\\\nline2\\",\\n'
+            '  \\"source_code\\": \\"import os\\\\nprint(1)\\"\\n'
+            '}","file_path":"/exports/agent_export.json","mime_type":"application/json"}'
+        )
+
+        raw_text, tool_params = _parse_tool_call_params(raw_args)
+
+        self.assertEqual(raw_text, raw_args)
+        self.assertIn("\\n", tool_params["content"])
+        self.assertNotIn('line1\nline2', tool_params["content"])
+        self.assertIn('line1\\nline2', tool_params["content"])
+        self.assertIn('import os\\nprint(1)', tool_params["content"])
