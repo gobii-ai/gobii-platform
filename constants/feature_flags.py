@@ -68,6 +68,19 @@ START_TRIAL_CAPI_SEND_REVIEW = "start_trial_capi_send_review"
 # when the StartTrial CAPI trial-eligibility policy is enabled.
 START_TRIAL_CAPI_SEND_NO_TRIAL = "start_trial_capi_send_no_trial"
 
+# Controls whether AddPaymentInfo CAPI is skipped when UserTrialEligibility is not eligible.
+ADD_PAYMENT_INFO_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT = (
+    "add_payment_info_capi_trial_eligibility_enforcement"
+)
+
+# Controls whether AddPaymentInfo CAPI is still sent for stored "review" decisions
+# when the AddPaymentInfo CAPI trial-eligibility policy is enabled.
+ADD_PAYMENT_INFO_CAPI_SEND_REVIEW = "add_payment_info_capi_send_review"
+
+# Controls whether AddPaymentInfo CAPI is still sent for stored "no_trial" decisions
+# when the AddPaymentInfo CAPI trial-eligibility policy is enabled.
+ADD_PAYMENT_INFO_CAPI_SEND_NO_TRIAL = "add_payment_info_capi_send_no_trial"
+
 # Controls whether "review" trial eligibility decisions are treated as trial-allowed
 # while still blocking explicit "no_trial" decisions.
 USER_TRIAL_REVIEW_ALLOWS_TRIAL = "user_trial_review_allows_trial"

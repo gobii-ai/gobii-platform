@@ -101,6 +101,10 @@ from util.subscription_helper import (
     downgrade_owner_to_free_plan,
     sync_subscription_after_direct_update,
 )
+from util.trial_eligibility import (
+    is_add_payment_info_capi_decision_allowed,
+    is_add_payment_info_capi_trial_eligibility_enforcement_enabled,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -1021,6 +1025,14 @@ def _emit_add_payment_info_for_setup_intent(
     if not checkout_context:
         return
 
+    eligibility_snapshot = _add_payment_info_eligibility_snapshot(owner)
+    if eligibility_snapshot is not None and eligibility_snapshot.get("send_allowed") is False:
+        _track_add_payment_info_trial_eligibility_skip(
+            owner=owner,
+            snapshot=eligibility_snapshot,
+        )
+        return
+
     payment_method_types = payload.get("payment_method_types")
     payment_method_type = None
     if isinstance(payment_method_types, list) and payment_method_types:
@@ -1052,6 +1064,64 @@ def _emit_add_payment_info_for_setup_intent(
         properties=marketing_properties,
         request=None,
         context=marketing_context,
+    )
+
+
+def _add_payment_info_eligibility_snapshot(user: Any) -> dict[str, Any] | None:
+    if not is_add_payment_info_capi_trial_eligibility_enforcement_enabled():
+        return None
+
+    user_id = getattr(user, "id", None)
+    if not user_id:
+        return None
+
+    try:
+        from api.models import UserTrialEligibility
+
+        eligibility = UserTrialEligibility.objects.filter(user_id=user_id).only(
+            "auto_status",
+            "manual_action",
+            "reason_codes",
+        ).first()
+    except DatabaseError:
+        logger.warning(
+            "Failed to load stored trial eligibility while preparing AddPaymentInfo CAPI for user %s",
+            user_id,
+            exc_info=True,
+        )
+        return None
+
+    if eligibility is None:
+        return None
+
+    decision = eligibility.effective_status
+    return {
+        "decision": decision,
+        "manual_action": eligibility.manual_action,
+        "reason_codes": list(eligibility.reason_codes or []),
+        "send_allowed": is_add_payment_info_capi_decision_allowed(decision),
+        "decision_source": "stored_trial_eligibility_snapshot",
+    }
+
+
+def _track_add_payment_info_trial_eligibility_skip(
+    *,
+    owner: Any,
+    snapshot: Mapping[str, Any],
+) -> None:
+    owner_id = getattr(owner, "id", None)
+    Analytics.track(
+        user_id=owner_id,
+        event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
+        properties={
+            "event_name": "AddPaymentInfo",
+            "reason": "trial_eligibility_disallowed",
+            "decision_source": snapshot.get("decision_source"),
+            "trial_eligibility_decision": snapshot.get("decision"),
+            "trial_eligibility_manual_action": snapshot.get("manual_action"),
+            "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
+            "trial_eligibility_policy_send_allowed": False,
+        },
     )
 
 
