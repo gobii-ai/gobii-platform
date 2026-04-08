@@ -1,0 +1,13 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block object-tools %}
+  {{ block.super }}
+  {% if original and original.pk %}
+    <li>
+      <a href="{% url 'admin:api_globalagentskill_export_json' original.pk %}" class="button">
+        {% trans "Export JSON" %}
+      </a>
+    </li>
+  {% endif %}
+{% endblock %}

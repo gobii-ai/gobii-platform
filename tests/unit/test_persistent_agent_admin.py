@@ -1,7 +1,9 @@
+import json
 from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory
 from django.test import Client, TestCase, tag
@@ -64,6 +66,47 @@ class PersistentAgentAdminTests(TestCase):
         }
         defaults.update(overrides)
         return PersistentAgent.objects.create(**defaults)
+
+    def _create_global_skill_with_custom_tool(self, *, name="weather-check", is_active=True):
+        skill = GlobalAgentSkill.objects.create(
+            name=name,
+            description="Check weather",
+            tools=["weather"],
+            secrets=[
+                {
+                    "name": "Weather API key",
+                    "key": "WEATHER_API_KEY",
+                    "secret_type": "env_var",
+                    "description": "API key for weather lookups.",
+                }
+            ],
+            instructions="Check weather and summarize it.",
+            is_active=is_active,
+        )
+        tool = GlobalAgentSkillCustomTool(
+            global_skill=skill,
+            name="Weather Tool",
+            tool_name="weather_tool",
+            description="Reads weather data.",
+            parameters_schema={"type": "object", "properties": {}, "required": []},
+            timeout_seconds=120,
+        )
+        tool.source_file.save(
+            "weather_tool.py",
+            ContentFile(
+                (
+                    b"from _gobii_ctx import main\n\n"
+                    b"def run(params, ctx):\n"
+                    b"    return {'ok': True}\n\n"
+                    b"if __name__ == '__main__':\n"
+                    b"    main(run)\n"
+                )
+            ),
+            save=False,
+        )
+        tool.full_clean()
+        tool.save()
+        return skill
 
     def test_trigger_processing_queues_valid_ids(self):
         url = reverse("admin:api_persistentagent_trigger_processing")
@@ -153,6 +196,229 @@ class PersistentAgentAdminTests(TestCase):
         self.assertIn("secrets", admin_view.fields)
         inline_models = {inline.model for inline in admin_view.inlines}
         self.assertIn(GlobalAgentSkillCustomTool, inline_models)
+
+    def test_global_agent_skill_changelist_shows_import_json_link(self):
+        response = self.client.get(reverse("admin:api_globalagentskill_changelist"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Import Skill JSON")
+        self.assertContains(response, reverse("admin:api_globalagentskill_import_json"))
+
+    def test_global_agent_skill_change_form_shows_export_json_link(self):
+        skill = self._create_global_skill_with_custom_tool()
+
+        response = self.client.get(reverse("admin:api_globalagentskill_change", args=[skill.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Export JSON")
+        self.assertContains(response, reverse("admin:api_globalagentskill_export_json", args=[skill.pk]))
+
+    def test_global_agent_skill_export_json_returns_content_only_payload(self):
+        skill = self._create_global_skill_with_custom_tool(name="Check Weather Skill")
+
+        response = self.client.get(reverse("admin:api_globalagentskill_export_json", args=[skill.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertIn('attachment; filename="Check_Weather_Skill.json"', response["Content-Disposition"])
+
+        payload = json.loads(response.content)
+        self.assertEqual(payload["name"], "Check Weather Skill")
+        self.assertEqual(payload["description"], "Check weather")
+        self.assertEqual(payload["tools"], ["weather"])
+        self.assertEqual(
+            payload["secrets"],
+            [
+                {
+                    "name": "Weather API key",
+                    "key": "WEATHER_API_KEY",
+                    "secret_type": "env_var",
+                    "description": "API key for weather lookups.",
+                }
+            ],
+        )
+        self.assertEqual(payload["instructions"], "Check weather and summarize it.")
+        self.assertEqual(len(payload["custom_tools"]), 1)
+        self.assertEqual(payload["custom_tools"][0]["tool_name"], "custom_weather_tool")
+        self.assertIn("def run(params, ctx):", payload["custom_tools"][0]["source_code"])
+        self.assertNotIn("id", payload)
+        self.assertNotIn("created_at", payload)
+        self.assertNotIn("updated_at", payload)
+        self.assertNotIn("is_active", payload)
+
+    def test_global_agent_skill_import_json_creates_skill_and_bundled_tools(self):
+        payload = {
+            "name": "check-weather",
+            "description": "Check weather and summarize impact.",
+            "tools": ["weather"],
+            "secrets": [
+                {
+                    "name": "Weather API key",
+                    "key": "WEATHER_API_KEY",
+                    "secret_type": "env_var",
+                    "description": "API key for extended weather lookups.",
+                }
+            ],
+            "instructions": "Use this skill for weather tasks.",
+            "custom_tools": [
+                {
+                    "name": "Weather Briefing",
+                    "tool_name": "weather_briefing",
+                    "description": "Prepare a weather briefing.",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string"},
+                        },
+                        "required": ["location"],
+                    },
+                    "timeout_seconds": 120,
+                    "source_code": (
+                        "from _gobii_ctx import main\n\n"
+                        "def run(params, ctx):\n"
+                        "    return {'location': params['location']}\n\n"
+                        "if __name__ == '__main__':\n"
+                        "    main(run)\n"
+                    ),
+                }
+            ],
+        }
+
+        response = self.client.post(
+            reverse("admin:api_globalagentskill_import_json"),
+            data={
+                "json_file": SimpleUploadedFile(
+                    "skill.json",
+                    json.dumps(payload).encode("utf-8"),
+                    content_type="application/json",
+                )
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        skill = GlobalAgentSkill.objects.get(name="check-weather")
+        self.assertContains(response, "Imported global skill &#x27;check-weather&#x27;.")
+        self.assertEqual(skill.description, "Check weather and summarize impact.")
+        self.assertTrue(skill.is_active)
+        self.assertEqual(skill.tools, ["weather"])
+        self.assertEqual(len(skill.secrets), 1)
+        tool = skill.bundled_custom_tools.get()
+        self.assertEqual(tool.tool_name, "custom_weather_briefing")
+        self.assertTrue(tool.source_file.name.endswith("custom_weather_briefing.py"))
+
+    def test_global_agent_skill_import_json_updates_existing_skill_and_replaces_tools(self):
+        skill = self._create_global_skill_with_custom_tool(name="check-weather", is_active=False)
+        old_tool = skill.bundled_custom_tools.get()
+        payload = {
+            "name": "check-weather",
+            "description": "Updated weather workflow.",
+            "tools": ["weather", "read_file"],
+            "secrets": [],
+            "instructions": "Use the updated workflow.",
+            "custom_tools": [
+                {
+                    "name": "Weather Summary",
+                    "tool_name": "weather_summary",
+                    "description": "Summarize weather conditions.",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                    "timeout_seconds": 90,
+                    "source_code": (
+                        "from _gobii_ctx import main\n\n"
+                        "def run(params, ctx):\n"
+                        "    return {'summary': 'ok'}\n\n"
+                        "if __name__ == '__main__':\n"
+                        "    main(run)\n"
+                    ),
+                }
+            ],
+        }
+
+        response = self.client.post(
+            reverse("admin:api_globalagentskill_import_json"),
+            data={
+                "json_file": SimpleUploadedFile(
+                    "skill.json",
+                    json.dumps(payload).encode("utf-8"),
+                    content_type="application/json",
+                )
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        skill.refresh_from_db()
+        self.assertContains(response, "Updated global skill &#x27;check-weather&#x27; from JSON.")
+        self.assertEqual(skill.description, "Updated weather workflow.")
+        self.assertEqual(skill.tools, ["weather", "read_file"])
+        self.assertEqual(skill.instructions, "Use the updated workflow.")
+        self.assertFalse(skill.is_active)
+        self.assertFalse(GlobalAgentSkillCustomTool.objects.filter(pk=old_tool.pk).exists())
+        replacement_tool = skill.bundled_custom_tools.get()
+        self.assertEqual(replacement_tool.tool_name, "custom_weather_summary")
+
+    def test_global_agent_skill_import_json_rejects_malformed_json(self):
+        response = self.client.post(
+            reverse("admin:api_globalagentskill_import_json"),
+            data={
+                "json_file": SimpleUploadedFile(
+                    "skill.json",
+                    b"{not valid json",
+                    content_type="application/json",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Invalid JSON")
+        self.assertFalse(GlobalAgentSkill.objects.filter(name="check-weather").exists())
+
+    def test_global_agent_skill_import_json_is_transactional_on_invalid_tool_source(self):
+        skill = self._create_global_skill_with_custom_tool(name="check-weather", is_active=False)
+        payload = {
+            "name": "check-weather",
+            "description": "Broken update",
+            "tools": ["weather"],
+            "secrets": [],
+            "instructions": "Broken update instructions.",
+            "custom_tools": [
+                {
+                    "name": "Broken Tool",
+                    "tool_name": "broken_tool",
+                    "description": "This tool is invalid.",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                    "timeout_seconds": 90,
+                    "source_code": "not python at all(",
+                }
+            ],
+        }
+
+        response = self.client.post(
+            reverse("admin:api_globalagentskill_import_json"),
+            data={
+                "json_file": SimpleUploadedFile(
+                    "skill.json",
+                    json.dumps(payload).encode("utf-8"),
+                    content_type="application/json",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "syntax error")
+        skill.refresh_from_db()
+        self.assertEqual(skill.description, "Check weather")
+        self.assertFalse(skill.is_active)
+        self.assertEqual(skill.bundled_custom_tools.count(), 1)
+        self.assertEqual(skill.bundled_custom_tools.get().tool_name, "custom_weather_tool")
 
     def test_global_agent_skill_custom_tool_clean_keeps_uploaded_file_readable(self):
         skill = GlobalAgentSkill.objects.create(
