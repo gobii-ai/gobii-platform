@@ -31,7 +31,7 @@ from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
 from .global_skills import enable_global_skills, get_compatible_global_skills
 from .mcp_manager import get_mcp_manager
-from .skill_utils import normalize_skill_tool_ids
+from .skill_utils import format_skill_secret_requirement, normalize_skill_tool_ids
 from .tool_manager import (
     enable_tools,
     CREATE_IMAGE_TOOL_NAME,
@@ -294,12 +294,22 @@ def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
         if not isinstance(name, str) or not name:
             continue
         description = _strip_description(_tool_attr(skill, "description", "") or "")
-        normalized_tools = list(normalize_skill_tool_ids(_tool_attr(skill, "tools", []) or []))
+        if hasattr(skill, "get_effective_tool_ids"):
+            normalized_tools = list(skill.get_effective_tool_ids())
+        else:
+            normalized_tools = list(normalize_skill_tool_ids(_tool_attr(skill, "tools", []) or []))
         tool_text = ", ".join(normalized_tools) if normalized_tools else "(none)"
+        raw_secrets = _tool_attr(skill, "secrets", []) or []
+        secret_text = ", ".join(
+            format_skill_secret_requirement(secret)
+            for secret in raw_secrets
+            if isinstance(secret, dict)
+        ) or "(none)"
         line = f"- {name}"
         if description:
             line += f": {description}"
         line += f" | tools: {tool_text}"
+        line += f" | secrets: {secret_text}"
         lines.append(line)
     return lines
 
@@ -514,6 +524,7 @@ def _append_section_summary(
     evicted_label: Optional[str] = None,
     invalid_label: Optional[str] = None,
     conflicts_label: Optional[str] = None,
+    failed_label: Optional[str] = None,
 ) -> None:
     if not result or result.get("status") != "success":
         return
@@ -529,6 +540,8 @@ def _append_section_summary(
         summary.append(f"{invalid_label}: {', '.join(result['invalid'])}")
     if conflicts_label and result.get("conflicts"):
         summary.append(f"{conflicts_label}: {', '.join(result['conflicts'])}")
+    if failed_label and result.get("failed"):
+        summary.append(f"{failed_label}: {', '.join(result['failed'])}")
     if summary:
         message_lines.append("; ".join(summary))
 
@@ -841,6 +854,7 @@ def _search_with_llm(
                     enabled_label="Enabled skills",
                     already_enabled_label="Already enabled skills",
                     conflicts_label="Skill conflicts",
+                    failed_label="Failed skills",
                 )
                 _append_section_summary(
                     message_lines,
@@ -905,6 +919,10 @@ def _search_with_llm(
                         already_enabled=enabled_global_skills_result.get("already_enabled", []),
                         conflicts=enabled_global_skills_result.get("conflicts", []),
                     )
+                    if enabled_global_skills_result.get("failed"):
+                        response_payload["skills"]["failed"] = list(
+                            enabled_global_skills_result.get("failed", [])
+                        )
                 if enabled_result and enabled_result.get("status") == "success":
                     response_payload["tools"] = _section_payload(
                         enabled=enabled_result.get("enabled", []),

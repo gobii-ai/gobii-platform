@@ -32,6 +32,7 @@ from api.services.sandbox_compute import (
     SandboxComputeUnavailable,
     sandbox_compute_enabled_for_agent,
 )
+from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
@@ -269,7 +270,10 @@ def _normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
     display_name = raw_name.strip()
     if not display_name:
         return None
-    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", display_name.replace("-", "_").replace(" ", "_").lower())
+    normalized_input = display_name.lower()
+    if normalized_input.startswith(CUSTOM_TOOL_PREFIX):
+        normalized_input = normalized_input[len(CUSTOM_TOOL_PREFIX):]
+    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", normalized_input.replace("-", "_").replace(" ", "_"))
     slug = re.sub(r"_+", "_", slug).strip("_")
     if not slug:
         return None
@@ -278,6 +282,10 @@ def _normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
     if not slug:
         return None
     return display_name[:128], f"{CUSTOM_TOOL_PREFIX}{slug}"
+
+
+def normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
+    return _normalize_custom_tool_name(raw_name)
 
 
 def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
@@ -305,6 +313,12 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
     elif not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         return None
     return schema
+
+
+def normalize_custom_tool_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
+    return _normalize_parameters_schema(value)
+
+
 def _normalize_timeout_seconds(value: Any) -> Optional[int]:
     if value in (None, ""):
         return DEFAULT_CUSTOM_TOOL_TIMEOUT_SECONDS
@@ -317,6 +331,10 @@ def _normalize_timeout_seconds(value: Any) -> Optional[int]:
     if timeout <= 0 or timeout > MAX_CUSTOM_TOOL_TIMEOUT_SECONDS:
         return None
     return timeout
+
+
+def normalize_custom_tool_timeout_seconds(value: Any) -> Optional[int]:
+    return _normalize_timeout_seconds(value)
 
 
 def _get_filespace_file(agent: PersistentAgent, source_path: str) -> Optional[AgentFsNode]:
@@ -457,6 +475,10 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     if not has_main_guard:
         return "Custom tool source must end with `if __name__ == '__main__': main(run)`."
     return None
+
+
+def validate_custom_tool_source_code(source_text: str, source_path: str) -> Optional[str]:
+    return _validate_source_code(source_text, source_path)
 
 
 def _encode_env_json(value: Dict[str, Any]) -> str:
@@ -840,6 +862,11 @@ def execute_custom_tool(
         local_exec_source_path = _resolve_local_exec_source_path(agent, tool.source_path)
         if local_exec_source_path:
             env[_EXEC_SOURCE_PATH_ENV_KEY] = local_exec_source_path
+    else:
+        env[_EXEC_SOURCE_PATH_ENV_KEY] = posixpath.join(
+            sandbox_workspace_root_for_agent(agent.id),
+            tool.source_path.lstrip("/"),
+        )
 
     with _custom_tool_uv_runtime_dirs(service) as runtime_env, _custom_tool_sqlite_db(
         agent,

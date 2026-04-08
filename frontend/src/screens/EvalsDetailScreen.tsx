@@ -448,7 +448,14 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
               <div className="flex flex-col justify-between space-y-2">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Suite Strategy</p>
-                  <p className="text-lg font-bold text-slate-900 mt-1">{suite.suite_slug}</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="text-lg font-bold text-slate-900">{suite.display_name || suite.suite_slug}</p>
+                    {suite.launcher_type === 'global_skill' ? (
+                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
+                        Skill Eval
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
                 <p className="text-sm text-slate-500">
                   Strategy: <span className="font-medium text-slate-700">{suite.agent_strategy}</span>

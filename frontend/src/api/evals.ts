@@ -1,6 +1,7 @@
 import { jsonFetch, jsonRequest } from './http'
 
 export type EvalRunType = 'one_off' | 'official'
+export type EvalSuiteLauncherType = 'suite' | 'global_skill'
 
 export type EvalTask = {
   id: number
@@ -125,6 +126,16 @@ export type LLMRoutingProfileSnapshot = {
 export type EvalSuiteRun = {
   id: string
   suite_slug: string
+  launcher_type: EvalSuiteLauncherType
+  display_name: string
+  skill_eval?: {
+    global_skill_id: string
+    global_skill_name: string
+    task_prompt: string
+    rubric_version: string
+    required_secret_status: GlobalSkillEvalSecretStatus[]
+    effective_tool_ids: string[]
+  } | null
   status: string
   run_type: EvalRunType
   requested_runs?: number
@@ -156,8 +167,45 @@ export type EvalSuite = {
   scenario_slugs: string[]
 }
 
+export type GlobalSkillEvalSecretStatus = {
+  label: string
+  name: string
+  key: string
+  secret_type: 'credential' | 'env_var'
+  domain_pattern?: string | null
+  description: string
+  status: 'available' | 'missing'
+  matched_secret_id?: string | null
+}
+
+export type GlobalSkillEvalSkill = {
+  id: string
+  name: string
+  description: string
+  instructions: string
+  effective_tool_ids: string[]
+  required_secrets: Array<{
+    name: string
+    key: string
+    secret_type: 'credential' | 'env_var'
+    description: string
+    domain_pattern?: string
+  }>
+  required_secret_status: GlobalSkillEvalSecretStatus[]
+  missing_required_secrets: string[]
+  launchable: boolean
+}
+
 export function fetchSuites(signal?: AbortSignal): Promise<{ suites: EvalSuite[] }> {
   return jsonFetch('/console/api/evals/suites/', { method: 'GET', signal })
+}
+
+export function fetchGlobalSkillEvalLauncher(signal?: AbortSignal): Promise<{
+  global_skills: GlobalSkillEvalSkill[]
+  rubric_version: string
+  global_secrets_url: string
+}> {
+  return jsonFetch('/console/api/evals/global-skill-launcher/', { method: 'GET', signal })
 }
 
 export function fetchSuiteRuns(params: { status?: string; suite?: string; limit?: number; run_type?: EvalRunType } = {}): Promise<{
@@ -197,6 +245,25 @@ export function createSuiteRuns(payload: CreateSuiteRunPayload): Promise<{
   agent_strategy: string
 }> {
   return jsonRequest('/console/api/evals/suite-runs/create/', {
+    method: 'POST',
+    json: payload,
+    includeCsrf: true,
+  })
+}
+
+export type CreateGlobalSkillEvalRunPayload = {
+  global_skill_id: string
+  task_prompt: string
+  n_runs?: number
+  llm_routing_profile_id?: string | null
+}
+
+export function createGlobalSkillEvalRun(payload: CreateGlobalSkillEvalRunPayload): Promise<{
+  suite_runs: EvalSuiteRun[]
+  runs: string[]
+  agent_strategy: string
+}> {
+  return jsonRequest('/console/api/evals/global-skill-runs/create/', {
     method: 'POST',
     json: payload,
     includeCsrf: true,

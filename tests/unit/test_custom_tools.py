@@ -24,6 +24,7 @@ from api.agent.tools.custom_tools import (
     execute_custom_tool,
     get_create_custom_tool_tool,
     get_custom_tools_prompt_summary,
+    normalize_custom_tool_name,
 )
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
@@ -35,6 +36,7 @@ from api.agent.tools.tool_manager import (
     get_available_tool_ids,
     get_enabled_tool_definitions,
 )
+from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 from api.models import (
     AgentFsNode,
     BrowserUseAgent,
@@ -128,6 +130,11 @@ class CustomToolsTests(TestCase):
                 records.append(f"{relative_path},sha256={digest},{len(payload)}")
             records.append(f"{dist_info}/RECORD,,")
             archive.writestr(f"{dist_info}/RECORD", "\n".join(records) + "\n")
+
+    def test_normalize_custom_tool_name_is_idempotent_for_custom_prefix(self):
+        normalized = normalize_custom_tool_name("custom_weather_tool")
+
+        self.assertEqual(normalized, ("custom_weather_tool", "custom_weather_tool"))
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
@@ -483,6 +490,10 @@ class CustomToolsTests(TestCase):
         self.assertEqual(call.kwargs["timeout"], 123)
         self.assertIn("SANDBOX_CUSTOM_TOOL_PARAMS_B64", call.kwargs["env"])
         self.assertEqual(call.kwargs["env"]["SANDBOX_CUSTOM_TOOL_SOURCE_PATH"], "/tools/increment.py")
+        self.assertEqual(
+            call.kwargs["env"]["SANDBOX_CUSTOM_TOOL_EXEC_SOURCE_PATH"],
+            f"{sandbox_workspace_root_for_agent(self.agent.id)}/tools/increment.py",
+        )
         self.assertEqual(call.kwargs["sqlite_env_key"], "SANDBOX_CUSTOM_TOOL_SQLITE_DB_PATH")
         self.assertTrue(call.kwargs["local_sqlite_db_path"])
         self.assertIn('RUNTIME_CACHE_ROOT="${SANDBOX_RUNTIME_CACHE_ROOT:-/tmp}"', call.args[1])

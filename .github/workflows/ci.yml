@@ -143,6 +143,8 @@ jobs:
             tag: batch_secrets
           - batch: global_secrets
             tag: global_secrets_batch
+          - batch: global_skill_evals
+            tag: batch_global_skill_evals
           - batch: proxy_selection
             tag: batch_proxy_selection
           - batch: compaction

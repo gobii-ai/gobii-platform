@@ -12,6 +12,7 @@ import zipfile
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from uuid import UUID
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -59,6 +60,7 @@ from api.models import (
     FileHandlerLLMTier,
     FileHandlerModelEndpoint,
     FileHandlerTierEndpoint,
+    GlobalAgentSkill,
     ImageGenerationLLMTier,
     ImageGenerationModelEndpoint,
     ImageGenerationTierEndpoint,
@@ -191,6 +193,14 @@ from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task
 from api.evals.runner import _update_suite_state
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update
+from api.evals.global_skill_evals import (
+    GLOBAL_SKILL_EVAL_RUBRIC_VERSION,
+    GLOBAL_SKILL_EVAL_SCENARIO_SLUG,
+    GLOBAL_SKILL_EVAL_SUITE_SLUG,
+    build_global_skill_eval_secret_status,
+    build_skill_eval_summary,
+    serialize_global_skill_eval_skill,
+)
 from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
@@ -2049,6 +2059,37 @@ def _serialize_eval_run(run: EvalRun, *, include_tasks: bool = False) -> dict[st
     return payload
 
 
+def _resolve_console_secret_owner(request: HttpRequest):
+    context = build_console_context(request)
+    if context.current_context.type == "organization":
+        membership = context.current_membership
+        if membership is None or not context.can_manage_org_agents:
+            raise PermissionDenied("You do not have permission to manage organization secrets.")
+        return None, membership.org
+    return request.user, None
+
+
+def _create_eval_ephemeral_agent(
+    request: HttpRequest,
+    *,
+    label_suffix: str,
+    owner_org=None,
+) -> PersistentAgent:
+    unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
+    browser_agent = BrowserUseAgent.objects.create(
+        name=f"Eval Browser {unique_id}",
+        user=request.user,
+    )
+    return PersistentAgent.objects.create(
+        name=f"Eval Agent {unique_id}",
+        user=request.user,
+        organization=owner_org,
+        browser_use_agent=browser_agent,
+        execution_environment="eval",
+        charter="You are a test agent.",
+    )
+
+
 def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, include_tasks: bool = False) -> dict[str, Any]:
     runs = list(suite.runs.all()) if include_runs else []
     runs_payload = [_serialize_eval_run(run, include_tasks=include_tasks) for run in runs] if include_runs else []
@@ -2097,9 +2138,19 @@ def _serialize_suite_run(suite: EvalSuiteRun, *, include_runs: bool = False, inc
                 "display_name": suite.llm_routing_profile.display_name if suite.llm_routing_profile else None,
             }
 
+    skill_eval = None
+    display_name = suite.suite_slug
+    if suite.launcher_type == EvalSuiteRun.LauncherType.GLOBAL_SKILL:
+        skill_eval = build_skill_eval_summary(suite.launch_config)
+        if skill_eval and skill_eval.get("global_skill_name"):
+            display_name = str(skill_eval["global_skill_name"])
+
     return {
         "id": str(suite.id),
         "suite_slug": suite.suite_slug,
+        "launcher_type": suite.launcher_type,
+        "display_name": display_name,
+        "skill_eval": skill_eval,
         "status": suite.status,
         "run_type": suite.run_type,
         "requested_runs": suite.requested_runs,
@@ -7006,6 +7057,173 @@ class EvalSuiteListAPIView(SystemAdminAPIView):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class GlobalSkillEvalLauncherAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        owner_user, owner_org = _resolve_console_secret_owner(request)
+        global_skills = [
+            serialize_global_skill_eval_skill(
+                skill,
+                owner_user=owner_user,
+                owner_org=owner_org,
+            )
+            for skill in GlobalAgentSkill.objects.filter(is_active=True)
+            .prefetch_related("bundled_custom_tools")
+            .order_by("name")
+        ]
+        return JsonResponse(
+            {
+                "global_skills": global_skills,
+                "rubric_version": GLOBAL_SKILL_EVAL_RUBRIC_VERSION,
+                "global_secrets_url": reverse("console-secrets"),
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class GlobalSkillEvalRunCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        MAX_REQUESTED_RUNS = 10
+
+        try:
+            body = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        global_skill_id = body.get("global_skill_id")
+        if not global_skill_id:
+            return HttpResponseBadRequest("global_skill_id is required")
+        try:
+            normalized_global_skill_id = UUID(str(global_skill_id))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("global_skill_id must be a valid UUID")
+
+        task_prompt = str(body.get("task_prompt") or "").strip()
+        if not task_prompt:
+            return HttpResponseBadRequest("task_prompt is required")
+
+        n_runs_raw = body.get("n_runs") if "n_runs" in body else body.get("runs")
+        if n_runs_raw is None:
+            requested_runs = 3
+        else:
+            try:
+                requested_runs = int(n_runs_raw)
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest(f"n_runs must be an integer between 1 and {MAX_REQUESTED_RUNS}")
+        if requested_runs < 1 or requested_runs > MAX_REQUESTED_RUNS:
+            return HttpResponseBadRequest(f"n_runs must be between 1 and {MAX_REQUESTED_RUNS}")
+
+        skill = get_object_or_404(
+            GlobalAgentSkill.objects.filter(is_active=True).prefetch_related("bundled_custom_tools"),
+            pk=normalized_global_skill_id,
+        )
+
+        owner_user, owner_org = _resolve_console_secret_owner(request)
+        secret_status = build_global_skill_eval_secret_status(
+            skill,
+            owner_user=owner_user,
+            owner_org=owner_org,
+        )
+        if not secret_status["launchable"]:
+            return JsonResponse(
+                {
+                    "error": "Missing required global secrets for this skill eval.",
+                    "missing_required_secrets": secret_status["missing_required_secrets"],
+                },
+                status=400,
+            )
+
+        from api.models import LLMRoutingProfile
+        from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
+
+        source_routing_profile = None
+        llm_routing_profile_id = body.get("llm_routing_profile_id")
+        if llm_routing_profile_id:
+            try:
+                normalized_routing_profile_id = UUID(str(llm_routing_profile_id))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("LLM routing profile not found")
+            try:
+                source_routing_profile = LLMRoutingProfile.objects.get(
+                    id=normalized_routing_profile_id,
+                    is_eval_snapshot=False,
+                )
+            except LLMRoutingProfile.DoesNotExist:
+                return HttpResponseBadRequest("LLM routing profile not found")
+
+        suite_run_id = uuid.uuid4()
+        profile_snapshot = None
+        if source_routing_profile:
+            profile_snapshot = create_eval_profile_snapshot(
+                source_routing_profile,
+                str(suite_run_id),
+            )
+
+        launch_config = {
+            "global_skill_id": str(skill.id),
+            "global_skill_name": skill.name,
+            "task_prompt": task_prompt,
+            "rubric_version": GLOBAL_SKILL_EVAL_RUBRIC_VERSION,
+            "required_secret_status": secret_status["required_secret_status"],
+            "effective_tool_ids": list(skill.get_effective_tool_ids()),
+        }
+
+        suite_run = EvalSuiteRun.objects.create(
+            id=suite_run_id,
+            suite_slug=GLOBAL_SKILL_EVAL_SUITE_SLUG,
+            launcher_type=EvalSuiteRun.LauncherType.GLOBAL_SKILL,
+            launch_config=launch_config,
+            initiated_by=request.user,
+            status=EvalSuiteRun.Status.RUNNING,
+            run_type=EvalSuiteRun.RunType.ONE_OFF,
+            requested_runs=requested_runs,
+            agent_strategy=EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO,
+            started_at=timezone.now(),
+            llm_routing_profile=profile_snapshot,
+        )
+
+        created_runs: list[EvalRun] = []
+        for iteration in range(requested_runs):
+            suffix = f"{skill.name[:8]}-{iteration + 1}" if requested_runs > 1 else skill.name[:8]
+            run_agent = _create_eval_ephemeral_agent(
+                request,
+                label_suffix=suffix,
+                owner_org=owner_org,
+            )
+            run = EvalRun.objects.create(
+                suite_run=suite_run,
+                scenario_slug=GLOBAL_SKILL_EVAL_SCENARIO_SLUG,
+                scenario_version="1.0.0",
+                agent=run_agent,
+                initiated_by=request.user,
+                status=EvalRun.Status.PENDING,
+                run_type=EvalSuiteRun.RunType.ONE_OFF,
+            )
+            run_eval_task.delay(str(run.id))
+            created_runs.append(run)
+
+        _update_suite_state(suite_run.id)
+        suite_run.refresh_from_db()
+
+        try:
+            gc_eval_runs_task.delay()
+        except Exception:
+            logger.debug("Failed to enqueue eval GC task", exc_info=True)
+
+        return JsonResponse(
+            {
+                "suite_runs": [_serialize_suite_run(suite_run, include_runs=True, include_tasks=False)],
+                "agent_strategy": EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO,
+                "runs": [str(run.id) for run in created_runs],
+            },
+            status=201,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
     http_method_names = ["post"]
 
@@ -7069,16 +7287,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
             except PersistentAgent.DoesNotExist:
                 return HttpResponseBadRequest("Agent not found")
 
-        def create_ephemeral_agent(label_suffix: str) -> PersistentAgent:
-            unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
-            browser_agent = BrowserUseAgent.objects.create(name=f"Eval Browser {unique_id}", user=request.user)
-            return PersistentAgent.objects.create(
-                name=f"Eval Agent {unique_id}",
-                user=request.user,
-                browser_use_agent=browser_agent,
-                execution_environment="eval",
-                charter="You are a test agent.",
-            )
+        _owner_user, owner_org = _resolve_console_secret_owner(request)
 
         created_suite_runs: list[EvalSuiteRun] = []
         created_runs: list[EvalRun] = []
@@ -7124,7 +7333,11 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                     run_agent = shared_agent
                     if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
                         suffix = f"{scenario.slug[:8]}-{iteration + 1}" if requested_runs > 1 else scenario.slug[:8]
-                        run_agent = create_ephemeral_agent(label_suffix=suffix)
+                        run_agent = _create_eval_ephemeral_agent(
+                            request,
+                            label_suffix=suffix,
+                            owner_org=owner_org,
+                        )
 
                     run = EvalRun.objects.create(
                         suite_run=suite_run,

@@ -12,8 +12,9 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from django.db import transaction
+from django.db.models import Q
 
-from api.models import PersistentAgentSkill
+from api.models import GlobalSecret, PersistentAgentSecret, PersistentAgentSkill
 from api.services.skill_analytics import (
     SKILL_ORIGIN_FORKED_FROM_GLOBAL,
     infer_agent_skill_origin,
@@ -21,7 +22,11 @@ from api.services.skill_analytics import (
 )
 from util.analytics import AnalyticsEvent
 
-from .skill_utils import normalize_skill_tool_ids
+from .skill_utils import (
+    format_skill_secret_requirement,
+    normalize_skill_secret_requirements,
+    normalize_skill_tool_ids,
+)
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from .sqlite_state import AGENT_SKILLS_TABLE, get_sqlite_db_path
 
@@ -34,6 +39,7 @@ class AgentSkillSnapshotRow:
     name: str
     description: str
     tools: tuple[str, ...]
+    secrets: tuple[dict[str, str], ...]
     instructions: str
 
 
@@ -57,6 +63,7 @@ class _SQLiteSkillRow:
     name: str
     description: str
     tools: tuple[str, ...]
+    secrets: tuple[dict[str, str], ...]
     instructions: str
 
 
@@ -79,6 +86,7 @@ def seed_sqlite_skills(agent) -> Optional[AgentSkillsSnapshot]:
                 description TEXT,
                 version INTEGER NOT NULL DEFAULT 1,
                 tools TEXT NOT NULL DEFAULT '[]',
+                secrets TEXT NOT NULL DEFAULT '[]',
                 instructions TEXT NOT NULL,
                 created_at TEXT,
                 updated_at TEXT
@@ -97,6 +105,7 @@ def seed_sqlite_skills(agent) -> Optional[AgentSkillsSnapshot]:
             description = (skill.description or "").strip()
             version = int(skill.version or 0)
             tools = normalize_skill_tool_ids(skill.tools)
+            secrets = normalize_skill_secret_requirements(skill.secrets)
             instructions = (skill.instructions or "").strip()
             rows.append(
                 (
@@ -105,6 +114,7 @@ def seed_sqlite_skills(agent) -> Optional[AgentSkillsSnapshot]:
                     description,
                     version,
                     json.dumps(list(tools)),
+                    json.dumps(list(secrets)),
                     instructions,
                     _format_timestamp(skill.created_at),
                     _format_timestamp(skill.updated_at),
@@ -115,6 +125,7 @@ def seed_sqlite_skills(agent) -> Optional[AgentSkillsSnapshot]:
                 name=name,
                 description=description,
                 tools=tools,
+                secrets=secrets,
                 instructions=instructions,
             )
 
@@ -122,8 +133,8 @@ def seed_sqlite_skills(agent) -> Optional[AgentSkillsSnapshot]:
             conn.executemany(
                 f"""
                 INSERT INTO "{AGENT_SKILLS_TABLE}"
-                    (id, name, description, version, tools, instructions, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    (id, name, description, version, tools, secrets, instructions, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 rows,
             )
@@ -247,6 +258,7 @@ def apply_sqlite_skill_updates(agent, baseline: Optional[AgentSkillsSnapshot]) -
                 description=row.description,
                 version=next_version,
                 tools=list(row.tools),
+                secrets=list(row.secrets),
                 instructions=row.instructions,
             )
             created_versions.append(f"{name}@{next_version}")
@@ -321,6 +333,97 @@ def get_required_skill_tool_ids(agent) -> set[str]:
     return required
 
 
+def _get_global_secrets_for_agent(agent):
+    if agent.organization_id:
+        owner_filter = Q(organization=agent.organization)
+    else:
+        owner_filter = Q(user=agent.user, organization__isnull=True)
+    return GlobalSecret.objects.filter(owner_filter)
+
+
+def _get_skill_secret_status_sets(agent) -> dict[str, set[tuple[str, str]] | set[str]]:
+    available_env_keys = set(
+        PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+        ).values_list("key", flat=True)
+    )
+    pending_env_keys = set(
+        PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=True,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+        ).values_list("key", flat=True)
+    )
+    available_credentials = set(
+        PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=False,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+        ).values_list("key", "domain_pattern")
+    )
+    pending_credentials = set(
+        PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=True,
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+        ).values_list("key", "domain_pattern")
+    )
+
+    global_qs = _get_global_secrets_for_agent(agent)
+    available_env_keys.update(
+        global_qs.filter(secret_type=GlobalSecret.SecretType.ENV_VAR).values_list("key", flat=True)
+    )
+    available_credentials.update(
+        global_qs.filter(secret_type=GlobalSecret.SecretType.CREDENTIAL).values_list("key", "domain_pattern")
+    )
+
+    return {
+        "available_env_keys": available_env_keys,
+        "pending_env_keys": pending_env_keys,
+        "available_credentials": available_credentials,
+        "pending_credentials": pending_credentials,
+    }
+
+
+def _classify_skill_secret_requirements(
+    normalized_secrets: tuple[dict[str, str], ...],
+    status_sets: dict[str, set[tuple[str, str]] | set[str]],
+) -> tuple[list[str], list[str], list[str]]:
+    required_labels: list[str] = []
+    pending_labels: list[str] = []
+    missing_labels: list[str] = []
+
+    available_env_keys = status_sets["available_env_keys"]
+    pending_env_keys = status_sets["pending_env_keys"]
+    available_credentials = status_sets["available_credentials"]
+    pending_credentials = status_sets["pending_credentials"]
+
+    for secret in normalized_secrets:
+        label = format_skill_secret_requirement(secret)
+        required_labels.append(label)
+        if secret["secret_type"] == PersistentAgentSecret.SecretType.ENV_VAR:
+            key = secret["key"]
+            if key in available_env_keys:
+                continue
+            if key in pending_env_keys:
+                pending_labels.append(label)
+                continue
+            missing_labels.append(label)
+            continue
+
+        credential_key = (secret["key"], secret["domain_pattern"])
+        if credential_key in available_credentials:
+            continue
+        if credential_key in pending_credentials:
+            pending_labels.append(label)
+            continue
+        missing_labels.append(label)
+
+    return required_labels, pending_labels, missing_labels
+
+
 def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
     """Format top-N recently updated skills for a high-priority prompt section."""
     if limit <= 0:
@@ -330,24 +433,50 @@ def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
     if not latest:
         return ""
 
+    secret_status_sets = _get_skill_secret_status_sets(agent)
     sections: list[str] = []
     for skill in latest:
         tools = normalize_skill_tool_ids(skill.tools)
         tool_text = ", ".join(tools) if tools else "(none)"
         description = (skill.description or "").strip() or "(no description)"
+        try:
+            normalized_secrets = normalize_skill_secret_requirements(skill.secrets)
+            required_secrets, pending_secrets, missing_secrets = _classify_skill_secret_requirements(
+                normalized_secrets,
+                secret_status_sets,
+            )
+            required_secret_text = ", ".join(required_secrets) if required_secrets else "(none)"
+        except ValueError as exc:
+            required_secret_text = f"(invalid: {exc})"
+            pending_secrets = []
+            missing_secrets = []
         instructions = (skill.instructions or "").strip()
         if not instructions:
             instructions = "(no instructions)"
-        sections.append(
-            "\n".join(
-                [
-                    f"Skill: {skill.name} (v{skill.version})",
-                    f"Description: {description}",
-                    f"Tools: {tool_text}",
-                    "Instructions:",
-                    instructions,
-                ]
+        lines = [
+            f"Skill: {skill.name} (v{skill.version})",
+            f"Description: {description}",
+            f"Tools: {tool_text}",
+            f"Required secrets: {required_secret_text}",
+        ]
+        if pending_secrets:
+            lines.append(f"Pending secrets: {', '.join(pending_secrets)}")
+            lines.append(
+                "Pending secrets were already requested. Follow up with the user instead of requesting them again."
             )
+        if missing_secrets:
+            lines.append(f"Missing secrets: {', '.join(missing_secrets)}")
+            lines.append(
+                "If you need these to use the skill, request them with `secure_credentials_request` using the listed type/key details."
+            )
+        lines.extend(
+            [
+                "Instructions:",
+                instructions,
+            ]
+        )
+        sections.append(
+            "\n".join(lines)
         )
 
     return "\n\n".join(sections)
@@ -369,7 +498,7 @@ def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str], s
         cur = conn.cursor()
         cur.execute(
             f"""
-            SELECT id, name, description, tools, instructions
+            SELECT id, name, description, tools, secrets, instructions
             FROM "{AGENT_SKILLS_TABLE}"
             ORDER BY rowid ASC;
             """
@@ -379,7 +508,8 @@ def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str], s
             name = str(raw_row[1] or "").strip()
             description = str(raw_row[2] or "").strip()
             tools, tools_error = _parse_tools_json(raw_row[3])
-            instructions = str(raw_row[4] or "").strip()
+            secrets, secrets_error = _parse_secrets_json(raw_row[4])
+            instructions = str(raw_row[5] or "").strip()
 
             if not skill_id:
                 errors.append("Skill row ignored: missing id.")
@@ -393,6 +523,11 @@ def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str], s
                 invalid_skill_ids.add(skill_id)
                 invalid_skill_names.add(name)
                 continue
+            if secrets_error:
+                errors.append(f"Skill '{name}' ignored: {secrets_error}")
+                invalid_skill_ids.add(skill_id)
+                invalid_skill_names.add(name)
+                continue
 
             rows.append(
                 _SQLiteSkillRow(
@@ -400,6 +535,7 @@ def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str], s
                     name=name,
                     description=description,
                     tools=tuple(tools),
+                    secrets=tuple(secrets),
                     instructions=instructions,
                 )
             )
@@ -443,6 +579,7 @@ def _rows_match_snapshot(row: _SQLiteSkillRow, baseline: AgentSkillSnapshotRow) 
         row.name == baseline.name
         and row.description == baseline.description
         and row.tools == baseline.tools
+        and row.secrets == baseline.secrets
         and row.instructions == baseline.instructions
     )
 
@@ -451,6 +588,7 @@ def _is_same_skill_content(skill: PersistentAgentSkill, row: _SQLiteSkillRow) ->
     return (
         (skill.description or "").strip() == row.description
         and normalize_skill_tool_ids(skill.tools) == row.tools
+        and normalize_skill_secret_requirements(skill.secrets) == row.secrets
         and (skill.instructions or "").strip() == row.instructions
     )
 
@@ -485,6 +623,27 @@ def _parse_tools_json(raw_value) -> tuple[list[str], Optional[str]]:
         seen.add(tool_id)
         normalized.append(tool_id)
     return normalized, None
+
+
+def _parse_secrets_json(raw_value) -> tuple[list[dict[str, str]], Optional[str]]:
+    if raw_value is None:
+        return [], None
+
+    parsed = raw_value
+    if isinstance(raw_value, str):
+        text = raw_value.strip()
+        if not text:
+            return [], None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return [], "secrets must be a JSON array of secret requirement objects"
+
+    try:
+        normalized = normalize_skill_secret_requirements(parsed)
+    except ValueError as exc:
+        return [], str(exc)
+    return list(normalized), None
 
 
 def _format_timestamp(dt) -> Optional[str]:
