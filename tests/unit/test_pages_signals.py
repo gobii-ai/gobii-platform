@@ -26,8 +26,13 @@ from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
 from api.services.trial_abuse import SIGNAL_SOURCE_SIGNUP
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY,
 )
 from pages.signals import (
     handle_checkout_session_event,
@@ -654,8 +659,13 @@ class CheckoutSessionSignalTests(TestCase):
         mock_customer_modify.assert_called_once_with(
             "cus_trial_complete",
             metadata={
+                STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY: "",
             },
             api_key="sk_test",
         )
@@ -3083,6 +3093,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "pages.signals._resolve_setup_intent_owner",
                 return_value=(self.user, "user", None, "cus_setup_user"),
             ), \
+            patch("pages.signals._emit_add_payment_info_for_setup_intent"), \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
             patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
             patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
@@ -3117,12 +3128,111 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "pages.signals._resolve_setup_intent_owner",
                 return_value=(self.user, "user", None, "cus_setup_user"),
             ), \
+            patch("pages.signals._emit_add_payment_info_for_setup_intent"), \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
             patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
             patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
 
             handle_setup_intent_succeeded(event)
 
+        mock_modify.assert_not_called()
+        mock_sync.assert_not_called()
+
+    def test_setup_intent_succeeded_emits_add_payment_info_from_active_checkout_context(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_add_payment",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_current",
+            stripe_data={"default_payment_method": "pm_setup_current"},
+        )
+        customer_payload = {
+            "metadata": {
+                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "startup-sub-add-payment",
+                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "trial",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY: PlanNames.STARTUP,
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY: "Pro",
+                STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY: "120.0",
+                STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY: "USD",
+                STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY: "https://www.gobii.ai/pricing",
+            }
+        }
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_setup_user"),
+            ), \
+            patch("pages.signals.stripe.Customer.retrieve", return_value=customer_payload), \
+            patch(
+                "pages.signals._build_marketing_context_from_user",
+                return_value={"consent": True, "click_ids": {"fbp": "fb.1.1700000000000.123456789"}},
+            ), \
+            patch("pages.signals.get_active_subscription", return_value=subscription), \
+            patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
+            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_setup_intent_succeeded(event)
+
+        mock_capi.assert_called_once_with(
+            user=self.user,
+            event_name="AddPaymentInfo",
+            properties={
+                "event_id": "startup-sub-add-payment",
+                "plan": PlanNames.STARTUP,
+                "plan_label": "Pro",
+                "flow_type": "trial",
+                "value": 120.0,
+                "currency": "USD",
+                "payment_method_type": "card",
+            },
+            request=None,
+            context={
+                "consent": True,
+                "click_ids": {"fbp": "fb.1.1700000000000.123456789"},
+                "page": {"url": "https://www.gobii.ai/pricing"},
+            },
+        )
+        mock_modify.assert_not_called()
+        mock_sync.assert_not_called()
+
+    def test_setup_intent_succeeded_skips_add_payment_info_without_active_checkout_context(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_missing_context",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_current",
+            stripe_data={"default_payment_method": "pm_setup_current"},
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_setup_user"),
+            ), \
+            patch("pages.signals.stripe.Customer.retrieve", return_value={"metadata": {}}), \
+            patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
+            patch("pages.signals.get_active_subscription", return_value=subscription), \
+            patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
+            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_setup_intent_succeeded(event)
+
+        mock_capi.assert_not_called()
         mock_modify.assert_not_called()
         mock_sync.assert_not_called()
 

@@ -23,8 +23,13 @@ from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from config.redis_client import get_redis_client
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY,
 )
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
@@ -1779,6 +1784,25 @@ class CheckoutRedirectTests(TestCase):
             customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
             kwargs["metadata"]["gobii_event_id"],
         )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY],
+            PlanNames.STARTUP,
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY],
+            "Pro",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY],
+            "120.0",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY],
+            "USD",
+        )
+        self.assertTrue(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY]
+        )
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
@@ -2003,6 +2027,25 @@ class CheckoutRedirectTests(TestCase):
             customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
             kwargs["metadata"]["gobii_event_id"],
         )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY],
+            PlanNames.SCALE,
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY],
+            "Scale",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY],
+            "250.0",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY],
+            "USD",
+        )
+        self.assertTrue(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY]
+        )
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
@@ -2117,8 +2160,13 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(
             second_modify_kwargs["metadata"],
             {
+                STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY: "",
             },
         )
         mock_customer_retrieve.assert_called_once()

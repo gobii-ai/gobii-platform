@@ -43,7 +43,13 @@ import stripe
 
 from billing.addons import AddonEntitlementService
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY,
     clear_checkout_customer_metadata,
 )
 from billing.lifecycle_classifier import (
@@ -951,6 +957,102 @@ def _clear_customer_checkout_context_if_matches(*, customer_id: str | None, expe
         api_key=stripe.api_key,
     )
     return True
+
+
+def _get_active_customer_checkout_context(*, customer_id: str | None, api_key: str) -> dict[str, Any] | None:
+    """Return the active checkout context persisted on the Stripe customer, if any."""
+    if not customer_id:
+        return None
+
+    try:
+        customer_payload = stripe.Customer.retrieve(customer_id, api_key=api_key)
+    except stripe.error.StripeError:
+        logger.warning(
+            "Failed to retrieve customer %s for active checkout marketing context",
+            customer_id,
+            exc_info=True,
+        )
+        return None
+
+    customer_metadata = _coerce_metadata_dict(_get_stripe_data_value(customer_payload, "metadata"))
+    event_id = str(customer_metadata.get(STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY) or "").strip()
+    if not event_id:
+        return None
+
+    checkout_context: dict[str, Any] = {"event_id": event_id}
+    optional_string_mappings = (
+        (STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY, "flow_type"),
+        (STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY, "plan"),
+        (STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY, "plan_label"),
+        (STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY, "currency"),
+        (STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY, "checkout_source_url"),
+    )
+    for metadata_key, context_key in optional_string_mappings:
+        value = str(customer_metadata.get(metadata_key) or "").strip()
+        if value:
+            checkout_context[context_key] = value
+
+    raw_value = str(customer_metadata.get(STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY) or "").strip()
+    if raw_value:
+        try:
+            checkout_context["value"] = float(Decimal(raw_value))
+        except (InvalidOperation, TypeError, ValueError):
+            logger.warning(
+                "Failed to parse active checkout value %r for customer %s",
+                raw_value,
+                customer_id,
+            )
+
+    return checkout_context
+
+
+def _emit_add_payment_info_for_setup_intent(
+    *,
+    owner,
+    owner_type: str,
+    customer_id: str | None,
+    payload: Mapping[str, Any],
+    stripe_key: str,
+) -> None:
+    if owner_type != "user" or not owner or not customer_id:
+        return
+
+    checkout_context = _get_active_customer_checkout_context(customer_id=customer_id, api_key=stripe_key)
+    if not checkout_context:
+        return
+
+    payment_method_types = payload.get("payment_method_types")
+    payment_method_type = None
+    if isinstance(payment_method_types, list) and payment_method_types:
+        payment_method_type = str(payment_method_types[0]).strip() or None
+
+    marketing_properties = {
+        "event_id": checkout_context["event_id"],
+        "plan": checkout_context.get("plan"),
+        "plan_label": checkout_context.get("plan_label"),
+        "flow_type": checkout_context.get("flow_type"),
+        "value": checkout_context.get("value"),
+        "currency": checkout_context.get("currency"),
+        "payment_method_type": payment_method_type,
+    }
+    marketing_properties = {
+        key: value
+        for key, value in marketing_properties.items()
+        if value not in (None, "")
+    }
+
+    marketing_context = _build_marketing_context_from_user(owner)
+    checkout_source_url = checkout_context.get("checkout_source_url")
+    if checkout_source_url:
+        marketing_context["page"] = {"url": checkout_source_url}
+
+    capi(
+        user=owner,
+        event_name="AddPaymentInfo",
+        properties=marketing_properties,
+        request=None,
+        context=marketing_context,
+    )
 
 
 def _extract_stripe_object_id(candidate: Any) -> str | None:
@@ -2469,6 +2571,21 @@ def handle_setup_intent_succeeded(event, **kwargs):
         owner_id = getattr(owner, "id", None)
         if owner_id is not None:
             span.set_attribute("setup_intent.owner.id", str(owner_id))
+
+        try:
+            _emit_add_payment_info_for_setup_intent(
+                owner=owner,
+                owner_type=owner_type,
+                customer_id=customer_id,
+                payload=payload,
+                stripe_key=stripe_key,
+            )
+        except Exception:
+            span.add_event("add_payment_info_emit_failed")
+            logger.exception(
+                "Failed to enqueue AddPaymentInfo for setup intent %s",
+                payload.get("id"),
+            )
 
         subscription = get_active_subscription(owner, sync_with_stripe=True)
         if subscription is None or not getattr(subscription, "id", None):
