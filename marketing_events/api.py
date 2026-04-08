@@ -6,6 +6,8 @@ from django.conf import settings
 from django.db import DatabaseError
 
 from util.trial_eligibility import (
+    is_complete_registration_capi_decision_allowed,
+    is_complete_registration_capi_trial_eligibility_enforcement_enabled,
     is_start_trial_capi_decision_allowed,
     is_start_trial_capi_trial_eligibility_enforcement_enabled,
 )
@@ -70,6 +72,46 @@ def _start_trial_eligibility_snapshot(user, *, request=None) -> dict[str, object
         "manual_action": eligibility.manual_action,
         "reason_codes": list(eligibility.reason_codes or []),
         "send_allowed": is_start_trial_capi_decision_allowed(decision, request=request),
+        "decision_source": "stored_trial_eligibility_snapshot",
+    }
+
+
+def _complete_registration_eligibility_snapshot(user, *, request=None) -> dict[str, object] | None:
+    if not is_complete_registration_capi_trial_eligibility_enforcement_enabled(request):
+        return None
+
+    user_id = getattr(user, "id", None)
+    if not user_id:
+        return None
+
+    try:
+        from api.models import UserTrialEligibility
+
+        eligibility = UserTrialEligibility.objects.filter(user_id=user_id).only(
+            "auto_status",
+            "manual_action",
+            "reason_codes",
+        ).first()
+    except DatabaseError:
+        logger.warning(
+            "Failed to load stored trial eligibility while enqueueing CompleteRegistration CAPI for user %s",
+            user_id,
+            exc_info=True,
+        )
+        return None
+
+    if eligibility is None:
+        return None
+
+    decision = eligibility.effective_status
+    return {
+        "decision": decision,
+        "manual_action": eligibility.manual_action,
+        "reason_codes": list(eligibility.reason_codes or []),
+        "send_allowed": is_complete_registration_capi_decision_allowed(
+            decision,
+            request=request,
+        ),
         "decision_source": "stored_trial_eligibility_snapshot",
     }
 
@@ -160,4 +202,11 @@ def capi(user, event_name, properties=None, request=None, context=None, provider
         context=context,
         provider_targets=provider_targets,
     )
+    if event_name == "CompleteRegistration":
+        eligibility_snapshot = _complete_registration_eligibility_snapshot(
+            user,
+            request=request,
+        )
+        if eligibility_snapshot is not None:
+            payload["complete_registration_eligibility"] = eligibility_snapshot
     enqueue_marketing_event.delay(payload)

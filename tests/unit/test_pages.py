@@ -23,8 +23,13 @@ from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from config.redis_client import get_redis_client
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY,
 )
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
@@ -1719,6 +1724,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.record_checkout_context")
     @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
@@ -1731,6 +1737,7 @@ class CheckoutRedirectTests(TestCase):
         mock_price_get,
         mock_session_create,
         mock_customer_modify,
+        mock_record_checkout_context,
         mock_ensure,
         _mock_trial_eligible,
         _,
@@ -1749,7 +1756,11 @@ class CheckoutRedirectTests(TestCase):
         )
         mock_customer.return_value = SimpleNamespace(id="cus_trial")
         mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
-        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
+        mock_session_create.return_value = SimpleNamespace(
+            id="cs_trial_checkout_context",
+            created=1_700_000_000,
+            url="https://stripe.test/checkout-startup",
+        )
         mock_ensure.return_value = (None, "absent")
         resp = self.client.get(reverse("proprietary:pro_checkout"))
 
@@ -1778,6 +1789,37 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(
             customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
             kwargs["metadata"]["gobii_event_id"],
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY],
+            PlanNames.STARTUP,
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY],
+            "Pro",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY],
+            "120.0",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY],
+            "USD",
+        )
+        self.assertTrue(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY]
+        )
+        mock_record_checkout_context.assert_called_once_with(
+            customer_id="cus_trial",
+            checkout_session_id="cs_trial_checkout_context",
+            session_created_at=1_700_000_000,
+            flow_type="trial",
+            event_id=kwargs["metadata"]["gobii_event_id"],
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=120.0,
+            currency="USD",
+            checkout_source_url=kwargs["metadata"]["checkout_source_url"],
         )
 
     @tag("batch_pages")
@@ -1941,6 +1983,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.record_checkout_context")
     @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
@@ -1953,6 +1996,7 @@ class CheckoutRedirectTests(TestCase):
         mock_price_get,
         mock_session_create,
         mock_customer_modify,
+        mock_record_checkout_context,
         mock_existing_subs,
         mock_ensure,
         _mock_trial_eligible,
@@ -1972,7 +2016,11 @@ class CheckoutRedirectTests(TestCase):
         )
         mock_customer.return_value = SimpleNamespace(id="cus_scale_trial")
         mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
-        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+        mock_session_create.return_value = SimpleNamespace(
+            id="cs_purchase_checkout_context",
+            created=1_700_000_100,
+            url="https://stripe.test/checkout-scale",
+        )
         mock_existing_subs.return_value = []
         mock_ensure.return_value = (None, "absent")
         resp = self.client.get("/subscribe/scale/")
@@ -2002,6 +2050,37 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(
             customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY],
             kwargs["metadata"]["gobii_event_id"],
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY],
+            PlanNames.SCALE,
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY],
+            "Scale",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY],
+            "250.0",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY],
+            "USD",
+        )
+        self.assertTrue(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY]
+        )
+        mock_record_checkout_context.assert_called_once_with(
+            customer_id="cus_scale_trial",
+            checkout_session_id="cs_purchase_checkout_context",
+            session_created_at=1_700_000_100,
+            flow_type="purchase",
+            event_id=kwargs["metadata"]["gobii_event_id"],
+            plan=PlanNames.SCALE,
+            plan_label="Scale",
+            value=250.0,
+            currency="USD",
+            checkout_source_url=kwargs["metadata"]["checkout_source_url"],
         )
 
     @tag("batch_pages")
@@ -2117,8 +2196,13 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(
             second_modify_kwargs["metadata"],
             {
+                STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY: "",
             },
         )
         mock_customer_retrieve.assert_called_once()

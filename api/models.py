@@ -4107,6 +4107,44 @@ class UserBilling(models.Model):
         verbose_name_plural = "User Billing"
 
 
+class StripeCheckoutContext(models.Model):
+    """Immutable checkout context used to correlate delayed billing webhooks."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    stripe_customer_id = models.CharField(max_length=255, db_index=True)
+    stripe_checkout_session_id = models.CharField(max_length=255, unique=True)
+    stripe_setup_intent_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+    )
+    event_id = models.CharField(max_length=255, db_index=True)
+    flow_type = models.CharField(max_length=32, db_index=True)
+    plan = models.CharField(max_length=64, blank=True, default="")
+    plan_label = models.CharField(max_length=64, blank=True, default="")
+    value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=16, blank=True, default="")
+    checkout_source_url = models.CharField(max_length=500, blank=True, default="")
+    stripe_session_created_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=("stripe_customer_id", "flow_type"),
+                name="stripe_chk_ctx_cust_flow_idx",
+            ),
+        ]
+        verbose_name = "Stripe checkout context"
+        verbose_name_plural = "Stripe checkout contexts"
+
+    def __str__(self):
+        return f"StripeCheckoutContext<{self.stripe_checkout_session_id}>"
+
+
 class AddonEntitlementQuerySet(models.QuerySet):
     def for_owner(self, owner):
         if owner is None:

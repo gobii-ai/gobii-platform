@@ -162,6 +162,24 @@ def _start_trial_ineligibility_skip_properties(payload: dict) -> dict[str, Any] 
     }
 
 
+def _complete_registration_ineligibility_skip_properties(
+    payload: dict,
+) -> dict[str, Any] | None:
+    snapshot = (payload or {}).get("complete_registration_eligibility")
+    if not isinstance(snapshot, dict):
+        return None
+
+    if snapshot.get("send_allowed") is not False:
+        return None
+
+    return {
+        "trial_eligibility_decision": snapshot.get("decision"),
+        "trial_eligibility_manual_action": snapshot.get("manual_action"),
+        "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
+        "trial_eligibility_policy_send_allowed": False,
+    }
+
+
 def _should_send_subscription_guarded_event(payload: dict) -> tuple[bool, str | None]:
     normalized_subscription_id = _subscription_guard_id_from_payload(payload)
     if not normalized_subscription_id:
@@ -281,7 +299,8 @@ def _dispatch_marketing_event(payload: dict):
     with trace_event(evt):
         for provider in get_providers():
             provider_name = provider.__class__.__name__
-            if provider_targets and _provider_target_key(provider) not in provider_targets:
+            provider_key = _provider_target_key(provider)
+            if provider_targets and provider_key not in provider_targets:
                 continue
             try:
                 provider.send(evt)
@@ -326,6 +345,17 @@ def _dispatch_marketing_event(payload: dict):
 )
 def enqueue_marketing_event(self, payload: dict):
     if not settings.GOBII_PROPRIETARY_MODE:
+        return
+    ineligibility_skip_properties = _complete_registration_ineligibility_skip_properties(payload)
+    if ineligibility_skip_properties is not None:
+        _track_marketing_skip(
+            payload,
+            reason="trial_eligibility_disallowed",
+            decision_source=((payload or {}).get("complete_registration_eligibility") or {}).get(
+                "decision_source"
+            ),
+            extra_properties=ineligibility_skip_properties,
+        )
         return
     _dispatch_marketing_event(payload)
 

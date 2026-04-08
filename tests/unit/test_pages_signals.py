@@ -16,8 +16,11 @@ from api.models import (
     DedicatedProxyAllocation,
     Organization,
     ProxyServer,
+    StripeCheckoutContext,
     UserAttribution,
     UserBilling,
+    UserTrialEligibility,
+    UserTrialEligibilityAutoStatusChoices,
     UserIdentitySignal,
     UserIdentitySignalTypeChoices,
 )
@@ -26,14 +29,20 @@ from constants.grant_types import GrantTypeChoices
 from dateutil.relativedelta import relativedelta
 from api.services.trial_abuse import SIGNAL_SOURCE_SIGNUP
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY,
 )
 from pages.signals import (
     handle_checkout_session_event,
     handle_subscription_event,
     handle_user_signed_up,
     handle_invoice_payment_failed,
+    handle_setup_intent_created,
     handle_setup_intent_setup_failed,
     handle_setup_intent_succeeded,
     handle_invoice_payment_succeeded,
@@ -234,6 +243,7 @@ class UserSignedUpSignalTests(TestCase):
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "CompleteRegistration")
+        self.assertIs(capi_kwargs["request"], request)
         props = capi_kwargs["properties"]
         self.assertEqual(props["value"], 12.5)
         self.assertEqual(props["currency"], "USD")
@@ -598,6 +608,7 @@ def _build_setup_intent_payload(
     livemode=True,
     payment_method_types=None,
     last_setup_error=None,
+    created=None,
 ):
     payload = {
         "object": "setup_intent",
@@ -613,11 +624,20 @@ def _build_setup_intent_payload(
         payload["payment_method"] = payment_method
     if last_setup_error is not None:
         payload["last_setup_error"] = last_setup_error
+    if created is not None:
+        payload["created"] = created
     return payload
 
 
 @tag("batch_pages")
 class CheckoutSessionSignalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="checkout-session-user",
+            email="checkout-session@example.com",
+            password="pw",
+        )
+
     @patch("pages.signals.stripe.Customer.modify")
     @patch("pages.signals.stripe.Customer.retrieve")
     @patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test")
@@ -654,8 +674,13 @@ class CheckoutSessionSignalTests(TestCase):
         mock_customer_modify.assert_called_once_with(
             "cus_trial_complete",
             metadata={
+                STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "",
                 STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY: "",
+                STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY: "",
             },
             api_key="sk_test",
         )
@@ -694,6 +719,105 @@ class CheckoutSessionSignalTests(TestCase):
 
         mock_customer_retrieve.assert_called_once_with("cus_trial_expired", api_key="sk_test")
         mock_customer_modify.assert_not_called()
+
+    def test_checkout_session_completed_emits_add_payment_info_for_purchase_flow(self):
+        StripeCheckoutContext.objects.create(
+            stripe_customer_id="cus_purchase_complete",
+            stripe_checkout_session_id="cs_purchase_complete",
+            event_id="startup-sub-purchase",
+            flow_type="purchase",
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=Decimal("120.00"),
+            currency="USD",
+            checkout_source_url="https://www.gobii.ai/pricing",
+        )
+        payload = {
+            "object": "checkout.session",
+            "id": "cs_purchase_complete",
+            "customer": "cus_purchase_complete",
+            "mode": "subscription",
+            "payment_method_types": ["card"],
+            "metadata": {
+                "gobii_event_id": "startup-sub-purchase",
+                "flow_type": "purchase",
+                "plan": PlanNames.STARTUP,
+                "checkout_source_url": "https://www.gobii.ai/pricing",
+            },
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="checkout.session.completed",
+            event_id="evt_checkout_purchase_complete",
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_purchase_complete"),
+            ), \
+            patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
+            patch("pages.signals._clear_customer_checkout_context_if_matches", return_value=True) as mock_clear, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_checkout_session_event(event)
+
+        mock_capi.assert_called_once_with(
+            user=self.user,
+            event_name="AddPaymentInfo",
+            properties={
+                "event_id": "startup-sub-purchase",
+                "plan": PlanNames.STARTUP,
+                "plan_label": "Pro",
+                "flow_type": "purchase",
+                "value": 120.0,
+                "currency": "USD",
+                "payment_method_type": "card",
+            },
+            request=None,
+            context={
+                "consent": True,
+                "page": {"url": "https://www.gobii.ai/pricing"},
+            },
+        )
+        mock_clear.assert_called_once_with(
+            customer_id="cus_purchase_complete",
+            expected_event_id="startup-sub-purchase",
+        )
+
+    def test_checkout_session_completed_does_not_emit_add_payment_info_for_trial_flow(self):
+        payload = {
+            "object": "checkout.session",
+            "id": "cs_trial_complete",
+            "customer": "cus_trial_complete",
+            "mode": "subscription",
+            "payment_method_types": ["card"],
+            "metadata": {
+                "gobii_event_id": "startup-sub-trial",
+                "flow_type": "trial",
+            },
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="checkout.session.completed",
+            event_id="evt_checkout_trial_complete",
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals._resolve_setup_intent_owner") as mock_resolve_owner, \
+            patch("pages.signals._clear_customer_checkout_context_if_matches", return_value=True) as mock_clear, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_checkout_session_event(event)
+
+        mock_resolve_owner.assert_not_called()
+        mock_capi.assert_not_called()
+        mock_clear.assert_called_once_with(
+            customer_id="cus_trial_complete",
+            expected_event_id="startup-sub-trial",
+        )
 
 
 @tag("batch_pages")
@@ -3076,6 +3200,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             stripe_data={"default_payment_method": "pm_setup_old"},
         )
         updated_subscription = {"id": "sub_user_success", "default_payment_method": "pm_setup_new"}
+        call_order = []
 
         with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
             patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
@@ -3083,9 +3208,22 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "pages.signals._resolve_setup_intent_owner",
                 return_value=(self.user, "user", None, "cus_setup_user"),
             ), \
+            patch(
+                "pages.signals._emit_add_payment_info_for_setup_intent",
+                side_effect=lambda **_kwargs: call_order.append("emit"),
+            ) as mock_emit_add_payment_info, \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
-            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
-            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
+            patch(
+                "pages.signals.stripe.Subscription.modify",
+                side_effect=lambda *args, **kwargs: (
+                    call_order.append("modify"),
+                    updated_subscription,
+                )[1],
+            ) as mock_modify, \
+            patch(
+                "pages.signals.sync_subscription_after_direct_update",
+                side_effect=lambda _updated_subscription: call_order.append("sync"),
+            ) as mock_sync:
 
             handle_setup_intent_succeeded(event)
 
@@ -3095,7 +3233,13 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             idempotency_key="setup-intent-default-payment-method-seti_user_success-sub_user_success",
             api_key="sk_test",
         )
+        mock_emit_add_payment_info.assert_called_once_with(
+            owner=self.user,
+            owner_type="user",
+            payload=payload,
+        )
         mock_sync.assert_called_once_with(updated_subscription)
+        self.assertEqual(call_order, ["modify", "emit", "sync"])
 
     def test_setup_intent_succeeded_skips_when_subscription_already_uses_payment_method(self):
         payload = _build_setup_intent_payload(
@@ -3117,14 +3261,370 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "pages.signals._resolve_setup_intent_owner",
                 return_value=(self.user, "user", None, "cus_setup_user"),
             ), \
+            patch("pages.signals._emit_add_payment_info_for_setup_intent") as mock_emit_add_payment_info, \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
             patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
             patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
 
             handle_setup_intent_succeeded(event)
 
+        mock_emit_add_payment_info.assert_not_called()
         mock_modify.assert_not_called()
         mock_sync.assert_not_called()
+
+    def test_setup_intent_created_binds_trial_checkout_context(self):
+        StripeCheckoutContext.objects.create(
+            stripe_customer_id="cus_setup_user",
+            stripe_checkout_session_id="cs_trial_context",
+            event_id="startup-sub-created-bind",
+            flow_type="trial",
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=Decimal("120.00"),
+            currency="USD",
+            checkout_source_url="https://www.gobii.ai/pricing",
+            stripe_session_created_at=timezone.make_aware(
+                datetime(2026, 4, 8, 16, 0, 0),
+                timezone=dt_timezone.utc,
+            ),
+        )
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_bound_from_created",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+            created=int(datetime(2026, 4, 8, 16, 1, 0, tzinfo=dt_timezone.utc).timestamp()),
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.created")
+
+        handle_setup_intent_created(event)
+
+        checkout_context = StripeCheckoutContext.objects.get(
+            stripe_checkout_session_id="cs_trial_context",
+        )
+        self.assertEqual(checkout_context.stripe_setup_intent_id, "seti_user_bound_from_created")
+
+    def test_setup_intent_succeeded_emits_add_payment_info_from_bound_checkout_context(self):
+        StripeCheckoutContext.objects.create(
+            stripe_customer_id="cus_setup_user",
+            stripe_checkout_session_id="cs_trial_bound",
+            stripe_setup_intent_id="seti_user_add_payment",
+            event_id="startup-sub-add-payment",
+            flow_type="trial",
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=Decimal("120.00"),
+            currency="USD",
+            checkout_source_url="https://www.gobii.ai/pricing",
+        )
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_add_payment",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
+        )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_setup_user"),
+            ), \
+            patch(
+                "pages.signals._build_marketing_context_from_user",
+                return_value={"consent": True, "click_ids": {"fbp": "fb.1.1700000000000.123456789"}},
+            ), \
+            patch("pages.signals.get_active_subscription", return_value=subscription), \
+            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
+            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_setup_intent_succeeded(event)
+
+        mock_capi.assert_called_once_with(
+            user=self.user,
+            event_name="AddPaymentInfo",
+            properties={
+                "event_id": "startup-sub-add-payment",
+                "plan": PlanNames.STARTUP,
+                "plan_label": "Pro",
+                "flow_type": "trial",
+                "value": 120.0,
+                "currency": "USD",
+                "payment_method_type": "card",
+            },
+            request=None,
+            context={
+                "consent": True,
+                "click_ids": {"fbp": "fb.1.1700000000000.123456789"},
+                "page": {"url": "https://www.gobii.ai/pricing"},
+            },
+        )
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_add_payment-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
+
+    def test_setup_intent_succeeded_binds_checkout_context_on_the_fly(self):
+        StripeCheckoutContext.objects.create(
+            stripe_customer_id="cus_setup_user",
+            stripe_checkout_session_id="cs_trial_on_the_fly",
+            event_id="startup-sub-on-the-fly",
+            flow_type="trial",
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=Decimal("120.00"),
+            currency="USD",
+            checkout_source_url="https://www.gobii.ai/pricing",
+            stripe_session_created_at=timezone.make_aware(
+                datetime(2026, 4, 8, 16, 0, 0),
+                timezone=dt_timezone.utc,
+            ),
+        )
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_on_the_fly",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+            created=int(datetime(2026, 4, 8, 16, 1, 0, tzinfo=dt_timezone.utc).timestamp()),
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
+        )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_setup_user"),
+            ), \
+            patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
+            patch("pages.signals.get_active_subscription", return_value=subscription), \
+            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
+            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_setup_intent_succeeded(event)
+
+        mock_capi.assert_called_once()
+        checkout_context = StripeCheckoutContext.objects.get(
+            stripe_checkout_session_id="cs_trial_on_the_fly",
+        )
+        self.assertEqual(checkout_context.stripe_setup_intent_id, "seti_user_on_the_fly")
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_on_the_fly-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
+
+    def test_setup_intent_succeeded_does_not_bind_future_checkout_context(self):
+        StripeCheckoutContext.objects.create(
+            stripe_customer_id="cus_setup_user",
+            stripe_checkout_session_id="cs_trial_future_context",
+            event_id="startup-sub-future-context",
+            flow_type="trial",
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=Decimal("120.00"),
+            currency="USD",
+            checkout_source_url="https://www.gobii.ai/pricing",
+            stripe_session_created_at=timezone.make_aware(
+                datetime(2026, 4, 8, 16, 2, 0),
+                timezone=dt_timezone.utc,
+            ),
+        )
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_future_context",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+            created=int(datetime(2026, 4, 8, 16, 1, 0, tzinfo=dt_timezone.utc).timestamp()),
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
+        )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_setup_user"),
+            ), \
+            patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
+            patch("pages.signals.get_active_subscription", return_value=subscription), \
+            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
+            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_setup_intent_succeeded(event)
+
+        mock_capi.assert_not_called()
+        checkout_context = StripeCheckoutContext.objects.get(
+            stripe_checkout_session_id="cs_trial_future_context",
+        )
+        self.assertIsNone(checkout_context.stripe_setup_intent_id)
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_future_context-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
+
+    def test_setup_intent_succeeded_suppresses_add_payment_info_for_no_trial_decision(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_no_trial",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
+        )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
+        StripeCheckoutContext.objects.create(
+            stripe_customer_id="cus_setup_user",
+            stripe_checkout_session_id="cs_trial_no_trial",
+            stripe_setup_intent_id="seti_user_no_trial",
+            event_id="startup-sub-no-trial",
+            flow_type="trial",
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=Decimal("120.00"),
+            currency="USD",
+            checkout_source_url="https://www.gobii.ai/pricing",
+        )
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+            reason_codes=["fpjs_history_match"],
+        )
+
+        with override_flag("add_payment_info_capi_trial_eligibility_enforcement", active=True):
+            with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+                patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+                patch(
+                    "pages.signals._resolve_setup_intent_owner",
+                    return_value=(self.user, "user", None, "cus_setup_user"),
+                ), \
+                patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
+                patch("pages.signals.get_active_subscription", return_value=subscription), \
+                patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
+                patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
+                patch("pages.signals.capi") as mock_capi, \
+                patch("pages.signals.Analytics.track") as mock_track:
+
+                handle_setup_intent_succeeded(event)
+
+        mock_capi.assert_not_called()
+        mock_track.assert_called_once_with(
+            user_id=self.user.id,
+            event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
+            properties={
+                "event_name": "AddPaymentInfo",
+                "reason": "trial_eligibility_disallowed",
+                "decision_source": "stored_trial_eligibility_snapshot",
+                "trial_eligibility_decision": UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+                "trial_eligibility_manual_action": "inherit",
+                "trial_eligibility_reason_codes": ["fpjs_history_match"],
+                "trial_eligibility_policy_send_allowed": False,
+            },
+        )
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_no_trial-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
+
+    def test_setup_intent_succeeded_allows_add_payment_info_for_review_when_override_enabled(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_review",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_current",
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        subscription = SimpleNamespace(
+            id="sub_user_current",
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
+        )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
+        StripeCheckoutContext.objects.create(
+            stripe_customer_id="cus_setup_user",
+            stripe_checkout_session_id="cs_trial_review",
+            stripe_setup_intent_id="seti_user_review",
+            event_id="startup-sub-review",
+            flow_type="trial",
+            plan=PlanNames.STARTUP,
+            plan_label="Pro",
+            value=Decimal("120.00"),
+            currency="USD",
+            checkout_source_url="https://www.gobii.ai/pricing",
+        )
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.REVIEW,
+            reason_codes=["multi_signal_history_match"],
+        )
+
+        with override_flag("add_payment_info_capi_trial_eligibility_enforcement", active=True):
+            with override_flag("add_payment_info_capi_send_review", active=True):
+                with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+                    patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+                    patch(
+                        "pages.signals._resolve_setup_intent_owner",
+                        return_value=(self.user, "user", None, "cus_setup_user"),
+                    ), \
+                    patch(
+                        "pages.signals._build_marketing_context_from_user",
+                        return_value={"consent": True},
+                    ), \
+                    patch("pages.signals.get_active_subscription", return_value=subscription), \
+                    patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
+                    patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
+                    patch("pages.signals.capi") as mock_capi:
+
+                    handle_setup_intent_succeeded(event)
+
+        mock_capi.assert_called_once()
+        self.assertEqual(mock_capi.call_args.kwargs["event_name"], "AddPaymentInfo")
+        self.assertEqual(
+            mock_capi.call_args.kwargs["properties"]["event_id"],
+            "startup-sub-review",
+        )
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_review-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
 
 
 @tag("batch_pages")

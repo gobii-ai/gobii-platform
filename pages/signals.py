@@ -43,8 +43,14 @@ import stripe
 
 from billing.addons import AddonEntitlementService
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     clear_checkout_customer_metadata,
+)
+from billing.checkout_context import (
+    bind_setup_intent_checkout_context,
+    get_checkout_context_for_session,
+    get_checkout_context_for_setup_intent,
 )
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
@@ -94,6 +100,10 @@ from util.subscription_helper import (
     mark_user_billing_with_plan,
     downgrade_owner_to_free_plan,
     sync_subscription_after_direct_update,
+)
+from util.trial_eligibility import (
+    is_add_payment_info_capi_decision_allowed,
+    is_add_payment_info_capi_trial_eligibility_enforcement_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -951,6 +961,173 @@ def _clear_customer_checkout_context_if_matches(*, customer_id: str | None, expe
         api_key=stripe.api_key,
     )
     return True
+
+
+def _emit_add_payment_info_from_checkout_context(
+    *,
+    owner,
+    checkout_context: Mapping[str, Any],
+    payment_method_type: str | None,
+) -> None:
+    eligibility_snapshot = _add_payment_info_eligibility_snapshot(owner)
+    if eligibility_snapshot is not None and eligibility_snapshot.get("send_allowed") is False:
+        _track_add_payment_info_trial_eligibility_skip(
+            owner=owner,
+            snapshot=eligibility_snapshot,
+        )
+        return
+
+    marketing_properties = {
+        "event_id": checkout_context.get("event_id"),
+        "plan": checkout_context.get("plan"),
+        "plan_label": checkout_context.get("plan_label"),
+        "flow_type": checkout_context.get("flow_type"),
+        "value": checkout_context.get("value"),
+        "currency": checkout_context.get("currency"),
+        "payment_method_type": payment_method_type,
+    }
+    marketing_properties = {
+        key: value
+        for key, value in marketing_properties.items()
+        if value not in (None, "")
+    }
+
+    marketing_context = _build_marketing_context_from_user(owner)
+    checkout_source_url = checkout_context.get("checkout_source_url")
+    if checkout_source_url:
+        marketing_context["page"] = {"url": checkout_source_url}
+
+    capi(
+        user=owner,
+        event_name="AddPaymentInfo",
+        properties=marketing_properties,
+        request=None,
+        context=marketing_context,
+    )
+
+
+def _emit_add_payment_info_for_setup_intent(
+    *,
+    owner,
+    owner_type: str,
+    payload: Mapping[str, Any],
+) -> None:
+    if owner_type != "user" or not owner:
+        return
+
+    setup_intent_id = _extract_stripe_object_id(payload)
+    checkout_context = get_checkout_context_for_setup_intent(setup_intent_id)
+    if not checkout_context:
+        return
+
+    payment_method_types = payload.get("payment_method_types")
+    payment_method_type = None
+    if isinstance(payment_method_types, list) and payment_method_types:
+        payment_method_type = str(payment_method_types[0]).strip() or None
+
+    _emit_add_payment_info_from_checkout_context(
+        owner=owner,
+        checkout_context=checkout_context,
+        payment_method_type=payment_method_type,
+    )
+
+
+def _emit_add_payment_info_for_completed_checkout_session(
+    *,
+    payload: Mapping[str, Any],
+    customer_id: str | None,
+) -> None:
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    if metadata.get("flow_type") != STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE:
+        return
+
+    checkout_context = get_checkout_context_for_session(_extract_stripe_object_id(payload))
+    if not checkout_context:
+        return
+
+    owner, owner_type, _organization_billing, resolved_customer_id = _resolve_setup_intent_owner(
+        payload,
+        customer_id=customer_id,
+    )
+    if not owner:
+        logger.info(
+            "Unable to resolve owner for checkout session %s (customer=%s); skipping purchase AddPaymentInfo",
+            payload.get("id"),
+            customer_id,
+        )
+        return
+
+    if owner_type != "user" or not resolved_customer_id:
+        return
+
+    payment_method_types = payload.get("payment_method_types")
+    payment_method_type = None
+    if isinstance(payment_method_types, list) and payment_method_types:
+        payment_method_type = str(payment_method_types[0]).strip() or None
+
+    _emit_add_payment_info_from_checkout_context(
+        owner=owner,
+        checkout_context=checkout_context,
+        payment_method_type=payment_method_type,
+    )
+
+
+def _add_payment_info_eligibility_snapshot(user: Any) -> dict[str, Any] | None:
+    if not is_add_payment_info_capi_trial_eligibility_enforcement_enabled():
+        return None
+
+    user_id = getattr(user, "id", None)
+    if not user_id:
+        return None
+
+    try:
+        from api.models import UserTrialEligibility
+
+        eligibility = UserTrialEligibility.objects.filter(user_id=user_id).only(
+            "auto_status",
+            "manual_action",
+            "reason_codes",
+        ).first()
+    except DatabaseError:
+        logger.warning(
+            "Failed to load stored trial eligibility while preparing AddPaymentInfo CAPI for user %s",
+            user_id,
+            exc_info=True,
+        )
+        return None
+
+    if eligibility is None:
+        return None
+
+    decision = eligibility.effective_status
+    return {
+        "decision": decision,
+        "manual_action": eligibility.manual_action,
+        "reason_codes": list(eligibility.reason_codes or []),
+        "send_allowed": is_add_payment_info_capi_decision_allowed(decision),
+        "decision_source": "stored_trial_eligibility_snapshot",
+    }
+
+
+def _track_add_payment_info_trial_eligibility_skip(
+    *,
+    owner: Any,
+    snapshot: Mapping[str, Any],
+) -> None:
+    owner_id = getattr(owner, "id", None)
+    Analytics.track(
+        user_id=owner_id,
+        event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
+        properties={
+            "event_name": "AddPaymentInfo",
+            "reason": "trial_eligibility_disallowed",
+            "decision_source": snapshot.get("decision_source"),
+            "trial_eligibility_decision": snapshot.get("decision"),
+            "trial_eligibility_manual_action": snapshot.get("manual_action"),
+            "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
+            "trial_eligibility_policy_send_allowed": False,
+        },
+    )
 
 
 def _extract_stripe_object_id(candidate: Any) -> str | None:
@@ -1997,7 +2174,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                 user=user,
                 event_name='CompleteRegistration',
                 properties=marketing_properties,
-                request=None,
+                request=request,
                 context=marketing_context,
             )
 
@@ -2065,7 +2242,7 @@ def handle_user_logged_out(sender, request, user, **kwargs):
 
 @djstripe_receiver(["checkout.session.completed", "checkout.session.expired"])
 def handle_checkout_session_event(event, **kwargs):
-    """Clear transient customer checkout metadata once the session reaches a terminal state."""
+    """Emit purchase AddPaymentInfo and clear transient checkout metadata at terminal session states."""
     payload = _coerce_metadata_dict(getattr(event, "data", {}).get("object"))
     if payload.get("object") != "checkout.session":
         return
@@ -2091,6 +2268,18 @@ def handle_checkout_session_event(event, **kwargs):
     expected_event_id = str(metadata.get("gobii_event_id") or "").strip()
     if not customer_id or not expected_event_id:
         return
+
+    if getattr(event, "type", "") == "checkout.session.completed":
+        try:
+            _emit_add_payment_info_for_completed_checkout_session(
+                payload=payload,
+                customer_id=customer_id,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to enqueue AddPaymentInfo for checkout session %s",
+                payload.get("id"),
+            )
 
     try:
         _clear_customer_checkout_context_if_matches(
@@ -2423,6 +2612,26 @@ def handle_setup_intent_setup_failed(event, **kwargs):
             logger.exception("Failed to track setup_intent.setup_failed for setup intent %s", payload.get("id"))
 
 
+@djstripe_receiver(["setup_intent.created"])
+def handle_setup_intent_created(event, **kwargs):
+    payload = event.data.get("object", {}) or {}
+    if payload.get("object") != "setup_intent":
+        return
+
+    try:
+        bind_setup_intent_checkout_context(
+            customer_id=_extract_stripe_object_id(payload.get("customer")),
+            setup_intent_id=_extract_stripe_object_id(payload),
+            setup_intent_created_at=payload.get("created"),
+        )
+    except DatabaseError:
+        logger.warning(
+            "Failed to bind checkout context for setup intent %s",
+            payload.get("id"),
+            exc_info=True,
+        )
+
+
 @djstripe_receiver(["setup_intent.succeeded"])
 def handle_setup_intent_succeeded(event, **kwargs):
     """Apply a newly saved payment method to the owner's active subscription."""
@@ -2451,9 +2660,23 @@ def handle_setup_intent_succeeded(event, **kwargs):
             logger.info("Setup intent %s succeeded without a payment method; skipping subscription update", payload.get("id"))
             return
 
+        customer_id = _extract_stripe_object_id(payload.get("customer"))
+        try:
+            bind_setup_intent_checkout_context(
+                customer_id=customer_id,
+                setup_intent_id=_extract_stripe_object_id(payload),
+                setup_intent_created_at=payload.get("created"),
+            )
+        except DatabaseError:
+            logger.warning(
+                "Failed to bind checkout context for setup intent %s before success handling",
+                payload.get("id"),
+                exc_info=True,
+            )
+
         owner, owner_type, _organization_billing, customer_id = _resolve_setup_intent_owner(
             payload,
-            customer_id=_extract_stripe_object_id(payload.get("customer")),
+            customer_id=customer_id,
         )
         if not owner:
             span.add_event("owner_not_found", {"customer.id": customer_id or ""})
@@ -2505,6 +2728,19 @@ def handle_setup_intent_succeeded(event, **kwargs):
                 payload.get("id"),
             )
             return
+
+        try:
+            _emit_add_payment_info_for_setup_intent(
+                owner=owner,
+                owner_type=owner_type,
+                payload=payload,
+            )
+        except Exception:
+            span.add_event("add_payment_info_emit_failed")
+            logger.exception(
+                "Failed to enqueue AddPaymentInfo for setup intent %s",
+                payload.get("id"),
+            )
 
         sync_subscription_after_direct_update(updated_subscription)
 

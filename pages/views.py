@@ -17,6 +17,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
+from django.db import DatabaseError
 from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
@@ -37,6 +38,7 @@ from billing.checkout_metadata import (
     build_checkout_flow_metadata,
     clear_checkout_customer_metadata,
 )
+from billing.checkout_context import record_checkout_context
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from config.stripe_config import get_stripe_settings
 
@@ -532,13 +534,28 @@ def _emit_checkout_initiated_event(
         logger.exception("Failed to emit %s marketing event for %s", event_name, plan_code)
 
 
-def _set_customer_checkout_context(*, customer_id: str, flow_type: str, event_id: str) -> None:
+def _set_customer_checkout_context(
+    *,
+    customer_id: str,
+    flow_type: str,
+    event_id: str,
+    plan: str,
+    plan_label: str,
+    value: float | None,
+    currency: str | None,
+    checkout_source_url: str | None,
+) -> None:
     """Mark the customer with the active checkout context for Radar evaluation."""
     stripe.Customer.modify(
         customer_id,
         metadata=build_checkout_customer_metadata(
             flow_type=flow_type,
             event_id=event_id,
+            plan=plan,
+            plan_label=plan_label,
+            value=value,
+            currency=(currency or "USD").upper(),
+            checkout_source_url=checkout_source_url,
         ),
         api_key=stripe.api_key,
     )
@@ -572,6 +589,11 @@ def _create_checkout_session_with_customer_context(
     customer_id: str,
     flow_type: str,
     event_id: str,
+    plan: str,
+    plan_label: str,
+    value: float | None,
+    currency: str | None,
+    checkout_source_url: str | None,
     checkout_kwargs: dict,
 ):
     """
@@ -586,6 +608,11 @@ def _create_checkout_session_with_customer_context(
             customer_id=customer_id,
             flow_type=flow_type,
             event_id=event_id,
+            plan=plan,
+            plan_label=plan_label,
+            value=value,
+            currency=currency,
+            checkout_source_url=checkout_source_url,
         )
         customer_checkout_context_set = True
     except stripe.error.StripeError as exc:
@@ -596,7 +623,7 @@ def _create_checkout_session_with_customer_context(
         )
 
     try:
-        return stripe.checkout.Session.create(**checkout_kwargs)
+        session = stripe.checkout.Session.create(**checkout_kwargs)
     except stripe.error.StripeError as exc:
         if customer_checkout_context_set:
             try:
@@ -611,6 +638,30 @@ def _create_checkout_session_with_customer_context(
                     cleanup_exc,
                 )
         raise
+
+    session_id = getattr(session, "id", None)
+    if isinstance(session_id, str) and session_id.strip():
+        try:
+            record_checkout_context(
+                customer_id=customer_id,
+                checkout_session_id=session_id.strip(),
+                session_created_at=getattr(session, "created", None),
+                flow_type=flow_type,
+                event_id=event_id,
+                plan=plan,
+                plan_label=plan_label,
+                value=value,
+                currency=(currency or "USD").upper(),
+                checkout_source_url=checkout_source_url,
+            )
+        except DatabaseError:
+            logger.warning(
+                "Failed to persist checkout context for session %s",
+                session_id,
+                exc_info=True,
+            )
+
+    return session
 
 
 class HomePage(TemplateView):
@@ -1841,19 +1892,12 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             customer_id=customer.id,
             flow_type=flow_type,
             event_id=event_id,
-            checkout_kwargs=checkout_kwargs,
-        )
-
-        _emit_checkout_initiated_event(
-            request=request,
-            user=user,
-            plan_code=PlanNames.STARTUP,
+            plan=PlanNames.STARTUP,
             plan_label="Pro",
             value=price,
             currency=price_currency,
-            event_id=event_id,
-            event_name="AddPaymentInfo",
-            post_checkout_redirect_used=post_checkout_redirect_used,
+            checkout_source_url=base_metadata.get("checkout_source_url"),
+            checkout_kwargs=checkout_kwargs,
         )
 
         # 3️⃣  No need to sync anything here.  The webhook events
@@ -2015,19 +2059,12 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             customer_id=customer.id,
             flow_type=flow_type,
             event_id=event_id,
-            checkout_kwargs=checkout_kwargs,
-        )
-
-        _emit_checkout_initiated_event(
-            request=request,
-            user=user,
-            plan_code=PlanNames.SCALE,
+            plan=PlanNames.SCALE,
             plan_label="Scale",
             value=price,
             currency=price_currency,
-            event_id=event_id,
-            event_name="AddPaymentInfo",
-            post_checkout_redirect_used=post_checkout_redirect_used,
+            checkout_source_url=base_metadata.get("checkout_source_url"),
+            checkout_kwargs=checkout_kwargs,
         )
 
         return redirect(session.url)
