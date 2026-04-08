@@ -3621,7 +3621,7 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
     def import_json_view(self, request):
         changelist_url = reverse("admin:api_globalagentskill_changelist")
 
-        if not self.has_add_permission(request):
+        if not (self.has_add_permission(request) or self.has_change_permission(request)):
             self.message_user(request, "You do not have permission to import global skills.", level=messages.ERROR)
             return HttpResponseRedirect(changelist_url)
 
@@ -3640,30 +3640,48 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
             upload = form.cleaned_data["json_file"]
             try:
                 payload = parse_global_skill_json_bytes(upload.read())
-                skill, created = import_global_skill_from_payload(payload)
             except ValidationError as exc:
                 self._add_import_form_errors(form, exc)
             else:
-                track_global_agent_skill_event(
-                    user_id=getattr(request.user, "id", None),
-                    event=(
-                        AnalyticsEvent.GLOBAL_AGENT_SKILL_CREATED
-                        if created
-                        else AnalyticsEvent.GLOBAL_AGENT_SKILL_UPDATED
-                    ),
-                    skill=skill,
-                    source=AnalyticsSource.WEB,
+                skill_name = str(payload.get("name") or "").strip()
+                existing_skill = (
+                    GlobalAgentSkill.objects.only("pk")
+                    .filter(name=skill_name)
+                    .first()
+                    if skill_name
+                    else None
                 )
-                self.message_user(
-                    request,
-                    (
-                        f"Imported global skill '{skill.name}'."
-                        if created
-                        else f"Updated global skill '{skill.name}' from JSON."
-                    ),
-                    level=messages.SUCCESS,
-                )
-                return HttpResponseRedirect(reverse("admin:api_globalagentskill_change", args=[skill.pk]))
+
+                if existing_skill is None and not self.has_add_permission(request):
+                    form.add_error(None, "You do not have permission to create global skills.")
+                elif existing_skill is not None and not self.has_change_permission(request, existing_skill):
+                    form.add_error(None, "You do not have permission to update existing global skills.")
+                else:
+                    try:
+                        skill, created = import_global_skill_from_payload(payload)
+                    except ValidationError as exc:
+                        self._add_import_form_errors(form, exc)
+                    else:
+                        track_global_agent_skill_event(
+                            user_id=getattr(request.user, "id", None),
+                            event=(
+                                AnalyticsEvent.GLOBAL_AGENT_SKILL_CREATED
+                                if created
+                                else AnalyticsEvent.GLOBAL_AGENT_SKILL_UPDATED
+                            ),
+                            skill=skill,
+                            source=AnalyticsSource.WEB,
+                        )
+                        self.message_user(
+                            request,
+                            (
+                                f"Imported global skill '{skill.name}'."
+                                if created
+                                else f"Updated global skill '{skill.name}' from JSON."
+                            ),
+                            level=messages.SUCCESS,
+                        )
+                        return HttpResponseRedirect(reverse("admin:api_globalagentskill_change", args=[skill.pk]))
 
         return TemplateResponse(request, "admin/global_skill_import.html", context)
 
@@ -3671,6 +3689,9 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
         skill = self.get_object(request, str(pk))
         if not skill:
             self.message_user(request, "Global skill not found.", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_globalagentskill_changelist"))
+        if not self.has_view_or_change_permission(request, skill):
+            self.message_user(request, "You do not have permission to export this global skill.", level=messages.ERROR)
             return HttpResponseRedirect(reverse("admin:api_globalagentskill_changelist"))
 
         try:

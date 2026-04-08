@@ -103,6 +103,12 @@ class ToolParamUnicodeNormalizationTests(SimpleTestCase):
 
 @tag('batch_event_processing')
 class ToolParamParsingTests(SimpleTestCase):
+    def test_empty_string_arguments_are_treated_as_empty_object(self):
+        raw_text, tool_params = _parse_tool_call_params("")
+
+        self.assertEqual(raw_text, "")
+        self.assertEqual(tool_params, {})
+
     def test_preserves_escaped_newlines_inside_nested_json_string_payload(self):
         raw_args = (
             '{"content":"{\\n'

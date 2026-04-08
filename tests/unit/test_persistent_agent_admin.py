@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch
 
 from django.contrib import admin
+from django.contrib.auth.models import Permission
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -107,6 +108,19 @@ class PersistentAgentAdminTests(TestCase):
         tool.full_clean()
         tool.save()
         return skill
+
+    def _create_staff_user_with_global_skill_permissions(self, *codenames):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username=f"staff-{'-'.join(codenames) or 'none'}@example.com",
+            email=f"staff-{'-'.join(codenames) or 'none'}@example.com",
+            password="testpass123",
+            is_staff=True,
+        )
+        if codenames:
+            permissions = Permission.objects.filter(codename__in=codenames)
+            user.user_permissions.set(permissions)
+        return user
 
     def test_trigger_processing_queues_valid_ids(self):
         url = reverse("admin:api_persistentagent_trigger_processing")
@@ -360,6 +374,129 @@ class PersistentAgentAdminTests(TestCase):
         self.assertFalse(GlobalAgentSkillCustomTool.objects.filter(pk=old_tool.pk).exists())
         replacement_tool = skill.bundled_custom_tools.get()
         self.assertEqual(replacement_tool.tool_name, "custom_weather_summary")
+
+    def test_global_agent_skill_import_json_updates_existing_tool_in_place(self):
+        skill = self._create_global_skill_with_custom_tool(name="check-weather", is_active=False)
+        existing_tool = skill.bundled_custom_tools.get()
+        payload = {
+            "name": "check-weather",
+            "description": "Updated weather workflow.",
+            "tools": ["weather"],
+            "secrets": [],
+            "instructions": "Use the updated workflow.",
+            "custom_tools": [
+                {
+                    "name": "Weather Tool",
+                    "tool_name": existing_tool.tool_name,
+                    "description": "Updated weather reader.",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string"},
+                        },
+                        "required": ["location"],
+                    },
+                    "timeout_seconds": 180,
+                    "source_code": (
+                        "from _gobii_ctx import main\n\n"
+                        "def run(params, ctx):\n"
+                        "    return {'location': params['location'], 'status': 'updated'}\n\n"
+                        "if __name__ == '__main__':\n"
+                        "    main(run)\n"
+                    ),
+                }
+            ],
+        }
+
+        response = self.client.post(
+            reverse("admin:api_globalagentskill_import_json"),
+            data={
+                "json_file": SimpleUploadedFile(
+                    "skill.json",
+                    json.dumps(payload).encode("utf-8"),
+                    content_type="application/json",
+                )
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        skill.refresh_from_db()
+        self.assertContains(response, "Updated global skill &#x27;check-weather&#x27; from JSON.")
+        updated_tool = skill.bundled_custom_tools.get()
+        self.assertEqual(updated_tool.pk, existing_tool.pk)
+        self.assertEqual(updated_tool.description, "Updated weather reader.")
+        self.assertEqual(updated_tool.timeout_seconds, 180)
+        self.assertEqual(
+            updated_tool.parameters_schema,
+            {
+                "type": "object",
+                "properties": {
+                    "location": {"type": "string"},
+                },
+                "required": ["location"],
+            },
+        )
+
+    def test_global_agent_skill_import_json_requires_change_permission_to_overwrite(self):
+        skill = self._create_global_skill_with_custom_tool(name="check-weather", is_active=False)
+        limited_user = self._create_staff_user_with_global_skill_permissions("add_globalagentskill")
+        self.client.force_login(limited_user)
+        payload = {
+            "name": "check-weather",
+            "description": "Unauthorized update",
+            "tools": ["weather"],
+            "secrets": [],
+            "instructions": "Unauthorized update instructions.",
+            "custom_tools": [
+                {
+                    "name": "Weather Tool",
+                    "tool_name": "weather_tool",
+                    "description": "Should not update.",
+                    "parameters_schema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                    },
+                    "timeout_seconds": 120,
+                    "source_code": (
+                        "from _gobii_ctx import main\n\n"
+                        "def run(params, ctx):\n"
+                        "    return {'ok': False}\n\n"
+                        "if __name__ == '__main__':\n"
+                        "    main(run)\n"
+                    ),
+                }
+            ],
+        }
+
+        response = self.client.post(
+            reverse("admin:api_globalagentskill_import_json"),
+            data={
+                "json_file": SimpleUploadedFile(
+                    "skill.json",
+                    json.dumps(payload).encode("utf-8"),
+                    content_type="application/json",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "You do not have permission to update existing global skills.")
+        skill.refresh_from_db()
+        self.assertEqual(skill.description, "Check weather")
+
+    def test_global_agent_skill_export_json_requires_view_permission(self):
+        skill = self._create_global_skill_with_custom_tool(name="check-weather")
+        limited_user = self._create_staff_user_with_global_skill_permissions()
+        self.client.force_login(limited_user)
+
+        response = self.client.get(
+            reverse("admin:api_globalagentskill_export_json", args=[skill.pk]),
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("admin:api_globalagentskill_changelist"))
 
     def test_global_agent_skill_import_json_rejects_malformed_json(self):
         response = self.client.post(

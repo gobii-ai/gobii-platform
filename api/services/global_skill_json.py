@@ -170,7 +170,7 @@ def _validate_and_normalize_custom_tools(
             parameters_schema=raw_tool.get("parameters_schema"),
             timeout_seconds=raw_tool.get("timeout_seconds"),
         )
-        tool.full_clean()
+        tool.full_clean(validate_unique=False, validate_constraints=False)
 
         if tool.tool_name in seen_tool_names:
             raise ValidationError({"custom_tools": [f"Duplicate custom tool tool_name '{tool.tool_name}' in import file."]})
@@ -238,6 +238,7 @@ def import_global_skill_from_payload(payload: Mapping[str, object]) -> tuple[Glo
             ContentFile(tool_payload["source_code"].encode("utf-8")),
             save=False,
         )
+        tool.full_clean()
         tool.save()
 
     return skill, created

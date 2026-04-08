@@ -1234,6 +1234,8 @@ def _parse_tool_call_params(raw_args: Any) -> tuple[Any, Any]:
     if isinstance(raw_args, dict):
         return json.dumps(raw_args), raw_args
     raw_args = raw_args or ""
+    if raw_args == "":
+        return raw_args, {}
     return raw_args, json.loads(raw_args)
 
 
