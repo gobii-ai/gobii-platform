@@ -270,7 +270,10 @@ def _normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
     display_name = raw_name.strip()
     if not display_name:
         return None
-    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", display_name.replace("-", "_").replace(" ", "_").lower())
+    normalized_input = display_name.lower()
+    if normalized_input.startswith(CUSTOM_TOOL_PREFIX):
+        normalized_input = normalized_input[len(CUSTOM_TOOL_PREFIX):]
+    slug = re.sub(r"[^a-zA-Z0-9_]+", "_", normalized_input.replace("-", "_").replace(" ", "_"))
     slug = re.sub(r"_+", "_", slug).strip("_")
     if not slug:
         return None

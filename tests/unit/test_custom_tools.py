@@ -24,6 +24,7 @@ from api.agent.tools.custom_tools import (
     execute_custom_tool,
     get_create_custom_tool_tool,
     get_custom_tools_prompt_summary,
+    normalize_custom_tool_name,
 )
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
@@ -129,6 +130,11 @@ class CustomToolsTests(TestCase):
                 records.append(f"{relative_path},sha256={digest},{len(payload)}")
             records.append(f"{dist_info}/RECORD,,")
             archive.writestr(f"{dist_info}/RECORD", "\n".join(records) + "\n")
+
+    def test_normalize_custom_tool_name_is_idempotent_for_custom_prefix(self):
+        normalized = normalize_custom_tool_name("custom_weather_tool")
+
+        self.assertEqual(normalized, ("custom_weather_tool", "custom_weather_tool"))
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
