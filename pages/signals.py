@@ -2693,19 +2693,6 @@ def handle_setup_intent_succeeded(event, **kwargs):
         if owner_id is not None:
             span.set_attribute("setup_intent.owner.id", str(owner_id))
 
-        try:
-            _emit_add_payment_info_for_setup_intent(
-                owner=owner,
-                owner_type=owner_type,
-                payload=payload,
-            )
-        except Exception:
-            span.add_event("add_payment_info_emit_failed")
-            logger.exception(
-                "Failed to enqueue AddPaymentInfo for setup intent %s",
-                payload.get("id"),
-            )
-
         subscription = get_active_subscription(owner, sync_with_stripe=True)
         if subscription is None or not getattr(subscription, "id", None):
             span.add_event("subscription_not_found")
@@ -2741,6 +2728,19 @@ def handle_setup_intent_succeeded(event, **kwargs):
                 payload.get("id"),
             )
             return
+
+        try:
+            _emit_add_payment_info_for_setup_intent(
+                owner=owner,
+                owner_type=owner_type,
+                payload=payload,
+            )
+        except Exception:
+            span.add_event("add_payment_info_emit_failed")
+            logger.exception(
+                "Failed to enqueue AddPaymentInfo for setup intent %s",
+                payload.get("id"),
+            )
 
         sync_subscription_after_direct_update(updated_subscription)
 

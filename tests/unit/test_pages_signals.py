@@ -3200,6 +3200,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             stripe_data={"default_payment_method": "pm_setup_old"},
         )
         updated_subscription = {"id": "sub_user_success", "default_payment_method": "pm_setup_new"}
+        call_order = []
 
         with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
             patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
@@ -3207,10 +3208,22 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "pages.signals._resolve_setup_intent_owner",
                 return_value=(self.user, "user", None, "cus_setup_user"),
             ), \
-            patch("pages.signals._emit_add_payment_info_for_setup_intent"), \
+            patch(
+                "pages.signals._emit_add_payment_info_for_setup_intent",
+                side_effect=lambda **_kwargs: call_order.append("emit"),
+            ) as mock_emit_add_payment_info, \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
-            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
-            patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
+            patch(
+                "pages.signals.stripe.Subscription.modify",
+                side_effect=lambda *args, **kwargs: (
+                    call_order.append("modify"),
+                    updated_subscription,
+                )[1],
+            ) as mock_modify, \
+            patch(
+                "pages.signals.sync_subscription_after_direct_update",
+                side_effect=lambda _updated_subscription: call_order.append("sync"),
+            ) as mock_sync:
 
             handle_setup_intent_succeeded(event)
 
@@ -3220,7 +3233,13 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             idempotency_key="setup-intent-default-payment-method-seti_user_success-sub_user_success",
             api_key="sk_test",
         )
+        mock_emit_add_payment_info.assert_called_once_with(
+            owner=self.user,
+            owner_type="user",
+            payload=payload,
+        )
         mock_sync.assert_called_once_with(updated_subscription)
+        self.assertEqual(call_order, ["modify", "emit", "sync"])
 
     def test_setup_intent_succeeded_skips_when_subscription_already_uses_payment_method(self):
         payload = _build_setup_intent_payload(
@@ -3242,13 +3261,14 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "pages.signals._resolve_setup_intent_owner",
                 return_value=(self.user, "user", None, "cus_setup_user"),
             ), \
-            patch("pages.signals._emit_add_payment_info_for_setup_intent"), \
+            patch("pages.signals._emit_add_payment_info_for_setup_intent") as mock_emit_add_payment_info, \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
             patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
             patch("pages.signals.sync_subscription_after_direct_update") as mock_sync:
 
             handle_setup_intent_succeeded(event)
 
+        mock_emit_add_payment_info.assert_not_called()
         mock_modify.assert_not_called()
         mock_sync.assert_not_called()
 
@@ -3306,9 +3326,10 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
         subscription = SimpleNamespace(
             id="sub_user_current",
-            default_payment_method_id="pm_setup_current",
-            stripe_data={"default_payment_method": "pm_setup_current"},
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
         )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
 
         with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
             patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
@@ -3321,7 +3342,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 return_value={"consent": True, "click_ids": {"fbp": "fb.1.1700000000000.123456789"}},
             ), \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
-            patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
+            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
             patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
             patch("pages.signals.capi") as mock_capi:
 
@@ -3346,8 +3367,13 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "page": {"url": "https://www.gobii.ai/pricing"},
             },
         )
-        mock_modify.assert_not_called()
-        mock_sync.assert_not_called()
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_add_payment-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
 
     def test_setup_intent_succeeded_binds_checkout_context_on_the_fly(self):
         StripeCheckoutContext.objects.create(
@@ -3375,9 +3401,10 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
         subscription = SimpleNamespace(
             id="sub_user_current",
-            default_payment_method_id="pm_setup_current",
-            stripe_data={"default_payment_method": "pm_setup_current"},
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
         )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
 
         with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
             patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
@@ -3387,7 +3414,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             ), \
             patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
             patch("pages.signals.get_active_subscription", return_value=subscription), \
-            patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
+            patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
             patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
             patch("pages.signals.capi") as mock_capi:
 
@@ -3398,8 +3425,13 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             stripe_checkout_session_id="cs_trial_on_the_fly",
         )
         self.assertEqual(checkout_context.stripe_setup_intent_id, "seti_user_on_the_fly")
-        mock_modify.assert_not_called()
-        mock_sync.assert_not_called()
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_on_the_fly-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
 
     def test_setup_intent_succeeded_suppresses_add_payment_info_for_no_trial_decision(self):
         payload = _build_setup_intent_payload(
@@ -3411,9 +3443,10 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
         subscription = SimpleNamespace(
             id="sub_user_current",
-            default_payment_method_id="pm_setup_current",
-            stripe_data={"default_payment_method": "pm_setup_current"},
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
         )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
         StripeCheckoutContext.objects.create(
             stripe_customer_id="cus_setup_user",
             stripe_checkout_session_id="cs_trial_no_trial",
@@ -3441,7 +3474,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 ), \
                 patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
                 patch("pages.signals.get_active_subscription", return_value=subscription), \
-                patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
+                patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
                 patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
                 patch("pages.signals.capi") as mock_capi, \
                 patch("pages.signals.Analytics.track") as mock_track:
@@ -3462,8 +3495,13 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "trial_eligibility_policy_send_allowed": False,
             },
         )
-        mock_modify.assert_not_called()
-        mock_sync.assert_not_called()
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_no_trial-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
 
     def test_setup_intent_succeeded_allows_add_payment_info_for_review_when_override_enabled(self):
         payload = _build_setup_intent_payload(
@@ -3475,9 +3513,10 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
         subscription = SimpleNamespace(
             id="sub_user_current",
-            default_payment_method_id="pm_setup_current",
-            stripe_data={"default_payment_method": "pm_setup_current"},
+            default_payment_method_id="pm_setup_old",
+            stripe_data={"default_payment_method": "pm_setup_old"},
         )
+        updated_subscription = {"id": "sub_user_current", "default_payment_method": "pm_setup_current"}
         StripeCheckoutContext.objects.create(
             stripe_customer_id="cus_setup_user",
             stripe_checkout_session_id="cs_trial_review",
@@ -3509,7 +3548,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                         return_value={"consent": True},
                     ), \
                     patch("pages.signals.get_active_subscription", return_value=subscription), \
-                    patch("pages.signals.stripe.Subscription.modify") as mock_modify, \
+                    patch("pages.signals.stripe.Subscription.modify", return_value=updated_subscription) as mock_modify, \
                     patch("pages.signals.sync_subscription_after_direct_update") as mock_sync, \
                     patch("pages.signals.capi") as mock_capi:
 
@@ -3521,8 +3560,13 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             mock_capi.call_args.kwargs["properties"]["event_id"],
             "startup-sub-review",
         )
-        mock_modify.assert_not_called()
-        mock_sync.assert_not_called()
+        mock_modify.assert_called_once_with(
+            "sub_user_current",
+            default_payment_method="pm_setup_current",
+            idempotency_key="setup-intent-default-payment-method-seti_user_review-sub_user_current",
+            api_key="sk_test",
+        )
+        mock_sync.assert_called_once_with(updated_subscription)
 
 
 @tag("batch_pages")
