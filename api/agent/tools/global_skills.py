@@ -217,7 +217,7 @@ def enable_global_skills(
             already_enabled.append(skill.name)
             continue
         if skill.name in existing_names:
-            conflicts.append(skill.name)
+            already_enabled.append(skill.name)
             continue
         prepared_tools, preparation_error = _prepare_bundled_custom_tools(agent, skill)
         if preparation_error:

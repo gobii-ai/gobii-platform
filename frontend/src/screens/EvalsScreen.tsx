@@ -41,7 +41,8 @@ export function EvalsScreen() {
   const [selectedGlobalSkillId, setSelectedGlobalSkillId] = useState<string>('')
   const [globalSkillTaskPrompt, setGlobalSkillTaskPrompt] = useState<string>('')
   const [runTypeFilter, setRunTypeFilter] = useState<'all' | EvalSuiteRun['run_type']>('all')
-  const [runCount, setRunCount] = useState<number>(3)
+  const [suiteRunCount, setSuiteRunCount] = useState<number>(3)
+  const [skillEvalRunCount, setSkillEvalRunCount] = useState<number>(1)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
   const [launchingGlobalSkillEval, setLaunchingGlobalSkillEval] = useState(false)
@@ -155,7 +156,7 @@ export function EvalsScreen() {
       await createSuiteRuns({
         suite_slugs,
         agent_strategy: 'ephemeral_per_scenario',
-        n_runs: clampRunCount(runCount),
+        n_runs: clampRunCount(suiteRunCount),
         llm_routing_profile_id: selectedProfileId,
       })
       await loadSuiteRuns()
@@ -175,7 +176,7 @@ export function EvalsScreen() {
       await createGlobalSkillEvalRun({
         global_skill_id: selectedGlobalSkill.id,
         task_prompt: globalSkillTaskPrompt.trim(),
-        n_runs: clampRunCount(runCount),
+        n_runs: clampRunCount(skillEvalRunCount),
         llm_routing_profile_id: selectedProfileId,
       })
       await loadSuiteRuns()
@@ -240,19 +241,19 @@ export function EvalsScreen() {
               <button
                 type="button"
                 className="w-6 h-6 flex items-center justify-center rounded bg-white text-slate-600 shadow-sm hover:text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                onClick={() => setRunCount((prev) => clampRunCount(prev - 1))}
-                disabled={runCount <= 1}
+                onClick={() => setSuiteRunCount((prev) => clampRunCount(prev - 1))}
+                disabled={suiteRunCount <= 1}
               >
                 <Minus className="w-3 h-3" strokeWidth={3} />
               </button>
               <div className="w-6 text-center text-sm font-bold text-slate-700 tabular-nums">
-                {runCount}
+                {suiteRunCount}
               </div>
               <button
                 type="button"
                 className="w-6 h-6 flex items-center justify-center rounded bg-white text-slate-600 shadow-sm hover:text-blue-600 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                onClick={() => setRunCount((prev) => clampRunCount(prev + 1))}
-                disabled={runCount >= 10}
+                onClick={() => setSuiteRunCount((prev) => clampRunCount(prev + 1))}
+                disabled={suiteRunCount >= 10}
               >
                 <Plus className="w-3 h-3" strokeWidth={3} />
               </button>
@@ -394,6 +395,28 @@ export function EvalsScreen() {
             <div className="flex flex-wrap items-center gap-3">
               <div className="inline-flex items-center rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
                 Judge rubric: built-in {rubricVersion}
+              </div>
+              <div className="flex items-center gap-1.5 rounded-lg bg-white px-2 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200">
+                <span className="px-1 text-slate-500 uppercase tracking-wider">Runs</span>
+                <button
+                  type="button"
+                  className="flex h-6 w-6 items-center justify-center rounded bg-slate-100 text-slate-600 shadow-sm hover:text-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
+                  onClick={() => setSkillEvalRunCount((prev) => clampRunCount(prev - 1))}
+                  disabled={skillEvalRunCount <= 1}
+                >
+                  <Minus className="h-3 w-3" strokeWidth={3} />
+                </button>
+                <div className="w-6 text-center text-sm font-bold tabular-nums text-slate-800">
+                  {skillEvalRunCount}
+                </div>
+                <button
+                  type="button"
+                  className="flex h-6 w-6 items-center justify-center rounded bg-slate-100 text-slate-600 shadow-sm hover:text-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
+                  onClick={() => setSkillEvalRunCount((prev) => clampRunCount(prev + 1))}
+                  disabled={skillEvalRunCount >= 10}
+                >
+                  <Plus className="h-3 w-3" strokeWidth={3} />
+                </button>
               </div>
               <button
                 type="button"

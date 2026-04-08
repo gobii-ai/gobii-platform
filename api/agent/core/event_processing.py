@@ -1229,6 +1229,16 @@ def _get_tool_call_arguments(call: Any) -> Any:
     return arguments
 
 
+def _parse_tool_call_params(raw_args: Any) -> tuple[Any, Any]:
+    """Parse tool-call arguments without altering escape sequences in string values."""
+    if isinstance(raw_args, dict):
+        return json.dumps(raw_args), raw_args
+    raw_args = raw_args or ""
+    if raw_args == "":
+        return raw_args, {}
+    return raw_args, json.loads(raw_args)
+
+
 def _substitute_variables_in_params(params: Any) -> Any:
     """Recursively substitute $[var] placeholders in tool parameters.
 
@@ -1602,13 +1612,7 @@ def _prepare_tool_batch(
             all_calls_sleep = False
             try:
                 raw_args = _get_tool_call_arguments(call)
-                if isinstance(raw_args, dict):
-                    tool_params = raw_args
-                    raw_args = json.dumps(raw_args)
-                else:
-                    raw_args = raw_args or ""
-                    tool_params = json.loads(raw_args)
-                tool_params = _normalize_tool_params_unicode_escapes(tool_params)
+                raw_args, tool_params = _parse_tool_call_params(raw_args)
             except Exception:
                 preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
                 logger.warning(

@@ -184,6 +184,13 @@ class MCPServerConfigAdminForm(forms.ModelForm):
             obj.save()
             self.save_m2m()
         return obj
+
+
+class GlobalAgentSkillImportForm(forms.Form):
+    json_file = forms.FileField(
+        label="Skill JSON file",
+        help_text="Upload a JSON file exported from Global Skills admin.",
+    )
 import phonenumbers
 from django.utils import timezone
 from decimal import Decimal

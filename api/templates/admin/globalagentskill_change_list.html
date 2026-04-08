@@ -1,0 +1,11 @@
+{% extends "admin/change_list.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+  {{ block.super }}
+  <li>
+    <a href="{% url 'admin:api_globalagentskill_import_json' %}" class="addlink">
+      {% trans "Import Skill JSON" %}
+    </a>
+  </li>
+{% endblock %}

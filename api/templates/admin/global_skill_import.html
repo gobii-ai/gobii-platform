@@ -1,0 +1,34 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{% url 'admin:api_globalagentskill_changelist' %}">{% trans 'Global agent skills' %}</a>
+    &rsaquo; {% trans "Import Skill JSON" %}
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>{% trans "Import Global Skill JSON" %}</h1>
+  <p>{% trans "Upload a previously exported skill JSON file to create or replace a global skill and its bundled custom tools." %}</p>
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      {{ form.non_field_errors }}
+      <div class="form-row">
+        {{ form.json_file.errors }}
+        <label for="{{ form.json_file.id_for_label }}"><strong>{{ form.json_file.label }}</strong></label>
+        {{ form.json_file }}
+        {% if form.json_file.help_text %}
+          <p class="help">{{ form.json_file.help_text }}</p>
+        {% endif %}
+      </div>
+    </fieldset>
+    <div class="submit-row">
+      <a class="button" href="{% url 'admin:api_globalagentskill_changelist' %}">{% trans "Cancel" %}</a>
+      <button type="submit" class="button default">{% trans "Import Skill JSON" %}</button>
+    </div>
+  </form>
+{% endblock %}

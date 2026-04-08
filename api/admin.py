@@ -38,6 +38,7 @@ from .admin_forms import (
     AgentEmailAccountForm,
     StripeConfigForm,
     MCPServerConfigAdminForm,
+    GlobalAgentSkillImportForm,
 )
 from .models import (
     ApiKey, UserQuota, UserFlags, UserReferral, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
@@ -72,7 +73,8 @@ from django.contrib.auth.admin import UserAdmin
 from django.urls import NoReverseMatch, reverse, path
 from django.utils.html import format_html
 from django.utils import timezone
-from django.http import HttpResponseRedirect, FileResponse, StreamingHttpResponse
+from django.utils.text import get_valid_filename
+from django.http import HttpResponse, HttpResponseRedirect, FileResponse, StreamingHttpResponse
 from django.template.response import TemplateResponse
 from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
@@ -81,6 +83,11 @@ from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
 from .tasks.sms_tasks import sync_twilio_numbers, send_test_sms
 from .services.sms_number_inventory import retire_sms_number
+from .services.global_skill_json import (
+    import_global_skill_from_payload,
+    parse_global_skill_json_bytes,
+    serialize_global_skill_to_json_bytes,
+)
 from config import settings
 from constants.plans import PlanNamesChoices
 
@@ -3536,6 +3543,8 @@ class PersistentAgentSkillAdmin(admin.ModelAdmin):
 
 @admin.register(GlobalAgentSkill)
 class GlobalAgentSkillAdmin(admin.ModelAdmin):
+    change_list_template = "admin/globalagentskill_change_list.html"
+    change_form_template = "admin/globalagentskill_change_form.html"
     list_display = ("name", "is_active", "updated_at", "created_at")
     list_filter = ("is_active", "created_at", "updated_at")
     search_fields = ("name", "description", "instructions")
@@ -3543,6 +3552,37 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
     ordering = ("name",)
     fields = ("name", "description", "tools", "secrets", "instructions", "is_active", "created_at", "updated_at")
     inlines = (GlobalAgentSkillCustomToolInline,)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "import-json/",
+                self.admin_site.admin_view(self.import_json_view),
+                name="api_globalagentskill_import_json",
+            ),
+            path(
+                "<uuid:pk>/export-json/",
+                self.admin_site.admin_view(self.export_json_view),
+                name="api_globalagentskill_export_json",
+            ),
+        ]
+        return custom_urls + urls
+
+    def _add_import_form_errors(self, form, exc: ValidationError):
+        message_dict = getattr(exc, "message_dict", None)
+        if message_dict:
+            for field, errors in message_dict.items():
+                target_field = "json_file" if field == "__all__" else field
+                for error in errors:
+                    if target_field in form.fields:
+                        form.add_error(target_field, error)
+                    else:
+                        form.add_error(None, f"{target_field}: {error}")
+            return
+
+        for error in exc.messages:
+            form.add_error(None, error)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -3577,6 +3617,94 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
                 skill=skill,
                 source=AnalyticsSource.WEB,
             )
+
+    def import_json_view(self, request):
+        changelist_url = reverse("admin:api_globalagentskill_changelist")
+
+        if not (self.has_add_permission(request) or self.has_change_permission(request)):
+            self.message_user(request, "You do not have permission to import global skills.", level=messages.ERROR)
+            return HttpResponseRedirect(changelist_url)
+
+        form = GlobalAgentSkillImportForm(request.POST or None, request.FILES or None)
+        context = dict(self.admin_site.each_context(request))
+        context.update(
+            {
+                "opts": self.model._meta,
+                "title": "Import Global Skill JSON",
+                "form": form,
+                "has_change_permission": self.has_change_permission(request),
+            }
+        )
+
+        if request.method == "POST" and form.is_valid():
+            upload = form.cleaned_data["json_file"]
+            try:
+                payload = parse_global_skill_json_bytes(upload.read())
+            except ValidationError as exc:
+                self._add_import_form_errors(form, exc)
+            else:
+                skill_name = str(payload.get("name") or "").strip()
+                existing_skill = (
+                    GlobalAgentSkill.objects.only("pk")
+                    .filter(name=skill_name)
+                    .first()
+                    if skill_name
+                    else None
+                )
+
+                if existing_skill is None and not self.has_add_permission(request):
+                    form.add_error(None, "You do not have permission to create global skills.")
+                elif existing_skill is not None and not self.has_change_permission(request, existing_skill):
+                    form.add_error(None, "You do not have permission to update existing global skills.")
+                else:
+                    try:
+                        skill, created = import_global_skill_from_payload(payload)
+                    except ValidationError as exc:
+                        self._add_import_form_errors(form, exc)
+                    else:
+                        track_global_agent_skill_event(
+                            user_id=getattr(request.user, "id", None),
+                            event=(
+                                AnalyticsEvent.GLOBAL_AGENT_SKILL_CREATED
+                                if created
+                                else AnalyticsEvent.GLOBAL_AGENT_SKILL_UPDATED
+                            ),
+                            skill=skill,
+                            source=AnalyticsSource.WEB,
+                        )
+                        self.message_user(
+                            request,
+                            (
+                                f"Imported global skill '{skill.name}'."
+                                if created
+                                else f"Updated global skill '{skill.name}' from JSON."
+                            ),
+                            level=messages.SUCCESS,
+                        )
+                        return HttpResponseRedirect(reverse("admin:api_globalagentskill_change", args=[skill.pk]))
+
+        return TemplateResponse(request, "admin/global_skill_import.html", context)
+
+    def export_json_view(self, request, pk, *args, **kwargs):
+        skill = self.get_object(request, str(pk))
+        if not skill:
+            self.message_user(request, "Global skill not found.", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_globalagentskill_changelist"))
+        if not self.has_view_or_change_permission(request, skill):
+            self.message_user(request, "You do not have permission to export this global skill.", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_globalagentskill_changelist"))
+
+        try:
+            payload = serialize_global_skill_to_json_bytes(skill)
+        except ValidationError as exc:
+            message = "; ".join(exc.messages) if exc.messages else str(exc)
+            self.message_user(request, f"Unable to export global skill JSON: {message}", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_globalagentskill_change", args=[skill.pk]))
+
+        filename = get_valid_filename(skill.name) or "global-skill"
+        response = HttpResponse(payload, content_type="application/json")
+        response["Content-Disposition"] = f'attachment; filename="{filename}.json"'
+        return response
 
 
 @admin.register(PersistentAgentCommsEndpoint)

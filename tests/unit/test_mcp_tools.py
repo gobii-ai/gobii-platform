@@ -1971,7 +1971,7 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
-    def test_search_tools_global_skill_conflict_does_not_merge_histories(
+    def test_search_tools_global_skill_same_name_is_reported_as_already_enabled(
         self,
         mock_get_config,
         mock_get_manager,
@@ -2020,7 +2020,8 @@ class MCPToolFunctionsTests(TestCase):
 
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["skills"]["enabled"], [])
-        self.assertEqual(result["skills"]["conflicts"], ["ops-report"])
+        self.assertEqual(result["skills"]["already_enabled"], ["ops-report"])
+        self.assertEqual(result["skills"]["conflicts"], [])
         self.assertFalse(PersistentAgentSkill.objects.filter(agent=self.agent, global_skill=skill).exists())
         mock_track_event.assert_not_called()
         mock_enable_tools.assert_not_called()
