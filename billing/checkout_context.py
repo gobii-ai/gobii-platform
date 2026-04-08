@@ -107,9 +107,7 @@ def bind_setup_intent_checkout_context(
 
     created_at = _coerce_datetime(setup_intent_created_at)
     if created_at is not None:
-        filtered_qs = candidate_qs.filter(candidate_created_at__lte=created_at)
-        if filtered_qs.exists():
-            candidate_qs = filtered_qs
+        candidate_qs = candidate_qs.filter(candidate_created_at__lte=created_at)
 
     with transaction.atomic():
         context = (
