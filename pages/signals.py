@@ -43,6 +43,7 @@ import stripe
 
 from billing.addons import AddonEntitlementService
 from billing.checkout_metadata import (
+    STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
@@ -1064,6 +1065,37 @@ def _emit_add_payment_info_for_setup_intent(
         properties=marketing_properties,
         request=None,
         context=marketing_context,
+    )
+
+
+def _emit_add_payment_info_for_completed_checkout_session(
+    *,
+    payload: Mapping[str, Any],
+    customer_id: str | None,
+    stripe_key: str,
+) -> None:
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    if metadata.get("flow_type") != STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE:
+        return
+
+    owner, owner_type, _organization_billing, resolved_customer_id = _resolve_setup_intent_owner(
+        payload,
+        customer_id=customer_id,
+    )
+    if not owner:
+        logger.info(
+            "Unable to resolve owner for checkout session %s (customer=%s); skipping purchase AddPaymentInfo",
+            payload.get("id"),
+            customer_id,
+        )
+        return
+
+    _emit_add_payment_info_for_setup_intent(
+        owner=owner,
+        owner_type=owner_type,
+        customer_id=resolved_customer_id,
+        payload=payload,
+        stripe_key=stripe_key,
     )
 
 
@@ -2237,7 +2269,7 @@ def handle_user_logged_out(sender, request, user, **kwargs):
 
 @djstripe_receiver(["checkout.session.completed", "checkout.session.expired"])
 def handle_checkout_session_event(event, **kwargs):
-    """Clear transient customer checkout metadata once the session reaches a terminal state."""
+    """Emit purchase AddPaymentInfo and clear transient checkout metadata at terminal session states."""
     payload = _coerce_metadata_dict(getattr(event, "data", {}).get("object"))
     if payload.get("object") != "checkout.session":
         return
@@ -2263,6 +2295,19 @@ def handle_checkout_session_event(event, **kwargs):
     expected_event_id = str(metadata.get("gobii_event_id") or "").strip()
     if not customer_id or not expected_event_id:
         return
+
+    if getattr(event, "type", "") == "checkout.session.completed":
+        try:
+            _emit_add_payment_info_for_completed_checkout_session(
+                payload=payload,
+                customer_id=customer_id,
+                stripe_key=stripe_key,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to enqueue AddPaymentInfo for checkout session %s",
+                payload.get("id"),
+            )
 
     try:
         _clear_customer_checkout_context_if_matches(

@@ -626,6 +626,13 @@ def _build_setup_intent_payload(
 
 @tag("batch_pages")
 class CheckoutSessionSignalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="checkout-session-user",
+            email="checkout-session@example.com",
+            password="pw",
+        )
+
     @patch("pages.signals.stripe.Customer.modify")
     @patch("pages.signals.stripe.Customer.retrieve")
     @patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test")
@@ -707,6 +714,106 @@ class CheckoutSessionSignalTests(TestCase):
 
         mock_customer_retrieve.assert_called_once_with("cus_trial_expired", api_key="sk_test")
         mock_customer_modify.assert_not_called()
+
+    def test_checkout_session_completed_emits_add_payment_info_for_purchase_flow(self):
+        payload = {
+            "object": "checkout.session",
+            "id": "cs_purchase_complete",
+            "customer": "cus_purchase_complete",
+            "mode": "subscription",
+            "payment_method_types": ["card"],
+            "metadata": {
+                "gobii_event_id": "startup-sub-purchase",
+                "flow_type": "purchase",
+                "plan": PlanNames.STARTUP,
+                "checkout_source_url": "https://www.gobii.ai/pricing",
+            },
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="checkout.session.completed",
+            event_id="evt_checkout_purchase_complete",
+        )
+        customer_payload = {
+            "metadata": {
+                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "startup-sub-purchase",
+                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "purchase",
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY: PlanNames.STARTUP,
+                STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY: "Pro",
+                STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY: "120.0",
+                STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY: "USD",
+                STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY: "https://www.gobii.ai/pricing",
+            }
+        }
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._resolve_setup_intent_owner",
+                return_value=(self.user, "user", None, "cus_purchase_complete"),
+            ), \
+            patch("pages.signals.stripe.Customer.retrieve", return_value=customer_payload), \
+            patch("pages.signals._build_marketing_context_from_user", return_value={"consent": True}), \
+            patch("pages.signals._clear_customer_checkout_context_if_matches", return_value=True) as mock_clear, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_checkout_session_event(event)
+
+        mock_capi.assert_called_once_with(
+            user=self.user,
+            event_name="AddPaymentInfo",
+            properties={
+                "event_id": "startup-sub-purchase",
+                "plan": PlanNames.STARTUP,
+                "plan_label": "Pro",
+                "flow_type": "purchase",
+                "value": 120.0,
+                "currency": "USD",
+                "payment_method_type": "card",
+            },
+            request=None,
+            context={
+                "consent": True,
+                "page": {"url": "https://www.gobii.ai/pricing"},
+            },
+        )
+        mock_clear.assert_called_once_with(
+            customer_id="cus_purchase_complete",
+            expected_event_id="startup-sub-purchase",
+        )
+
+    def test_checkout_session_completed_does_not_emit_add_payment_info_for_trial_flow(self):
+        payload = {
+            "object": "checkout.session",
+            "id": "cs_trial_complete",
+            "customer": "cus_trial_complete",
+            "mode": "subscription",
+            "payment_method_types": ["card"],
+            "metadata": {
+                "gobii_event_id": "startup-sub-trial",
+                "flow_type": "trial",
+            },
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="checkout.session.completed",
+            event_id="evt_checkout_trial_complete",
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals._resolve_setup_intent_owner") as mock_resolve_owner, \
+            patch("pages.signals._clear_customer_checkout_context_if_matches", return_value=True) as mock_clear, \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_checkout_session_event(event)
+
+        mock_resolve_owner.assert_not_called()
+        mock_capi.assert_not_called()
+        mock_clear.assert_called_once_with(
+            customer_id="cus_trial_complete",
+            expected_event_id="startup-sub-trial",
+        )
 
 
 @tag("batch_pages")
