@@ -12,13 +12,17 @@ from typing import Any
 from unittest.mock import patch, MagicMock, AsyncMock, PropertyMock
 from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from api.models import (
+    AgentFsNode,
     PersistentAgent,
     BrowserUseAgent,
     ProxyServer,
     GlobalAgentSkill,
+    GlobalAgentSkillCustomTool,
+    PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
     PersistentAgentSkill,
     MCPServerConfig,
@@ -60,6 +64,16 @@ from api.services.prompt_settings import invalidate_prompt_settings_cache
 from api.services.tool_settings import invalidate_tool_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
 from util.analytics import AnalyticsEvent
+
+
+def _valid_custom_tool_source() -> bytes:
+    return (
+        b"from _gobii_ctx import main\n\n"
+        b"def run(params, ctx):\n"
+        b"    return {'ok': True}\n\n"
+        b"if __name__ == '__main__':\n"
+        b"    main(run)\n"
+    )
 
 
 def _default_fake_run_completion(*args, **kwargs):
@@ -1505,8 +1519,10 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent', return_value=True)
     def test_search_tools_includes_global_skill_prompt_section(
         self,
+        _mock_sandbox_enabled,
         mock_get_config,
         mock_get_manager,
         mock_run_completion,
@@ -1538,12 +1554,75 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result["status"], "success")
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertIn("Available global skills:", user_message)
-        self.assertIn("- ops-report: Generate an ops report | tools: sqlite_batch", user_message)
+        self.assertIn("- ops-report: Generate an ops report | tools: sqlite_batch | secrets: (none)", user_message)
         tool_defs = mock_run_completion.call_args.kwargs["tools"]
         self.assertEqual(
             [tool_def["function"]["name"] for tool_def in tool_defs],
             ["enable_tools", "enable_global_skills"],
         )
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent', return_value=True)
+    def test_search_tools_lists_bundled_custom_tools_and_required_secrets(
+        self,
+        _mock_sandbox_enabled,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate an ops report",
+            tools=["sqlite_batch"],
+            secrets=[
+                {
+                    "name": "Ops API token",
+                    "key": "OPS_API_TOKEN",
+                    "secret_type": "env_var",
+                    "description": "Used by the bundled sync tool.",
+                }
+            ],
+            instructions="Collect the latest operational metrics and summarize them.",
+        )
+        GlobalAgentSkillCustomTool.objects.create(
+            global_skill=skill,
+            name="Ops Sync",
+            tool_name="ops_sync",
+            description="Sync metrics into SQLite.",
+            source_file=SimpleUploadedFile(
+                "ops_sync.py",
+                _valid_custom_tool_source(),
+                content_type="text/x-python",
+            ),
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=300,
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "anything")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("custom_ops_sync", user_message)
+        self.assertIn("Ops API token [env_var:OPS_API_TOKEN]", user_message)
         mock_enable_tools.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')
@@ -1592,8 +1671,10 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent', return_value=True)
     def test_search_tools_enables_global_skill_and_imports_agent_copy(
         self,
+        _mock_sandbox_enabled,
         mock_get_config,
         mock_get_manager,
         mock_run_completion,
@@ -1603,7 +1684,28 @@ class MCPToolFunctionsTests(TestCase):
             name="ops-report",
             description="Generate an ops report",
             tools=["sqlite_batch"],
+            secrets=[
+                {
+                    "name": "Ops API token",
+                    "key": "OPS_API_TOKEN",
+                    "secret_type": "env_var",
+                    "description": "Used by the bundled sync tool.",
+                }
+            ],
             instructions="Collect the latest operational metrics and summarize them.",
+        )
+        GlobalAgentSkillCustomTool.objects.create(
+            global_skill=skill,
+            name="Ops Sync",
+            tool_name="ops_sync",
+            description="Sync metrics into SQLite.",
+            source_file=SimpleUploadedFile(
+                "ops_sync.py",
+                _valid_custom_tool_source(),
+                content_type="text/x-python",
+            ),
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=300,
         )
         mock_manager = MagicMock()
         mock_manager._initialized = True
@@ -1638,8 +1740,27 @@ class MCPToolFunctionsTests(TestCase):
         imported = PersistentAgentSkill.objects.get(agent=self.agent, name="ops-report")
         self.assertEqual(imported.global_skill, skill)
         self.assertEqual(imported.version, 1)
-        mock_track_event.assert_called_once()
-        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(imported.tools, ["sqlite_batch", "custom_ops_sync"])
+        self.assertEqual(
+            imported.secrets,
+            [
+                {
+                    "name": "Ops API token",
+                    "key": "OPS_API_TOKEN",
+                    "secret_type": "env_var",
+                    "description": "Used by the bundled sync tool.",
+                }
+            ],
+        )
+        custom_tool = PersistentAgentCustomTool.objects.get(agent=self.agent, tool_name="custom_ops_sync")
+        self.assertEqual(custom_tool.source_path, "/tools/global_skills/ops-report/custom_ops_sync.py")
+        self.assertTrue(AgentFsNode.objects.filter(path=custom_tool.source_path).exists())
+        matching_calls = [
+            call for call in mock_track_event.call_args_list
+            if call.kwargs.get("event") == AnalyticsEvent.PERSISTENT_AGENT_GLOBAL_SKILL_IMPORTED
+        ]
+        self.assertEqual(len(matching_calls), 1)
+        kwargs = matching_calls[0].kwargs
         self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_GLOBAL_SKILL_IMPORTED)
         self.assertEqual(kwargs["user_id"], self.agent.user_id)
         self.assertEqual(kwargs["properties"]["agent_id"], str(self.agent.id))
@@ -1648,8 +1769,81 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(kwargs["properties"]["skill_origin"], "global_import")
         self.assertEqual(kwargs["properties"]["global_skill_id"], str(skill.id))
         self.assertEqual(kwargs["properties"]["global_skill_name"], "ops-report")
-        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch"])
+        self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch", "custom_ops_sync"])
         self.assertFalse(kwargs["properties"]["organization"])
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent', return_value=True)
+    def test_search_tools_global_skill_bundled_custom_tool_conflict_does_not_overwrite_local_tool(
+        self,
+        _mock_sandbox_enabled,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = GlobalAgentSkill.objects.create(
+            name="ops-report",
+            description="Generate an ops report",
+            tools=["sqlite_batch"],
+            instructions="Collect the latest operational metrics and summarize them.",
+        )
+        GlobalAgentSkillCustomTool.objects.create(
+            global_skill=skill,
+            name="Ops Sync",
+            tool_name="ops_sync",
+            description="Sync metrics into SQLite.",
+            source_file=SimpleUploadedFile(
+                "ops_sync.py",
+                _valid_custom_tool_source(),
+                content_type="text/x-python",
+            ),
+            parameters_schema={"type": "object", "properties": {}},
+            timeout_seconds=300,
+        )
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Local Ops Sync",
+            tool_name="custom_ops_sync",
+            description="Local tool that should win.",
+            source_path="/tools/local_ops_sync.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the ops report skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_global_skills",
+                    "arguments": json.dumps({"skill_names": ["ops-report"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "generate recurring ops reports")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["skills"]["enabled"], [])
+        self.assertEqual(result["skills"]["conflicts"], ["ops-report"])
+        self.assertFalse(PersistentAgentSkill.objects.filter(agent=self.agent, global_skill=skill).exists())
+        local_tool = PersistentAgentCustomTool.objects.get(agent=self.agent, tool_name="custom_ops_sync")
+        self.assertEqual(local_tool.source_path, "/tools/local_ops_sync.py")
         mock_enable_tools.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')

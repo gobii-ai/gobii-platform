@@ -5,6 +5,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase, tag
 from django.utils import timezone
 
@@ -22,8 +23,10 @@ from api.agent.tools.tool_manager import (
 from api.models import (
     BrowserUseAgent,
     GlobalAgentSkill,
+    GlobalSecret,
     PersistentAgent,
     PersistentAgentEnabledTool,
+    PersistentAgentSecret,
     PersistentAgentSkill,
     UserQuota,
 )
@@ -392,6 +395,168 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("Skill: skill-1 (v1)", block)
         self.assertNotIn("Skill: skill-0 (v1)", block)
         self.assertIn("instructions for skill 3", block)
+
+    def test_prompt_block_reports_required_pending_and_missing_secrets(self):
+        global_secret = GlobalSecret(
+            user=self.user,
+            secret_type=GlobalSecret.SecretType.ENV_VAR,
+            domain_pattern=GlobalSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="Available token",
+            key="AVAILABLE_TOKEN",
+        )
+        global_secret.set_value("available-token")
+        global_secret.save()
+
+        PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
+            domain_pattern=PersistentAgentSecret.ENV_VAR_DOMAIN_SENTINEL,
+            name="Pending token",
+            key="PENDING_TOKEN",
+            requested=True,
+            encrypted_value=b"",
+        )
+
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="skill-with-secrets",
+            description="Secret-heavy workflow",
+            version=1,
+            tools=["sqlite_batch"],
+            secrets=[
+                {
+                    "name": "Available token",
+                    "key": "AVAILABLE_TOKEN",
+                    "secret_type": "env_var",
+                    "description": "Already configured globally.",
+                },
+                {
+                    "name": "Pending token",
+                    "key": "PENDING_TOKEN",
+                    "secret_type": "env_var",
+                    "description": "Already requested.",
+                },
+                {
+                    "name": "Missing credential",
+                    "key": "portal_password",
+                    "secret_type": "credential",
+                    "domain_pattern": "*.example.com",
+                    "description": "Still missing.",
+                },
+            ],
+            instructions="Use the secrets when available.",
+        )
+
+        block = format_recent_skills_for_prompt(self.agent, limit=1)
+
+        self.assertIn("Required secrets:", block)
+        self.assertIn("Available token [env_var:AVAILABLE_TOKEN]", block)
+        self.assertIn("Pending token [env_var:PENDING_TOKEN]", block)
+        self.assertIn("Missing credential [credential:portal_password @ https://*.example.com]", block)
+        self.assertIn("Pending secrets: Pending token [env_var:PENDING_TOKEN]", block)
+        self.assertIn("Missing secrets: Missing credential [credential:portal_password @ https://*.example.com]", block)
+        self.assertIn("secure_credentials_request", block)
+        self.assertIn("Follow up with the user", block)
+
+    @patch("api.agent.tools.tool_manager.get_available_tool_ids", return_value={"sqlite_batch"})
+    def test_sqlite_skill_update_persists_secret_changes(self, _mock_available_tools):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="daily-brief",
+            description="Daily digest workflow",
+            version=1,
+            tools=["sqlite_batch"],
+            secrets=[
+                {
+                    "name": "Old token",
+                    "key": "OLD_TOKEN",
+                    "secret_type": "env_var",
+                    "description": "Old env key.",
+                }
+            ],
+            instructions="Collect updates and summarize.",
+        )
+
+        baseline = seed_sqlite_skills(self.agent)
+        self.assertIsNotNone(baseline)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                """
+                UPDATE "__agent_skills"
+                SET secrets = ?
+                WHERE name = ? AND version = 1;
+                """,
+                (
+                    '[{"name":"Renamed token","key":"RENAMED_TOKEN","secret_type":"env_var","description":"Updated env key."}]',
+                    "daily-brief",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = apply_sqlite_skill_updates(self.agent, baseline)
+
+        self.assertFalse(result.errors)
+        self.assertTrue(result.changed)
+        latest = (
+            PersistentAgentSkill.objects.filter(agent=self.agent, name="daily-brief")
+            .order_by("-version")
+            .first()
+        )
+        self.assertIsNotNone(latest)
+        assert latest is not None
+        self.assertEqual(latest.version, 2)
+        self.assertEqual(
+            latest.secrets,
+            [
+                {
+                    "name": "Renamed token",
+                    "key": "RENAMED_TOKEN",
+                    "secret_type": "env_var",
+                    "description": "Updated env key.",
+                }
+            ],
+        )
+
+    def test_skill_secret_validation_rejects_invalid_requirements(self):
+        invalid_env_var_skill = GlobalAgentSkill(
+            name="invalid-env",
+            description="Invalid env var secret",
+            tools=["sqlite_batch"],
+            secrets=[
+                {
+                    "name": "Bad env",
+                    "key": "bad-key",
+                    "secret_type": "env_var",
+                    "description": "Invalid env key.",
+                }
+            ],
+            instructions="Do not use.",
+        )
+        with self.assertRaises(ValidationError):
+            invalid_env_var_skill.full_clean()
+
+        missing_domain_skill = PersistentAgentSkill(
+            agent=self.agent,
+            name="missing-domain",
+            description="Missing credential domain",
+            version=1,
+            tools=["sqlite_batch"],
+            secrets=[
+                {
+                    "name": "Portal password",
+                    "key": "portal_password",
+                    "secret_type": "credential",
+                    "description": "Missing domain.",
+                }
+            ],
+            instructions="Do not use.",
+        )
+        with self.assertRaises(ValidationError):
+            missing_domain_skill.full_clean()
 
 
 @tag("batch_agent_tools")

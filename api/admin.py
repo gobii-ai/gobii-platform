@@ -45,7 +45,7 @@ from .models import (
     PersistentAgent, PersistentAgentTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSkill, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
-    GlobalAgentSkill,
+    GlobalAgentSkill, GlobalAgentSkillCustomTool,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
@@ -2521,10 +2521,20 @@ class PersistentAgentSkillInline(admin.TabularInline):
 
     model = PersistentAgentSkill
     extra = 0
-    fields = ("name", "global_skill", "version", "description", "tools", "updated_at")
+    fields = ("name", "global_skill", "version", "description", "tools", "secrets", "updated_at")
     readonly_fields = ("global_skill", "updated_at")
     ordering = ("name", "-version", "-updated_at")
     show_change_link = True
+
+
+class GlobalAgentSkillCustomToolInline(admin.TabularInline):
+    """Inline for bundled custom tools stored with a global skill."""
+
+    model = GlobalAgentSkillCustomTool
+    extra = 0
+    fields = ("name", "tool_name", "description", "parameters_schema", "timeout_seconds", "source_file", "updated_at")
+    readonly_fields = ("updated_at",)
+    ordering = ("tool_name",)
 
 
 class CommsAllowlistEntryInline(admin.TabularInline):
@@ -3531,6 +3541,8 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
     search_fields = ("name", "description", "instructions")
     readonly_fields = ("created_at", "updated_at")
     ordering = ("name",)
+    fields = ("name", "description", "tools", "secrets", "instructions", "is_active", "created_at", "updated_at")
+    inlines = (GlobalAgentSkillCustomToolInline,)
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
@@ -3547,13 +3559,13 @@ class GlobalAgentSkillAdmin(admin.ModelAdmin):
 
     def delete_model(self, request, obj):
         skill = obj
-        super().delete_model(request, obj)
         track_global_agent_skill_event(
             user_id=getattr(request.user, "id", None),
             event=AnalyticsEvent.GLOBAL_AGENT_SKILL_DELETED,
             skill=skill,
             source=AnalyticsSource.WEB,
         )
+        super().delete_model(request, obj)
 
     def delete_queryset(self, request, queryset):
         skills = list(queryset)

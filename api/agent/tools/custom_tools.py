@@ -280,6 +280,10 @@ def _normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
     return display_name[:128], f"{CUSTOM_TOOL_PREFIX}{slug}"
 
 
+def normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
+    return _normalize_custom_tool_name(raw_name)
+
+
 def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
     if isinstance(value, str):
         try:
@@ -305,6 +309,12 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
     elif not isinstance(required, list) or not all(isinstance(item, str) for item in required):
         return None
     return schema
+
+
+def normalize_custom_tool_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
+    return _normalize_parameters_schema(value)
+
+
 def _normalize_timeout_seconds(value: Any) -> Optional[int]:
     if value in (None, ""):
         return DEFAULT_CUSTOM_TOOL_TIMEOUT_SECONDS
@@ -317,6 +327,10 @@ def _normalize_timeout_seconds(value: Any) -> Optional[int]:
     if timeout <= 0 or timeout > MAX_CUSTOM_TOOL_TIMEOUT_SECONDS:
         return None
     return timeout
+
+
+def normalize_custom_tool_timeout_seconds(value: Any) -> Optional[int]:
+    return _normalize_timeout_seconds(value)
 
 
 def _get_filespace_file(agent: PersistentAgent, source_path: str) -> Optional[AgentFsNode]:
@@ -457,6 +471,10 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     if not has_main_guard:
         return "Custom tool source must end with `if __name__ == '__main__': main(run)`."
     return None
+
+
+def validate_custom_tool_source_code(source_text: str, source_path: str) -> Optional[str]:
+    return _validate_source_code(source_text, source_path)
 
 
 def _encode_env_json(value: Dict[str, Any]) -> str:

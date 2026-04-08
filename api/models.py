@@ -7436,6 +7436,15 @@ class PersistentAgentCustomTool(models.Model):
         return f"CustomTool<{self.tool_name}> for {getattr(self.agent, 'name', 'agent')}"
 
 
+def global_skill_custom_tool_upload_to(instance, filename: str) -> str:
+    safe_filename = get_valid_filename(os.path.basename(filename or "")) or "tool.py"
+    if not os.path.splitext(safe_filename)[1]:
+        safe_filename = f"{safe_filename}.py"
+    safe_tool_name = get_valid_filename(instance.tool_name or instance.name or "custom_tool") or "custom_tool"
+    skill_id = str(instance.global_skill_id or "unassigned")
+    return f"global_skill_custom_tools/{skill_id}/{safe_tool_name}/{safe_filename}"
+
+
 class GlobalAgentSkill(models.Model):
     """Platform-managed reusable skill template available to all compatible agents."""
 
@@ -7443,6 +7452,7 @@ class GlobalAgentSkill(models.Model):
     name = models.CharField(max_length=128, unique=True)
     description = models.TextField(blank=True)
     tools = models.JSONField(default=list, blank=True)
+    secrets = models.JSONField(default=list, blank=True)
     instructions = models.TextField()
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -7455,8 +7465,148 @@ class GlobalAgentSkill(models.Model):
         ]
         ordering = ["name"]
 
+    def clean(self):
+        super().clean()
+        from api.agent.tools.skill_utils import (
+            normalize_skill_secret_requirements,
+            normalize_skill_tool_ids,
+        )
+
+        if self.name:
+            self.name = self.name.strip()
+        self.description = (self.description or "").strip()
+        self.tools = list(normalize_skill_tool_ids(self.tools))
+        try:
+            self.secrets = list(normalize_skill_secret_requirements(self.secrets))
+        except ValueError as exc:
+            raise ValidationError({"secrets": str(exc)}) from exc
+
+    def get_bundled_custom_tool_ids(self) -> tuple[str, ...]:
+        if not self.pk:
+            return ()
+        from api.agent.tools.custom_tools import normalize_custom_tool_name
+
+        tools = list(self.bundled_custom_tools.all())
+        tools.sort(key=lambda tool: tool.tool_name)
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for tool in tools:
+            normalized_name = normalize_custom_tool_name(tool.tool_name or tool.name)
+            if normalized_name is None:
+                continue
+            tool_name = normalized_name[1]
+            if tool_name in seen:
+                continue
+            seen.add(tool_name)
+            normalized.append(tool_name)
+        return tuple(normalized)
+
+    def get_effective_tool_ids(self) -> tuple[str, ...]:
+        from api.agent.tools.skill_utils import build_skill_tool_ids
+
+        return build_skill_tool_ids(
+            self.tools,
+            extra_tool_ids=self.get_bundled_custom_tool_ids(),
+        )
+
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"GlobalSkill<{self.name}>"
+
+
+class GlobalAgentSkillCustomTool(models.Model):
+    """Bundled custom tool source stored with a global skill template."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    global_skill = models.ForeignKey(
+        "GlobalAgentSkill",
+        on_delete=models.CASCADE,
+        related_name="bundled_custom_tools",
+    )
+    name = models.CharField(max_length=128)
+    tool_name = models.CharField(max_length=128)
+    description = models.TextField()
+    source_file = models.FileField(upload_to=global_skill_custom_tool_upload_to, max_length=512)
+    parameters_schema = models.JSONField(default=dict, blank=True)
+    timeout_seconds = models.PositiveIntegerField(default=300)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["global_skill", "tool_name"],
+                name="unique_global_skill_custom_tool_name",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["global_skill", "-updated_at"], name="gsk_tool_skill_upd_idx"),
+        ]
+        ordering = ["tool_name"]
+
+    def clean(self):
+        super().clean()
+        from api.agent.tools.custom_tools import (
+            MAX_CUSTOM_TOOL_SOURCE_BYTES,
+            normalize_custom_tool_name,
+            normalize_custom_tool_parameters_schema,
+            normalize_custom_tool_timeout_seconds,
+            validate_custom_tool_source_code,
+        )
+
+        self.name = (self.name or "").strip()
+        self.description = (self.description or "").strip()
+
+        normalized_name = normalize_custom_tool_name(self.tool_name or self.name)
+        if normalized_name is None:
+            raise ValidationError({"tool_name": "tool_name must identify a valid custom tool."})
+        if not self.name:
+            self.name = normalized_name[0]
+        self.tool_name = normalized_name[1]
+
+        parameters_schema = normalize_custom_tool_parameters_schema(self.parameters_schema)
+        if parameters_schema is None:
+            raise ValidationError(
+                {"parameters_schema": "parameters_schema must be a JSON object schema with `type: object`."}
+            )
+        self.parameters_schema = parameters_schema
+
+        timeout_seconds = normalize_custom_tool_timeout_seconds(self.timeout_seconds)
+        if timeout_seconds is None:
+            raise ValidationError({"timeout_seconds": "timeout_seconds must be between 1 and 900."})
+        self.timeout_seconds = timeout_seconds
+
+        if not self.source_file:
+            raise ValidationError({"source_file": "source_file is required."})
+
+        try:
+            self.source_file.open("rb")
+            raw = self.source_file.read(MAX_CUSTOM_TOOL_SOURCE_BYTES + 1)
+        except OSError as exc:
+            raise ValidationError({"source_file": f"Failed to read source_file: {exc}"}) from exc
+        finally:
+            try:
+                self.source_file.seek(0)
+            except (AttributeError, OSError, ValueError):
+                pass
+
+        if len(raw) > MAX_CUSTOM_TOOL_SOURCE_BYTES:
+            raise ValidationError(
+                {"source_file": f"Custom tool source must be {MAX_CUSTOM_TOOL_SOURCE_BYTES} bytes or smaller."}
+            )
+        try:
+            source_text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValidationError({"source_file": "Custom tool source must be UTF-8 text."}) from exc
+
+        validation_error = validate_custom_tool_source_code(
+            source_text,
+            self.source_file.name or f"{self.tool_name}.py",
+        )
+        if validation_error:
+            raise ValidationError({"source_file": validation_error})
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"GlobalSkillCustomTool<{self.tool_name}> for {self.global_skill.name}"
 
 
 class PersistentAgentSkill(models.Model):
@@ -7479,6 +7629,7 @@ class PersistentAgentSkill(models.Model):
     description = models.TextField(blank=True)
     version = models.PositiveIntegerField()
     tools = models.JSONField(default=list, blank=True)
+    secrets = models.JSONField(default=list, blank=True)
     instructions = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -7495,6 +7646,22 @@ class PersistentAgentSkill(models.Model):
             models.Index(fields=["agent", "-updated_at"], name="pa_skill_agent_updated_idx"),
         ]
         ordering = ["name", "-version", "-updated_at"]
+
+    def clean(self):
+        super().clean()
+        from api.agent.tools.skill_utils import (
+            normalize_skill_secret_requirements,
+            normalize_skill_tool_ids,
+        )
+
+        if self.name:
+            self.name = self.name.strip()
+        self.description = (self.description or "").strip()
+        self.tools = list(normalize_skill_tool_ids(self.tools))
+        try:
+            self.secrets = list(normalize_skill_secret_requirements(self.secrets))
+        except ValueError as exc:
+            raise ValidationError({"secrets": str(exc)}) from exc
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"Skill<{self.name}@v{self.version}> for {getattr(self.agent, 'name', 'agent')}"

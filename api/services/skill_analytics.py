@@ -74,7 +74,10 @@ def track_agent_skill_event(
 
 
 def _build_global_skill_properties(skill: GlobalAgentSkill) -> dict[str, object]:
-    tool_ids = list(normalize_skill_tool_ids(skill.tools))
+    if hasattr(skill, "get_effective_tool_ids"):
+        tool_ids = list(skill.get_effective_tool_ids())
+    else:
+        tool_ids = list(normalize_skill_tool_ids(skill.tools))
     return {
         "global_skill_id": str(skill.id),
         "global_skill_name": skill.name,

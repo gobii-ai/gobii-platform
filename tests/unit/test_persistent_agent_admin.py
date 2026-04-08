@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory
 from django.test import Client, TestCase, tag
 from django.urls import reverse
@@ -12,6 +13,7 @@ from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
     GlobalAgentSkill,
+    GlobalAgentSkillCustomTool,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
@@ -137,6 +139,7 @@ class PersistentAgentAdminTests(TestCase):
         self.assertIn(PersistentAgentSkill, inline_models)
         skill_inline = next(inline for inline in model_admin.inlines if inline.model is PersistentAgentSkill)
         self.assertIn("global_skill", skill_inline.fields)
+        self.assertIn("secrets", skill_inline.fields)
         self.assertIn("global_skill", skill_inline.readonly_fields)
 
     def test_persistent_agent_skill_admin_is_registered(self):
@@ -147,6 +150,43 @@ class PersistentAgentAdminTests(TestCase):
         admin_view = admin.site._registry[GlobalAgentSkill]
         self.assertIn("is_active", admin_view.list_display)
         self.assertIn("instructions", admin_view.search_fields)
+        self.assertIn("secrets", admin_view.fields)
+        inline_models = {inline.model for inline in admin_view.inlines}
+        self.assertIn(GlobalAgentSkillCustomTool, inline_models)
+
+    def test_global_agent_skill_custom_tool_clean_keeps_uploaded_file_readable(self):
+        skill = GlobalAgentSkill.objects.create(
+            name="weather-check",
+            description="Check weather",
+            tools=["weather"],
+            instructions="Check weather and summarize it.",
+        )
+        source_bytes = (
+            b"from _gobii_ctx import main\n\n"
+            b"def run(params, ctx):\n"
+            b"    return {'ok': True}\n\n"
+            b"if __name__ == '__main__':\n"
+            b"    main(run)\n"
+        )
+        upload = SimpleUploadedFile(
+            "weather_tool.py",
+            source_bytes,
+            content_type="text/x-python",
+        )
+        tool = GlobalAgentSkillCustomTool(
+            global_skill=skill,
+            name="Weather Tool",
+            tool_name="weather_tool",
+            description="Reads weather data.",
+            source_file=upload,
+            parameters_schema={"type": "object", "properties": {}, "required": []},
+            timeout_seconds=120,
+        )
+
+        tool.full_clean()
+
+        self.assertFalse(upload.closed)
+        self.assertEqual(b"".join(upload.chunks()), source_bytes)
 
     @patch("util.analytics.Analytics.track_event")
     def test_global_agent_skill_admin_create_emits_analytics(self, mock_track_event):
