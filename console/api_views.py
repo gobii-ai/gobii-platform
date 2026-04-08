@@ -7107,7 +7107,7 @@ class GlobalSkillEvalRunCreateAPIView(SystemAdminAPIView):
 
         n_runs_raw = body.get("n_runs") if "n_runs" in body else body.get("runs")
         if n_runs_raw is None:
-            requested_runs = 3
+            requested_runs = 1
         else:
             try:
                 requested_runs = int(n_runs_raw)

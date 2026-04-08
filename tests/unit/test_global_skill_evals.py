@@ -180,6 +180,48 @@ class GlobalSkillEvalAPITests(TestCase):
         self.assertEqual(detail_payload["display_name"], "check-weather")
         self.assertEqual(detail_payload["skill_eval"]["rubric_version"], "v1")
 
+    @patch("console.api_views.gc_eval_runs_task.delay")
+    @patch("console.api_views.run_eval_task.delay")
+    def test_create_skill_eval_defaults_to_single_run(self, mock_run_eval_delay, mock_gc_delay):
+        skill = GlobalAgentSkill.objects.create(
+            name="check-weather",
+            description="Check weather with a dedicated skill.",
+            tools=["weather"],
+            secrets=[
+                {
+                    "name": "Weather API key",
+                    "key": "WEATHER_API_KEY",
+                    "secret_type": "env_var",
+                    "description": "API key",
+                },
+            ],
+            instructions="Use this skill for weather tasks.",
+            is_active=True,
+        )
+        self._create_global_secret(
+            name="Weather API key",
+            key="WEATHER_API_KEY",
+            secret_type=GlobalSecret.SecretType.ENV_VAR,
+            domain_pattern=GlobalSecret.ENV_VAR_DOMAIN_SENTINEL,
+            value="secret-value",
+        )
+
+        response = self.client.post(
+            reverse("console_evals_global_skill_runs_create"),
+            data={
+                "global_skill_id": str(skill.id),
+                "task_prompt": "Get the current weather in Boston and summarize it.",
+            },
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        suite_run = EvalSuiteRun.objects.get()
+        self.assertEqual(suite_run.requested_runs, 1)
+        self.assertEqual(EvalRun.objects.count(), 1)
+        mock_run_eval_delay.assert_called_once()
+        mock_gc_delay.assert_called_once()
+
     def test_create_skill_eval_rejects_missing_task_prompt(self):
         skill = GlobalAgentSkill.objects.create(
             name="check-weather",
