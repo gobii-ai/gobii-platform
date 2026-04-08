@@ -81,6 +81,22 @@ ADD_PAYMENT_INFO_CAPI_SEND_REVIEW = "add_payment_info_capi_send_review"
 # when the AddPaymentInfo CAPI trial-eligibility policy is enabled.
 ADD_PAYMENT_INFO_CAPI_SEND_NO_TRIAL = "add_payment_info_capi_send_no_trial"
 
+# Controls whether CompleteRegistration CAPI is skipped when
+# UserTrialEligibility is not eligible.
+COMPLETE_REGISTRATION_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT = (
+    "complete_registration_capi_trial_eligibility_enforcement"
+)
+
+# Controls whether CompleteRegistration CAPI is still sent for stored "review"
+# decisions when the CompleteRegistration CAPI trial-eligibility policy is
+# enabled.
+COMPLETE_REGISTRATION_CAPI_SEND_REVIEW = "complete_registration_capi_send_review"
+
+# Controls whether CompleteRegistration CAPI is still sent for stored
+# "no_trial" decisions when the CompleteRegistration CAPI trial-eligibility
+# policy is enabled.
+COMPLETE_REGISTRATION_CAPI_SEND_NO_TRIAL = "complete_registration_capi_send_no_trial"
+
 # Controls whether "review" trial eligibility decisions are treated as trial-allowed
 # while still blocking explicit "no_trial" decisions.
 USER_TRIAL_REVIEW_ALLOWS_TRIAL = "user_trial_review_allows_trial"

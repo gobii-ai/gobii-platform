@@ -2169,7 +2169,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                 user=user,
                 event_name='CompleteRegistration',
                 properties=marketing_properties,
-                request=None,
+                request=request,
                 context=marketing_context,
             )
 

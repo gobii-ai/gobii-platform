@@ -241,6 +241,7 @@ class UserSignedUpSignalTests(TestCase):
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "CompleteRegistration")
+        self.assertIs(capi_kwargs["request"], request)
         props = capi_kwargs["properties"]
         self.assertEqual(props["value"], 12.5)
         self.assertEqual(props["currency"], "USD")

@@ -5,6 +5,9 @@ from constants.feature_flags import (
     ADD_PAYMENT_INFO_CAPI_SEND_NO_TRIAL,
     ADD_PAYMENT_INFO_CAPI_SEND_REVIEW,
     ADD_PAYMENT_INFO_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT,
+    COMPLETE_REGISTRATION_CAPI_SEND_NO_TRIAL,
+    COMPLETE_REGISTRATION_CAPI_SEND_REVIEW,
+    COMPLETE_REGISTRATION_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT,
     START_TRIAL_CAPI_SEND_NO_TRIAL,
     START_TRIAL_CAPI_SEND_REVIEW,
     USER_TRIAL_ELIGIBILITY_ENFORCEMENT,
@@ -134,4 +137,49 @@ def is_add_payment_info_capi_decision_allowed(
         return is_add_payment_info_capi_send_review_enabled(request)
     if decision == UserTrialEligibilityAutoStatusChoices.NO_TRIAL:
         return is_add_payment_info_capi_send_no_trial_enabled(request)
+    return True
+
+
+def is_complete_registration_capi_trial_eligibility_enforcement_enabled(
+    request: HttpRequest | None = None,
+) -> bool:
+    """Default to disabled so CompleteRegistration CAPI behavior only changes after rollout."""
+    return is_waffle_flag_active(
+        COMPLETE_REGISTRATION_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT,
+        request,
+        default=False,
+    )
+
+
+def is_complete_registration_capi_send_review_enabled(
+    request: HttpRequest | None = None,
+) -> bool:
+    return is_waffle_flag_active(
+        COMPLETE_REGISTRATION_CAPI_SEND_REVIEW,
+        request,
+        default=False,
+    )
+
+
+def is_complete_registration_capi_send_no_trial_enabled(
+    request: HttpRequest | None = None,
+) -> bool:
+    return is_waffle_flag_active(
+        COMPLETE_REGISTRATION_CAPI_SEND_NO_TRIAL,
+        request,
+        default=False,
+    )
+
+
+def is_complete_registration_capi_decision_allowed(
+    decision: str,
+    *,
+    request: HttpRequest | None = None,
+) -> bool:
+    if decision == UserTrialEligibilityAutoStatusChoices.ELIGIBLE:
+        return True
+    if decision == UserTrialEligibilityAutoStatusChoices.REVIEW:
+        return is_complete_registration_capi_send_review_enabled(request)
+    if decision == UserTrialEligibilityAutoStatusChoices.NO_TRIAL:
+        return is_complete_registration_capi_send_no_trial_enabled(request)
     return True

@@ -7,6 +7,7 @@ from django.test import SimpleTestCase, TestCase, override_settings, tag
 from waffle.testutils import override_flag
 
 from marketing_events.api import (
+    _complete_registration_eligibility_snapshot,
     _start_trial_eligibility_snapshot,
     capi,
     capi_delay_subscription_guarded,
@@ -95,8 +96,10 @@ class MarketingEventsApiTests(SimpleTestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_START_TRIAL_DELAY_MINUTES=60)
     @patch("marketing_events.api.enqueue_marketing_event.delay")
     @patch("marketing_events.api.enqueue_start_trial_marketing_event.apply_async")
+    @patch("marketing_events.api._complete_registration_eligibility_snapshot", return_value=None)
     def test_capi_non_start_trial_uses_existing_enqueue_path(
         self,
+        _mock_complete_registration_snapshot,
         mock_start_trial_apply_async,
         mock_enqueue_delay,
     ):
@@ -627,6 +630,107 @@ class StartTrialEligibilitySnapshotApiTests(TestCase):
         )
 
         snapshot = _start_trial_eligibility_snapshot(self.user, request=request)
+
+        mock_enforcement_enabled.assert_called_once_with(request)
+        mock_decision_allowed.assert_called_once_with(
+            UserTrialEligibilityAutoStatusChoices.REVIEW,
+            request=request,
+        )
+        self.assertFalse(snapshot["send_allowed"])
+
+
+@tag("batch_marketing_events")
+class CompleteRegistrationEligibilitySnapshotApiTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.user = get_user_model().objects.create_user(
+            username="complete-registration-capi@example.com",
+            email="complete-registration-capi@example.com",
+            password="pw",
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.api.enqueue_marketing_event.delay")
+    def test_capi_complete_registration_snapshots_no_trial_as_disallowed(
+        self,
+        mock_enqueue_delay,
+    ):
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+            reason_codes=["fpjs_history_match"],
+        )
+
+        with override_flag("complete_registration_capi_trial_eligibility_enforcement", active=True):
+            capi(
+                user=self.user,
+                event_name="CompleteRegistration",
+                properties={"event_id": "evt-signup"},
+                request=None,
+                context={"consent": True},
+            )
+
+        payload = mock_enqueue_delay.call_args.args[0]
+        self.assertEqual(
+            payload["complete_registration_eligibility"]["decision"],
+            UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+        )
+        self.assertFalse(payload["complete_registration_eligibility"]["send_allowed"])
+        self.assertEqual(
+            payload["complete_registration_eligibility"]["reason_codes"],
+            ["fpjs_history_match"],
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.api.enqueue_marketing_event.delay")
+    def test_capi_complete_registration_snapshots_review_as_allowed_when_override_enabled(
+        self,
+        mock_enqueue_delay,
+    ):
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.REVIEW,
+            reason_codes=["multi_signal_history_match"],
+        )
+
+        with override_flag("complete_registration_capi_trial_eligibility_enforcement", active=True):
+            with override_flag("complete_registration_capi_send_review", active=True):
+                capi(
+                    user=self.user,
+                    event_name="CompleteRegistration",
+                    properties={"event_id": "evt-signup"},
+                    request=None,
+                    context={"consent": True},
+                )
+
+        payload = mock_enqueue_delay.call_args.args[0]
+        self.assertEqual(
+            payload["complete_registration_eligibility"]["decision"],
+            UserTrialEligibilityAutoStatusChoices.REVIEW,
+        )
+        self.assertTrue(payload["complete_registration_eligibility"]["send_allowed"])
+
+    @patch(
+        "marketing_events.api.is_complete_registration_capi_trial_eligibility_enforcement_enabled",
+        return_value=True,
+    )
+    @patch(
+        "marketing_events.api.is_complete_registration_capi_decision_allowed",
+        return_value=False,
+    )
+    def test_complete_registration_eligibility_snapshot_passes_request_to_flag_checks(
+        self,
+        mock_decision_allowed,
+        mock_enforcement_enabled,
+    ):
+        request = self.factory.get("/signup")
+        UserTrialEligibility.objects.create(
+            user=self.user,
+            auto_status=UserTrialEligibilityAutoStatusChoices.REVIEW,
+            reason_codes=["multi_signal_history_match"],
+        )
+
+        snapshot = _complete_registration_eligibility_snapshot(self.user, request=request)
 
         mock_enforcement_enabled.assert_called_once_with(request)
         mock_decision_allowed.assert_called_once_with(

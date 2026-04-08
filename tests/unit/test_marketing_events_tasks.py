@@ -367,3 +367,97 @@ class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
 
         mock_dispatch.assert_called_once_with(payload)
         mock_track.assert_not_called()
+
+
+@tag("batch_marketing_events")
+class CompleteRegistrationEligibilityEnforcementTaskTests(SimpleTestCase):
+    def setUp(self):
+        self.payload = {
+            "event_name": "CompleteRegistration",
+            "properties": {
+                "event_time": 1_900_000_000,
+                "event_id": "evt-complete-registration",
+            },
+            "user": {"id": "42", "email": "signup-capi-user@example.com"},
+            "context": {},
+        }
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks.get_providers")
+    def test_enqueue_complete_registration_skips_all_providers_when_snapshot_disallows(
+        self,
+        mock_get_providers,
+        mock_track,
+    ):
+        meta_provider = MagicMock()
+        meta_provider.__class__.__name__ = "MetaCAPI"
+        meta_provider.send.return_value = {}
+
+        ga_provider = MagicMock()
+        ga_provider.__class__.__name__ = "GoogleAnalyticsMP"
+        ga_provider.send.return_value = {}
+
+        mock_get_providers.return_value = [meta_provider, ga_provider]
+        payload = self.payload | {
+            "complete_registration_eligibility": {
+                "decision": UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+                "manual_action": "inherit",
+                "reason_codes": ["fpjs_history_match"],
+                "send_allowed": False,
+                "decision_source": "stored_trial_eligibility_snapshot",
+            }
+        }
+
+        enqueue_marketing_event(payload)
+
+        meta_provider.send.assert_not_called()
+        ga_provider.send.assert_not_called()
+
+        mock_track.assert_called_once()
+        track_kwargs = mock_track.call_args.kwargs
+        self.assertEqual(track_kwargs["user_id"], 42)
+        self.assertEqual(track_kwargs["event"], AnalyticsEvent.CAPI_EVENT_SKIPPED)
+        self.assertEqual(track_kwargs["properties"]["event_name"], "CompleteRegistration")
+        self.assertEqual(track_kwargs["properties"]["reason"], "trial_eligibility_disallowed")
+        self.assertEqual(
+            track_kwargs["properties"]["trial_eligibility_decision"],
+            UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
+        )
+        self.assertFalse(track_kwargs["properties"]["trial_eligibility_policy_send_allowed"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks.get_providers")
+    def test_enqueue_complete_registration_dispatches_all_providers_when_snapshot_allows(
+        self,
+        mock_get_providers,
+        mock_track,
+    ):
+        meta_provider = MagicMock()
+        meta_provider.__class__.__name__ = "MetaCAPI"
+        meta_provider.send.return_value = {}
+
+        ga_provider = MagicMock()
+        ga_provider.__class__.__name__ = "GoogleAnalyticsMP"
+        ga_provider.send.return_value = {}
+
+        mock_get_providers.return_value = [meta_provider, ga_provider]
+        payload = self.payload | {
+            "complete_registration_eligibility": {
+                "decision": UserTrialEligibilityAutoStatusChoices.REVIEW,
+                "manual_action": "inherit",
+                "reason_codes": ["multi_signal_history_match"],
+                "send_allowed": True,
+                "decision_source": "stored_trial_eligibility_snapshot",
+            }
+        }
+
+        enqueue_marketing_event(payload)
+
+        meta_provider.send.assert_called_once()
+        ga_provider.send.assert_called_once()
+        self.assertEqual(mock_track.call_count, 2)
+        self.assertTrue(
+            all(call.kwargs["event"] == AnalyticsEvent.CAPI_EVENT_SENT for call in mock_track.call_args_list)
+        )
