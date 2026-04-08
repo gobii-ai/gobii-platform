@@ -66,6 +66,7 @@ const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: st
   { id: 'embedding', label: 'Embedding' },
   { id: 'file_handler', label: 'File handler' },
   { id: 'image_generation', label: 'Image generation' },
+  { id: 'video_generation', label: 'Video generation' },
 ]
 
 const reasoningEffortOptions = [
@@ -181,6 +182,7 @@ type ProviderEndpointCard = {
   supports_temperature?: boolean
   supports_vision?: boolean
   supports_image_to_image?: boolean
+  supports_image_to_video?: boolean
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
   allow_implied_send?: boolean
@@ -206,8 +208,9 @@ type ProviderCardData = {
 }
 
 type ImageGenerationUseCase = 'create_image' | 'avatar'
-type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation'
-type ProfileTierScope = Exclude<TierScope, 'file_handler' | 'image_generation'>
+type VideoGenerationUseCase = 'create_video'
+type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation' | 'video_generation'
+type ProfileTierScope = Exclude<TierScope, 'file_handler' | 'image_generation' | 'video_generation'>
 type EndpointKind = Extract<llmApi.ProviderEndpoint['type'], TierScope>
 type TierEndpointWeightPayload = { weight: number }
 type TierEndpointCreatePayload = { endpoint_id: string; weight: number }
@@ -218,6 +221,7 @@ const ENDPOINT_KIND_MAP: Record<llmApi.ProviderEndpoint['type'], EndpointKind> =
   embedding: 'embedding',
   file_handler: 'file_handler',
   image_generation: 'image_generation',
+  video_generation: 'video_generation',
 }
 
 const endpointKindFromType = (type: llmApi.ProviderEndpoint['type']): EndpointKind => ENDPOINT_KIND_MAP[type]
@@ -228,6 +232,7 @@ const updateTierEndpointByScope: Record<TierScope, (tierEndpointId: string, payl
   embedding: (tierEndpointId, payload) => llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload),
   file_handler: (tierEndpointId, payload) => llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload),
   image_generation: (tierEndpointId, payload) => llmApi.updateImageGenerationTierEndpoint(tierEndpointId, payload),
+  video_generation: (tierEndpointId, payload) => llmApi.updateVideoGenerationTierEndpoint(tierEndpointId, payload),
 }
 
 const deleteTierEndpointByScope: Record<TierScope, (tierEndpointId: string) => Promise<unknown>> = {
@@ -236,6 +241,7 @@ const deleteTierEndpointByScope: Record<TierScope, (tierEndpointId: string) => P
   embedding: (tierEndpointId) => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId),
   file_handler: (tierEndpointId) => llmApi.deleteFileHandlerTierEndpoint(tierEndpointId),
   image_generation: (tierEndpointId) => llmApi.deleteImageGenerationTierEndpoint(tierEndpointId),
+  video_generation: (tierEndpointId) => llmApi.deleteVideoGenerationTierEndpoint(tierEndpointId),
 }
 
 const addTierEndpointByScope: Record<TierScope, (
@@ -256,6 +262,7 @@ const addTierEndpointByScope: Record<TierScope, (
   embedding: async (tierId, payload) => llmApi.addEmbeddingTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
   file_handler: async (tierId, payload) => llmApi.addFileHandlerTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
   image_generation: async (tierId, payload) => llmApi.addImageGenerationTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+  video_generation: async (tierId, payload) => llmApi.addVideoGenerationTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
 }
 
 const updateProfileTierEndpointByScope: Record<ProfileTierScope, (tierEndpointId: string, payload: TierEndpointWeightPayload) => Promise<unknown>> = {
@@ -369,6 +376,7 @@ type EndpointFormValues = {
   allowImpliedSend?: boolean
   supportsVision?: boolean
   supportsImageToImage?: boolean
+  supportsImageToVideo?: boolean
   supportsReasoning?: boolean
   reasoningEffort?: string | null
   openrouterPreset?: string
@@ -379,6 +387,22 @@ const actionKey = (...parts: Array<string | number | null | undefined>) => parts
 
 type ImageGenerationSectionConfig = {
   useCase: ImageGenerationUseCase
+  title: string
+  description: string
+  emptyText: string
+  addSuccessMessage: string
+  addLabel: string
+  addContext: string
+  removeMessage: string
+  removeSuccessMessage: string
+  removeLabel: string
+  moveUpLabel: string
+  moveDownLabel: string
+  moveContext: string
+}
+
+type VideoGenerationSectionConfig = {
+  useCase: VideoGenerationUseCase
   title: string
   description: string
   emptyText: string
@@ -423,6 +447,24 @@ const IMAGE_GENERATION_SECTION_CONFIG: Record<ImageGenerationUseCase, ImageGener
     moveUpLabel: 'Moving avatar image tier up…',
     moveDownLabel: 'Moving avatar image tier down…',
     moveContext: 'Avatar image tiers',
+  },
+}
+
+const VIDEO_GENERATION_SECTION_CONFIG: Record<VideoGenerationUseCase, VideoGenerationSectionConfig> = {
+  create_video: {
+    useCase: 'create_video',
+    title: 'Create video tiers',
+    description: 'Fallback order for video generation models used by the create_video tool.',
+    emptyText: 'No create_video tiers configured.',
+    addSuccessMessage: 'Video generation tier added',
+    addLabel: 'Creating video generation tier…',
+    addContext: 'Video generation tiers',
+    removeMessage: 'Any weighting rules tied to this tier will be lost.',
+    removeSuccessMessage: 'Video generation tier removed',
+    removeLabel: 'Removing video generation tier…',
+    moveUpLabel: 'Moving video generation tier up…',
+    moveDownLabel: 'Moving video generation tier down…',
+    moveContext: 'Video generation tiers',
   },
 }
 
@@ -731,6 +773,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       supports_temperature: endpoint.supports_temperature ?? true,
       supports_vision: endpoint.supports_vision,
       supports_image_to_image: endpoint.supports_image_to_image,
+      supports_image_to_video: endpoint.supports_image_to_video,
       supports_tool_choice: endpoint.supports_tool_choice,
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
       allow_implied_send: endpoint.allow_implied_send,
@@ -892,6 +935,30 @@ function mapImageGenerationTiers(
   return mapped
 }
 
+function mapVideoGenerationTiers(
+  tiers: llmApi.VideoGenerationTier[] = [],
+  useCase: VideoGenerationUseCase,
+): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'video_generation',
+      intelligenceTier: null,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, () => `video_generation:${useCase}`)
+  return mapped
+}
+
 // Profile-based mapping functions
 function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Tier[] {
   const mapped = tiers.map((tier) => {
@@ -961,6 +1028,8 @@ function AddEndpointModal({
         ? choices.file_handler_endpoints
         : scope === 'image_generation'
           ? choices.image_generation_endpoints
+          : scope === 'video_generation'
+            ? choices.video_generation_endpoints
           : choices.persistent_endpoints
   const [selected, setSelected] = useState(endpoints[0]?.id || '')
   const [extractionSelected, setExtractionSelected] = useState<string>('')
@@ -1380,6 +1449,8 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
                       ? 'Edit file handler endpoint'
                       : endpoint.type === 'image_generation'
                         ? 'Edit image generation endpoint'
+                        : endpoint.type === 'video_generation'
+                          ? 'Edit video generation endpoint'
                         : 'Edit embedding endpoint'}
               </h3>
               <button
@@ -1604,6 +1675,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [maxInputTokens, setMaxInputTokens] = useState(endpoint.max_input_tokens?.toString() ?? '')
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
   const [supportsImageToImage, setSupportsImageToImage] = useState(Boolean(endpoint.supports_image_to_image))
+  const [supportsImageToVideo, setSupportsImageToVideo] = useState(Boolean(endpoint.supports_image_to_video))
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
   const [allowImpliedSend, setAllowImpliedSend] = useState(endpoint.allow_implied_send ?? true)
@@ -1626,6 +1698,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       allowImpliedSend,
       supportsVision: supportsVision,
       supportsImageToImage,
+      supportsImageToVideo,
       supportsReasoning,
       reasoningEffort,
       openrouterPreset,
@@ -1638,8 +1711,10 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isEmbedding = endpoint.type === 'embedding'
   const isFileHandler = endpoint.type === 'file_handler'
   const isImageGeneration = endpoint.type === 'image_generation'
+  const isVideoGeneration = endpoint.type === 'video_generation'
   const isPersistent = endpoint.type === 'persistent'
-  const isToolingEndpoint = !isEmbedding && !isFileHandler && !isImageGeneration
+  const isMediaGeneration = isImageGeneration || isVideoGeneration
+  const isToolingEndpoint = !isEmbedding && !isFileHandler && !isMediaGeneration
 
   return (
     <div className="space-y-3">
@@ -1648,7 +1723,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <label className="text-xs text-slate-500">Model identifier</label>
           <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
-        {!isBrowser && !isImageGeneration && (
+        {!isBrowser && !isMediaGeneration && (
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>
             <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
@@ -1683,13 +1758,13 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         )}
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
-        {!isImageGeneration && (
+        {!isMediaGeneration && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Supports temperature
           </label>
         )}
-        {!isImageGeneration && (
+        {!isMediaGeneration && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Vision
@@ -1704,6 +1779,17 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
               className="rounded border-slate-300 text-blue-600 shadow-sm"
             />
             Supports image-to-image
+          </label>
+        )}
+        {isVideoGeneration && (
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={supportsImageToVideo}
+              onChange={(event) => setSupportsImageToVideo(event.target.checked)}
+              className="rounded border-slate-300 text-blue-600 shadow-sm"
+            />
+            Supports image-to-video
           </label>
         )}
         {!isBrowser && isToolingEndpoint && (
@@ -1784,6 +1870,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [maxInputTokens, setMaxInputTokens] = useState('')
   const [supportsVision, setSupportsVision] = useState(false)
   const [supportsImageToImage, setSupportsImageToImage] = useState(false)
+  const [supportsImageToVideo, setSupportsImageToVideo] = useState(false)
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
@@ -1802,6 +1889,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
     embedding: 'Add embedding endpoint',
     file_handler: 'Add file handler endpoint',
     image_generation: 'Add image generation endpoint',
+    video_generation: 'Add video generation endpoint',
   }[type]
 
   const handleSubmit = async () => {
@@ -1817,6 +1905,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         supportsTemperature,
         supportsVision,
         supportsImageToImage,
+        supportsImageToVideo,
         supportsToolChoice: supportsTools,
         useParallelToolCalls: parallelTools,
         allowImpliedSend,
@@ -1886,13 +1975,13 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             )}
           </div>
           <div className="flex flex-wrap gap-4 text-sm">
-            {type !== 'image_generation' && (
+            {type !== 'image_generation' && type !== 'video_generation' && (
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
                 Supports temperature
               </label>
             )}
-            {type !== 'image_generation' && (
+            {type !== 'image_generation' && type !== 'video_generation' && (
               <label className="inline-flex items-center gap-2">
                 <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
                 Vision
@@ -1909,6 +1998,17 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 Supports image-to-image
               </label>
             )}
+            {type === 'video_generation' && (
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={supportsImageToVideo}
+                  onChange={(event) => setSupportsImageToVideo(event.target.checked)}
+                  className="rounded border-slate-300 text-blue-600 shadow-sm"
+                />
+                Supports image-to-video
+              </label>
+            )}
             {type === 'persistent' && (
               <label className="inline-flex items-center gap-2">
                 <input
@@ -1923,7 +2023,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 Reasoning
               </label>
             )}
-            {type !== 'embedding' && type !== 'file_handler' && type !== 'image_generation' && (
+            {type !== 'embedding' && type !== 'file_handler' && type !== 'image_generation' && type !== 'video_generation' && (
               <>
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" checked={supportsTools} onChange={(event) => setSupportsTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -2595,6 +2695,10 @@ export function LlmConfigScreen() {
     () => mapImageGenerationTiers(overviewQuery.data?.image_generations?.avatar_tiers, 'avatar'),
     [overviewQuery.data?.image_generations?.avatar_tiers],
   )
+  const videoGenerationTiers = useMemo(
+    () => mapVideoGenerationTiers(overviewQuery.data?.video_generations?.create_video_tiers, 'create_video'),
+    [overviewQuery.data?.video_generations?.create_video_tiers],
+  )
   const imageGenerationSections = useMemo(
     () => ([
       {
@@ -2608,6 +2712,15 @@ export function LlmConfigScreen() {
     ]),
     [avatarImageGenerationTiers, imageGenerationTiers],
   )
+  const videoGenerationSections = useMemo(
+    () => ([
+      {
+        ...VIDEO_GENERATION_SECTION_CONFIG.create_video,
+        tiers: videoGenerationTiers,
+      },
+    ]),
+    [videoGenerationTiers],
+  )
 
   const browserTierGroups = useMemo(
     () => buildTierGroups(browserTiers, intelligenceTiers),
@@ -2619,6 +2732,7 @@ export function LlmConfigScreen() {
     embedding_endpoints: [],
     file_handler_endpoints: [],
     image_generation_endpoints: [],
+    video_generation_endpoints: [],
   }
 
   useEffect(() => {
@@ -2803,6 +2917,12 @@ export function LlmConfigScreen() {
       payload.api_base = values.api_base || ''
       payload.supports_image_to_image = values.supportsImageToImage ?? false
       payload.enabled = true
+    } else if (type === 'video_generation') {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
+      payload.supports_image_to_video = values.supportsImageToVideo ?? false
+      payload.enabled = true
     } else {
       payload.model = values.model
       payload.litellm_model = values.model
@@ -2854,14 +2974,17 @@ export function LlmConfigScreen() {
       const parsed = parseNumber(values.max_output_tokens)
       payload.max_output_tokens = parsed ?? null
     }
-    if (kind !== 'browser' && kind !== 'image_generation' && values.temperature !== undefined) {
+    if (kind !== 'browser' && kind !== 'image_generation' && kind !== 'video_generation' && values.temperature !== undefined) {
       const parsed = parseNumber(values.temperature)
       payload.temperature_override = parsed ?? null
     }
-    if (kind !== 'image_generation' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
-    if (kind !== 'image_generation' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
+    if (kind !== 'image_generation' && kind !== 'video_generation' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
+    if (kind !== 'image_generation' && kind !== 'video_generation' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (kind === 'image_generation' && values.supportsImageToImage !== undefined) {
       payload.supports_image_to_image = values.supportsImageToImage
+    }
+    if (kind === 'video_generation' && values.supportsImageToVideo !== undefined) {
+      payload.supports_image_to_video = values.supportsImageToVideo
     }
     if (kind === 'persistent' && values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (kind === 'persistent' && values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
@@ -3203,8 +3326,52 @@ export function LlmConfigScreen() {
     })
   }
 
+  const videoGenerationActionKey = (useCase: VideoGenerationUseCase, ...parts: Array<string | number>) =>
+    actionKey('video_generation', useCase, ...parts)
+
+  const handleVideoGenerationTierAdd = (useCase: VideoGenerationUseCase) => {
+    const config = VIDEO_GENERATION_SECTION_CONFIG[useCase]
+    return runMutation(() => llmApi.createVideoGenerationTier({ use_case: useCase }), {
+      successMessage: config.addSuccessMessage,
+      label: config.addLabel,
+      busyKey: videoGenerationActionKey(useCase, 'add'),
+      context: config.addContext,
+    })
+  }
+
+  const handleVideoGenerationTierMove = (
+    useCase: VideoGenerationUseCase,
+    tierId: string,
+    direction: 'up' | 'down',
+  ) => {
+    const config = VIDEO_GENERATION_SECTION_CONFIG[useCase]
+    return runMutation(() => llmApi.updateVideoGenerationTier(tierId, { move: direction }), {
+      label: direction === 'up' ? config.moveUpLabel : config.moveDownLabel,
+      busyKey: videoGenerationActionKey(useCase, tierId, 'move', direction),
+      busyKeys: [videoGenerationActionKey(useCase, tierId, 'move')],
+      context: config.moveContext,
+    })
+  }
+
+  const handleVideoGenerationTierRemove = (useCase: VideoGenerationUseCase, tier: Tier) => {
+    const config = VIDEO_GENERATION_SECTION_CONFIG[useCase]
+    return confirmDestructiveAction({
+      title: `Delete ${config.title.toLowerCase().slice(0, -1)} "${tier.name}"?`,
+      message: config.removeMessage,
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteVideoGenerationTier(tier.id), {
+        successMessage: config.removeSuccessMessage,
+        label: config.removeLabel,
+        busyKey: videoGenerationActionKey(useCase, tier.id, 'remove'),
+        context: tier.name,
+      }),
+    })
+  }
+
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
-    const useProfile = Boolean(selectedProfile && scope !== 'file_handler' && scope !== 'image_generation')
+    const useProfile = Boolean(
+      selectedProfile && scope !== 'file_handler' && scope !== 'image_generation' && scope !== 'video_generation',
+    )
     showModal((onClose) => createPortal(
       <AddEndpointModal
         tier={tier}
@@ -3679,7 +3846,7 @@ export function LlmConfigScreen() {
   // Profile-specific tier endpoint handlers
   const commitProfileTierEndpointWeights = (tier: Tier, scope: TierScope) => {
     if (!selectedProfile) return commitTierEndpointWeights(tier, scope)
-    if (scope === 'file_handler' || scope === 'image_generation') return
+    if (scope === 'file_handler' || scope === 'image_generation' || scope === 'video_generation') return
 
     const key = `${scope}:${tier.id}`
     const staged = stagedWeightsRef.current[key]
@@ -3721,7 +3888,7 @@ export function LlmConfigScreen() {
 
   const handleProfileTierEndpointRemove = (tier: Tier, endpoint: TierEndpoint, scope: TierScope) => {
     if (!selectedProfile) return handleTierEndpointRemove(tier, endpoint, scope)
-    if (scope === 'file_handler' || scope === 'image_generation') return
+    if (scope === 'file_handler' || scope === 'image_generation' || scope === 'video_generation') return
 
     return confirmDestructiveAction({
       title: `Remove "${endpoint.label}" from ${tier.name}?`,
@@ -3749,7 +3916,7 @@ export function LlmConfigScreen() {
     selection: { endpointId: string; extractionEndpointId?: string | null },
   ) => {
     if (!selectedProfile) return submitTierEndpoint(tier, scope, selection)
-    if (scope === 'file_handler' || scope === 'image_generation') return
+    if (scope === 'file_handler' || scope === 'image_generation' || scope === 'video_generation') return
     const { endpointId, extractionEndpointId } = selection
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
@@ -4088,7 +4255,7 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Other model consumers"
-          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, file handling, and image generation.'}
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, file handling, image generation, and video generation.'}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4290,6 +4457,45 @@ export function LlmConfigScreen() {
                       onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'image_generation')}
                       onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'image_generation')}
                       onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'image_generation')}
+                      isActionBusy={isBusy}
+                    />
+                  )
+                })}
+                {section.tiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">{section.emptyText}</p>}
+              </div>
+            ))}
+            {videoGenerationSections.map((section) => (
+              <div key={section.useCase} className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-start gap-3">
+                    <Clock3 className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-semibold text-slate-900/90">{section.title}</h4>
+                      <p className="text-sm text-slate-600">{section.description}</p>
+                    </div>
+                  </div>
+                  <button type="button" className={button.secondary} onClick={() => handleVideoGenerationTierAdd(section.useCase)}>
+                    <PlusCircle className="size-4" /> Add tier
+                  </button>
+                </div>
+                {section.tiers.map((tier, index) => {
+                  const lastIndex = section.tiers.length - 1
+                  return (
+                    <TierCard
+                      key={tier.id}
+                      tier={tier}
+                      pendingWeights={pendingWeights}
+                      scope="video_generation"
+                      canMoveUp={index > 0}
+                      canMoveDown={index < lastIndex}
+                      isDirty={dirtyTierIds.has(`video_generation:${tier.id}`)}
+                      isSaving={savingTierIds.has(`video_generation:${tier.id}`)}
+                      onMove={(direction) => handleVideoGenerationTierMove(section.useCase, tier.id, direction)}
+                      onRemove={(currentTier) => handleVideoGenerationTierRemove(section.useCase, currentTier)}
+                      onAddEndpoint={() => handleTierEndpointAdd(tier, 'video_generation')}
+                      onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'video_generation')}
+                      onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'video_generation')}
+                      onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'video_generation')}
                       isActionBusy={isBusy}
                     />
                   )

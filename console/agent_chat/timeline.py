@@ -643,15 +643,24 @@ def _serialize_thinking(env: ThinkingEnvelope) -> dict:
 
 _FILE_REF_RE = re.compile(r"^\$\[(.+)\]$")
 _INLINE_IMG_SRC_RE = re.compile(r"<img[^>]+src=['\"]([^'\"]+)['\"]", re.IGNORECASE)
+_INLINE_VIDEO_SRC_RE = re.compile(r"<(?:video|source)[^>]+src=['\"]([^'\"]+)['\"]", re.IGNORECASE)
 _MARKDOWN_IMG_RE = re.compile(r"!\[[^\]]*]\(([^)]+)\)")
+_MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*]\(([^)]+)\)")
 
 
-def _resolve_tool_image_candidate(
+def _resolve_tool_preview_candidate(
     tool_call: PersistentAgentToolCall,
     candidate: str | Mapping[str, object] | None,
+    *,
+    allow_data_prefixes: tuple[str, ...] = (),
 ) -> str | None:
     if isinstance(candidate, Mapping):
-        raw_candidate = candidate.get("url") or candidate.get("image_url")
+        raw_candidate = (
+            candidate.get("url")
+            or candidate.get("image_url")
+            or candidate.get("video_url")
+            or candidate.get("download_url")
+        )
         candidate = str(raw_candidate).strip() if raw_candidate is not None else None
     if not isinstance(candidate, str):
         return None
@@ -663,9 +672,17 @@ def _resolve_tool_image_candidate(
     if inline_match:
         normalized = inline_match.group(1).strip()
     else:
-        markdown_match = _MARKDOWN_IMG_RE.search(normalized)
-        if markdown_match:
-            normalized = markdown_match.group(1).strip()
+        inline_video_match = _INLINE_VIDEO_SRC_RE.search(normalized)
+        if inline_video_match:
+            normalized = inline_video_match.group(1).strip()
+        else:
+            markdown_match = _MARKDOWN_IMG_RE.search(normalized)
+            if markdown_match:
+                normalized = markdown_match.group(1).strip()
+            else:
+                markdown_link_match = _MARKDOWN_LINK_RE.search(normalized)
+                if markdown_link_match:
+                    normalized = markdown_link_match.group(1).strip()
 
     match = _FILE_REF_RE.match(normalized)
     file_path = match.group(1).strip() if match else None
@@ -677,18 +694,18 @@ def _resolve_tool_image_candidate(
         query = urlencode({"path": file_path})
         return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
 
-    if normalized.startswith(("http://", "https://", "data:image/")):
+    if normalized.startswith(("http://", "https://", *allow_data_prefixes)):
         return normalized
 
     return None
 
 
-def _extract_tool_image_url(tool_call: PersistentAgentToolCall) -> str | None:
-    """Resolve chart/image tool outputs to an image URL suitable for timeline previews."""
+def _extract_tool_preview_url(tool_call: PersistentAgentToolCall) -> str | None:
+    """Resolve chart/image/video tool outputs to a preview URL suitable for timeline entries."""
     import json as _json
 
     tool_name = (tool_call.tool_name or "").lower()
-    if tool_name not in {"create_chart", "create_image"}:
+    if tool_name not in {"create_chart", "create_image", "create_video"}:
         return None
     if (getattr(tool_call, "status", None) or "complete") != "complete":
         return None
@@ -703,11 +720,20 @@ def _extract_tool_image_url(tool_call: PersistentAgentToolCall) -> str | None:
         return None
     if tool_name == "create_chart":
         candidate_keys = ("file", "chart_url", "image_url", "url", "inline_html", "inline")
+        allow_data_prefixes = ("data:image/",)
+    elif tool_name == "create_video":
+        candidate_keys = ("file", "video_url", "download_url", "url", "inline_html", "inline")
+        allow_data_prefixes = ("data:video/",)
     else:
         candidate_keys = ("file", "image_url", "url", "inline_html", "inline")
+        allow_data_prefixes = ("data:image/",)
 
     for key in candidate_keys:
-        resolved = _resolve_tool_image_candidate(tool_call, result.get(key))
+        resolved = _resolve_tool_preview_candidate(
+            tool_call,
+            result.get(key),
+            allow_data_prefixes=allow_data_prefixes,
+        )
         if resolved:
             return resolved
     return None
@@ -733,13 +759,15 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         else tool_call.result,
         "status": status,
     }
-    preview_image_url = _extract_tool_image_url(tool_call)
-    if preview_image_url:
+    preview_url = _extract_tool_preview_url(tool_call)
+    if preview_url:
         lowered_tool_name = tool_name.lower()
         if lowered_tool_name == "create_chart":
-            entry["chartImageUrl"] = preview_image_url
+            entry["chartImageUrl"] = preview_url
         elif lowered_tool_name == "create_image":
-            entry["createImageUrl"] = preview_image_url
+            entry["createImageUrl"] = preview_url
+        elif lowered_tool_name == "create_video":
+            entry["createVideoUrl"] = preview_url
     return entry
 
 

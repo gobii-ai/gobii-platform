@@ -28,6 +28,7 @@ import {
   BrainCog,
   BarChart3,
   Image as ImageIcon,
+  Video,
   type LucideIcon,
 } from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
@@ -509,6 +510,20 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const filePath = coerceString(parameters?.file_path) || coerceString(parameters?.path)
       const prompt = coerceString(parameters?.prompt)
       const caption = filePath || prompt || 'Image'
+      return { caption: truncate(caption, 56) }
+    },
+  },
+  {
+    name: 'create_video',
+    label: 'Video',
+    icon: Video,
+    iconBgClass: 'bg-rose-100',
+    iconColorClass: 'text-rose-700',
+    detailKind: 'video',
+    derive(_entry, parameters) {
+      const filePath = coerceString(parameters?.file_path) || coerceString(parameters?.path)
+      const prompt = coerceString(parameters?.prompt)
+      const caption = filePath || prompt || 'Video'
       return { caption: truncate(caption, 56) }
     },
   },

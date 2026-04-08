@@ -566,6 +566,46 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(parse_qs(parsed.query).get("path"), ["/exports/generated-image.png"])
 
     @tag("batch_agent_chat")
+    def test_timeline_includes_create_video_preview_url(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Create teaser video",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="create_video",
+            tool_params={
+                "prompt": "A neon city at dusk",
+                "file_path": "/exports/generated-video.mp4",
+            },
+            result=json.dumps(
+                {
+                    "status": "ok",
+                    "file": "$[/exports/generated-video.mp4]",
+                }
+            ),
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        entries = [
+            entry
+            for event in payload.get("events", [])
+            if event.get("kind") == "steps"
+            for entry in event.get("entries", [])
+        ]
+        video_entry = next(entry for entry in entries if entry.get("toolName") == "create_video")
+
+        preview_url = video_entry.get("createVideoUrl")
+        self.assertIsInstance(preview_url, str)
+        parsed = urlparse(preview_url)
+        expected_path = reverse("console_agent_fs_download", kwargs={"agent_id": self.agent.id})
+        self.assertEqual(parsed.path, expected_path)
+        self.assertEqual(parse_qs(parsed.query).get("path"), ["/exports/generated-video.mp4"])
+
+    @tag("batch_agent_chat")
     def test_timeline_has_no_older_when_under_limit(self):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)

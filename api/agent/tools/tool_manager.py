@@ -37,6 +37,11 @@ from .create_image import (
     execute_create_image,
     is_image_generation_available_for_agent,
 )
+from .create_video import (
+    get_create_video_tool,
+    execute_create_video,
+    is_video_generation_available_for_agent,
+)
 from .custom_tools import execute_custom_tool, is_custom_tools_available_for_agent
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
@@ -92,6 +97,7 @@ CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
 CREATE_IMAGE_TOOL_NAME = "create_image"
+CREATE_VIDEO_TOOL_NAME = "create_video"
 PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
@@ -182,6 +188,11 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_create_image_tool,
         "executor": execute_create_image,
         "is_available": is_image_generation_available_for_agent,
+    },
+    CREATE_VIDEO_TOOL_NAME: {
+        "definition": get_create_video_tool,
+        "executor": execute_create_video,
+        "is_available": is_video_generation_available_for_agent,
     },
     PYTHON_EXEC_TOOL_NAME: {
         "definition": get_python_exec_tool,

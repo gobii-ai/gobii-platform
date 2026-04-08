@@ -97,6 +97,8 @@ export function CompletionCard({
         return 'Mini Description Generation'
       case 'image_generation':
         return 'Image Generation'
+      case 'video_generation':
+        return 'Video Generation'
       case 'tool_search':
         return 'Tool Search'
       default:

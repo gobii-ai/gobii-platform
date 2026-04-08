@@ -14,6 +14,9 @@ from api.models import (
     ImageGenerationTierEndpoint,
     LLMProvider,
     PersistentModelEndpoint,
+    VideoGenerationLLMTier,
+    VideoGenerationModelEndpoint,
+    VideoGenerationTierEndpoint,
 )
 from console.llm_serializers import build_llm_overview
 
@@ -286,6 +289,105 @@ class ConsoleLlmAuxModelApiTests(TestCase):
             avatar_tier_id,
         )
         self.assertEqual(move_avatar_resp.status_code, 400, move_avatar_resp.content)
+
+    def test_video_generation_endpoint_and_tier_lifecycle(self):
+        create_resp = self._json_post(
+            "console_llm_video_generation_endpoints",
+            {
+                "provider_id": str(self.provider.id),
+                "key": "video-gen-model",
+                "model": "openai/sora-2",
+                "supports_image_to_video": True,
+            },
+        )
+        self.assertEqual(create_resp.status_code, 200, create_resp.content)
+        endpoint_id = create_resp.json()["endpoint_id"]
+        endpoint = VideoGenerationModelEndpoint.objects.get(id=endpoint_id)
+        self.assertTrue(endpoint.supports_image_to_video)
+
+        patch_resp = self._json_patch(
+            "console_llm_video_generation_endpoint_detail",
+            {
+                "model": "google/veo-3",
+                "low_latency": True,
+                "supports_image_to_video": False,
+                "provider_id": None,
+            },
+            endpoint_id,
+        )
+        self.assertEqual(patch_resp.status_code, 200, patch_resp.content)
+        endpoint = VideoGenerationModelEndpoint.objects.get(id=endpoint_id)
+        self.assertEqual(endpoint.litellm_model, "google/veo-3")
+        self.assertTrue(endpoint.low_latency)
+        self.assertFalse(endpoint.supports_image_to_video)
+        self.assertIsNone(endpoint.provider_id)
+
+        tier_resp = self._json_post(
+            "console_llm_video_generation_tiers",
+            {"description": "Tier VID", "use_case": "create_video"},
+        )
+        self.assertEqual(tier_resp.status_code, 200, tier_resp.content)
+        tier_id = tier_resp.json()["tier_id"]
+
+        attach_resp = self._json_post(
+            "console_llm_video_generation_tier_endpoints",
+            {"endpoint_id": endpoint_id, "weight": 1},
+            tier_id,
+        )
+        self.assertEqual(attach_resp.status_code, 200, attach_resp.content)
+        tier_endpoint_id = attach_resp.json()["tier_endpoint_id"]
+        self.assertTrue(VideoGenerationTierEndpoint.objects.filter(id=tier_endpoint_id).exists())
+
+        blocked_delete_resp = self.client.delete(
+            reverse("console_llm_video_generation_endpoint_detail", args=[endpoint_id])
+        )
+        self.assertEqual(blocked_delete_resp.status_code, 400, blocked_delete_resp.content)
+
+        delete_tier_endpoint_resp = self.client.delete(
+            reverse("console_llm_video_generation_tier_endpoint_detail", args=[tier_endpoint_id])
+        )
+        self.assertEqual(delete_tier_endpoint_resp.status_code, 200, delete_tier_endpoint_resp.content)
+
+        delete_tier_resp = self.client.delete(reverse("console_llm_video_generation_tier_detail", args=[tier_id]))
+        self.assertEqual(delete_tier_resp.status_code, 200, delete_tier_resp.content)
+
+        delete_endpoint_resp = self.client.delete(
+            reverse("console_llm_video_generation_endpoint_detail", args=[endpoint_id])
+        )
+        self.assertEqual(delete_endpoint_resp.status_code, 200, delete_endpoint_resp.content)
+
+    def test_video_generation_tiers_are_exposed_in_overview(self):
+        endpoint = VideoGenerationModelEndpoint.objects.create(
+            provider=self.provider,
+            key="video-gen-shared",
+            litellm_model="openai/sora-2",
+            enabled=True,
+        )
+
+        create_video_resp = self._json_post(
+            "console_llm_video_generation_tiers",
+            {"description": "Create video tier", "use_case": "create_video"},
+        )
+        self.assertEqual(create_video_resp.status_code, 200, create_video_resp.content)
+        create_video_tier_id = create_video_resp.json()["tier_id"]
+
+        create_video_tier = VideoGenerationLLMTier.objects.get(id=create_video_tier_id)
+        self.assertEqual(create_video_tier.use_case, VideoGenerationLLMTier.UseCase.CREATE_VIDEO)
+        self.assertEqual(create_video_tier.order, 1)
+
+        attach_resp = self._json_post(
+            "console_llm_video_generation_tier_endpoints",
+            {"endpoint_id": str(endpoint.id), "weight": 1},
+            create_video_tier_id,
+        )
+        self.assertEqual(attach_resp.status_code, 200, attach_resp.content)
+
+        overview = build_llm_overview()
+        self.assertEqual(len(overview["video_generations"]["create_video_tiers"]), 1)
+        self.assertEqual(
+            overview["video_generations"]["create_video_tiers"][0]["use_case"],
+            "create_video",
+        )
 
     def test_persistent_endpoint_allow_implied_send_is_exposed_and_mutable(self):
         endpoint = PersistentModelEndpoint.objects.create(

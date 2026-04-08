@@ -20,13 +20,14 @@ export type ProviderEndpoint = {
   allow_implied_send?: boolean
   supports_vision?: boolean
   supports_image_to_image?: boolean
+  supports_image_to_video?: boolean
   browser_base_url?: string
   max_output_tokens?: number | null
   max_input_tokens?: number | null
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null
-  type: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation'
+  type: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation' | 'video_generation'
   low_latency?: boolean
   enabled: boolean
   provider_id: string
@@ -119,12 +120,21 @@ export type ImageGenerationTier = {
   endpoints: TierEndpoint[]
 }
 
+export type VideoGenerationTier = {
+  id: string
+  order: number
+  description: string
+  use_case?: 'create_video' | null
+  endpoints: TierEndpoint[]
+}
+
 export type EndpointChoices = {
   persistent_endpoints: ProviderEndpoint[]
   browser_endpoints: ProviderEndpoint[]
   embedding_endpoints: ProviderEndpoint[]
   file_handler_endpoints: ProviderEndpoint[]
   image_generation_endpoints: ProviderEndpoint[]
+  video_generation_endpoints: ProviderEndpoint[]
 }
 
 export type LlmOverviewResponse = {
@@ -136,6 +146,7 @@ export type LlmOverviewResponse = {
   embeddings: { tiers: EmbeddingTier[] }
   file_handlers: { tiers: FileHandlerTier[] }
   image_generations: { create_image_tiers: ImageGenerationTier[]; avatar_tiers: ImageGenerationTier[] }
+  video_generations: { create_video_tiers: VideoGenerationTier[] }
   choices: EndpointChoices
 }
 
@@ -176,6 +187,7 @@ const endpointPaths = {
   embedding: `${base}/embeddings/endpoints/`,
   file_handler: `${base}/file-handlers/endpoints/`,
   image_generation: `${base}/image-generations/endpoints/`,
+  video_generation: `${base}/video-generations/endpoints/`,
 } as const
 
 type EndpointKind = keyof typeof endpointPaths
@@ -325,6 +337,30 @@ export function updateImageGenerationTierEndpoint(tierEndpointId: string, payloa
 
 export function deleteImageGenerationTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/image-generations/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createVideoGenerationTier(payload: { description?: string; use_case?: 'create_video' }) {
+  return jsonRequest(`${base}/video-generations/tiers/`, withCsrf(payload))
+}
+
+export function updateVideoGenerationTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/video-generations/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteVideoGenerationTier(tierId: string) {
+  return jsonRequest(`${base}/video-generations/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addVideoGenerationTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${base}/video-generations/tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateVideoGenerationTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/video-generations/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteVideoGenerationTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${base}/video-generations/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
 export type EndpointTestResponse = {

@@ -64,6 +64,9 @@ from api.models import (
     ImageGenerationLLMTier,
     ImageGenerationModelEndpoint,
     ImageGenerationTierEndpoint,
+    VideoGenerationLLMTier,
+    VideoGenerationModelEndpoint,
+    VideoGenerationTierEndpoint,
     IntelligenceTier,
     LLMProvider,
     MCPServerConfig,
@@ -856,6 +859,70 @@ def _run_image_generation_test(endpoint: ImageGenerationModelEndpoint) -> dict[s
     }
 
 
+def _run_video_generation_test(endpoint: VideoGenerationModelEndpoint) -> dict[str, Any]:
+    import litellm as _litellm
+
+    if not endpoint.enabled:
+        raise ValueError("Endpoint is disabled")
+    provider = endpoint.provider
+    if provider and not provider.enabled:
+        raise ValueError("Provider is disabled")
+
+    raw_model = (endpoint.litellm_model or "").strip()
+    api_base = (endpoint.api_base or "").strip() or None
+    model = normalize_model_name(provider, raw_model, api_base=api_base)
+    if not model:
+        raise ValueError("Endpoint does not specify a model identifier")
+
+    api_key = _resolve_provider_api_key(provider)
+    if not api_key and api_base:
+        api_key = "sk-noauth"
+    if not api_key:
+        raise ValueError("Configure an API key or environment variable for this provider before testing")
+
+    params: dict[str, Any] = {
+        "api_key": api_key,
+        "timeout": 120,
+    }
+    if api_base:
+        params["api_base"] = api_base
+    _apply_provider_overrides(provider, params)
+
+    gen_kwargs: dict[str, Any] = {
+        "prompt": "A gentle wave rolling onto a sandy beach at sunset.",
+        "model": model,
+        "seconds": "5",
+        **params,
+    }
+
+    started = time.monotonic()
+    video_obj = _litellm.video_generation(**gen_kwargs)
+
+    poll_count = 0
+    while video_obj.status not in ("completed", "failed", "expired"):
+        if time.monotonic() - started > 120:
+            raise ValueError(f"Video generation timed out (status={video_obj.status})")
+        time.sleep(5)
+        poll_count += 1
+        video_obj = _litellm.video_status(video_obj.id, **params)
+
+    if video_obj.status != "completed":
+        error_msg = "unknown"
+        if video_obj.error and isinstance(video_obj.error, dict):
+            error_msg = video_obj.error.get("message", error_msg)
+        raise ValueError(f"Video generation failed: {error_msg}")
+
+    latency_ms = int((time.monotonic() - started) * 1000)
+    return {
+        "message": "Video generated successfully.",
+        "model": model,
+        "provider": provider.display_name if provider else "Unlinked",
+        "latency_ms": latency_ms,
+        "video_id": video_obj.id,
+        "poll_count": poll_count,
+    }
+
+
 def _resolve_mcp_server_config(request: HttpRequest, config_id: str) -> MCPServerConfig:
     """Resolve an MCP server configuration the user is allowed to manage."""
     config = get_object_or_404(MCPServerConfig, pk=config_id)
@@ -1114,12 +1181,18 @@ def _next_image_generation_order(use_case: str) -> int:
     return (last.order if last else 0) + 1
 
 
+def _next_video_generation_order(use_case: str) -> int:
+    last = VideoGenerationLLMTier.objects.filter(use_case=use_case).order_by("-order").first()
+    return (last.order if last else 0) + 1
+
+
 def _create_aux_llm_endpoint_from_payload(
     payload: dict[str, Any],
     *,
     endpoint_model,
     include_supports_vision: bool = False,
     include_supports_image_to_image: bool = False,
+    include_supports_image_to_video: bool = False,
 ) -> tuple[Any | None, HttpResponseBadRequest | None]:
     """Create an embeddings/file-handler style endpoint from request payload."""
     key = (payload.get("key") or "").strip()
@@ -1146,6 +1219,8 @@ def _create_aux_llm_endpoint_from_payload(
         create_kwargs["supports_vision"] = _coerce_bool(payload.get("supports_vision", False))
     if include_supports_image_to_image:
         create_kwargs["supports_image_to_image"] = _coerce_bool(payload.get("supports_image_to_image", False))
+    if include_supports_image_to_video:
+        create_kwargs["supports_image_to_video"] = _coerce_bool(payload.get("supports_image_to_video", False))
 
     endpoint = endpoint_model.objects.create(**create_kwargs)
     return endpoint, None
@@ -1157,6 +1232,7 @@ def _update_aux_llm_endpoint_from_payload(
     *,
     include_supports_vision: bool = False,
     include_supports_image_to_image: bool = False,
+    include_supports_image_to_video: bool = False,
 ) -> HttpResponseBadRequest | None:
     """Update an embeddings/file-handler style endpoint from request payload."""
     if "model" in payload or "litellm_model" in payload:
@@ -1170,6 +1246,8 @@ def _update_aux_llm_endpoint_from_payload(
         endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
     if include_supports_image_to_image and "supports_image_to_image" in payload:
         endpoint.supports_image_to_image = _coerce_bool(payload.get("supports_image_to_image"))
+    if include_supports_image_to_video and "supports_image_to_video" in payload:
+        endpoint.supports_image_to_video = _coerce_bool(payload.get("supports_image_to_video"))
     if "low_latency" in payload:
         endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
     if "enabled" in payload:
@@ -3866,6 +3944,9 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
             elif kind == "image_generation":
                 endpoint = get_object_or_404(ImageGenerationModelEndpoint, pk=endpoint_id)
                 result = _run_image_generation_test(endpoint)
+            elif kind == "video_generation":
+                endpoint = get_object_or_404(VideoGenerationModelEndpoint, pk=endpoint_id)
+                result = _run_video_generation_test(endpoint)
             else:
                 return HttpResponseBadRequest("Invalid endpoint kind")
         except ValueError as exc:
@@ -4806,6 +4887,142 @@ class ImageGenerationTierEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
         tier_endpoint = get_object_or_404(ImageGenerationTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        return _json_ok()
+
+
+# =============================================================================
+# Video Generation Endpoint APIs
+# =============================================================================
+
+
+class VideoGenerationEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        endpoint, error_response = _create_aux_llm_endpoint_from_payload(
+            payload,
+            endpoint_model=VideoGenerationModelEndpoint,
+            include_supports_image_to_video=True,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class VideoGenerationEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(VideoGenerationModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_aux_llm_endpoint_from_payload(
+            endpoint,
+            payload,
+            include_supports_image_to_video=True,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(VideoGenerationModelEndpoint, pk=endpoint_id)
+        error_response = _delete_endpoint_with_tier_guard(endpoint)
+        if error_response:
+            return error_response
+        return _json_ok()
+
+
+class VideoGenerationTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        use_case = (payload.get("use_case") or VideoGenerationLLMTier.UseCase.CREATE_VIDEO).strip()
+        valid_use_cases = set(VideoGenerationLLMTier.UseCase.values)
+        if use_case not in valid_use_cases:
+            allowed = ", ".join(sorted(valid_use_cases))
+            return HttpResponseBadRequest(f"use_case must be one of: {allowed}")
+
+        tier = _create_aux_tier_from_payload(
+            payload,
+            tier_model=VideoGenerationLLMTier,
+            next_order_fn=lambda: _next_video_generation_order(use_case),
+            extra_create_kwargs={"use_case": use_case},
+        )
+        return _json_ok(tier_id=str(tier.id))
+
+
+class VideoGenerationTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(VideoGenerationLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_aux_tier_from_payload(
+            tier,
+            payload,
+            queryset=VideoGenerationLLMTier.objects.filter(use_case=tier.use_case),
+        )
+        if error_response:
+            return error_response
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(VideoGenerationLLMTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class VideoGenerationTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(VideoGenerationLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        te, error_response = _create_aux_tier_endpoint_from_payload(
+            payload,
+            tier=tier,
+            endpoint_model=VideoGenerationModelEndpoint,
+            tier_endpoint_model=VideoGenerationTierEndpoint,
+        )
+        if error_response:
+            return error_response
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class VideoGenerationTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(VideoGenerationTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        error_response = _update_weighted_tier_endpoint_from_payload(tier_endpoint, payload)
+        if error_response:
+            return error_response
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(VideoGenerationTierEndpoint, pk=tier_endpoint_id)
         tier_endpoint.delete()
         return _json_ok()
 

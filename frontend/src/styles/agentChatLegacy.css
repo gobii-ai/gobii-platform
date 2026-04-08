@@ -3758,6 +3758,10 @@
   background: rgba(168, 85, 247, 0.4);
 }
 
+.tool-cluster-live-preview__chart-thumb-header-dot[data-kind="video"] {
+  background: rgba(225, 29, 72, 0.42);
+}
+
 .tool-cluster-live-preview__chart-thumb-header-label {
   font-size: 0.6rem;
   font-weight: 600;
@@ -3769,6 +3773,11 @@
 .tool-cluster-live-preview__chart-thumb-header-dot[data-kind="image"]
   ~ .tool-cluster-live-preview__chart-thumb-header-label {
   color: rgba(168, 85, 247, 0.55);
+}
+
+.tool-cluster-live-preview__chart-thumb-header-dot[data-kind="video"]
+  ~ .tool-cluster-live-preview__chart-thumb-header-label {
+  color: rgba(190, 24, 93, 0.58);
 }
 
 /* ── Image ── */
