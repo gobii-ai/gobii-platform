@@ -11696,8 +11696,18 @@ class EvalSuiteRun(models.Model):
         ONE_OFF = "one_off", "One-off"
         OFFICIAL = "official", "Official"
 
+    class LauncherType(models.TextChoices):
+        SUITE = "suite", "Suite"
+        GLOBAL_SKILL = "global_skill", "Global Skill"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     suite_slug = models.CharField(max_length=200)
+    launcher_type = models.CharField(
+        max_length=24,
+        choices=LauncherType.choices,
+        default=LauncherType.SUITE,
+    )
+    launch_config = models.JSONField(default=dict, blank=True)
     initiated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     run_type = models.CharField(

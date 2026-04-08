@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Beaker, ChevronDown, Loader2, Play, RefreshCcw, CheckSquare, Minus, Plus } from 'lucide-react'
 
 import {
+  createGlobalSkillEvalRun,
   createSuiteRuns,
+  fetchGlobalSkillEvalLauncher,
   fetchSuiteRuns,
   fetchSuites,
   type EvalSuite,
   type EvalSuiteRun,
+  type GlobalSkillEvalSkill,
 } from '../api/evals'
 import { fetchRoutingProfiles, type RoutingProfileListItem } from '../api/llmConfig'
 import { StatusBadge } from '../components/common/StatusBadge'
@@ -31,11 +34,17 @@ const formatPassRate = (taskTotals: EvalSuiteRun['task_totals'] | null | undefin
 export function EvalsScreen() {
   const [suites, setSuites] = useState<EvalSuite[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
+  const [globalSkills, setGlobalSkills] = useState<GlobalSkillEvalSkill[]>([])
+  const [globalSecretsUrl, setGlobalSecretsUrl] = useState<string>('/console/secrets/')
+  const [rubricVersion, setRubricVersion] = useState<string>('v1')
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(new Set())
+  const [selectedGlobalSkillId, setSelectedGlobalSkillId] = useState<string>('')
+  const [globalSkillTaskPrompt, setGlobalSkillTaskPrompt] = useState<string>('')
   const [runTypeFilter, setRunTypeFilter] = useState<'all' | EvalSuiteRun['run_type']>('all')
   const [runCount, setRunCount] = useState<number>(3)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [launching, setLaunching] = useState(false)
+  const [launchingGlobalSkillEval, setLaunchingGlobalSkillEval] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [routingProfiles, setRoutingProfiles] = useState<RoutingProfileListItem[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
@@ -57,6 +66,22 @@ export function EvalsScreen() {
       setErrorMessage('Unable to load suites right now.')
     }
   }, [selectedSuites.size])
+
+  const loadGlobalSkills = useCallback(async () => {
+    try {
+      const result = await fetchGlobalSkillEvalLauncher()
+      setGlobalSkills(result.global_skills)
+      setGlobalSecretsUrl(result.global_secrets_url)
+      setRubricVersion(result.rubric_version)
+      setSelectedGlobalSkillId((prev) => {
+        if (prev && result.global_skills.some((skill) => skill.id === prev)) return prev
+        return result.global_skills[0]?.id || ''
+      })
+    } catch (error) {
+      console.error(error)
+      setErrorMessage('Unable to load global skill eval options right now.')
+    }
+  }, [])
 
   const loadRoutingProfiles = useCallback(async () => {
     try {
@@ -94,9 +119,10 @@ export function EvalsScreen() {
 
   useEffect(() => {
     loadSuites()
+    loadGlobalSkills()
     loadSuiteRuns()
     loadRoutingProfiles()
-  }, [loadSuites, loadSuiteRuns, loadRoutingProfiles])
+  }, [loadSuites, loadGlobalSkills, loadSuiteRuns, loadRoutingProfiles])
 
   const toggleSuiteSelection = (slug: string) => {
     setSelectedSuites((prev) => {
@@ -118,6 +144,9 @@ export function EvalsScreen() {
     }
   }
 
+  const selectedGlobalSkill = globalSkills.find((skill) => skill.id === selectedGlobalSkillId) || null
+  const hasMissingGlobalSkillSecrets = Boolean(selectedGlobalSkill?.missing_required_secrets.length)
+
   const handleLaunch = async () => {
     setLaunching(true)
     setErrorMessage(null)
@@ -135,6 +164,27 @@ export function EvalsScreen() {
       setErrorMessage('Failed to launch evals.')
     } finally {
       setLaunching(false)
+    }
+  }
+
+  const handleGlobalSkillEvalLaunch = async () => {
+    if (!selectedGlobalSkill) return
+    setLaunchingGlobalSkillEval(true)
+    setErrorMessage(null)
+    try {
+      await createGlobalSkillEvalRun({
+        global_skill_id: selectedGlobalSkill.id,
+        task_prompt: globalSkillTaskPrompt.trim(),
+        n_runs: clampRunCount(runCount),
+        llm_routing_profile_id: selectedProfileId,
+      })
+      await loadSuiteRuns()
+      await loadGlobalSkills()
+    } catch (error) {
+      console.error(error)
+      setErrorMessage('Failed to launch global skill eval.')
+    } finally {
+      setLaunchingGlobalSkillEval(false)
     }
   }
 
@@ -303,6 +353,148 @@ export function EvalsScreen() {
       </section>
 
       <section className="card overflow-hidden" style={{ padding: 0 }}>
+        <div className="bg-gradient-to-r from-emerald-50/90 to-cyan-50/90 border-b border-emerald-100 px-6 py-4">
+          <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Global Skill Eval</h2>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Launch an ad hoc eval that asks an ephemeral agent to enable and use one global skill.
+          </p>
+        </div>
+        <div className="grid gap-6 p-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Global Skill</label>
+              <div className="relative">
+                <select
+                  value={selectedGlobalSkillId}
+                  onChange={(e) => setSelectedGlobalSkillId(e.target.value)}
+                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  {globalSkills.map((skill) => (
+                    <option key={skill.id} value={skill.id}>
+                      {skill.name}
+                    </option>
+                  ))}
+                  {!globalSkills.length && <option value="">No active global skills</option>}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 pointer-events-none" />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Task Prompt</label>
+              <textarea
+                value={globalSkillTaskPrompt}
+                onChange={(e) => setGlobalSkillTaskPrompt(e.target.value)}
+                rows={5}
+                placeholder="Ask the agent to complete a task that should require this skill."
+                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="inline-flex items-center rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                Judge rubric: built-in {rubricVersion}
+              </div>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition-all hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleGlobalSkillEvalLaunch}
+                disabled={
+                  launchingGlobalSkillEval
+                  || !selectedGlobalSkill
+                  || !globalSkillTaskPrompt.trim()
+                  || hasMissingGlobalSkillSecrets
+                }
+              >
+                {launchingGlobalSkillEval ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
+                Launch Skill Eval
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-900 px-5 py-5 text-slate-100">
+            {selectedGlobalSkill ? (
+              <div className="space-y-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-lg font-bold tracking-tight">{selectedGlobalSkill.name}</span>
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider ${
+                        selectedGlobalSkill.launchable
+                          ? 'bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-300/30'
+                          : 'bg-amber-400/15 text-amber-200 ring-1 ring-amber-300/30'
+                      }`}
+                    >
+                      {selectedGlobalSkill.launchable ? 'Launchable' : 'Needs Secrets'}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-300">
+                    {selectedGlobalSkill.description || 'No description provided.'}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Effective Tools</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {selectedGlobalSkill.effective_tool_ids.length ? selectedGlobalSkill.effective_tool_ids.map((toolId) => (
+                      <span key={toolId} className="inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-xs font-medium text-slate-100 ring-1 ring-white/10">
+                        {toolId}
+                      </span>
+                    )) : (
+                      <span className="text-sm text-slate-400">No effective tools recorded.</span>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-400">Required Secrets</p>
+                  <div className="mt-2 space-y-2">
+                    {selectedGlobalSkill.required_secret_status.length ? selectedGlobalSkill.required_secret_status.map((secret) => (
+                      <div key={secret.label} className="rounded-xl bg-white/5 px-3 py-3 ring-1 ring-white/10">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-white">{secret.name}</div>
+                            <div className="mt-1 text-xs text-slate-400">{secret.label}</div>
+                          </div>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-bold uppercase tracking-wide ${
+                              secret.status === 'available'
+                                ? 'bg-emerald-400/15 text-emerald-200'
+                                : 'bg-amber-400/15 text-amber-200'
+                            }`}
+                          >
+                            {secret.status === 'available' ? 'Ready' : 'Missing'}
+                          </span>
+                        </div>
+                        {secret.description ? (
+                          <p className="mt-2 text-xs leading-relaxed text-slate-300">{secret.description}</p>
+                        ) : null}
+                      </div>
+                    )) : (
+                      <div className="rounded-xl bg-emerald-400/10 px-3 py-3 text-sm text-emerald-100 ring-1 ring-emerald-300/20">
+                        No secrets required.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {hasMissingGlobalSkillSecrets ? (
+                  <div className="rounded-xl bg-amber-400/10 px-4 py-3 text-sm text-amber-100 ring-1 ring-amber-300/20">
+                    This eval is blocked until the required global secrets exist.
+                    <a href={globalSecretsUrl} className="ml-2 font-semibold text-white underline underline-offset-4">
+                      Manage global secrets
+                    </a>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-300">No active global skills are available for skill evals.</div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="card overflow-hidden" style={{ padding: 0 }}>
         <div className="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Recent Activity</h2>
           <div className="inline-flex items-center gap-1 rounded-lg bg-white/70 p-1 ring-1 ring-slate-200 shadow-sm">
@@ -333,7 +525,7 @@ export function EvalsScreen() {
             <table className="min-w-full divide-y divide-slate-200 text-sm">
               <thead className="bg-white text-left text-xs uppercase tracking-wider text-slate-500 font-bold">
                 <tr>
-                  <th className="px-6 py-4 bg-white border-b border-slate-100">Suite</th>
+                  <th className="px-6 py-4 bg-white border-b border-slate-100">Eval</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Type</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Status</th>
                   <th className="px-6 py-4 bg-white border-b border-slate-100">Progress</th>
@@ -352,7 +544,19 @@ export function EvalsScreen() {
                   return (
                     <tr key={suite.id} className="group">
                       <td className="px-6 py-4">
-                        <div className="font-semibold text-slate-900">{suite.suite_slug}</div>
+                        <div className="flex items-center gap-2">
+                          <div className="font-semibold text-slate-900">{suite.display_name || suite.suite_slug}</div>
+                          {suite.launcher_type === 'global_skill' ? (
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-200">
+                              Skill Eval
+                            </span>
+                          ) : null}
+                        </div>
+                        {suite.launcher_type === 'global_skill' && suite.skill_eval?.task_prompt ? (
+                          <div className="mt-1 max-w-xl text-xs leading-relaxed text-slate-500">
+                            {suite.skill_eval.task_prompt}
+                          </div>
+                        ) : null}
                         <div className="text-xs font-mono text-slate-400 mt-0.5">{suite.id.slice(0, 8)}</div>
                       </td>
                       <td className="px-6 py-4">
