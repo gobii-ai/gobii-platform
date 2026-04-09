@@ -275,9 +275,53 @@ class SandboxComputeSyncTests(TestCase):
         self.assertIn("state=error", str(exc_info.exception))
         self.assertIn("sandbox-agent-bad", str(exc_info.exception))
         manifest_mock.assert_not_called()
+        self.assertEqual(len(backend.deploy_calls), 2)
         session = AgentComputeSession.objects.get(agent=self.agent)
         self.assertEqual(session.state, AgentComputeSession.State.ERROR)
         self.assertEqual(session.pod_name, "sandbox-agent-bad")
+        self.assertEqual(session.namespace, "gobii-pr-815")
+
+    def test_ensure_session_retries_once_before_pull_when_backend_recovers(self):
+        class _RecoveringBackend(_DummyBackend):
+            def __init__(self) -> None:
+                super().__init__()
+                self._attempt = 0
+
+            def deploy_or_resume(self, agent, session):
+                self._attempt += 1
+                self.deploy_calls.append(
+                    {
+                        "agent_id": str(agent.id),
+                        "state": session.state,
+                        "attempt": self._attempt,
+                    }
+                )
+                if self._attempt == 1:
+                    return SandboxSessionUpdate(
+                        state=AgentComputeSession.State.ERROR,
+                        pod_name="sandbox-agent-recovering",
+                        namespace="gobii-pr-815",
+                    )
+                return SandboxSessionUpdate(
+                    state=AgentComputeSession.State.RUNNING,
+                    pod_name="sandbox-agent-recovered",
+                    namespace="gobii-pr-815",
+                )
+
+        backend = _RecoveringBackend()
+        service = SandboxComputeService(backend=backend)
+
+        with patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={"status": "ok", "files": [], "sync_cursor": None},
+        ) as manifest_mock:
+            session = service._ensure_session(self.agent, source="custom_tool_source_sync")
+
+        self.assertEqual(len(backend.deploy_calls), 2)
+        self.assertEqual(len(backend.sync_calls), 1)
+        manifest_mock.assert_called_once()
+        self.assertEqual(session.state, AgentComputeSession.State.RUNNING)
+        self.assertEqual(session.pod_name, "sandbox-agent-recovered")
         self.assertEqual(session.namespace, "gobii-pr-815")
 
     def test_pull_manifest_excludes_internal_custom_tool_sqlite_path(self):

@@ -119,6 +119,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         )
         self._no_proxy = getattr(settings, "SANDBOX_COMPUTE_NO_PROXY", "") or ""
         self._pod_ready_timeout = int(getattr(settings, "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS", 60))
+        self._service_routable_timeout = int(settings.SANDBOX_COMPUTE_SERVICE_ROUTABLE_TIMEOUT_SECONDS)
         self._pvc_size = getattr(settings, "SANDBOX_COMPUTE_PVC_SIZE", "1Gi")
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
         self._snapshot_class = getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_CLASS", "")
@@ -203,13 +204,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         except KubernetesApiError as exc:
             raise SandboxComputeUnavailable(f"Kubernetes scheduler failed: {exc}") from exc
 
-        readiness_started_at = time.monotonic()
         if not self._wait_for_pod_ready(pod_name):
             return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
-        remaining_timeout = self._pod_ready_timeout - (time.monotonic() - readiness_started_at)
-        if remaining_timeout <= 0 or not self._wait_for_service_routable(
+        if not self._wait_for_service_routable(
             sandbox_service_name,
-            timeout_seconds=remaining_timeout,
+            timeout_seconds=self._service_routable_timeout,
         ):
             return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
 

@@ -19,6 +19,7 @@ from django.utils import timezone
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.custom_tools import (
     CUSTOM_TOOL_RESULT_MARKER,
+    _sync_workspace_source,
     build_custom_tool_bridge_token,
     execute_create_custom_tool,
     execute_custom_tool,
@@ -37,7 +38,9 @@ from api.agent.tools.tool_manager import (
     get_enabled_tool_definitions,
 )
 from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
+from api.services.sandbox_compute import SandboxComputeService, SandboxSessionUpdate, LocalSandboxBackend
 from api.models import (
+    AgentComputeSession,
     AgentFsNode,
     BrowserUseAgent,
     PersistentAgent,
@@ -49,7 +52,6 @@ from api.models import (
     TaskCredit,
     UserQuota,
 )
-from api.services.sandbox_compute import LocalSandboxBackend
 
 
 @tag("batch_agent_tools")
@@ -511,6 +513,68 @@ class CustomToolsTests(TestCase):
         )
         self.assertIn('export PATH="$UV_INSTALL_DIR:$PATH"', call.args[1])
         self.assertIn('uv run --no-project "$SOURCE_EXEC_PATH"', call.args[1])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_sync_workspace_source_recovers_from_transient_error_session(
+        self,
+        mock_service_cls,
+        _mock_select_proxy,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+    ):
+        class _RecoveringBackend:
+            def __init__(self) -> None:
+                self.deploy_calls = []
+                self.sync_calls = []
+                self._attempt = 0
+
+            def deploy_or_resume(self, agent, session):
+                self._attempt += 1
+                self.deploy_calls.append(
+                    {
+                        "agent_id": str(agent.id),
+                        "state": session.state,
+                        "attempt": self._attempt,
+                    }
+                )
+                if self._attempt == 1:
+                    return SandboxSessionUpdate(
+                        state=AgentComputeSession.State.ERROR,
+                        pod_name="sandbox-agent-recovering",
+                        namespace="gobii-prod",
+                    )
+                return SandboxSessionUpdate(
+                    state=AgentComputeSession.State.RUNNING,
+                    pod_name="sandbox-agent-recovered",
+                    namespace="gobii-prod",
+                )
+
+            def sync_filespace(self, agent, session, *, direction, payload=None):
+                self.sync_calls.append(
+                    {
+                        "agent_id": str(agent.id),
+                        "direction": direction,
+                        "payload": payload,
+                    }
+                )
+                if direction == "pull":
+                    return {"status": "ok", "files": [], "sync_cursor": None}
+                return {"status": "ok", "changes": []}
+
+        service = SandboxComputeService(backend=_RecoveringBackend())
+        mock_service_cls.return_value = service
+
+        sync_error = _sync_workspace_source(self.agent, "/tools/sync_intercom_waiting.py")
+
+        self.assertIsNone(sync_error)
+        self.assertEqual(len(service._backend.deploy_calls), 2)
+        self.assertEqual(
+            [call["direction"] for call in service._backend.sync_calls],
+            ["pull", "push"],
+        )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")

@@ -32,6 +32,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._egress_proxy_socks_port = 1080
         backend._egress_proxy_socks_service_port = 1080
         backend._pod_ready_timeout = 60
+        backend._service_routable_timeout = 45
         backend._proxy_timeout = 30
         backend._wait_for_service_routable = Mock(return_value=True)
         return backend
@@ -392,10 +393,33 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.deploy_or_resume(agent, session)
 
         self.assertEqual(result.state, "error")
-        backend._wait_for_service_routable.assert_called_once()
+        backend._wait_for_service_routable.assert_called_once_with(
+            "sandbox-agent-agent-routability",
+            timeout_seconds=backend._service_routable_timeout,
+        )
         self.assertEqual(
             backend._wait_for_service_routable.call_args.args[0],
             "sandbox-agent-agent-routability",
+        )
+
+    def test_deploy_or_resume_uses_full_service_routability_timeout_after_pod_ready(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-slow-ready")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(return_value=None)
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+        backend._wait_for_service_routable = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[False, False]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._wait_for_service_routable.assert_called_once_with(
+            "sandbox-agent-agent-slow-ready",
+            timeout_seconds=backend._service_routable_timeout,
         )
 
     def test_wait_for_service_routable_polls_healthz_until_success(self):
