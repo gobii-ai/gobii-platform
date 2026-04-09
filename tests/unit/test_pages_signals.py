@@ -3762,6 +3762,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 "trial_eligibility_manual_action": "inherit",
                 "trial_eligibility_reason_codes": ["fpjs_history_match"],
                 "trial_eligibility_policy_send_allowed": False,
+                "value": 120.0,
             },
         )
         mock_modify.assert_called_once_with(

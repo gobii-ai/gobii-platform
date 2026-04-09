@@ -972,6 +972,7 @@ def _emit_add_payment_info_from_checkout_context(
         _track_add_payment_info_trial_eligibility_skip(
             owner=owner,
             snapshot=eligibility_snapshot,
+            value=checkout_context.get("value"),
         )
         return False
 
@@ -1162,20 +1163,24 @@ def _track_add_payment_info_trial_eligibility_skip(
     *,
     owner: Any,
     snapshot: Mapping[str, Any],
+    value: Any = None,
 ) -> None:
     owner_id = getattr(owner, "id", None)
+    properties = {
+        "event_name": "AddPaymentInfo",
+        "reason": "trial_eligibility_disallowed",
+        "decision_source": snapshot.get("decision_source"),
+        "trial_eligibility_decision": snapshot.get("decision"),
+        "trial_eligibility_manual_action": snapshot.get("manual_action"),
+        "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
+        "trial_eligibility_policy_send_allowed": False,
+    }
+    if value is not None:
+        properties["value"] = value
     Analytics.track(
         user_id=owner_id,
         event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
-        properties={
-            "event_name": "AddPaymentInfo",
-            "reason": "trial_eligibility_disallowed",
-            "decision_source": snapshot.get("decision_source"),
-            "trial_eligibility_decision": snapshot.get("decision"),
-            "trial_eligibility_manual_action": snapshot.get("manual_action"),
-            "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
-            "trial_eligibility_policy_send_allowed": False,
-        },
+        properties=properties,
     )
 
 

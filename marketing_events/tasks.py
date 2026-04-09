@@ -228,6 +228,9 @@ def _track_marketing_skip(
         "event_name": event_name,
         "reason": reason,
     }
+    value = properties_payload.get("value")
+    if value is not None:
+        skip_properties["value"] = value
 
     subscription_id = _subscription_guard_id_from_payload(payload) or properties_payload.get("subscription_id")
     if subscription_id:
@@ -312,6 +315,7 @@ def _dispatch_marketing_event(payload: dict):
                         "provider": provider_name,
                         "event_name": evt["event_name"],
                         "event_id": evt["event_id"],
+                        **({"value": evt["properties"].get("value")} if evt["properties"].get("value") is not None else {}),
                     },
                 )
             except TemporaryError:
@@ -329,6 +333,7 @@ def _dispatch_marketing_event(payload: dict):
                         "provider": provider_name,
                         "event_name": evt["event_name"],
                         "event_id": evt["event_id"],
+                        **({"value": evt["properties"].get("value")} if evt["properties"].get("value") is not None else {}),
                         "error": str(e),
                         "error_type": "permanent",
                     },

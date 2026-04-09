@@ -33,7 +33,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         enqueue_marketing_event(
             {
                 "event_name": "StartTrial",
-                "properties": {"event_time": 1_900_000_000, "event_id": "evt-123"},
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-123", "value": 375.0},
                 "user": {"id": "42", "email": "test@example.com"},
                 "context": {},
             }
@@ -45,6 +45,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_SENT)
         self.assertEqual(kwargs["properties"]["provider"], "MetaCAPI")
         self.assertEqual(kwargs["properties"]["event_id"], "evt-123")
+        self.assertEqual(kwargs["properties"]["value"], 375.0)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks.Analytics.track")
@@ -58,7 +59,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         enqueue_marketing_event(
             {
                 "event_name": "Subscribe",
-                "properties": {"event_time": 1_900_000_000, "event_id": "evt-456"},
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-456", "value": 1250.0},
                 "user": {"id": "77", "email": "test@example.com"},
                 "context": {},
             }
@@ -70,6 +71,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_FAILED)
         self.assertEqual(kwargs["properties"]["provider"], "MetaCAPI")
         self.assertEqual(kwargs["properties"]["event_id"], "evt-456")
+        self.assertEqual(kwargs["properties"]["value"], 1250.0)
         self.assertEqual(kwargs["properties"]["error_type"], "permanent")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
@@ -89,7 +91,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         enqueue_marketing_event(
             {
                 "event_name": "Subscribe",
-                "properties": {"event_time": 1_900_000_000, "event_id": "evt-789"},
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-789", "value": 1250.0},
                 "user": {"id": "88", "email": "test@example.com"},
                 "context": {},
                 "provider_targets": ["google_analytics"],
@@ -104,6 +106,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["user_id"], 88)
         self.assertEqual(kwargs["event"], AnalyticsEvent.CAPI_EVENT_SENT)
         self.assertEqual(kwargs["properties"]["provider"], "GoogleAnalyticsMP")
+        self.assertEqual(kwargs["properties"]["value"], 1250.0)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks._dispatch_marketing_event")
@@ -124,6 +127,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
                     "event_time": 1_900_000_000,
                     "event_id": "evt-123",
                     "subscription_id": "sub_123",
+                    "value": 375.0,
                 },
                 "user": {"id": "42", "email": "test@example.com"},
                 "context": {},
@@ -142,6 +146,7 @@ class MarketingEventsTaskTests(SimpleTestCase):
         )
         self.assertEqual(track_kwargs["properties"]["subscription_id"], "sub_123")
         self.assertEqual(track_kwargs["properties"]["decision_source"], "stripe")
+        self.assertEqual(track_kwargs["properties"]["value"], 375.0)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks._dispatch_marketing_event")
@@ -282,6 +287,7 @@ class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
                 "event_time": 1_900_000_000,
                 "event_id": "evt-eligibility",
                 "subscription_id": "sub_eligibility",
+                "value": 375.0,
             },
             "user": {"id": "42", "email": "trial-capi-user@example.com"},
             "context": {},
@@ -342,6 +348,7 @@ class StartTrialEligibilityEnforcementTaskTests(SimpleTestCase):
             ["fpjs_history_match"],
         )
         self.assertFalse(track_kwargs["properties"]["trial_eligibility_policy_send_allowed"])
+        self.assertEqual(track_kwargs["properties"]["value"], 375.0)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks._dispatch_marketing_event")
@@ -377,6 +384,7 @@ class CompleteRegistrationEligibilityEnforcementTaskTests(SimpleTestCase):
             "properties": {
                 "event_time": 1_900_000_000,
                 "event_id": "evt-complete-registration",
+                "value": 10.0,
             },
             "user": {"id": "42", "email": "signup-capi-user@example.com"},
             "context": {},
@@ -425,6 +433,7 @@ class CompleteRegistrationEligibilityEnforcementTaskTests(SimpleTestCase):
             UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
         )
         self.assertFalse(track_kwargs["properties"]["trial_eligibility_policy_send_allowed"])
+        self.assertEqual(track_kwargs["properties"]["value"], 10.0)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks.Analytics.track")
