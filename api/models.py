@@ -4127,6 +4127,7 @@ class StripeCheckoutContext(models.Model):
     currency = models.CharField(max_length=16, blank=True, default="")
     checkout_source_url = models.CharField(max_length=500, blank=True, default="")
     stripe_session_created_at = models.DateTimeField(null=True, blank=True)
+    add_payment_info_sent_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
