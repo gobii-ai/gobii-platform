@@ -1229,15 +1229,15 @@ class SandboxComputeService:
                 session.workspace_snapshot = snapshot
         session.save(update_fields=["state", "pod_name", "namespace", "workspace_snapshot", "updated_at"])
 
-    def _ensure_session(self, agent, *, source: str) -> AgentComputeSession:
-        session, _created = AgentComputeSession.objects.get_or_create(
-            agent=agent,
-            defaults={"state": AgentComputeSession.State.STOPPED},
-        )
-        _select_proxy_for_session(agent, session)
-        previous_state = session.state
-        started = session.state != AgentComputeSession.State.RUNNING
-        bootstrap_started_at = time.monotonic()
+    def _deploy_or_resume_session(
+        self,
+        agent,
+        session: AgentComputeSession,
+        *,
+        source: str,
+        mode: str,
+        attempt: int,
+    ) -> None:
         deploy_started_at = time.monotonic()
         update = self._backend.deploy_or_resume(agent, session)
         deploy_duration_ms = _elapsed_ms(deploy_started_at)
@@ -1246,17 +1246,41 @@ class SandboxComputeService:
         self._apply_session_update(session, update)
         logger.info(
             (
-                "Sandbox %s deploy_or_resume agent=%s source=%s duration_ms=%s "
+                "Sandbox %s deploy_or_resume agent=%s source=%s attempt=%s duration_ms=%s "
                 "state=%s pod=%s namespace=%s"
             ),
-            "bootstrap" if started else "refresh",
+            mode,
             agent.id,
             source,
+            attempt,
             deploy_duration_ms,
             update.state,
             update.pod_name or session.pod_name,
             update.namespace or session.namespace,
         )
+
+    def _ensure_session(self, agent, *, source: str) -> AgentComputeSession:
+        session, _created = AgentComputeSession.objects.get_or_create(
+            agent=agent,
+            defaults={"state": AgentComputeSession.State.STOPPED},
+        )
+        _select_proxy_for_session(agent, session)
+        previous_state = session.state
+        started = session.state != AgentComputeSession.State.RUNNING
+        mode = "bootstrap" if started else "refresh"
+        bootstrap_started_at = time.monotonic()
+        # Retry only backend-reported non-running states. Raised bootstrap errors
+        # indicate scheduler/configuration failures and should still fail fast.
+        self._deploy_or_resume_session(agent, session, source=source, mode=mode, attempt=1)
+        if session.state != AgentComputeSession.State.RUNNING:
+            logger.info(
+                "Sandbox %s retrying deploy_or_resume agent=%s source=%s previous_state=%s",
+                mode,
+                agent.id,
+                source,
+                session.state,
+            )
+            self._deploy_or_resume_session(agent, session, source=source, mode=mode, attempt=2)
         if session.state != AgentComputeSession.State.RUNNING:
             raise SandboxComputeUnavailable(
                 "Sandbox session is not ready"
@@ -1269,7 +1293,7 @@ class SandboxComputeService:
         pull_status = sync_result.get("status") if isinstance(sync_result, dict) else "skipped"
         logger.info(
             "Sandbox %s pull agent=%s source=%s duration_ms=%s status=%s",
-            "bootstrap" if started else "refresh",
+            mode,
             agent.id,
             source,
             pull_duration_ms,
