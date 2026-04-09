@@ -1,12 +1,17 @@
+import base64
+from io import BytesIO
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase, tag
+from PIL import Image
 
 from api.models import PersistentAgentCompletion
 from api.agent.tools.create_video import (
     GeneratedVideoResult,
+    ResolvedSourceImage,
     VideoGenerationResponseError,
+    _create_openai_video_job,
     _generate_video,
     _wait_for_video_completion,
     get_create_video_tool,
@@ -34,6 +39,20 @@ def _make_video_obj(status="completed", video_id="vid-123", error=None):
     obj.error = error
     obj.usage = None
     return obj
+
+
+def _make_png_bytes(size: tuple[int, int], color=(255, 0, 0, 255)) -> bytes:
+    image = Image.new("RGBA", size, color)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _decode_data_url_image_size(data_url: str) -> tuple[int, int]:
+    encoded = data_url.split(",", 1)[1]
+    image_bytes = base64.b64decode(encoded)
+    with Image.open(BytesIO(image_bytes)) as image:
+        return image.size
 
 
 @tag("batch_video_generation")
@@ -115,6 +134,188 @@ class WaitForVideoCompletionTests(TestCase):
 
 @tag("batch_video_generation")
 class GenerateVideoTests(TestCase):
+    @patch("api.agent.tools.create_video.httpx.Client")
+    def test_create_openai_video_job_posts_json_image_reference(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "id": "video_123",
+            "object": "video",
+            "status": "queued",
+            "created_at": 123,
+            "progress": 0,
+            "seconds": "4",
+            "size": "1280x720",
+            "model": "sora-2",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        config = _make_config(model="openai/sora-2", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=b"\x89PNG\r\n",
+            mime_type="image/png",
+            path="/Inbox/source.png",
+            width=1280,
+            height=720,
+        )
+
+        result = _create_openai_video_job(
+            config=config,
+            prompt="animate this",
+            duration="4",
+            size="1280x720",
+            source_image=source_image,
+        )
+
+        self.assertEqual(result.id, "video_123")
+        mock_client.post.assert_called_once_with(
+            "https://api.openai.com/v1/videos",
+            headers={
+                "Authorization": "Bearer sk-test",
+                "Content-Type": "application/json",
+            },
+            json={
+                "prompt": "animate this",
+                "model": "sora-2",
+                "seconds": "4",
+                "size": "1280x720",
+                "input_reference": {
+                    "image_url": "data:image/png;base64,iVBORw0K",
+                },
+            },
+        )
+
+    @patch("api.agent.tools.create_video.httpx.Client")
+    def test_create_openai_video_job_rejects_conflicting_size(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "id": "video_123",
+            "object": "video",
+            "status": "queued",
+            "created_at": 123,
+            "progress": 0,
+            "seconds": "4",
+            "size": "720x1280",
+            "model": "sora-2",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        config = _make_config(model="openai/sora-2", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=_make_png_bytes((1280, 720)),
+            mime_type="image/png",
+            path="/Inbox/source.png",
+            width=1280,
+            height=720,
+        )
+
+        result = _create_openai_video_job(
+            config=config,
+            prompt="animate this",
+            duration="4",
+            size="720x1280",
+            source_image=source_image,
+        )
+
+        self.assertEqual(result.id, "video_123")
+        posted_json = mock_client.post.call_args.kwargs["json"]
+        self.assertEqual(posted_json["size"], "720x1280")
+        self.assertEqual(
+            _decode_data_url_image_size(posted_json["input_reference"]["image_url"]),
+            (720, 1280),
+        )
+
+    @patch("api.agent.tools.create_video.httpx.Client")
+    def test_create_openai_video_job_normalizes_unsupported_source_size(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "id": "video_123",
+            "object": "video",
+            "status": "queued",
+            "created_at": 123,
+            "progress": 0,
+            "seconds": "4",
+            "size": "1280x720",
+            "model": "sora-2",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        config = _make_config(model="openai/sora-2", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=_make_png_bytes((1000, 1000)),
+            mime_type="image/png",
+            path="/Inbox/source.png",
+            width=1000,
+            height=1000,
+        )
+
+        result = _create_openai_video_job(
+            config=config,
+            prompt="animate this",
+            duration="4",
+            size=None,
+            source_image=source_image,
+        )
+
+        self.assertEqual(result.id, "video_123")
+        posted_json = mock_client.post.call_args.kwargs["json"]
+        self.assertEqual(posted_json["size"], "1280x720")
+        self.assertEqual(
+            _decode_data_url_image_size(posted_json["input_reference"]["image_url"]),
+            (1280, 720),
+        )
+
+    @patch("api.agent.tools.create_video.httpx.Client")
+    def test_create_openai_video_job_allows_larger_sizes_for_sora_2_pro(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "id": "video_123",
+            "object": "video",
+            "status": "queued",
+            "created_at": 123,
+            "progress": 0,
+            "seconds": "4",
+            "size": "1792x1024",
+            "model": "sora-2-pro",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        config = _make_config(model="openai/sora-2-pro", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=_make_png_bytes((1000, 1000)),
+            mime_type="image/png",
+            path="/Inbox/source.png",
+            width=1000,
+            height=1000,
+        )
+
+        result = _create_openai_video_job(
+            config=config,
+            prompt="animate this",
+            duration="4",
+            size=None,
+            source_image=source_image,
+        )
+
+        self.assertEqual(result.id, "video_123")
+        posted_json = mock_client.post.call_args.kwargs["json"]
+        self.assertEqual(posted_json["size"], "1792x1024")
+        self.assertEqual(
+            _decode_data_url_image_size(posted_json["input_reference"]["image_url"]),
+            (1792, 1024),
+        )
+
     @patch("api.agent.tools.create_video.litellm")
     def test_generates_video_successfully(self, mock_litellm):
         video_obj = _make_video_obj(status="completed")
@@ -142,18 +343,80 @@ class GenerateVideoTests(TestCase):
         self.assertEqual(call_kwargs["seconds"], "10")
         self.assertEqual(call_kwargs["size"], "1920x1080")
 
+    @patch("api.agent.tools.create_video._create_openai_video_job")
     @patch("api.agent.tools.create_video.litellm")
-    def test_passes_source_image_as_input_reference(self, mock_litellm):
+    def test_openai_source_image_bypasses_litellm_video_generation(self, mock_litellm, mock_create_job):
+        video_obj = _make_video_obj(status="completed", video_id="video_123")
+        mock_create_job.return_value = video_obj
+        mock_litellm.video_content.return_value = b"video"
+
+        config = _make_config(model="sora-2-pro", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=b"\x89PNG\r\n",
+            mime_type="image/png",
+            path="/Inbox/source.png",
+        )
+        _generate_video(config, prompt="animate this", source_image=source_image)
+
+        mock_create_job.assert_called_once()
+        mock_litellm.video_generation.assert_not_called()
+        self.assertEqual(
+            mock_create_job.call_args.kwargs,
+            {
+                "config": config,
+                "prompt": "animate this",
+                "duration": None,
+                "size": None,
+                "source_image": source_image,
+            },
+        )
+
+    @patch("api.agent.tools.create_video.litellm")
+    def test_passes_runway_source_image_as_data_url(self, mock_litellm):
         video_obj = _make_video_obj(status="completed")
         mock_litellm.video_generation.return_value = video_obj
         mock_litellm.video_content.return_value = b"video"
 
-        config = _make_config(supports_image_to_video=True)
-        image_bytes = b"\x89PNG\r\n"
-        _generate_video(config, prompt="animate this", source_image_bytes=image_bytes)
+        config = _make_config(model="runwayml/gen4_turbo", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=b"\x89PNG\r\n",
+            mime_type="image/png",
+            path="/Inbox/source.png",
+        )
+        _generate_video(config, prompt="animate this", source_image=source_image)
 
         call_kwargs = mock_litellm.video_generation.call_args[1]
-        self.assertEqual(call_kwargs["input_reference"], image_bytes)
+        self.assertEqual(call_kwargs["input_reference"], "data:image/png;base64,iVBORw0K")
+
+    @patch("api.agent.tools.create_video.litellm")
+    def test_passes_vertex_source_image_as_file_like_object(self, mock_litellm):
+        video_obj = _make_video_obj(status="completed")
+        mock_litellm.video_generation.return_value = video_obj
+        mock_litellm.video_content.return_value = b"video"
+
+        config = _make_config(model="vertex_ai/veo-3", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=b"\x89PNG\r\n",
+            mime_type="image/png",
+            path="/Inbox/source.png",
+        )
+        _generate_video(config, prompt="animate this", source_image=source_image)
+
+        call_kwargs = mock_litellm.video_generation.call_args[1]
+        self.assertIsInstance(call_kwargs["input_reference"], BytesIO)
+        self.assertEqual(call_kwargs["input_reference"].getvalue(), b"\x89PNG\r\n")
+
+    @patch("api.agent.tools.create_video.litellm")
+    def test_text_only_request_omits_input_reference(self, mock_litellm):
+        video_obj = _make_video_obj(status="completed")
+        mock_litellm.video_generation.return_value = video_obj
+        mock_litellm.video_content.return_value = b"video"
+
+        config = _make_config()
+        _generate_video(config, prompt="text only")
+
+        call_kwargs = mock_litellm.video_generation.call_args[1]
+        self.assertNotIn("input_reference", call_kwargs)
 
     @patch("api.agent.tools.create_video.litellm")
     def test_raises_on_empty_content(self, mock_litellm):
@@ -221,7 +484,7 @@ class ExecuteCreateVideoTests(TestCase):
 
     @patch("api.agent.tools.create_video._log_video_generation_completion")
     @patch("api.agent.tools.create_video._generate_video")
-    @patch("api.agent.tools.create_video._resolve_source_image_bytes")
+    @patch("api.agent.tools.create_video._resolve_source_image")
     @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
     @patch("api.agent.tools.create_video.resolve_export_target")
     def test_skips_endpoint_without_image_to_video_support(
@@ -233,7 +496,14 @@ class ExecuteCreateVideoTests(TestCase):
         mock_log,
     ):
         mock_resolve.return_value = ("/exports/test.mp4", False, None)
-        mock_resolve_img.return_value = (b"\x89PNG", None)
+        mock_resolve_img.return_value = (
+            ResolvedSourceImage(
+                image_bytes=b"\x89PNG",
+                mime_type="image/png",
+                path="/inbox/photo.png",
+            ),
+            None,
+        )
         config_no_img = _make_config(endpoint_key="no-img", supports_image_to_video=False)
         mock_configs.return_value = [config_no_img]
 
