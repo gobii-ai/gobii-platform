@@ -130,6 +130,11 @@ def _get_openai_video_supported_sizes(model_name: str) -> set[str]:
     return OPENAI_VIDEO_SUPPORTED_SIZES
 
 
+def _prefer_higher_resolution_when_ratio_ties(model_name: str) -> bool:
+    normalized = _strip_openai_prefix(model_name)
+    return normalized == "sora-2-pro"
+
+
 def _read_image_dimensions(image_bytes: bytes) -> tuple[int | None, int | None]:
     try:
         with Image.open(BytesIO(image_bytes)) as image:
@@ -148,7 +153,13 @@ def _parse_video_size(size: str) -> tuple[int, int]:
     return width, height
 
 
-def _choose_openai_video_target_size(width: int, height: int, *, supported_sizes: set[str]) -> str:
+def _choose_openai_video_target_size(
+    width: int,
+    height: int,
+    *,
+    model_name: str,
+    supported_sizes: set[str],
+) -> str:
     source_ratio = width / height
     landscape = width >= height
     candidates: list[str] = []
@@ -157,12 +168,15 @@ def _choose_openai_video_target_size(width: int, height: int, *, supported_sizes
         if landscape == (candidate_width >= candidate_height):
             candidates.append(candidate)
     if not candidates:
-        candidates = list(OPENAI_VIDEO_SUPPORTED_SIZES)
+        candidates = list(supported_sizes)
+    prefer_higher_resolution = _prefer_higher_resolution_when_ratio_ties(model_name)
     return min(
         candidates,
         key=lambda candidate: (
             abs((_parse_video_size(candidate)[0] / _parse_video_size(candidate)[1]) - source_ratio),
-            _parse_video_size(candidate)[0] * _parse_video_size(candidate)[1],
+            -_parse_video_size(candidate)[0] * _parse_video_size(candidate)[1]
+            if prefer_higher_resolution
+            else _parse_video_size(candidate)[0] * _parse_video_size(candidate)[1],
             candidate,
         ),
     )
@@ -234,6 +248,7 @@ def _resolve_openai_video_source_image(
             inferred_size = _choose_openai_video_target_size(
                 source_image.width,
                 source_image.height,
+                model_name=model_name,
                 supported_sizes=supported_sizes,
             )
             return inferred_size, _normalize_source_image_to_size(
