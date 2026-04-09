@@ -37,7 +37,10 @@ from marketing_events.api import capi
 from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
 from marketing_events.context import build_marketing_context_from_user, extract_click_context
 from marketing_events.telemetry import record_fbc_synthesized
-from marketing_events.value_utils import calculate_start_trial_values
+from marketing_events.value_utils import (
+    calculate_start_trial_values,
+    resolve_start_trial_conversion_rate,
+)
 import logging
 import stripe
 
@@ -3742,10 +3745,15 @@ def handle_subscription_event(event, **kwargs):
 
                     if sub.status == "trialing":
                         value, currency = _calculate_subscription_value(licensed_item)
+                        conversion_rate = resolve_start_trial_conversion_rate(
+                            plan_value,
+                            default_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+                            scale_rate=settings.CAPI_START_TRIAL_SCALE_CONV_RATE,
+                        )
                         predicted_ltv, conversion_value = calculate_start_trial_values(
                             value,
                             ltv_multiple=settings.CAPI_LTV_MULTIPLE,
-                            conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+                            conversion_rate=conversion_rate,
                         )
                         if predicted_ltv is not None:
                             marketing_properties["predicted_ltv"] = predicted_ltv

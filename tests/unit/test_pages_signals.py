@@ -1392,6 +1392,11 @@ class SubscriptionSignalTests(TestCase):
         self.assertTrue(identify_args[1].get("is_trial"))
 
     @tag("batch_pages")
+    @override_settings(
+        CAPI_LTV_MULTIPLE=5.0,
+        CAPI_START_TRIAL_CONV_RATE=0.322,
+        CAPI_START_TRIAL_SCALE_CONV_RATE=0.22,
+    )
     def test_scale_trialing_subscription_grants_quarter_credits(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
@@ -1429,6 +1434,12 @@ class SubscriptionSignalTests(TestCase):
         self.assertTrue(grant_kwargs["invoice_id"].startswith("trial:sub_123"))
         self.assertEqual(grant_kwargs["expiration_date"], end_dt + relativedelta(months=1))
         self.assertTrue(grant_kwargs["free_trial_start"])
+        self.mock_capi.assert_called_once()
+        capi_kwargs = self.mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "StartTrial")
+        props = capi_kwargs["properties"]
+        self.assertAlmostEqual(props["predicted_ltv"], 149.95, places=2)
+        self.assertAlmostEqual(props["value"], props["predicted_ltv"] * 0.22, places=6)
 
     @tag("batch_pages")
     def test_trial_conversion_topoffs_credits(self):

@@ -1,5 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
+from constants.plans import PlanNames
+
 
 def _to_decimal(value: object) -> Decimal | None:
     if value is None or isinstance(value, bool):
@@ -32,3 +34,15 @@ def calculate_start_trial_values(
     predicted_ltv = base_decimal * ltv_multiple_decimal
     conversion_value = predicted_ltv * conversion_rate_decimal
     return float(predicted_ltv), float(conversion_value)
+
+
+def resolve_start_trial_conversion_rate(
+    plan: object,
+    *,
+    default_rate: object,
+    scale_rate: object,
+):
+    normalized_plan = str(plan or "").strip()
+    if normalized_plan == PlanNames.SCALE:
+        return scale_rate
+    return default_rate
