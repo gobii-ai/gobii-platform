@@ -1899,17 +1899,20 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             checkout_source_url=base_metadata.get("checkout_source_url"),
             checkout_kwargs=checkout_kwargs,
         )
-        _emit_checkout_initiated_event(
-            request=request,
-            user=user,
-            plan_code=PlanNames.STARTUP,
-            plan_label="Pro",
-            value=price,
-            currency=price_currency,
-            event_id=event_id,
-            event_name="AddPaymentInfo",
-            post_checkout_redirect_used=post_checkout_redirect_used,
-        )
+        # Webhook-based AddPaymentInfo is authoritative so we only send once a
+        # payment method is actually saved. Keep the old checkout-time send here
+        # commented out for quick rollback if needed.
+        # _emit_checkout_initiated_event(
+        #     request=request,
+        #     user=user,
+        #     plan_code=PlanNames.STARTUP,
+        #     plan_label="Pro",
+        #     value=price,
+        #     currency=price_currency,
+        #     event_id=event_id,
+        #     event_name="AddPaymentInfo",
+        #     post_checkout_redirect_used=post_checkout_redirect_used,
+        # )
 
         # 3️⃣  No need to sync anything here.  The webhook events
         #     (customer.subscription.created, invoice.paid, etc.)
@@ -2077,17 +2080,20 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             checkout_source_url=base_metadata.get("checkout_source_url"),
             checkout_kwargs=checkout_kwargs,
         )
-        _emit_checkout_initiated_event(
-            request=request,
-            user=user,
-            plan_code=PlanNames.SCALE,
-            plan_label="Scale",
-            value=price,
-            currency=price_currency,
-            event_id=event_id,
-            event_name="AddPaymentInfo",
-            post_checkout_redirect_used=post_checkout_redirect_used,
-        )
+        # Webhook-based AddPaymentInfo is authoritative so we only send once a
+        # payment method is actually saved. Keep the old checkout-time send here
+        # commented out for quick rollback if needed.
+        # _emit_checkout_initiated_event(
+        #     request=request,
+        #     user=user,
+        #     plan_code=PlanNames.SCALE,
+        #     plan_label="Scale",
+        #     value=price,
+        #     currency=price_currency,
+        #     event_id=event_id,
+        #     event_name="AddPaymentInfo",
+        #     post_checkout_redirect_used=post_checkout_redirect_used,
+        # )
 
         return redirect(session.url)
 
