@@ -99,7 +99,10 @@ from api.services.agent_settings_resume import (
     queue_settings_change_resume,
 )
 from api.services.referral_service import ReferralService
-from api.services.trial_abuse import evaluate_user_trial_eligibility
+from api.services.trial_abuse import (
+    evaluate_user_trial_eligibility,
+    user_has_prior_individual_history,
+)
 from console.daily_credit import (
     build_agent_daily_credit_context,
     get_daily_credit_slider_bounds,
@@ -500,6 +503,7 @@ from util.waffle_flags import is_waffle_flag_active
 from util.trial_eligibility import (
     is_trial_decision_allowed,
     is_user_trial_eligibility_enforcement_enabled,
+    is_user_trial_eligibility_enforcement_one_per_user_enabled,
 )
 from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
@@ -633,6 +637,10 @@ def _get_checkout_trial_days() -> tuple[int, int]:
 
 def _is_checkout_trial_eligible(user, request: HttpRequest | None = None) -> bool:
     """Return whether a user can start an individual-plan free trial."""
+    if not user or not getattr(user, "pk", None):
+        return True
+    if is_user_trial_eligibility_enforcement_one_per_user_enabled(request):
+        return not user_has_prior_individual_history(user)
     if not is_user_trial_eligibility_enforcement_enabled(request):
         return True
     try:

@@ -22,7 +22,11 @@ from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, Persist
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
-from api.services.trial_abuse import SIGNAL_SOURCE_CHECKOUT, evaluate_user_trial_eligibility
+from api.services.trial_abuse import (
+    SIGNAL_SOURCE_CHECKOUT,
+    evaluate_user_trial_eligibility,
+    user_has_prior_individual_history,
+)
 from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
     OAUTH_ATTRIBUTION_SESSION_KEYS,
@@ -64,6 +68,7 @@ from util.onboarding import (
 from util.trial_eligibility import (
     is_trial_decision_allowed,
     is_user_trial_eligibility_enforcement_enabled,
+    is_user_trial_eligibility_enforcement_one_per_user_enabled,
 )
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
@@ -434,6 +439,9 @@ POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
 def _is_individual_trial_eligible(user, *, request=None, capture_source: str | None = None) -> bool:
     if not user or not getattr(user, "pk", None):
         return True
+    if is_user_trial_eligibility_enforcement_one_per_user_enabled(request):
+        # One-per-user mode intentionally ignores broader cross-account signals.
+        return not user_has_prior_individual_history(user)
     if not is_user_trial_eligibility_enforcement_enabled(request):
         return True
     result = evaluate_user_trial_eligibility(

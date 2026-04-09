@@ -21,6 +21,7 @@ from api.services.trial_abuse import (
     capture_request_identity_signals_and_attribution,
     evaluate_user_trial_eligibility,
     extract_request_identity_signal_values,
+    user_has_prior_individual_history,
 )
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
@@ -150,6 +151,40 @@ class TrialAbuseServiceTests(TestCase):
             result.evidence_summary["matched_signal_types"],
             [UserIdentitySignalTypeChoices.FPJS_VISITOR_ID],
         )
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
+    def test_user_has_prior_individual_history_returns_true_for_local_trial_history(
+        self,
+        _mock_get_stripe_customer,
+    ):
+        current_user = self._create_user("current-local-history@example.com")
+        self._grant_trial_history(current_user)
+
+        self.assertTrue(user_has_prior_individual_history(current_user))
+
+    @tag("batch_pages")
+    @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
+    def test_user_has_prior_individual_history_ignores_cross_account_signal_matches(
+        self,
+        _mock_get_stripe_customer,
+    ):
+        historical_user = self._create_user("historical-simple@example.com")
+        current_user = self._create_user("current-simple@example.com")
+        self._grant_trial_history(historical_user)
+
+        UserIdentitySignal.objects.create(
+            user=historical_user,
+            signal_type=UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
+            signal_value="visitor-shared-simple",
+        )
+        UserIdentitySignal.objects.create(
+            user=current_user,
+            signal_type=UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
+            signal_value="visitor-shared-simple",
+        )
+
+        self.assertFalse(user_has_prior_individual_history(current_user))
 
     @tag("batch_pages")
     @patch("api.services.trial_abuse._individual_plan_price_ids", return_value=set())

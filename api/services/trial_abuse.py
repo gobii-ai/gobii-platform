@@ -267,6 +267,11 @@ def _user_has_prior_individual_history(user) -> tuple[bool, str | None]:
         return True, "subscription_history_lookup_failed"
 
 
+def user_has_prior_individual_history(user) -> bool:
+    has_prior_history, _history_reason = _user_has_prior_individual_history(user)
+    return has_prior_history
+
+
 def _user_ids_with_matching_signal_values(user, signal_type: str) -> set[int]:
     values = list(
         UserIdentitySignal.objects.filter(

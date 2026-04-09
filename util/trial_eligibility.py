@@ -11,6 +11,7 @@ from constants.feature_flags import (
     START_TRIAL_CAPI_SEND_NO_TRIAL,
     START_TRIAL_CAPI_SEND_REVIEW,
     USER_TRIAL_ELIGIBILITY_ENFORCEMENT,
+    USER_TRIAL_ELIGIBILITY_ENFORCEMENT_ONE_PER_USER,
     USER_TRIAL_REVIEW_ALLOWS_TRIAL,
     START_TRIAL_CAPI_TRIAL_ELIGIBILITY_ENFORCEMENT,
 )
@@ -25,6 +26,17 @@ def is_user_trial_eligibility_enforcement_enabled(
         USER_TRIAL_ELIGIBILITY_ENFORCEMENT,
         request,
         default=True,
+    )
+
+
+def is_user_trial_eligibility_enforcement_one_per_user_enabled(
+    request: HttpRequest | None = None,
+) -> bool:
+    """Default to disabled so the simpler one-trial-per-user mode is opt-in."""
+    return is_waffle_flag_active(
+        USER_TRIAL_ELIGIBILITY_ENFORCEMENT_ONE_PER_USER,
+        request,
+        default=False,
     )
 
 

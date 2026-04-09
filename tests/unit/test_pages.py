@@ -1874,6 +1874,30 @@ class CheckoutRedirectTests(TestCase):
         mock_trial_eligibility.assert_not_called()
 
     @tag("batch_pages")
+    @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="eligible"))
+    @patch("pages.views.user_has_prior_individual_history", return_value=True)
+    def test_individual_trial_eligibility_uses_one_per_user_flag_before_abuse_matching(
+        self,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        user = get_user_model().objects.create_user(
+            email="one_per_user@test.com",
+            password="pw",
+            username="one_per_user_user",
+        )
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=False),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+        ):
+            eligible = page_views._is_individual_trial_eligible(user)
+
+        self.assertFalse(eligible)
+        mock_prior_history.assert_called_once_with(user)
+        mock_trial_eligibility.assert_not_called()
+
+    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
     @patch("pages.views.ensure_single_individual_subscription")

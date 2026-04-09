@@ -927,6 +927,26 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(eligible)
 
     @tag("batch_console_agents")
+    @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="eligible"))
+    @patch("console.views.user_has_prior_individual_history", return_value=True)
+    def test_checkout_trial_eligibility_uses_one_per_user_flag_before_abuse_matching(
+        self,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        from console.views import _is_checkout_trial_eligible
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=False),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+        ):
+            eligible = _is_checkout_trial_eligible(self.user)
+
+        self.assertFalse(eligible)
+        mock_prior_history.assert_called_once_with(self.user)
+        mock_trial_eligibility.assert_not_called()
+
+    @tag("batch_console_agents")
     @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
     @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")
