@@ -42,7 +42,7 @@ def resolve_start_trial_conversion_rate(
     default_rate: object,
     scale_rate: object,
 ):
-    normalized_plan = str(plan or "").strip()
+    normalized_plan = str(plan or "").strip().lower()
     if normalized_plan == PlanNames.SCALE:
         return scale_rate
     return default_rate
