@@ -1,6 +1,6 @@
 from django.test import SimpleTestCase, tag
 
-from constants.plans import PlanNames
+from constants.plans import PlanNames, PlanSlugs
 from marketing_events.value_utils import (
     calculate_start_trial_values,
     resolve_start_trial_conversion_rate,
@@ -76,6 +76,16 @@ class StartTrialValueUtilsTests(SimpleTestCase):
         self.assertEqual(
             resolve_start_trial_conversion_rate(
                 PlanNames.SCALE,
+                default_rate=0.322,
+                scale_rate=0.22,
+            ),
+            0.22,
+        )
+
+    def test_resolve_start_trial_conversion_rate_uses_scale_override_for_slug(self):
+        self.assertEqual(
+            resolve_start_trial_conversion_rate(
+                PlanSlugs.SCALE,
                 default_rate=0.322,
                 scale_rate=0.22,
             ),

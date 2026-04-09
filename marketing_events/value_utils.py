@@ -1,6 +1,6 @@
 from decimal import Decimal, InvalidOperation
 
-from constants.plans import PlanNames
+from constants.plans import PlanNames, PlanSlugs
 
 
 def _to_decimal(value: object) -> Decimal | None:
@@ -43,6 +43,6 @@ def resolve_start_trial_conversion_rate(
     scale_rate: object,
 ):
     normalized_plan = str(plan or "").strip().lower()
-    if normalized_plan == PlanNames.SCALE:
+    if normalized_plan in {PlanNames.SCALE, PlanSlugs.SCALE}:
         return scale_rate
     return default_rate
