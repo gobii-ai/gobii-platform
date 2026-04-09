@@ -49,8 +49,6 @@ from billing.checkout_metadata import (
 )
 from billing.checkout_context import (
     bind_setup_intent_checkout_context,
-    get_checkout_context_for_session,
-    get_checkout_context_for_setup_intent,
 )
 from billing.lifecycle_classifier import (
     is_subscription_delinquency_entered,
@@ -73,7 +71,7 @@ from billing.plan_resolver import (
     get_plan_version_by_price_id,
     get_plan_version_by_product_id,
 )
-from api.models import UserBilling, OrganizationBilling, UserAttribution
+from api.models import UserBilling, OrganizationBilling, StripeCheckoutContext, UserAttribution
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
@@ -968,14 +966,14 @@ def _emit_add_payment_info_from_checkout_context(
     owner,
     checkout_context: Mapping[str, Any],
     payment_method_type: str | None,
-) -> None:
+) -> bool:
     eligibility_snapshot = _add_payment_info_eligibility_snapshot(owner)
     if eligibility_snapshot is not None and eligibility_snapshot.get("send_allowed") is False:
         _track_add_payment_info_trial_eligibility_skip(
             owner=owner,
             snapshot=eligibility_snapshot,
         )
-        return
+        return False
 
     marketing_properties = {
         "event_id": checkout_context.get("event_id"),
@@ -1004,6 +1002,44 @@ def _emit_add_payment_info_from_checkout_context(
         request=None,
         context=marketing_context,
     )
+    return True
+
+
+def _serialize_checkout_context_record(checkout_context: StripeCheckoutContext) -> dict[str, Any]:
+    value = getattr(checkout_context, "value", None)
+    return {
+        "event_id": getattr(checkout_context, "event_id", ""),
+        "flow_type": getattr(checkout_context, "flow_type", ""),
+        "plan": getattr(checkout_context, "plan", ""),
+        "plan_label": getattr(checkout_context, "plan_label", ""),
+        "value": float(value) if value is not None else None,
+        "currency": getattr(checkout_context, "currency", ""),
+        "checkout_source_url": getattr(checkout_context, "checkout_source_url", ""),
+        "stripe_checkout_session_id": getattr(checkout_context, "stripe_checkout_session_id", ""),
+        "stripe_setup_intent_id": getattr(checkout_context, "stripe_setup_intent_id", None),
+    }
+
+
+def _emit_add_payment_info_for_checkout_context_once(
+    *,
+    owner,
+    checkout_context: StripeCheckoutContext,
+    payment_method_type: str | None,
+) -> bool:
+    if checkout_context.add_payment_info_sent_at is not None:
+        return False
+
+    did_enqueue = _emit_add_payment_info_from_checkout_context(
+        owner=owner,
+        checkout_context=_serialize_checkout_context_record(checkout_context),
+        payment_method_type=payment_method_type,
+    )
+    if not did_enqueue:
+        return False
+
+    checkout_context.add_payment_info_sent_at = timezone.now()
+    checkout_context.save(update_fields=["add_payment_info_sent_at", "updated_at"])
+    return True
 
 
 def _emit_add_payment_info_for_setup_intent(
@@ -1016,20 +1052,25 @@ def _emit_add_payment_info_for_setup_intent(
         return
 
     setup_intent_id = _extract_stripe_object_id(payload)
-    checkout_context = get_checkout_context_for_setup_intent(setup_intent_id)
-    if not checkout_context:
-        return
-
     payment_method_types = payload.get("payment_method_types")
     payment_method_type = None
     if isinstance(payment_method_types, list) and payment_method_types:
         payment_method_type = str(payment_method_types[0]).strip() or None
 
-    _emit_add_payment_info_from_checkout_context(
-        owner=owner,
-        checkout_context=checkout_context,
-        payment_method_type=payment_method_type,
-    )
+    with transaction.atomic():
+        checkout_context = (
+            StripeCheckoutContext.objects.select_for_update()
+            .filter(stripe_setup_intent_id=setup_intent_id)
+            .first()
+        )
+        if checkout_context is None:
+            return
+
+        _emit_add_payment_info_for_checkout_context_once(
+            owner=owner,
+            checkout_context=checkout_context,
+            payment_method_type=payment_method_type,
+        )
 
 
 def _emit_add_payment_info_for_completed_checkout_session(
@@ -1039,10 +1080,6 @@ def _emit_add_payment_info_for_completed_checkout_session(
 ) -> None:
     metadata = _coerce_metadata_dict(payload.get("metadata"))
     if metadata.get("flow_type") != STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE:
-        return
-
-    checkout_context = get_checkout_context_for_session(_extract_stripe_object_id(payload))
-    if not checkout_context:
         return
 
     owner, owner_type, _organization_billing, resolved_customer_id = _resolve_setup_intent_owner(
@@ -1065,11 +1102,20 @@ def _emit_add_payment_info_for_completed_checkout_session(
     if isinstance(payment_method_types, list) and payment_method_types:
         payment_method_type = str(payment_method_types[0]).strip() or None
 
-    _emit_add_payment_info_from_checkout_context(
-        owner=owner,
-        checkout_context=checkout_context,
-        payment_method_type=payment_method_type,
-    )
+    with transaction.atomic():
+        checkout_context = (
+            StripeCheckoutContext.objects.select_for_update()
+            .filter(stripe_checkout_session_id=_extract_stripe_object_id(payload))
+            .first()
+        )
+        if checkout_context is None:
+            return
+
+        _emit_add_payment_info_for_checkout_context_once(
+            owner=owner,
+            checkout_context=checkout_context,
+            payment_method_type=payment_method_type,
+        )
 
 
 def _add_payment_info_eligibility_snapshot(user: Any) -> dict[str, Any] | None:
@@ -2693,6 +2739,19 @@ def handle_setup_intent_succeeded(event, **kwargs):
         if owner_id is not None:
             span.set_attribute("setup_intent.owner.id", str(owner_id))
 
+        try:
+            _emit_add_payment_info_for_setup_intent(
+                owner=owner,
+                owner_type=owner_type,
+                payload=payload,
+            )
+        except Exception:
+            span.add_event("add_payment_info_emit_failed")
+            logger.exception(
+                "Failed to enqueue AddPaymentInfo for setup intent %s",
+                payload.get("id"),
+            )
+
         subscription = get_active_subscription(owner, sync_with_stripe=True)
         if subscription is None or not getattr(subscription, "id", None):
             span.add_event("subscription_not_found")
@@ -2728,19 +2787,6 @@ def handle_setup_intent_succeeded(event, **kwargs):
                 payload.get("id"),
             )
             return
-
-        try:
-            _emit_add_payment_info_for_setup_intent(
-                owner=owner,
-                owner_type=owner_type,
-                payload=payload,
-            )
-        except Exception:
-            span.add_event("add_payment_info_emit_failed")
-            logger.exception(
-                "Failed to enqueue AddPaymentInfo for setup intent %s",
-                payload.get("id"),
-            )
 
         sync_subscription_after_direct_update(updated_subscription)
 
