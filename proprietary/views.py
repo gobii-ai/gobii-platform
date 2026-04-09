@@ -21,7 +21,10 @@ from util.waffle_flags import is_waffle_flag_active
 from util.subscription_helper import (
     get_user_plan,
 )
-from api.services.trial_abuse import evaluate_user_trial_eligibility
+from api.services.trial_abuse import (
+    evaluate_user_trial_eligibility,
+    user_has_prior_individual_history,
+)
 from util.fish_collateral import is_fish_collateral_enabled
 from constants.feature_flags import (
     CTA_NO_CHARGE_DURING_TRIAL,
@@ -33,6 +36,7 @@ from constants.feature_flags import (
 from util.trial_eligibility import (
     is_trial_decision_allowed,
     is_user_trial_eligibility_enforcement_enabled,
+    is_user_trial_eligibility_enforcement_one_per_user_enabled,
 )
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
@@ -65,6 +69,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         def _is_trial_eligible() -> bool:
             if not authenticated:
                 return True
+            if is_user_trial_eligibility_enforcement_one_per_user_enabled(self.request):
+                return not user_has_prior_individual_history(self.request.user)
             if not is_user_trial_eligibility_enforcement_enabled(self.request):
                 return True
             try:
