@@ -499,6 +499,13 @@ def _resolve_local_exec_source_path(agent: PersistentAgent, source_path: str) ->
 
 
 def _resolve_bridge_base_url() -> str:
+    configured = (
+        getattr(settings, "SANDBOX_CUSTOM_TOOL_BRIDGE_BASE_URL", "")
+        or ""
+    ).strip().rstrip("/")
+    if configured:
+        return configured
+
     configured = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
     if configured:
         return configured
@@ -840,7 +847,13 @@ def execute_custom_tool(
 
     base_url = _resolve_bridge_base_url()
     if not base_url:
-        return {"status": "error", "message": "PUBLIC_SITE_URL or Site domain is required to run custom tools."}
+        return {
+            "status": "error",
+            "message": (
+                "SANDBOX_CUSTOM_TOOL_BRIDGE_BASE_URL, PUBLIC_SITE_URL, "
+                "or Site domain is required to run custom tools."
+            ),
+        }
 
     execution_context = get_tool_execution_context()
     parent_step_id = execution_context.step_id if execution_context is not None else None

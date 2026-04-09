@@ -215,6 +215,10 @@ def _public_site_url_default(*, debug: bool | None = None) -> str:
 
 
 PUBLIC_SITE_URL = env("PUBLIC_SITE_URL", default=_public_site_url_default())
+SANDBOX_CUSTOM_TOOL_BRIDGE_BASE_URL = env(
+    "SANDBOX_CUSTOM_TOOL_BRIDGE_BASE_URL",
+    default=""
+)
 
 
 def _cookie_secure_default(site_url: str, *, debug: bool | None = None) -> bool:
