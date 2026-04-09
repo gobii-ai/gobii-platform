@@ -1269,6 +1269,8 @@ class SandboxComputeService:
         started = session.state != AgentComputeSession.State.RUNNING
         mode = "bootstrap" if started else "refresh"
         bootstrap_started_at = time.monotonic()
+        # Retry only backend-reported non-running states. Raised bootstrap errors
+        # indicate scheduler/configuration failures and should still fail fast.
         self._deploy_or_resume_session(agent, session, source=source, mode=mode, attempt=1)
         if session.state != AgentComputeSession.State.RUNNING:
             logger.info(
