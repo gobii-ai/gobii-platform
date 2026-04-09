@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import sqlite3
 import subprocess
 import sys
@@ -28,7 +29,7 @@ from api.services.mcp_tool_cache import set_cached_mcp_tool_definitions
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
-    custom_tool_sqlite_workspace_path,
+    sandbox_workspace_root_for_agent,
 )
 from api.services.system_settings import get_sandbox_compute_enabled, get_sandbox_compute_require_proxy
 from api.sandbox_utils import monotonic_elapsed_ms as _elapsed_ms, normalize_timeout as _normalize_timeout
@@ -728,6 +729,15 @@ def _truncate_streams(stdout: str, stderr: str, max_bytes: int) -> tuple[str, st
         truncated_stdout.decode("utf-8", errors="ignore"),
         truncated_stderr.decode("utf-8", errors="ignore"),
     )
+
+
+def custom_tool_workspace_root_for_backend(backend: Any, agent_id: Any) -> str:
+    resolver = getattr(backend, "custom_tool_workspace_root", None)
+    if callable(resolver):
+        workspace_root = resolver(agent_id)
+        if isinstance(workspace_root, str) and workspace_root.strip():
+            return workspace_root
+    return sandbox_workspace_root_for_agent(agent_id)
 
 
 def _parse_sync_timestamp(value: Any) -> Optional[timezone.datetime]:
@@ -1604,7 +1614,10 @@ class SandboxComputeService:
             runtime_env[sqlite_env_key] = (
                 local_sqlite_db_path
                 if isinstance(self._backend, LocalSandboxBackend)
-                else custom_tool_sqlite_workspace_path(agent.id)
+                else posixpath.join(
+                    custom_tool_workspace_root_for_backend(self._backend, agent.id),
+                    CUSTOM_TOOL_SQLITE_FILESPACE_PATH.lstrip("/"),
+                )
             )
 
         merged_env, trusted_secret_keys = _merge_agent_env_vars_with_secret_keys(agent, runtime_env)

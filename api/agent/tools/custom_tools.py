@@ -30,9 +30,9 @@ from api.services.sandbox_compute import (
     LocalSandboxBackend,
     SandboxComputeService,
     SandboxComputeUnavailable,
+    custom_tool_workspace_root_for_backend,
     sandbox_compute_enabled_for_agent,
 )
-from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
@@ -864,7 +864,7 @@ def execute_custom_tool(
             env[_EXEC_SOURCE_PATH_ENV_KEY] = local_exec_source_path
     else:
         env[_EXEC_SOURCE_PATH_ENV_KEY] = posixpath.join(
-            sandbox_workspace_root_for_agent(agent.id),
+            custom_tool_workspace_root_for_backend(service._backend, agent.id),
             tool.source_path.lstrip("/"),
         )
 

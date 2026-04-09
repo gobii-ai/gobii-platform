@@ -31,8 +31,15 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._egress_proxy_service_port = 3128
         backend._egress_proxy_socks_port = 1080
         backend._egress_proxy_socks_service_port = 1080
+        backend._pod_ready_timeout = 60
         backend._proxy_timeout = 30
+        backend._wait_for_service_routable = Mock(return_value=True)
         return backend
+
+    def test_custom_tool_workspace_root_uses_isolated_workspace_mount(self):
+        backend = self._backend()
+
+        self.assertEqual(backend.custom_tool_workspace_root("agent-1"), "/workspace")
 
     def test_stdio_discovery_requires_agent_session(self):
         backend = self._backend()
@@ -368,6 +375,52 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             agent_id="agent-proxy-drift",
             egress_service_name="sandbox-egress-agent-proxy-drift",
             no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
+        )
+
+    def test_deploy_or_resume_returns_error_when_service_is_not_routable(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-routability")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(return_value=None)
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+        backend._wait_for_service_routable = Mock(return_value=False)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[False, False]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "error")
+        backend._wait_for_service_routable.assert_called_once()
+        self.assertEqual(
+            backend._wait_for_service_routable.call_args.args[0],
+            "sandbox-agent-agent-routability",
+        )
+
+    def test_wait_for_service_routable_polls_healthz_until_success(self):
+        backend = object.__new__(KubernetesSandboxBackend)
+        backend._namespace = "default"
+
+        error = __import__("requests").ConnectionError("connection refused")
+        response = Mock()
+        response.raise_for_status.return_value = None
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        session.get.side_effect = [error, response]
+
+        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ):
+            result = backend._wait_for_service_routable("sandbox-agent-agent-1", timeout_seconds=5)
+
+        self.assertTrue(result)
+        self.assertFalse(session.trust_env)
+        self.assertEqual(
+            session.get.call_args_list[-1].args[0],
+            "http://sandbox-agent-agent-1.default.svc.cluster.local:8080/healthz",
         )
 
 
