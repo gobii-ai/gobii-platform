@@ -200,7 +200,14 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         except KubernetesApiError as exc:
             raise SandboxComputeUnavailable(f"Kubernetes scheduler failed: {exc}") from exc
 
+        readiness_started_at = time.monotonic()
         if not self._wait_for_pod_ready(pod_name):
+            return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
+        remaining_timeout = self._pod_ready_timeout - (time.monotonic() - readiness_started_at)
+        if remaining_timeout <= 0 or not self._wait_for_service_routable(
+            sandbox_service_name,
+            timeout_seconds=remaining_timeout,
+        ):
             return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
 
         return SandboxSessionUpdate(state=AgentComputeSession.State.RUNNING, pod_name=pod_name, namespace=self._namespace)
@@ -663,6 +670,50 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             _elapsed_ms(started_at),
             self._pod_ready_timeout,
             last_phase,
+        )
+        return False
+
+    def _wait_for_service_routable(self, service_name: str, *, timeout_seconds: float) -> bool:
+        started_at = time.monotonic()
+        deadline = started_at + max(float(timeout_seconds), 0.0)
+        url = _sandbox_service_url(self._namespace, service_name, "/healthz")
+        attempts = 0
+        last_error = None
+
+        with requests.Session() as session:
+            session.trust_env = False
+            while time.monotonic() < deadline:
+                attempts += 1
+                remaining = max(deadline - time.monotonic(), 0.1)
+                try:
+                    response = session.get(url, timeout=min(5.0, remaining))
+                    response.raise_for_status()
+                    logger.info(
+                        "Sandbox service routable service=%s attempts=%s elapsed_ms=%s",
+                        service_name,
+                        attempts,
+                        _elapsed_ms(started_at),
+                    )
+                    return True
+                except requests.RequestException as exc:
+                    last_error = exc
+                    if attempts == 1 or attempts % 5 == 0:
+                        logger.info(
+                            "Sandbox service not routable yet service=%s attempts=%s elapsed_ms=%s error=%s",
+                            service_name,
+                            attempts,
+                            _elapsed_ms(started_at),
+                            exc,
+                        )
+                    time.sleep(min(1.0, remaining))
+
+        logger.warning(
+            "Sandbox service routability timeout service=%s attempts=%s elapsed_ms=%s timeout_seconds=%s last_error=%s",
+            service_name,
+            attempts,
+            _elapsed_ms(started_at),
+            timeout_seconds,
+            last_error,
         )
         return False
 
