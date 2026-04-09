@@ -763,24 +763,7 @@ class CheckoutSessionSignalTests(TestCase):
 
             handle_checkout_session_event(event)
 
-        mock_capi.assert_called_once_with(
-            user=self.user,
-            event_name="AddPaymentInfo",
-            properties={
-                "event_id": "startup-sub-purchase",
-                "plan": PlanNames.STARTUP,
-                "plan_label": "Pro",
-                "flow_type": "purchase",
-                "value": 120.0,
-                "currency": "USD",
-                "payment_method_type": "card",
-            },
-            request=None,
-            context={
-                "consent": True,
-                "page": {"url": "https://www.gobii.ai/pricing"},
-            },
-        )
+        mock_capi.assert_not_called()
         mock_clear.assert_called_once_with(
             customer_id="cus_purchase_complete",
             expected_event_id="startup-sub-purchase",
@@ -3281,28 +3264,11 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
 
             handle_setup_intent_succeeded(event)
 
-        mock_capi.assert_called_once_with(
-            user=self.user,
-            event_name="AddPaymentInfo",
-            properties={
-                "event_id": "startup-sub-current-payment-method",
-                "plan": PlanNames.STARTUP,
-                "plan_label": "Pro",
-                "flow_type": "trial",
-                "value": 120.0,
-                "currency": "USD",
-                "payment_method_type": "card",
-            },
-            request=None,
-            context={
-                "consent": True,
-                "page": {"url": "https://www.gobii.ai/pricing"},
-            },
-        )
+        mock_capi.assert_not_called()
         checkout_context = StripeCheckoutContext.objects.get(
             stripe_checkout_session_id="cs_trial_current_payment_method",
         )
-        self.assertIsNotNone(checkout_context.add_payment_info_sent_at)
+        self.assertIsNone(checkout_context.add_payment_info_sent_at)
         mock_modify.assert_not_called()
         mock_sync.assert_not_called()
 
@@ -3382,25 +3348,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
 
             handle_setup_intent_succeeded(event)
 
-        mock_capi.assert_called_once_with(
-            user=self.user,
-            event_name="AddPaymentInfo",
-            properties={
-                "event_id": "startup-sub-add-payment",
-                "plan": PlanNames.STARTUP,
-                "plan_label": "Pro",
-                "flow_type": "trial",
-                "value": 120.0,
-                "currency": "USD",
-                "payment_method_type": "card",
-            },
-            request=None,
-            context={
-                "consent": True,
-                "click_ids": {"fbp": "fb.1.1700000000000.123456789"},
-                "page": {"url": "https://www.gobii.ai/pricing"},
-            },
-        )
+        mock_capi.assert_not_called()
         mock_modify.assert_called_once_with(
             "sub_user_current",
             default_payment_method="pm_setup_current",
@@ -3411,7 +3359,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         checkout_context = StripeCheckoutContext.objects.get(
             stripe_checkout_session_id="cs_trial_bound",
         )
-        self.assertIsNotNone(checkout_context.add_payment_info_sent_at)
+        self.assertIsNone(checkout_context.add_payment_info_sent_at)
 
     def test_setup_intent_succeeded_binds_checkout_context_on_the_fly(self):
         StripeCheckoutContext.objects.create(
@@ -3458,12 +3406,12 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
 
             handle_setup_intent_succeeded(event)
 
-        mock_capi.assert_called_once()
+        mock_capi.assert_not_called()
         checkout_context = StripeCheckoutContext.objects.get(
             stripe_checkout_session_id="cs_trial_on_the_fly",
         )
         self.assertEqual(checkout_context.stripe_setup_intent_id, "seti_user_on_the_fly")
-        self.assertIsNotNone(checkout_context.add_payment_info_sent_at)
+        self.assertIsNone(checkout_context.add_payment_info_sent_at)
         mock_modify.assert_called_once_with(
             "sub_user_current",
             default_payment_method="pm_setup_current",
@@ -3507,28 +3455,11 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
 
             handle_setup_intent_succeeded(event)
 
-        mock_capi.assert_called_once_with(
-            user=self.user,
-            event_name="AddPaymentInfo",
-            properties={
-                "event_id": "startup-sub-without-subscription",
-                "plan": PlanNames.STARTUP,
-                "plan_label": "Pro",
-                "flow_type": "trial",
-                "value": 120.0,
-                "currency": "USD",
-                "payment_method_type": "card",
-            },
-            request=None,
-            context={
-                "consent": True,
-                "page": {"url": "https://www.gobii.ai/pricing"},
-            },
-        )
+        mock_capi.assert_not_called()
         checkout_context = StripeCheckoutContext.objects.get(
             stripe_checkout_session_id="cs_trial_without_subscription",
         )
-        self.assertIsNotNone(checkout_context.add_payment_info_sent_at)
+        self.assertIsNone(checkout_context.add_payment_info_sent_at)
         mock_modify.assert_not_called()
         mock_sync.assert_not_called()
 
@@ -3747,19 +3678,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
                 handle_setup_intent_succeeded(event)
 
         mock_capi.assert_not_called()
-        mock_track.assert_called_once_with(
-            user_id=self.user.id,
-            event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
-            properties={
-                "event_name": "AddPaymentInfo",
-                "reason": "trial_eligibility_disallowed",
-                "decision_source": "stored_trial_eligibility_snapshot",
-                "trial_eligibility_decision": UserTrialEligibilityAutoStatusChoices.NO_TRIAL,
-                "trial_eligibility_manual_action": "inherit",
-                "trial_eligibility_reason_codes": ["fpjs_history_match"],
-                "trial_eligibility_policy_send_allowed": False,
-            },
-        )
+        mock_track.assert_not_called()
         mock_modify.assert_called_once_with(
             "sub_user_current",
             default_payment_method="pm_setup_current",
@@ -3819,12 +3738,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
 
                     handle_setup_intent_succeeded(event)
 
-        mock_capi.assert_called_once()
-        self.assertEqual(mock_capi.call_args.kwargs["event_name"], "AddPaymentInfo")
-        self.assertEqual(
-            mock_capi.call_args.kwargs["properties"]["event_id"],
-            "startup-sub-review",
-        )
+        mock_capi.assert_not_called()
         mock_modify.assert_called_once_with(
             "sub_user_current",
             default_payment_method="pm_setup_current",

@@ -1048,6 +1048,9 @@ def _emit_add_payment_info_for_setup_intent(
     owner_type: str,
     payload: Mapping[str, Any],
 ) -> None:
+    # AddPaymentInfo is currently emitted at checkout-session creation time.
+    return
+
     if owner_type != "user" or not owner:
         return
 
@@ -1081,6 +1084,9 @@ def _emit_add_payment_info_for_completed_checkout_session(
     payload: Mapping[str, Any],
     customer_id: str | None,
 ) -> None:
+    # AddPaymentInfo is currently emitted at checkout-session creation time.
+    return
+
     metadata = _coerce_metadata_dict(payload.get("metadata"))
     if metadata.get("flow_type") != STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE:
         return
