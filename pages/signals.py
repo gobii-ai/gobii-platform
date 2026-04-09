@@ -1052,6 +1052,9 @@ def _emit_add_payment_info_for_setup_intent(
         return
 
     setup_intent_id = _extract_stripe_object_id(payload)
+    if not setup_intent_id:
+        return
+
     payment_method_types = payload.get("payment_method_types")
     payment_method_type = None
     if isinstance(payment_method_types, list) and payment_method_types:
