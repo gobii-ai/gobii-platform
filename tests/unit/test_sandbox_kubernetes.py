@@ -36,6 +36,11 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._wait_for_service_routable = Mock(return_value=True)
         return backend
 
+    def test_custom_tool_workspace_root_uses_isolated_workspace_mount(self):
+        backend = self._backend()
+
+        self.assertEqual(backend.custom_tool_workspace_root("agent-1"), "/workspace")
+
     def test_stdio_discovery_requires_agent_session(self):
         backend = self._backend()
 

@@ -26,6 +26,7 @@ from api.services.sandbox_compute import (
     SandboxSessionUpdate,
     _build_nonzero_exit_error_payload,
     _post_sync_queue_key,
+    custom_tool_workspace_root_for_backend,
 )
 from api.services.sandbox_internal_paths import (
     CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
@@ -175,6 +176,12 @@ class SandboxComputeSyncTests(TestCase):
 
     def test_custom_tool_sqlite_internal_path_matches_sandbox_server_constant(self):
         self.assertEqual(CUSTOM_TOOL_SQLITE_FILESPACE_PATH, SANDBOX_CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
+
+    def test_custom_tool_workspace_root_defaults_to_agent_scoped_path(self):
+        self.assertEqual(
+            custom_tool_workspace_root_for_backend(_DummyBackend(), "agent-1"),
+            "/workspace/agent-1",
+        )
 
     def test_pull_manifest_includes_checksum_and_cursor(self):
         write_result = write_bytes_to_dir(

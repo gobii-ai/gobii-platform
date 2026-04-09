@@ -82,6 +82,9 @@ class KubernetesApiClient:
 
 
 class KubernetesSandboxBackend(SandboxComputeBackend):
+    def custom_tool_workspace_root(self, agent_id: Any) -> str:
+        return "/workspace"
+
     def __init__(self) -> None:
         base_url = _k8s_api_url()
         token = _read_service_account_token()
