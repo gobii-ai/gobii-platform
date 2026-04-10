@@ -3543,17 +3543,6 @@ def process_agent_events(
     follow_up_key = burn_follow_up_key(persistent_agent_id)
     cooldown_key = burn_cooldown_key(persistent_agent_id)
 
-    if is_processing_stop_requested(persistent_agent_id, client=redis_client):
-        clear_processing_stop_requested(persistent_agent_id, client=redis_client)
-        clear_processing_work_state(persistent_agent_id, client=redis_client)
-        logger.info(
-            "Skipping event processing for agent %s due to pending stop request.",
-            persistent_agent_id,
-        )
-        span.add_event("Processing skipped - stop requested")
-        clear_processing_queued_flag(persistent_agent_id)
-        return
-
     # If this invocation is a scheduled burn-rate follow-up, ensure the token matches.
     if burn_follow_up_token:
         stored_token = redis_client.get(follow_up_key)
@@ -3759,6 +3748,21 @@ def process_agent_events(
                 return
 
         lock_acquired = True
+        if is_processing_stop_requested(persistent_agent_id, client=redis_client):
+            clear_processing_stop_requested(persistent_agent_id, client=redis_client)
+            clear_processing_work_state(persistent_agent_id, client=redis_client)
+            _close_active_cycle_for_skipped_agent(
+                persistent_agent_id,
+                budget_id=getattr(ctx, "budget_id", None),
+                span=span,
+                check_context="lock_acquired_stop_requested",
+            )
+            logger.info(
+                "Skipping event processing for agent %s due to pending stop request after lock acquisition.",
+                persistent_agent_id,
+            )
+            span.add_event("Processing skipped - stop requested after lock acquisition")
+            return
         mark_processing_lock_active(persistent_agent_id, client=redis_client)
         clear_processing_queued_flag(persistent_agent_id)
         if lock_settings.heartbeat_ttl_seconds > 0:
