@@ -278,6 +278,33 @@ class ReleaseSmsNumbersForm(forms.Form):
         return unique_numbers
 
 
+class FindReleaseCandidatesForm(forms.Form):
+    unused_days = forms.IntegerField(
+        label="Unused for at least (days)",
+        min_value=1,
+        initial=90,
+        help_text="Only numbers with no SMS send/receive activity in this window are returned.",
+    )
+    include_detached_unused = forms.BooleanField(
+        label="Detached unused",
+        required=False,
+        initial=True,
+        help_text="Twilio numbers with no agent owner attached and no SMS activity in the selected window.",
+    )
+    include_free_dormant_unused = forms.BooleanField(
+        label="Free-plan dormant unused",
+        required=False,
+        initial=True,
+        help_text="Twilio numbers still attached to a free-plan owner with no SMS activity in the selected window.",
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("include_detached_unused") and not cleaned.get("include_free_dormant_unused"):
+            raise forms.ValidationError("Select at least one candidate tier.")
+        return cleaned
+
+
 class GrantPlanCreditsForm(forms.Form):
     plan = forms.ChoiceField(
         label="Plan",
