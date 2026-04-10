@@ -63,10 +63,11 @@ class RedisBudgetCleanupTests(TestCase):
         mock_pipeline.execute.assert_called_once()
 
     @patch('api.agent.core.event_processing.AgentBudgetManager')
+    @patch('api.agent.core.event_processing._should_skip_processing_for_inactive_or_deleted_agent', return_value=False)
     @patch('api.agent.core.event_processing.get_redis_client')
     @patch('api.agent.core.event_processing.Redlock')
     @patch('api.agent.core.event_processing._process_agent_events_locked')
-    def test_exception_triggers_close_cycle(self, mock_process, mock_lock_class, mock_redis_client, mock_budget_mgr):
+    def test_exception_triggers_close_cycle(self, mock_process, mock_lock_class, mock_redis_client, _mock_skip, mock_budget_mgr):
         """Test that exceptions ACTUALLY call close_cycle."""
         from api.agent.core.event_processing import process_agent_events
         from api.agent.core.budget import BudgetContext
@@ -89,6 +90,7 @@ class RedisBudgetCleanupTests(TestCase):
         mock_lock.acquire.return_value = True
         mock_lock_class.return_value = mock_lock
         mock_redis_client.return_value.get.return_value = None
+        mock_redis_client.return_value.exists.return_value = False
         
         # Mock budget manager
         mock_budget_mgr.find_or_start_cycle.return_value = (budget_id, 10, 2)

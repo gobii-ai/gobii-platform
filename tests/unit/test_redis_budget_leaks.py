@@ -67,8 +67,9 @@ class RedisBudgetLeakTests(TestCase):
         )
 
     @patch('api.agent.core.event_processing.AgentBudgetManager')
+    @patch('api.agent.core.event_processing._should_skip_processing_for_inactive_or_deleted_agent', return_value=False)
     @patch('api.agent.core.event_processing._process_agent_events_locked')
-    def test_exception_skips_close_cycle(self, mock_process, mock_budget_mgr):
+    def test_exception_skips_close_cycle(self, mock_process, _mock_skip, mock_budget_mgr):
         """Test that exceptions in event processing skip close_cycle.
         
         THIS TEST SHOULD FAIL: Exceptions should trigger cleanup
@@ -89,6 +90,7 @@ class RedisBudgetLeakTests(TestCase):
         with patch('api.agent.core.event_processing.set_budget_context'):
             with patch('api.agent.core.event_processing.get_redis_client') as mock_redis:
                 mock_redis.return_value.get.return_value = None
+                mock_redis.return_value.exists.return_value = False
                 with patch('api.agent.core.event_processing.Redlock') as mock_lock:
                     mock_lock.return_value.acquire.return_value = True
                     
