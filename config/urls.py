@@ -31,6 +31,7 @@ from console.api_views import (
     AgentCollaboratorLeaveAPIView,
     AgentSuggestionsAPIView,
     AgentProcessingStatusAPIView,
+    AgentStopAPIView,
     AgentDailyCreditsAPIView,
     AgentAddonsAPIView,
     AgentQuickSettingsAPIView,
@@ -375,6 +376,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/files/folders/", AgentFsNodeCreateDirAPIView.as_view(), name="console_agent_fs_create_folder"),
     path("console/api/agents/<uuid:agent_id>/files/move/", AgentFsNodeMoveAPIView.as_view(), name="console_agent_fs_move"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
+    path("console/api/agents/<uuid:agent_id>/stop/", AgentStopAPIView.as_view(), name="console_agent_stop"),
     path("console/api/agents/<uuid:agent_id>/daily-credits/", AgentDailyCreditsAPIView.as_view(), name="console_agent_daily_credits"),
     path("console/api/agents/<uuid:agent_id>/email-settings/", AgentEmailSettingsAPIView.as_view(), name="console_agent_email_settings"),
     path(

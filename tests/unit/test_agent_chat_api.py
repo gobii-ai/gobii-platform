@@ -53,6 +53,12 @@ from api.models import (
     build_web_user_address,
 )
 from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
+from api.agent.core.processing_flags import (
+    clear_processing_stop_requested,
+    enqueue_pending_agent,
+    is_agent_pending,
+    is_processing_stop_requested,
+)
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.pipedream_apps import get_owner_apps_state
 from api.services.web_sessions import heartbeat_web_session, start_web_session
@@ -1630,6 +1636,95 @@ class AgentChatAPITests(TestCase):
             self.assertEqual(snapshot.get("webTasks"), [])
         finally:
             clear_processing_queued_flag(self.agent.id)
+
+    @tag("batch_agent_chat")
+    def test_stop_endpoint_stops_processing_and_cancels_active_web_tasks(self):
+        first_task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Visit example.com",
+            status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+        )
+        second_task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Visit gobii.com",
+            status=BrowserUseAgentTask.StatusChoices.PENDING,
+        )
+        set_processing_queued_flag(self.agent.id)
+        enqueue_pending_agent(self.agent.id)
+
+        try:
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/stop/",
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+
+            self.assertTrue(payload.get("stopping"))
+            self.assertEqual(payload.get("cancelledWebTaskCount"), 2)
+            self.assertFalse(payload.get("processing_active"))
+
+            snapshot = payload.get("processing_snapshot") or {}
+            self.assertFalse(snapshot.get("active"))
+            self.assertEqual(snapshot.get("webTasks"), [])
+
+            self.assertFalse(is_processing_stop_requested(self.agent.id))
+            self.assertFalse(is_agent_pending(self.agent.id))
+
+            self.assertFalse(
+                BrowserUseAgentTask.objects.filter(
+                    id__in=[first_task.id, second_task.id],
+                    status__in=[
+                        BrowserUseAgentTask.StatusChoices.PENDING,
+                        BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+                    ],
+                ).exists()
+            )
+            first_task.refresh_from_db()
+            second_task.refresh_from_db()
+            self.assertEqual(first_task.status, BrowserUseAgentTask.StatusChoices.CANCELLED)
+            self.assertEqual(second_task.status, BrowserUseAgentTask.StatusChoices.CANCELLED)
+        finally:
+            clear_processing_queued_flag(self.agent.id)
+            clear_processing_stop_requested(self.agent.id)
+
+    @tag("batch_agent_chat")
+    def test_stop_endpoint_forbids_shared_collaborator_without_manage_permission(self):
+        user_model = get_user_model()
+        collaborator = user_model.objects.create_user(
+            username="chat-stop-collab",
+            email="chat-stop-collab@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(agent=self.agent, user=collaborator)
+        collaborator_client = Client()
+        collaborator_client.force_login(collaborator)
+
+        response = collaborator_client.post(
+            f"/console/api/agents/{self.agent.id}/stop/",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(is_processing_stop_requested(self.agent.id))
+
+    @tag("batch_agent_chat")
+    def test_stop_endpoint_clears_stop_request_when_agent_is_already_idle(self):
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/stop/",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertTrue(payload.get("stopping"))
+        self.assertEqual(payload.get("cancelledWebTaskCount"), 0)
+        self.assertFalse(payload.get("processing_active"))
+        self.assertFalse(is_processing_stop_requested(self.agent.id))
 
     @tag("batch_agent_chat")
     @patch("console.api_views.process_agent_events_task.delay")

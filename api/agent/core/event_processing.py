@@ -58,11 +58,13 @@ from .processing_flags import (
     claim_pending_drain_slot,
     clear_processing_heartbeat,
     clear_processing_queued_flag,
+    clear_processing_stop_requested,
     clear_processing_work_state,
     enqueue_pending_agent,
     get_pending_drain_settings,
     is_agent_pending,
     is_processing_queued,
+    is_processing_stop_requested,
     mark_processing_lock_active,
     processing_lock_storage_keys,
     set_processing_heartbeat,
@@ -1536,7 +1538,7 @@ def _prepare_tool_batch(
 
     for idx, call in enumerate(tool_calls, start=1):
         with tracer.start_as_current_span("Prepare Tool") as tool_span:
-            if _should_abort_for_inactive_or_deleted_agent(
+            if _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
                 heartbeat=heartbeat,
@@ -1810,7 +1812,7 @@ def _execute_prepared_tool_batch(
             )
         for prepared in prepared_batch.prepared_calls:
             with tracer.start_as_current_span("Execute Tool") as tool_span:
-                if _should_abort_for_inactive_or_deleted_agent(
+                if _should_abort_processing(
                     agent,
                     budget_ctx=budget_ctx,
                     heartbeat=heartbeat,
@@ -2315,6 +2317,65 @@ def _should_abort_for_inactive_or_deleted_agent(
         heartbeat.touch(f"agent_{reason}")
     _attempt_cycle_close_for_sleep(agent, budget_ctx)
     return True
+
+
+def _should_abort_for_stop_request(
+    agent: PersistentAgent,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    heartbeat: Optional[_ProcessingHeartbeat],
+    span: Any,
+    check_context: str,
+    redis_client=None,
+) -> bool:
+    if not is_processing_stop_requested(agent.id, client=redis_client):
+        return False
+
+    clear_processing_stop_requested(agent.id, client=redis_client)
+    clear_processing_work_state(agent.id, client=redis_client)
+    logger.info(
+        "Agent %s stop requested during processing (%s); aborting loop gracefully.",
+        agent.id,
+        check_context,
+    )
+    try:
+        span.add_event(
+            "Agent processing aborted by stop request",
+            {"context": check_context},
+        )
+    except Exception:
+        pass
+    if heartbeat:
+        heartbeat.touch("agent_stop_requested")
+    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+    return True
+
+
+def _should_abort_processing(
+    agent: PersistentAgent,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    heartbeat: Optional[_ProcessingHeartbeat],
+    span: Any,
+    check_context: str,
+    redis_client=None,
+) -> bool:
+    if _should_abort_for_inactive_or_deleted_agent(
+        agent,
+        budget_ctx=budget_ctx,
+        heartbeat=heartbeat,
+        span=span,
+        check_context=check_context,
+    ):
+        return True
+    return _should_abort_for_stop_request(
+        agent,
+        budget_ctx=budget_ctx,
+        heartbeat=heartbeat,
+        span=span,
+        check_context=check_context,
+        redis_client=redis_client,
+    )
 
 
 def _close_active_cycle_for_skipped_agent(
@@ -3482,6 +3543,17 @@ def process_agent_events(
     follow_up_key = burn_follow_up_key(persistent_agent_id)
     cooldown_key = burn_cooldown_key(persistent_agent_id)
 
+    if is_processing_stop_requested(persistent_agent_id, client=redis_client):
+        clear_processing_stop_requested(persistent_agent_id, client=redis_client)
+        clear_processing_work_state(persistent_agent_id, client=redis_client)
+        logger.info(
+            "Skipping event processing for agent %s due to pending stop request.",
+            persistent_agent_id,
+        )
+        span.add_event("Processing skipped - stop requested")
+        clear_processing_queued_flag(persistent_agent_id)
+        return
+
     # If this invocation is a scheduled burn-rate follow-up, ensure the token matches.
     if burn_follow_up_token:
         stored_token = redis_client.get(follow_up_key)
@@ -4204,12 +4276,13 @@ def _run_agent_loop(
                 agent,
                 has_deliverable_web_target_now=had_deliverable_web_target_at_start,
             )
-            if _should_abort_for_inactive_or_deleted_agent(
+            if _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
                 heartbeat=heartbeat,
                 span=span,
                 check_context="iteration_start",
+                redis_client=redis_client,
             ):
                 return cumulative_token_usage
             if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):

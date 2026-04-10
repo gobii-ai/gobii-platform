@@ -4,6 +4,7 @@ import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
 import {
+  stopAgentProcessing,
   fulfillRequestedSecrets,
   removeRequestedSecrets,
   resolveContactRequests,
@@ -2048,6 +2049,8 @@ export function AgentChatPage({
   const [createAgentError, setCreateAgentError] = useState<CreateAgentErrorState | null>(null)
   const [createAgentTrialOnboarding, setCreateAgentTrialOnboarding] = useState<TrialOnboardingTarget | null>(null)
   const [sendMessageError, setSendMessageError] = useState<string | null>(null)
+  const [stopProcessingBusy, setStopProcessingBusy] = useState(false)
+  const [stopProcessingRequested, setStopProcessingRequested] = useState(false)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
   const spawnIntentAutoSubmittedRef = useRef(false)
@@ -2741,8 +2744,35 @@ export function AgentChatPage({
     [activeAgentId, isNewAgent, queryClient, refreshProcessing, refetchQuickSettings, resolvedIntelligenceTier],
   )
 
+  const handleStopProcessing = useCallback(async () => {
+    if (!activeAgentId || stopProcessingBusy) {
+      return
+    }
+    setStopProcessingRequested(true)
+    setStopProcessingBusy(true)
+    setSendMessageError(null)
+    try {
+      await stopAgentProcessing(activeAgentId)
+      void refreshProcessing()
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+    } catch (error) {
+      setStopProcessingRequested(false)
+      setSendMessageError(safeErrorMessage(error) || 'Unable to stop agent right now.')
+    } finally {
+      setStopProcessingBusy(false)
+    }
+  }, [activeAgentId, queryClient, refreshProcessing, stopProcessingBusy])
+
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
+  useEffect(() => {
+    if (!isProcessing) {
+      setStopProcessingRequested(false)
+    }
+  }, [isProcessing])
+  useEffect(() => {
+    setStopProcessingRequested(false)
+  }, [activeAgentId])
   useEffect(() => {
     if (isProcessing) {
       startInsightRotation()
@@ -3567,6 +3597,9 @@ export function AgentChatPage({
         allowLockedIntelligenceSelection={isNewAgent}
         llmTierSaving={intelligenceBusy}
         llmTierError={intelligenceError}
+        onStopProcessing={handleStopProcessing}
+        stopProcessingBusy={stopProcessingBusy}
+        stopProcessingRequested={stopProcessingRequested}
         spawnIntentLoading={showSpawnIntentLoader}
         starterPromptsDisabled={Boolean(sendMessageDisabledReason)}
       />

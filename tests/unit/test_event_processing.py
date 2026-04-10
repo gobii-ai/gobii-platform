@@ -26,8 +26,15 @@ from api.agent.core.event_processing import (
     _PreparedToolExecution,
     _ToolExecutionOutcome,
     _run_agent_loop,
+    process_agent_events,
 )
-from api.agent.core.processing_flags import PendingDrainSettings
+from api.agent.core.processing_flags import (
+    PendingDrainSettings,
+    clear_processing_stop_requested,
+    is_processing_stop_requested,
+    set_processing_stop_requested,
+    set_processing_queued_flag,
+)
 from api.agent.core.prompt_context import (
     get_agent_tools,
     get_prompt_token_budget,
@@ -3114,6 +3121,104 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
         self.assertFalse(self.agent.is_active)
         self.assertEqual(mock_execute_tool.call_count, 1)
         mock_close_cycle.assert_called_once()
+        self.assertEqual(usage.get("total_tokens"), 10)
+
+
+@tag("batch_event_processing")
+class EventProcessingStopRequestTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="stop_request@example.com",
+            email="stop_request@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="StopRequestBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="StopRequestAgent",
+            charter="Stop when requested",
+            browser_use_agent=self.browser_agent,
+        )
+        self.addCleanup(lambda: clear_processing_stop_requested(self.agent.id))
+
+    @patch("api.agent.core.event_processing._process_agent_events_locked")
+    def test_process_agent_events_skips_when_stop_requested_before_start(self, mock_process_locked):
+        set_processing_stop_requested(self.agent.id)
+        set_processing_queued_flag(self.agent.id)
+
+        process_agent_events(self.agent.id)
+
+        mock_process_locked.assert_not_called()
+        self.assertFalse(is_processing_stop_requested(self.agent.id))
+
+    @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    @patch("api.agent.core.event_processing.apply_sqlite_kanban_updates", return_value=MagicMock(changes=[], snapshot=None, errors=[]))
+    @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors=[]))
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
+    @patch("api.agent.core.event_processing.extract_reasoning_content", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[{"type": "function", "function": {"name": "sqlite_batch", "parameters": {"type": "object", "properties": {}}}}])
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
+    @patch("api.agent.core.event_processing.build_prompt_context", return_value=([{"role": "system", "content": "sys"}], 1000, None))
+    def test_run_agent_loop_stops_after_current_tool_when_stop_requested_mid_batch(
+        self,
+        _mock_prompt,
+        _mock_failover,
+        _mock_tools,
+        _mock_rate,
+        _mock_seed_config,
+        _mock_seed_kanban,
+        _mock_seed_skills,
+        _mock_apply_config,
+        _mock_apply_kanban,
+        _mock_reasoning,
+        mock_execute_tool,
+        _mock_credit,
+        mock_close_cycle,
+    ):
+        tool_call_one = {
+            "id": "call-1",
+            "function": {"name": "sqlite_batch", "arguments": '{"sql":"SELECT 1","will_continue_work":true}'},
+        }
+        tool_call_two = {
+            "id": "call-2",
+            "function": {"name": "sqlite_batch", "arguments": '{"sql":"SELECT 2","will_continue_work":true}'},
+        }
+
+        response_message = MagicMock()
+        response_message.tool_calls = [tool_call_one, tool_call_two]
+        response_message.function_call = None
+        response_message.content = None
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock(choices=[response_choice], model_extra={})
+        token_usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "total_tokens": 10,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        def _first_call_requests_stop(*_args, **_kwargs):
+            set_processing_stop_requested(self.agent.id)
+            return {"status": "ok"}
+
+        mock_execute_tool.side_effect = _first_call_requests_stop
+
+        with patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
+            from api.agent.core import event_processing as ep
+
+            with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+                usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_execute_tool.call_count, 1)
+        mock_close_cycle.assert_called_once()
+        self.assertFalse(is_processing_stop_requested(self.agent.id))
         self.assertEqual(usage.get("total_tokens"), 10)
 
 
