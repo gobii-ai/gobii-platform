@@ -245,6 +245,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [busyHumanInputRequestId, setBusyHumanInputRequestId] = useState<string | null>(null)
   const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
+  const [pendingActionsCollapsedInsights, setPendingActionsCollapsedInsights] = useState(false)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
@@ -264,7 +265,9 @@ export const AgentComposer = memo(function AgentComposer({
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
   const isProcessingRef = useRef(isProcessing)
-  const resolvedWorkingExpanded = insightsPanelExpandedPreference ?? autoWorkingExpanded
+  const hadPendingActionsRef = useRef(false)
+  const baseWorkingExpanded = insightsPanelExpandedPreference ?? autoWorkingExpanded
+  const resolvedWorkingExpanded = pendingActionsCollapsedInsights ? false : baseWorkingExpanded
 
   useEffect(() => {
     isProcessingRef.current = isProcessing
@@ -283,6 +286,16 @@ export const AgentComposer = memo(function AgentComposer({
     }
     wasProcessingRef.current = isProcessing
   }, [insightsPanelExpandedPreference, isProcessing])
+
+  useEffect(() => {
+    const hasPendingActions = pendingActionRequests.length > 0
+    if (hasPendingActions && !hadPendingActionsRef.current) {
+      setPendingActionsCollapsedInsights(true)
+    } else if (!hasPendingActions && hadPendingActionsRef.current) {
+      setPendingActionsCollapsedInsights(false)
+    }
+    hadPendingActionsRef.current = hasPendingActions
+  }, [pendingActionRequests.length])
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -378,6 +391,9 @@ export const AgentComposer = memo(function AgentComposer({
   // Handle panel expand/collapse toggle
   const handlePanelToggle = useCallback(() => {
     const newExpanded = !resolvedWorkingExpanded
+    if (pendingActionsCollapsedInsights && newExpanded) {
+      setPendingActionsCollapsedInsights(false)
+    }
     if (onInsightsPanelExpandedPreferenceChange) {
       onInsightsPanelExpandedPreferenceChange(newExpanded)
     } else {
@@ -388,7 +404,13 @@ export const AgentComposer = memo(function AgentComposer({
       hasInsights,
       currentInsightType: currentInsight?.insightType ?? null,
     })
-  }, [currentInsight?.insightType, hasInsights, onInsightsPanelExpandedPreferenceChange, resolvedWorkingExpanded])
+  }, [
+    currentInsight?.insightType,
+    hasInsights,
+    onInsightsPanelExpandedPreferenceChange,
+    pendingActionsCollapsedInsights,
+    resolvedWorkingExpanded,
+  ])
 
   // Wrap dismiss handler to track dismissals
   const handleDismissInsight = useCallback((insightId: string) => {
