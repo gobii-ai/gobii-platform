@@ -818,17 +818,20 @@ export const AgentComposer = memo(function AgentComposer({
       return
     }
     const attachmentsSnapshot = attachments.slice()
-    const activeRequest = activePendingActionKind === 'human_input'
-      ? (pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null)
-      : null
-    if (activeRequest && trimmed && attachmentsSnapshot.length === 0 && onRespondHumanInput) {
-      const submitted = await submitHumanInputResponse(activeRequest, {
-        requestId: activeRequest.id,
-        freeText: trimmed,
-      })
-      if (submitted) {
-        return
+    const activeRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
+      ?? pendingHumanInputRequests[0]
+      ?? null
+    if (activeRequest && onRespondHumanInput) {
+      if (trimmed && attachmentsSnapshot.length === 0) {
+        const submitted = await submitHumanInputResponse(activeRequest, {
+          requestId: activeRequest.id,
+          freeText: trimmed,
+        })
+        if (submitted) {
+          return
+        }
       }
+      return
     }
     if (onSubmit) {
       try {
@@ -864,7 +867,6 @@ export const AgentComposer = memo(function AgentComposer({
     isSending,
     onRespondHumanInput,
     onSubmit,
-    activePendingActionKind,
     pendingHumanInputRequests,
     submitHumanInputResponse,
   ])
