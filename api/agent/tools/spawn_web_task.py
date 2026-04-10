@@ -19,6 +19,7 @@ from ...models import (
 )
 from ..core.budget import get_current_context as get_budget_context, AgentBudgetManager
 from ...services.persistent_agent_secrets import build_browser_task_secret_payload
+from ...services.billing_snapshot import get_billing_snapshot_for_owner
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ...services.browser_settings import get_browser_settings_for_owner
 
@@ -271,6 +272,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             eval_run_id=getattr(budget_ctx, "eval_run_id", None),
             encrypted_secrets=encrypted_secrets,
             secret_keys=secret_keys_by_domain,
+            **get_billing_snapshot_for_owner(_get_plan_owner(agent)),
         )
 
         # If we have a parent branch, increment its outstanding-children counter

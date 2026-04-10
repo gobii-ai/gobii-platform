@@ -329,6 +329,7 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
     def perform_create(self, serializer):
         """Create a task; works for both agent-scoped and agent-less routes."""
         agentId = self.kwargs.get('agentId')
+        from api.services.billing_snapshot import get_billing_snapshot_for_owner
 
         with traced("POST task", user_id=self.request.user.id) as span:
             span.set_attribute('agent.id', str(agentId) if agentId else '')  # Set agent ID if available
@@ -359,6 +360,8 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
                     save_kwargs['organization'] = org
                 elif agent and hasattr(agent, 'persistent_agent') and getattr(agent.persistent_agent, 'organization', None):
                     save_kwargs['organization'] = agent.persistent_agent.organization
+                owner = save_kwargs.get('organization') or self.request.user
+                save_kwargs.update(get_billing_snapshot_for_owner(owner))
 
                 task = serializer.save(**save_kwargs)
 

@@ -597,6 +597,20 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         self.assertEqual(response.data['agent'], str(self.agent1_user1.id))
         self.assertTrue(BrowserUseAgentTask.objects.alive().filter(agent=self.agent1_user1, user=self.user1).exists())
 
+    @patch('api.views.process_browser_use_task.delay')
+    @patch(
+        'api.services.billing_snapshot.get_billing_snapshot_for_owner',
+        return_value={"billing_plan": "startup", "billing_is_trial": True},
+    )
+    def test_create_task_for_agent_stores_billing_snapshot(self, _mock_snapshot, _mock_delay):
+        url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user1.id})
+        response = self.client.post(url, {'prompt': 'snapshot me'}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        task = BrowserUseAgentTask.objects.get(id=response.data['id'])
+        self.assertEqual(task.billing_plan, "startup")
+        self.assertTrue(task.billing_is_trial)
+
     def test_create_task_for_agent_not_owned_by_user(self):
         url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user2.id})
         task_input_data = {"url": "http://example.com/task_for_agent_user2"}

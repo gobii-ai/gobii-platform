@@ -600,12 +600,16 @@ def log_agent_completion(
 
     resolved_eval_run_id = eval_run_id or _get_budget_eval_run_id()
     try:
+        from ...services.billing_snapshot import get_billing_snapshot_for_owner
+        from ...services.owner_execution_pause import resolve_agent_owner
         from ...models import PersistentAgentCompletion  # local import to avoid cycles
 
+        billing_snapshot = get_billing_snapshot_for_owner(resolve_agent_owner(agent))
         PersistentAgentCompletion.objects.create(
             agent=agent,
             eval_run_id=resolved_eval_run_id,
             thinking_content=thinking_content,
+            **billing_snapshot,
             **completion_kwargs_from_usage(
                 derived_token_usage,
                 completion_type=completion_type,

@@ -163,6 +163,7 @@ from ...models import (
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
+from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_MESSAGE,
     EXECUTION_PAUSE_NOTE,
@@ -4431,6 +4432,7 @@ def _run_agent_loop(
                 thinking_content = extract_reasoning_content(response)
                 msg = response.choices[0].message
                 token_usage_fields = _token_usage_fields(token_usage, response)
+                billing_snapshot = get_billing_snapshot_for_owner(resolve_agent_owner(agent))
                 completion: Optional[PersistentAgentCompletion] = None
 
                 def _ensure_completion() -> PersistentAgentCompletion:
@@ -4440,6 +4442,7 @@ def _run_agent_loop(
                             agent=agent,
                             eval_run_id=eval_run_id,
                             thinking_content=thinking_content,
+                            **billing_snapshot,
                             **token_usage_fields,
                         )
                     return completion

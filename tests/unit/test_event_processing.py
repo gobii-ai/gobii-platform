@@ -1320,6 +1320,38 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(completion.llm_model, "mock-model")
         self.assertEqual(completion.llm_provider, "mock-provider")
 
+    def test_completion_record_stores_billing_snapshot(self):
+        """Orchestrator completions should persist the owner billing snapshot."""
+        response_message = MagicMock()
+        response_message.tool_calls = None
+        response_message.function_call = None
+        response_message.content = "Reasoning output"
+        response_choice = MagicMock(message=response_message)
+        response = MagicMock()
+        response.choices = [response_choice]
+        response.model_extra = {}
+
+        token_usage = {
+            "model": "mock-model",
+            "provider": "mock-provider",
+        }
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch('api.agent.core.prompt_context.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._completion_with_failover', return_value=(response, token_usage)), \
+             patch(
+                 'api.agent.core.event_processing.get_billing_snapshot_for_owner',
+                 return_value={"billing_plan": "scale", "billing_is_trial": False},
+             ):
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        completion = PersistentAgentCompletion.objects.get(agent=self.agent)
+        self.assertEqual(completion.billing_plan, "scale")
+        self.assertFalse(completion.billing_is_trial)
+
     def test_agent_loop_excludes_enable_database_from_tools(self):
         """LLM tool payload should not expose enable_database."""
         enable_tools(self.agent, ["sqlite_batch"])
