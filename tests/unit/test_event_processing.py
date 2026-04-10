@@ -3141,15 +3141,43 @@ class EventProcessingStopRequestTests(TestCase):
         )
         self.addCleanup(lambda: clear_processing_stop_requested(self.agent.id))
 
+    @patch("api.agent.core.event_processing.Redlock")
     @patch("api.agent.core.event_processing._process_agent_events_locked")
-    def test_process_agent_events_skips_when_stop_requested_before_start(self, mock_process_locked):
+    def test_process_agent_events_skips_when_stop_requested_before_start(self, mock_process_locked, mock_redlock):
         set_processing_stop_requested(self.agent.id)
         set_processing_queued_flag(self.agent.id)
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = True
+        mock_redlock.return_value = mock_lock
 
         process_agent_events(self.agent.id)
 
         mock_process_locked.assert_not_called()
         self.assertFalse(is_processing_stop_requested(self.agent.id))
+
+    @patch("api.agent.core.event_processing._schedule_pending_drain")
+    @patch("api.agent.core.event_processing.enqueue_pending_agent")
+    @patch("api.agent.core.event_processing._maybe_clear_stale_lock", return_value=False)
+    @patch("api.agent.core.event_processing.Redlock")
+    @patch("api.agent.core.event_processing._process_agent_events_locked")
+    def test_process_agent_events_preserves_stop_request_when_lock_not_acquired(
+        self,
+        mock_process_locked,
+        mock_redlock,
+        _mock_clear_stale_lock,
+        mock_enqueue_pending,
+        _mock_schedule_pending_drain,
+    ):
+        set_processing_stop_requested(self.agent.id)
+        mock_lock = MagicMock()
+        mock_lock.acquire.return_value = False
+        mock_redlock.return_value = mock_lock
+
+        process_agent_events(self.agent.id)
+
+        mock_process_locked.assert_not_called()
+        mock_enqueue_pending.assert_called_once()
+        self.assertTrue(is_processing_stop_requested(self.agent.id))
 
     @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
