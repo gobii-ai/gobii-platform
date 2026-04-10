@@ -1352,6 +1352,58 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(completion.billing_plan, "scale")
         self.assertFalse(completion.billing_is_trial)
 
+    def test_completion_record_reuses_billing_snapshot_across_iterations(self):
+        """Billing snapshot should be resolved once per run even if the loop iterates."""
+        enable_tools(self.agent, ["sqlite_batch"])
+
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql": "UPDATE t SET id = 1", "will_continue_work": false}'
+
+        message_first = MagicMock()
+        message_first.tool_calls = [tool_call]
+        message_first.function_call = None
+        message_first.content = None
+        response_first = MagicMock()
+        response_first.choices = [MagicMock(message=message_first)]
+        response_first.model_extra = {}
+
+        message_second = MagicMock()
+        message_second.tool_calls = None
+        message_second.function_call = None
+        message_second.content = "done"
+        response_second = MagicMock()
+        response_second.choices = [MagicMock(message=message_second)]
+        response_second.model_extra = {}
+
+        token_usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "total_tokens": 10,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._completion_with_failover', side_effect=[(response_first, token_usage), (response_second, token_usage)]) as mock_completion, \
+             patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "warning", "message": "0 rows affected"}), \
+             patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
+             patch(
+                 'api.agent.core.event_processing.get_billing_snapshot_for_owner',
+                 return_value={"billing_plan": "scale", "billing_is_trial": False},
+             ) as mock_billing_snapshot:
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        mock_billing_snapshot.assert_called_once_with(self.user)
+
     def test_agent_loop_excludes_enable_database_from_tools(self):
         """LLM tool payload should not expose enable_database."""
         enable_tools(self.agent, ["sqlite_batch"])

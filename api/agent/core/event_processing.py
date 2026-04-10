@@ -4158,6 +4158,10 @@ def _run_agent_loop(
         logger.debug("Autotool heuristic check failed", exc_info=True)
 
     tools = get_agent_tools(agent)
+    owner = resolve_agent_owner(agent)
+    # Completion billing metadata is effectively scoped to this processing run,
+    # so resolve it once instead of repeating owner plan lookups each iteration.
+    billing_snapshot = get_billing_snapshot_for_owner(owner)
 
     # Track cumulative token usage across all iterations
     cumulative_token_usage = {
@@ -4432,7 +4436,6 @@ def _run_agent_loop(
                 thinking_content = extract_reasoning_content(response)
                 msg = response.choices[0].message
                 token_usage_fields = _token_usage_fields(token_usage, response)
-                billing_snapshot = get_billing_snapshot_for_owner(resolve_agent_owner(agent))
                 completion: Optional[PersistentAgentCompletion] = None
 
                 def _ensure_completion() -> PersistentAgentCompletion:
