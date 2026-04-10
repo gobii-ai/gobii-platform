@@ -37,9 +37,6 @@ export function PendingRequestedSecretsPanel({
       <div className="space-y-3">
         <div className="rounded-xl bg-white px-3 py-3">
           <div className="min-w-0">
-            <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-700">
-              {secret.secretType === 'env_var' ? 'Env Var' : 'Credential'}
-            </span>
             {secret.description ? <p className="mt-1 text-sm text-slate-700">{secret.description}</p> : null}
             <input
               type="password"

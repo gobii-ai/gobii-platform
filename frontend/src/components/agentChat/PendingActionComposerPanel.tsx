@@ -106,6 +106,16 @@ function actionIcon(action: PendingActionRequest) {
   }
 }
 
+function actionBadge(action: PendingActionRequest): { label: string; className: string } | null {
+  if (action.kind !== 'requested_secrets') {
+    return null
+  }
+  return {
+    label: action.secrets[0]?.secretType === 'env_var' ? 'Env Var' : 'Secret',
+    className: 'bg-sky-100 text-sky-700',
+  }
+}
+
 export function PendingActionComposerPanel({
   actions,
   activeActionId,
@@ -135,6 +145,7 @@ export function PendingActionComposerPanel({
   const activeIndex = Math.max(0, actions.findIndex((action) => action.id === activeAction?.id))
   const ActiveIcon = activeAction ? actionIcon(activeAction) : MessageSquareQuote
   const activeActionMeta = activeAction ? actionMeta(activeAction) : null
+  const activeActionBadge = activeAction ? actionBadge(activeAction) : null
 
   useEffect(() => {
     if (activeAction?.kind !== 'requested_secrets') {
@@ -270,9 +281,16 @@ export function PendingActionComposerPanel({
             <ActiveIcon className="h-4 w-4" aria-hidden="true" />
           </span>
           <div className={`min-w-0 ${activeActionMeta ? '' : 'flex min-h-9 items-center'}`}>
-            <p className="text-[0.95rem] font-semibold leading-6 tracking-[-0.02em] text-slate-900">
-              {actionHeading(activeAction)}
-            </p>
+            <div className="flex min-w-0 items-center gap-2">
+              <p className="min-w-0 text-[0.95rem] font-semibold leading-6 tracking-[-0.02em] text-slate-900">
+                {actionHeading(activeAction)}
+              </p>
+              {activeActionBadge ? (
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] ${activeActionBadge.className}`}>
+                  {activeActionBadge.label}
+                </span>
+              ) : null}
+            </div>
             {activeActionMeta ? (
               <p className="text-xs text-slate-600">
                 {activeActionMeta}
