@@ -1,6 +1,8 @@
+from unittest.mock import patch
+
 from django.contrib import admin
 from django.contrib.auth import get_user_model
-from django.test import Client, RequestFactory, TestCase, tag
+from django.test import Client, RequestFactory, TestCase, override_settings, tag
 from django.urls import reverse
 
 from api.admin import CustomUserAdmin, CustomUserAdminForm
@@ -15,6 +17,7 @@ from api.services.user_flags import (
     has_user_flag,
     set_user_flag,
 )
+from util.analytics import Analytics
 
 
 User = get_user_model()
@@ -78,6 +81,37 @@ class DynamicUserFlagServiceTests(TestCase):
 
         with self.assertRaises(ImmutableUserFlagSlugError):
             self.flag.save()
+
+    @override_settings(SEGMENT_WRITE_KEY="test-segment-key")
+    @patch("util.analytics.analytics.identify")
+    def test_analytics_identify_includes_dynamic_user_flags_trait(self, mock_segment_identify):
+        beta_flag = UserFlagDefinition.objects.create(
+            slug="beta_flag",
+            description="Second dynamic flag for analytics coverage.",
+        )
+        UserFlagAssignment.objects.create(user=self.user, flag=beta_flag)
+        UserFlagAssignment.objects.create(user=self.user, flag=self.flag)
+
+        Analytics.identify(self.user.id, {"plan": "free"})
+
+        mock_segment_identify.assert_called_once()
+        identify_user_id, identify_traits, identify_context = mock_segment_identify.call_args.args
+        self.assertEqual(identify_user_id, self.user.id)
+        self.assertEqual(identify_traits["plan"], "free")
+        self.assertEqual(identify_traits["user_flags"], ["beta_flag", "example_flag"])
+        self.assertEqual(identify_context["ip"], "0")
+
+    @patch("util.analytics.Analytics.identify")
+    def test_set_user_flag_syncs_analytics_when_flag_state_changes(self, mock_identify):
+        set_user_flag(self.flag, self.user, True)
+        mock_identify.assert_called_once_with(self.user.id, {})
+
+        mock_identify.reset_mock()
+        set_user_flag(self.flag, self.user, True)
+        mock_identify.assert_not_called()
+
+        set_user_flag(self.flag, self.user, False)
+        mock_identify.assert_called_once_with(self.user.id, {})
 
 
 @tag("batch_user_flags")

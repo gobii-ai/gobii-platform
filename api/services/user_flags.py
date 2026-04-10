@@ -1,7 +1,11 @@
+import logging
+
 from django.db import IntegrityError
 from django.db.models import Exists, OuterRef
 
 from api.models import UserFlagAssignment, UserFlagDefinition
+
+logger = logging.getLogger(__name__)
 
 
 class UnknownUserFlagError(ValueError):
@@ -42,6 +46,18 @@ def has_user_flag(flag: UserFlagDefinition | str, user) -> bool:
     return UserFlagAssignment.objects.filter(user=user, flag=definition).exists()
 
 
+def _sync_user_flags_to_analytics(user) -> None:
+    try:
+        from util.analytics import Analytics
+
+        Analytics.identify(user.id, {})
+    except Exception:
+        logger.exception(
+            "Failed to sync dynamic user flags to analytics for user %s",
+            getattr(user, "id", None),
+        )
+
+
 def set_user_flag(flag: UserFlagDefinition | str, user, enabled: bool) -> bool:
     if not isinstance(enabled, bool):
         raise ValueError("enabled must be a boolean.")
@@ -51,14 +67,19 @@ def set_user_flag(flag: UserFlagDefinition | str, user, enabled: bool) -> bool:
     definition = get_user_flag_definition(flag)
 
     if enabled:
+        created = False
         try:
-            UserFlagAssignment.objects.get_or_create(user=user, flag=definition)
+            _, created = UserFlagAssignment.objects.get_or_create(user=user, flag=definition)
         except IntegrityError:
             if not UserFlagAssignment.objects.filter(user=user, flag=definition).exists():
                 raise
+        if created:
+            _sync_user_flags_to_analytics(user)
         return True
 
-    UserFlagAssignment.objects.filter(user=user, flag=definition).delete()
+    deleted_count, _ = UserFlagAssignment.objects.filter(user=user, flag=definition).delete()
+    if deleted_count:
+        _sync_user_flags_to_analytics(user)
     return False
 
 
