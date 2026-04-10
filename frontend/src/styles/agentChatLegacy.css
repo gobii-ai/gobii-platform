@@ -1545,7 +1545,7 @@
 
 .composer-intelligence-option {
   display: grid;
-  grid-template-columns: 1.25rem 1fr 2.75rem 4.75rem;
+  grid-template-columns: 1.25rem 1fr 2.75rem;
   align-items: center;
   column-gap: 0.5rem;
   padding: 0.5rem 0.75rem;
@@ -1573,6 +1573,11 @@
   font-weight: 500;
 }
 
+.composer-intelligence-option[data-selected="true"] .composer-intelligence-option-multiplier--locked {
+  color: #f97316;
+  font-weight: 400;
+}
+
 .composer-intelligence-option[data-locked="true"] {
   cursor: pointer;
   opacity: 0.6;
@@ -1596,28 +1601,17 @@
 }
 
 .composer-intelligence-option-multiplier {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   font-size: 0.6875rem;
   font-variant-numeric: tabular-nums;
   color: rgba(148, 163, 184, 0.9);
   text-align: right;
 }
 
-.composer-intelligence-option-lock {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  justify-content: center;
-  padding: 0.1rem 0.35rem;
-  border-radius: 999px;
-  border: 1px solid rgba(251, 146, 60, 0.35);
-  background: rgba(251, 146, 60, 0.12);
+.composer-intelligence-option-multiplier--locked {
   color: #f97316;
-  font-size: 0.6rem;
-  font-weight: 600;
-}
-
-.composer-intelligence-option-lock--placeholder {
-  visibility: hidden;
 }
 
 .composer-intelligence-option-indicator {
@@ -1629,6 +1623,21 @@
   padding: 0.25rem 0.5rem;
   font-size: 0.625rem;
   color: rgba(100, 116, 139, 0.7);
+}
+
+.composer-intelligence-note-link {
+  margin-left: 0.25rem;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #6366f1;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.composer-intelligence-note-link:hover {
+  color: #4f46e5;
 }
 
 .composer-intelligence-error {
