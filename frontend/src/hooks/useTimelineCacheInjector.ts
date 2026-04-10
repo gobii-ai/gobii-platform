@@ -1,7 +1,7 @@
 import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline } from '../api/agentChat'
-import type { PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
+import type { PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import {
@@ -65,11 +65,56 @@ export function replacePendingHumanInputRequestsInCache(
     const pages = [...old.pages]
     const lastIndex = pages.length - 1
     const lastPage = pages[lastIndex]
+    const existingPendingActions = lastPage.raw.pending_action_requests ?? []
+    const nonHumanActions = existingPendingActions.filter((request) => request.kind !== 'human_input')
+    const nextPendingActions = pendingHumanInputRequests.length > 0
+      ? [
+          {
+            id: 'human_input',
+            kind: 'human_input' as const,
+            requests: pendingHumanInputRequests,
+            count: pendingHumanInputRequests.length,
+          },
+          ...nonHumanActions,
+        ]
+      : nonHumanActions
+
     pages[lastIndex] = {
       ...lastPage,
       raw: {
         ...lastPage.raw,
+        pending_action_requests: nextPendingActions,
         pending_human_input_requests: pendingHumanInputRequests,
+      },
+    }
+
+    return {
+      ...old,
+      pages,
+    }
+  })
+}
+
+export function replacePendingActionRequestsInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  pendingActionRequests: PendingActionRequest[],
+) {
+  const key = timelineQueryKey(agentId)
+  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+    if (!old?.pages?.length) {
+      return old
+    }
+
+    const pages = [...old.pages]
+    const lastIndex = pages.length - 1
+    const lastPage = pages[lastIndex]
+    pages[lastIndex] = {
+      ...lastPage,
+      raw: {
+        ...lastPage.raw,
+        pending_action_requests: pendingActionRequests,
+        pending_human_input_requests: pendingActionRequests.find((request) => request.kind === 'human_input')?.requests ?? [],
       },
     }
 

@@ -1,8 +1,11 @@
 import type {
+  PendingActionRequest,
+  PendingContactRequest,
   PendingHumanInputRequest,
   PendingHumanInputRequestInputMode,
   PendingHumanInputRequestStatus,
   ProcessingSnapshot,
+  RequestedSecret,
   TimelineEvent,
 } from '../types/agentChat'
 import type { SignupPreviewState } from '../types/agentRoster'
@@ -34,6 +37,7 @@ export type TimelineResponse = {
   agent_avatar_url?: string | null
   signup_preview_state?: SignupPreviewState | null
   pending_human_input_requests?: PendingHumanInputRequest[]
+  pending_action_requests?: PendingActionRequest[]
 }
 
 export type AgentWebSessionSnapshot = {
@@ -58,10 +62,12 @@ export async function fetchAgentTimeline(
   const url = `/console/api/agents/${agentId}/timeline/${query.toString() ? `?${query.toString()}` : ''}`
   const response = await jsonFetch<TimelineResponse & {
     pending_human_input_requests?: unknown[]
+    pending_action_requests?: unknown[]
   }>(url)
   return {
     ...response,
     pending_human_input_requests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+    pending_action_requests: normalizePendingActionRequests(response.pending_action_requests),
   }
 }
 
@@ -90,6 +96,68 @@ type HumanInputOptionWire = {
   option_key?: unknown
   title?: unknown
   description?: unknown
+}
+
+type PendingActionRequestWire = {
+  id?: unknown
+  kind?: unknown
+  count?: unknown
+  requests?: unknown
+  secrets?: unknown
+  requestId?: unknown
+  request_id?: unknown
+  requestedCharter?: unknown
+  requested_charter?: unknown
+  handoffMessage?: unknown
+  handoff_message?: unknown
+  requestReason?: unknown
+  request_reason?: unknown
+  requestedAt?: unknown
+  requested_at?: unknown
+  expiresAt?: unknown
+  expires_at?: unknown
+  decisionApiUrl?: unknown
+  decision_api_url?: unknown
+  fulfillApiUrl?: unknown
+  fulfill_api_url?: unknown
+  removeApiUrl?: unknown
+  remove_api_url?: unknown
+  resolveApiUrl?: unknown
+  resolve_api_url?: unknown
+}
+
+type RequestedSecretWire = {
+  id?: unknown
+  name?: unknown
+  key?: unknown
+  secretType?: unknown
+  secret_type?: unknown
+  domainPattern?: unknown
+  domain_pattern?: unknown
+  description?: unknown
+  createdAt?: unknown
+  created_at?: unknown
+  updatedAt?: unknown
+  updated_at?: unknown
+}
+
+type PendingContactRequestWire = {
+  id?: unknown
+  channel?: unknown
+  address?: unknown
+  name?: unknown
+  reason?: unknown
+  purpose?: unknown
+  allowInbound?: unknown
+  allow_inbound?: unknown
+  allowOutbound?: unknown
+  allow_outbound?: unknown
+  canConfigure?: unknown
+  can_configure?: unknown
+  requestedAt?: unknown
+  requested_at?: unknown
+  expiresAt?: unknown
+  expires_at?: unknown
 }
 
 function asNonEmptyString(value: unknown): string | null {
@@ -177,6 +245,62 @@ function normalizePendingHumanInputRequest(raw: unknown): PendingHumanInputReque
   }
 }
 
+function normalizeRequestedSecret(raw: unknown): RequestedSecret | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const secret = raw as RequestedSecretWire
+  const id = asNonEmptyString(secret.id)
+  const name = asNonEmptyString(secret.name)
+  const key = asNonEmptyString(secret.key)
+  const secretType = (
+    asNonEmptyString(secret.secretType)
+    ?? asNonEmptyString(secret.secret_type)
+  ) as RequestedSecret['secretType'] | null
+  const domainPattern =
+    asNonEmptyString(secret.domainPattern)
+    ?? asNonEmptyString(secret.domain_pattern)
+  if (!id || !name || !key || !secretType || !domainPattern) {
+    return null
+  }
+  return {
+    id,
+    name,
+    key,
+    secretType,
+    domainPattern,
+    description: asNonEmptyString(secret.description),
+    createdAt: asNonEmptyString(secret.createdAt) ?? asNonEmptyString(secret.created_at),
+    updatedAt: asNonEmptyString(secret.updatedAt) ?? asNonEmptyString(secret.updated_at),
+  }
+}
+
+function normalizePendingContactRequest(raw: unknown): PendingContactRequest | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+  const request = raw as PendingContactRequestWire
+  const id = asNonEmptyString(request.id)
+  const channel = asNonEmptyString(request.channel)
+  const address = asNonEmptyString(request.address)
+  if (!id || !channel || !address) {
+    return null
+  }
+  return {
+    id,
+    channel,
+    address,
+    name: asNonEmptyString(request.name),
+    reason: asNonEmptyString(request.reason),
+    purpose: asNonEmptyString(request.purpose),
+    allowInbound: Boolean(request.allowInbound ?? request.allow_inbound),
+    allowOutbound: Boolean(request.allowOutbound ?? request.allow_outbound),
+    canConfigure: Boolean(request.canConfigure ?? request.can_configure),
+    requestedAt: asNonEmptyString(request.requestedAt) ?? asNonEmptyString(request.requested_at),
+    expiresAt: asNonEmptyString(request.expiresAt) ?? asNonEmptyString(request.expires_at),
+  }
+}
+
 export function normalizePendingHumanInputRequests(raw: unknown): PendingHumanInputRequest[] {
   if (!Array.isArray(raw)) {
     return []
@@ -184,6 +308,80 @@ export function normalizePendingHumanInputRequests(raw: unknown): PendingHumanIn
   return raw
     .map(normalizePendingHumanInputRequest)
     .filter((value): value is PendingHumanInputRequest => Boolean(value))
+}
+
+export function normalizePendingActionRequests(raw: unknown): PendingActionRequest[] {
+  if (!Array.isArray(raw)) {
+    return []
+  }
+  const normalized: PendingActionRequest[] = []
+
+  raw.forEach((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      return
+    }
+    const request = item as PendingActionRequestWire
+    const id = asNonEmptyString(request.id)
+    const kind = asNonEmptyString(request.kind)
+    const count = asPositiveInteger(request.count) ?? 0
+    if (!id || !kind) {
+      return
+    }
+    if (kind === 'human_input') {
+      const requests = normalizePendingHumanInputRequests(request.requests)
+      normalized.push({ id, kind, requests, count: count || requests.length })
+      return
+    }
+    if (kind === 'spawn_request') {
+      const requestId = asNonEmptyString(request.requestId) ?? asNonEmptyString(request.request_id)
+      const requestedCharter =
+        asNonEmptyString(request.requestedCharter)
+        ?? asNonEmptyString(request.requested_charter)
+      if (!requestId || !requestedCharter) {
+        return
+      }
+      normalized.push({
+        id,
+        kind,
+        requestId,
+        requestedCharter,
+        handoffMessage: asNonEmptyString(request.handoffMessage) ?? asNonEmptyString(request.handoff_message),
+        requestReason: asNonEmptyString(request.requestReason) ?? asNonEmptyString(request.request_reason),
+        requestedAt: asNonEmptyString(request.requestedAt) ?? asNonEmptyString(request.requested_at),
+        expiresAt: asNonEmptyString(request.expiresAt) ?? asNonEmptyString(request.expires_at),
+        decisionApiUrl: asNonEmptyString(request.decisionApiUrl) ?? asNonEmptyString(request.decision_api_url),
+      })
+      return
+    }
+    if (kind === 'requested_secrets') {
+      const secrets = Array.isArray(request.secrets)
+        ? request.secrets.map(normalizeRequestedSecret).filter((value): value is RequestedSecret => Boolean(value))
+        : []
+      normalized.push({
+        id,
+        kind,
+        secrets,
+        count: count || secrets.length,
+        fulfillApiUrl: asNonEmptyString(request.fulfillApiUrl) ?? asNonEmptyString(request.fulfill_api_url),
+        removeApiUrl: asNonEmptyString(request.removeApiUrl) ?? asNonEmptyString(request.remove_api_url),
+      })
+      return
+    }
+    if (kind === 'contact_requests') {
+      const requests = Array.isArray(request.requests)
+        ? request.requests.map(normalizePendingContactRequest).filter((value): value is PendingContactRequest => Boolean(value))
+        : []
+      normalized.push({
+        id,
+        kind,
+        requests,
+        count: count || requests.length,
+        resolveApiUrl: asNonEmptyString(request.resolveApiUrl) ?? asNonEmptyString(request.resolve_api_url),
+      })
+    }
+  })
+
+  return normalized
 }
 
 export async function sendAgentMessage(agentId: string, body: string, attachments: File[] = []): Promise<TimelineEvent> {
@@ -217,6 +415,7 @@ export type HumanInputResponsePayload =
 export type HumanInputResponseResult = {
   event?: TimelineEvent
   pendingHumanInputRequests: PendingHumanInputRequest[]
+  pendingActionRequests: PendingActionRequest[]
 }
 
 export type HumanInputBatchResponsePayload = {
@@ -235,6 +434,7 @@ export async function respondToHumanInputRequest(
   const response = await jsonFetch<{
     event?: TimelineEvent
     pending_human_input_requests?: unknown[]
+    pending_action_requests?: unknown[]
   }>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -243,6 +443,7 @@ export async function respondToHumanInputRequest(
   return {
     event: response.event,
     pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+    pendingActionRequests: normalizePendingActionRequests(response.pending_action_requests),
   }
 }
 
@@ -254,6 +455,7 @@ export async function respondToHumanInputRequestsBatch(
   const response = await jsonFetch<{
     event?: TimelineEvent
     pending_human_input_requests?: unknown[]
+    pending_action_requests?: unknown[]
   }>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -262,7 +464,85 @@ export async function respondToHumanInputRequestsBatch(
   return {
     event: response.event,
     pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+    pendingActionRequests: normalizePendingActionRequests(response.pending_action_requests),
   }
+}
+
+export type RequestedSecretsFulfillPayload = {
+  values: Record<string, string>
+  make_global?: boolean
+}
+
+export type RequestedSecretsRemovePayload = {
+  secret_ids: string[]
+}
+
+export type ContactRequestResolvePayload = {
+  responses: Array<{
+    request_id: string
+    decision: 'approve' | 'decline'
+    allow_inbound?: boolean
+    allow_outbound?: boolean
+    can_configure?: boolean
+  }>
+}
+
+export type SpawnRequestDecisionPayload = {
+  decision: 'approve' | 'decline'
+}
+
+export type PendingActionMutationResult = {
+  message?: string
+  pendingHumanInputRequests: PendingHumanInputRequest[]
+  pendingActionRequests: PendingActionRequest[]
+}
+
+async function postPendingActionMutation(
+  url: string,
+  payload: unknown,
+): Promise<PendingActionMutationResult> {
+  const response = await jsonFetch<{
+    message?: string
+    pending_human_input_requests?: unknown[]
+    pending_action_requests?: unknown[]
+  }>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  return {
+    message: asNonEmptyString(response.message) ?? undefined,
+    pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+    pendingActionRequests: normalizePendingActionRequests(response.pending_action_requests),
+  }
+}
+
+export function fulfillRequestedSecrets(
+  agentId: string,
+  payload: RequestedSecretsFulfillPayload,
+): Promise<PendingActionMutationResult> {
+  return postPendingActionMutation(`/console/api/agents/${agentId}/requested-secrets/fulfill/`, payload)
+}
+
+export function removeRequestedSecrets(
+  agentId: string,
+  payload: RequestedSecretsRemovePayload,
+): Promise<PendingActionMutationResult> {
+  return postPendingActionMutation(`/console/api/agents/${agentId}/requested-secrets/remove/`, payload)
+}
+
+export function resolveContactRequests(
+  agentId: string,
+  payload: ContactRequestResolvePayload,
+): Promise<PendingActionMutationResult> {
+  return postPendingActionMutation(`/console/api/agents/${agentId}/contact-requests/resolve/`, payload)
+}
+
+export function resolveSpawnRequest(
+  decisionApiUrl: string,
+  payload: SpawnRequestDecisionPayload,
+): Promise<PendingActionMutationResult> {
+  return postPendingActionMutation(decisionApiUrl, payload)
 }
 
 export type ProcessingStatusResponse = {

@@ -94,6 +94,9 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
     async def human_input_requests_event(self, event):
         await self.send_json({"type": "human_input_requests.updated", "payload": event.get("payload")})
 
+    async def pending_action_requests_event(self, event):
+        await self.send_json({"type": "pending_action_requests.updated", "payload": event.get("payload")})
+
     @database_sync_to_async
     def _resolve_agent(self, user, session, agent_id):
         return resolve_agent(
@@ -199,6 +202,9 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
     async def human_input_requests_event(self, event):
         await self.send_json({"type": "human_input_requests.updated", "payload": event.get("payload")})
+
+    async def pending_action_requests_event(self, event):
+        await self.send_json({"type": "pending_action_requests.updated", "payload": event.get("payload")})
 
     async def _subscribe(self, agent_id: str, context_override=None) -> None:
         if self.agent_id == agent_id:

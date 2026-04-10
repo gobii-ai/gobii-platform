@@ -94,6 +94,10 @@ vi.mock('../api/agentSpawnIntent', () => ({
 }))
 
 vi.mock('../api/agentChat', () => ({
+  fulfillRequestedSecrets: vi.fn(),
+  removeRequestedSecrets: vi.fn(),
+  resolveContactRequests: vi.fn(),
+  resolveSpawnRequest: vi.fn(),
   respondToHumanInputRequest: vi.fn(),
   respondToHumanInputRequestsBatch: vi.fn(),
 }))
@@ -290,7 +294,7 @@ vi.mock('../hooks/useAgentTimeline', () => ({
 
 vi.mock('../hooks/useTimelineCacheInjector', () => ({
   refreshTimelineLatestInCache: vi.fn(async () => undefined),
-  replacePendingHumanInputRequestsInCache: vi.fn(),
+  replacePendingActionRequestsInCache: vi.fn(),
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES: 3,
 }))
 

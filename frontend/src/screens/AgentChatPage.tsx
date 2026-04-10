@@ -3,7 +3,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
-import { respondToHumanInputRequest, respondToHumanInputRequestsBatch } from '../api/agentChat'
+import {
+  fulfillRequestedSecrets,
+  removeRequestedSecrets,
+  resolveContactRequests,
+  resolveSpawnRequest,
+  respondToHumanInputRequest,
+  respondToHumanInputRequestsBatch,
+} from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
   parseNullableBooleanPreference,
@@ -34,7 +41,7 @@ import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore
 import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse } from '../hooks/useAgentTimeline'
 import {
   refreshTimelineLatestInCache,
-  replacePendingHumanInputRequestsInCache,
+  replacePendingActionRequestsInCache,
   DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES,
 } from '../hooks/useTimelineCacheInjector'
 import { collapseDetailedStatusRuns } from '../hooks/useSimplifiedTimeline'
@@ -43,7 +50,7 @@ import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, SignupPreviewState } from '../types/agentRoster'
-import type { KanbanBoardSnapshot, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
+import type { KanbanBoardSnapshot, PendingActionRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -789,8 +796,8 @@ export function AgentChatPage({
   const timelineQuery = useAgentTimeline(activeAgentId, { enabled: agentContextReady && !isNewAgent })
   const flatEvents = useMemo(() => flattenTimelinePages(timelineQuery.data), [timelineQuery.data])
   const initialPageResponse = useMemo(() => getInitialPageResponse(timelineQuery.data), [timelineQuery.data])
-  const pendingHumanInputRequests = useMemo<PendingHumanInputRequest[]>(
-    () => initialPageResponse?.pending_human_input_requests ?? [],
+  const pendingActionRequests = useMemo<PendingActionRequest[]>(
+    () => initialPageResponse?.pending_action_requests ?? [],
     [initialPageResponse],
   )
 
@@ -3175,7 +3182,7 @@ export function AgentChatPage({
             : { request_id: item.requestId, free_text: item.freeText?.trim() ?? '' }
         )),
       })
-      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
+      replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
       if (result.event) {
         receiveRealtimeEvent(result.event)
       }
@@ -3183,7 +3190,7 @@ export function AgentChatPage({
       const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
         selected_option_key: response.selectedOptionKey,
       })
-      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
+      replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
       if (result.event) {
         receiveRealtimeEvent(result.event)
       }
@@ -3191,7 +3198,7 @@ export function AgentChatPage({
       const result = await respondToHumanInputRequest(activeAgentId, response.requestId, {
         free_text: response.freeText.trim(),
       })
-      replacePendingHumanInputRequestsInCache(queryClient, activeAgentId, result.pendingHumanInputRequests)
+      replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
       if (result.event) {
         receiveRealtimeEvent(result.event)
       }
@@ -3203,6 +3210,63 @@ export function AgentChatPage({
     }
     scrollToBottom()
   }, [activeAgentId, queryClient, receiveRealtimeEvent, scrollToBottom])
+
+  const handleResolveSpawnRequest = useCallback(async (
+    decisionApiUrl: string,
+    decision: 'approve' | 'decline',
+  ) => {
+    if (!activeAgentId) {
+      return
+    }
+    const result = await resolveSpawnRequest(decisionApiUrl, { decision })
+    replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+  }, [activeAgentId, queryClient])
+
+  const handleFulfillRequestedSecrets = useCallback(async (
+    values: Record<string, string>,
+    makeGlobal: boolean,
+  ) => {
+    if (!activeAgentId) {
+      return
+    }
+    const result = await fulfillRequestedSecrets(activeAgentId, {
+      values,
+      make_global: makeGlobal,
+    })
+    replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+  }, [activeAgentId, queryClient])
+
+  const handleRemoveRequestedSecrets = useCallback(async (secretIds: string[]) => {
+    if (!activeAgentId) {
+      return
+    }
+    const result = await removeRequestedSecrets(activeAgentId, { secret_ids: secretIds })
+    replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+  }, [activeAgentId, queryClient])
+
+  const handleResolveContactRequests = useCallback(async (
+    responses: Array<{
+      requestId: string
+      decision: 'approve' | 'decline'
+      allowInbound: boolean
+      allowOutbound: boolean
+      canConfigure: boolean
+    }>,
+  ) => {
+    if (!activeAgentId) {
+      return
+    }
+    const result = await resolveContactRequests(activeAgentId, {
+      responses: responses.map((response) => ({
+        request_id: response.requestId,
+        decision: response.decision,
+        allow_inbound: response.allowInbound,
+        allow_outbound: response.allowOutbound,
+        can_configure: response.canConfigure,
+      })),
+    })
+    replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+  }, [activeAgentId, queryClient])
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow || !requiresTrialPlanSelection) {
@@ -3460,7 +3524,7 @@ export function AgentChatPage({
         maxAttachmentBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-        pendingHumanInputRequests={pendingHumanInputRequests}
+        pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}
         statusExpansionTargets={statusExpansionTargets}
@@ -3478,6 +3542,10 @@ export function AgentChatPage({
         onLoadOlder={requestPreviousPage}
         onSendMessage={handleSend}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
+        onResolveSpawnRequest={handleResolveSpawnRequest}
+        onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
+        onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
+        onResolveContactRequests={handleResolveContactRequests}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer
         autoScrollPinned={autoScrollPinned}

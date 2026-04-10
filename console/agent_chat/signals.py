@@ -2,20 +2,24 @@ import logging
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
 
 from api.models import (
+    AgentSpawnRequest,
     AgentCollaborator,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    CommsAllowlistRequest,
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -29,9 +33,13 @@ from console.agent_audit.serializers import (
     serialize_step,
     serialize_tool_call,
 )
-from console.agent_chat.realtime import user_profile_group_name
+from console.agent_chat.realtime import send_user_group_event, user_profile_group_name
 
 from .kanban_events import persist_kanban_event
+from .pending_actions import (
+    get_legacy_pending_human_input_requests,
+    list_pending_action_requests,
+)
 from .timeline import (
     build_processing_snapshot,
     build_tool_cluster_from_steps,
@@ -143,14 +151,33 @@ def emit_pending_human_input_requests_update(agent: PersistentAgent) -> None:
     if not agent or not getattr(agent, "id", None):
         return
 
-    from api.agent.comms.human_input_requests import list_pending_human_input_requests
-
+    pending_action_requests = list_pending_action_requests(agent, None)
     payload = {
         "agent_id": str(agent.id),
-        "pending_human_input_requests": list_pending_human_input_requests(agent),
+        "pending_human_input_requests": get_legacy_pending_human_input_requests(pending_action_requests),
         "timestamp": timezone.now().isoformat(),
     }
     _send(_group_name(agent.id), "human_input_requests_event", payload)
+
+
+def emit_pending_action_requests_update(agent: PersistentAgent) -> None:
+    if not agent or not getattr(agent, "id", None):
+        return
+
+    user_model = get_user_model()
+    user_ids = sorted(_resolve_profile_listener_user_ids(agent))
+    viewers_by_id = user_model.objects.in_bulk(user_ids)
+    timestamp = timezone.now().isoformat()
+    for user_id in user_ids:
+        viewer = viewers_by_id.get(user_id)
+        if viewer is None:
+            continue
+        payload = {
+            "agent_id": str(agent.id),
+            "pending_action_requests": list_pending_action_requests(agent, viewer),
+            "timestamp": timestamp,
+        }
+        send_user_group_event(str(agent.id), user_id, "pending_action_requests_event", payload)
 
 
 def _should_audit_tool_call(tool_call: PersistentAgentToolCall | None) -> bool:
@@ -236,6 +263,7 @@ def broadcast_human_input_requests_updated(sender, instance: PersistentAgentHuma
         except PersistentAgent.DoesNotExist:
             return
         emit_pending_human_input_requests_update(agent)
+        emit_pending_action_requests_update(agent)
 
     transaction.on_commit(_on_commit)
 
@@ -251,8 +279,53 @@ def broadcast_human_input_requests_deleted(sender, instance: PersistentAgentHuma
         except PersistentAgent.DoesNotExist:
             return
         emit_pending_human_input_requests_update(agent)
+        emit_pending_action_requests_update(agent)
 
     transaction.on_commit(_on_commit)
+
+
+def _broadcast_pending_action_requests_for_agent(agent_id) -> None:
+    if not agent_id:
+        return
+
+    def _on_commit():
+        try:
+            agent = PersistentAgent.objects.get(id=agent_id)
+        except PersistentAgent.DoesNotExist:
+            return
+        emit_pending_action_requests_update(agent)
+
+    transaction.on_commit(_on_commit)
+
+
+@receiver(post_save, sender=AgentSpawnRequest)
+def broadcast_spawn_requests_updated(sender, instance: AgentSpawnRequest, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_delete, sender=AgentSpawnRequest)
+def broadcast_spawn_requests_deleted(sender, instance: AgentSpawnRequest, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_save, sender=PersistentAgentSecret)
+def broadcast_requested_secrets_updated(sender, instance: PersistentAgentSecret, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_delete, sender=PersistentAgentSecret)
+def broadcast_requested_secrets_deleted(sender, instance: PersistentAgentSecret, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_save, sender=CommsAllowlistRequest)
+def broadcast_contact_requests_updated(sender, instance: CommsAllowlistRequest, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_delete, sender=CommsAllowlistRequest)
+def broadcast_contact_requests_deleted(sender, instance: CommsAllowlistRequest, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
 
 
 @receiver(post_save, sender=PersistentAgentStep)

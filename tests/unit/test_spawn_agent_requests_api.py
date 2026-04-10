@@ -122,6 +122,7 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
             pending_response.json().get("request_status"),
             AgentSpawnRequest.RequestStatus.PENDING,
         )
+        self.assertIn("pending_action_requests", pending_response.json())
 
         spawn_request.reject(self.owner)
         rejected_response = self.client.get(
@@ -147,6 +148,7 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload.get("request_status"), AgentSpawnRequest.RequestStatus.REJECTED)
+        self.assertIn("pending_action_requests", payload)
         spawn_request.refresh_from_db()
         self.assertEqual(spawn_request.status, AgentSpawnRequest.RequestStatus.REJECTED)
         self.assertEqual(spawn_request.responded_by_id, self.admin.id)

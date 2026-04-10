@@ -272,7 +272,7 @@ export function SpawnAgentDetail({ entry }: ToolDetailProps) {
         : normalizedStatus === 'expired'
           ? 'expired'
         : null
-  const showActions = Boolean(decisionApiUrl) && resolvedDecision === null
+  const showActions = false
   const actionsLocked = Boolean(busyDecision)
 
   const submitDecision = async (decision: SpawnDecision) => {
