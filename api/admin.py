@@ -34,6 +34,7 @@ from api.services.schedule_enforcement import (
 )
 from api.agent.core.schedule_parser import ScheduleParser
 from .admin_forms import (
+    ReleaseSmsNumbersForm,
     FindReleaseCandidatesForm,
     ReleaseSmsNumbersForm,
     TestSmsForm,
@@ -94,6 +95,7 @@ from .services.sms_number_inventory import (
     release_sms_number,
     retire_sms_number,
 )
+from .services.sms_number_inventory import release_sms_number, retire_sms_number
 from .services.global_skill_json import (
     import_global_skill_from_payload,
     parse_global_skill_json_bytes,
@@ -4915,6 +4917,25 @@ class SmsNumberAdmin(admin.ModelAdmin):
         }),
     )
 
+    def changelist_view(self, request, extra_context=None):
+        """Inject counts of numbers in use for the change list template."""
+        if extra_context is None:
+            extra_context = {}
+
+        in_use_numbers_qs = PersistentAgentCommsEndpoint.objects.filter(
+            channel=CommsChannel.SMS,
+        ).values("address")
+
+        extra_context["in_use_count"] = SmsNumber.objects.filter(
+            phone_number__in=in_use_numbers_qs,
+        ).count()
+
+        extra_context["total_count"] = SmsNumber.objects.count()
+
+        return super().changelist_view(request, extra_context=extra_context)
+
+
+
     def get_urls(self):
         urls = super().get_urls()
         extra = [
@@ -4979,6 +5000,117 @@ class SmsNumberAdmin(admin.ModelAdmin):
         )
 
         return TemplateResponse(request, "admin/test_sms_form.html", context)
+
+    def changelist_view(self, request, extra_context=None):
+        """Inject counts of numbers in use for the change list template."""
+        if extra_context is None:
+            extra_context = {}
+
+        inventory_numbers_qs = SmsNumber.objects.filter(released_at__isnull=True)
+        in_use_numbers_qs = PersistentAgentCommsEndpoint.objects.filter(
+            channel=CommsChannel.SMS,
+        ).values("address")
+
+        extra_context["in_use_count"] = inventory_numbers_qs.filter(
+            phone_number__in=in_use_numbers_qs,
+        ).count()
+        extra_context["inventory_count"] = inventory_numbers_qs.count()
+        extra_context["released_count"] = SmsNumber.objects.filter(released_at__isnull=False).count()
+
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def release_view(self, request):
+        changelist_url = reverse("admin:api_smsnumber_changelist")
+        if not request.user.has_perm("api.change_smsnumber"):
+            messages.error(request, "Permission denied.")
+            return HttpResponseRedirect(changelist_url)
+
+        form = ReleaseSmsNumbersForm(request.POST or None)
+        if request.method == "POST" and form.is_valid():
+            requested_numbers = form.cleaned_data["phone_numbers"]
+            sms_numbers_by_phone = {
+                sms_number.phone_number: sms_number
+                for sms_number in SmsNumber.objects.filter(phone_number__in=requested_numbers)
+            }
+
+            released_results = []
+            partial_results = []
+            missing_numbers = []
+            validation_errors = []
+            detached_endpoint_total = 0
+
+            for phone_number in requested_numbers:
+                sms_number = sms_numbers_by_phone.get(phone_number)
+                if sms_number is None:
+                    missing_numbers.append(phone_number)
+                    continue
+
+                try:
+                    result = release_sms_number(sms_number)
+                except ValidationError as exc:
+                    validation_errors.append(f"{phone_number}: {'; '.join(exc.messages)}")
+                    continue
+
+                detached_endpoint_total += result.detached_endpoint_count
+                if result.succeeded:
+                    released_results.append(result)
+                else:
+                    partial_results.append(result)
+
+            if released_results:
+                released_numbers = [result.phone_number for result in released_results]
+                messages.success(
+                    request,
+                    f"Released {len(released_results)} SMS number(s) in Twilio: "
+                    f"{self._preview_items(released_numbers)}",
+                )
+
+            if detached_endpoint_total:
+                messages.info(
+                    request,
+                    f"Detached {detached_endpoint_total} SMS endpoint(s) from agents before release.",
+                )
+
+            if partial_results:
+                partial_preview = self._preview_items(
+                    [f"{result.phone_number} ({result.error})" for result in partial_results],
+                    limit=3,
+                    separator="; ",
+                )
+                messages.error(
+                    request,
+                    "Retired locally but failed to release in Twilio for "
+                    f"{len(partial_results)} SMS number(s): {partial_preview}",
+                )
+
+            if missing_numbers:
+                messages.error(
+                    request,
+                    f"Skipped {len(missing_numbers)} number(s) not found in SMS inventory: "
+                    f"{self._preview_items(missing_numbers)}",
+                )
+
+            if validation_errors:
+                messages.error(
+                    request,
+                    f"Could not release {len(validation_errors)} number(s): "
+                    f"{self._preview_items(validation_errors, limit=3, separator=' | ')}",
+                )
+
+            if not any([released_results, partial_results, missing_numbers, validation_errors]):
+                messages.warning(request, "No SMS numbers were released.")
+
+            return HttpResponseRedirect(changelist_url)
+
+        context = dict(
+            self.admin_site.each_context(request),
+            opts=self.model._meta,
+            form=form,
+            title="Release SMS Numbers",
+            changelist_url=changelist_url,
+        )
+
+        return TemplateResponse(request, "admin/smsnumber_release_form.html", context)
 
     def changelist_view(self, request, extra_context=None):
         """Inject counts of numbers in use for the change list template."""
