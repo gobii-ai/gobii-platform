@@ -34,7 +34,6 @@ from api.services.schedule_enforcement import (
 )
 from api.agent.core.schedule_parser import ScheduleParser
 from .admin_forms import (
-    ReleaseSmsNumbersForm,
     FindReleaseCandidatesForm,
     ReleaseSmsNumbersForm,
     TestSmsForm,
@@ -95,7 +94,6 @@ from .services.sms_number_inventory import (
     release_sms_number,
     retire_sms_number,
 )
-from .services.sms_number_inventory import release_sms_number, retire_sms_number
 from .services.global_skill_json import (
     import_global_skill_from_payload,
     parse_global_skill_json_bytes,
@@ -4917,25 +4915,6 @@ class SmsNumberAdmin(admin.ModelAdmin):
         }),
     )
 
-    def changelist_view(self, request, extra_context=None):
-        """Inject counts of numbers in use for the change list template."""
-        if extra_context is None:
-            extra_context = {}
-
-        in_use_numbers_qs = PersistentAgentCommsEndpoint.objects.filter(
-            channel=CommsChannel.SMS,
-        ).values("address")
-
-        extra_context["in_use_count"] = SmsNumber.objects.filter(
-            phone_number__in=in_use_numbers_qs,
-        ).count()
-
-        extra_context["total_count"] = SmsNumber.objects.count()
-
-        return super().changelist_view(request, extra_context=extra_context)
-
-
-
     def get_urls(self):
         urls = super().get_urls()
         extra = [
@@ -5025,7 +5004,13 @@ class SmsNumberAdmin(admin.ModelAdmin):
             messages.error(request, "Permission denied.")
             return HttpResponseRedirect(changelist_url)
 
-        form = ReleaseSmsNumbersForm(request.POST or None)
+        initial = {}
+        if request.method != "POST":
+            prefilled_numbers = (request.GET.get("phone_numbers") or "").strip()
+            if prefilled_numbers:
+                initial["phone_numbers"] = prefilled_numbers
+
+        form = ReleaseSmsNumbersForm(request.POST or None, initial=initial)
         if request.method == "POST" and form.is_valid():
             requested_numbers = form.cleaned_data["phone_numbers"]
             sms_numbers_by_phone = {

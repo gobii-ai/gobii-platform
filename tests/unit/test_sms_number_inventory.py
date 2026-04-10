@@ -385,6 +385,136 @@ class SmsNumberInventoryTests(TestCase):
         self.assertNotIn(recent_number.phone_number, tiers_by_number)
         self.assertNotIn(paid_number.phone_number, tiers_by_number)
 
+    def test_find_sms_number_release_candidates_returns_detached_and_free_plan_candidates(self):
+        cutoff_days = 90
+        old_timestamp = timezone.now() - timedelta(days=cutoff_days + 5)
+        recent_timestamp = timezone.now() - timedelta(days=10)
+
+        detached_number = SmsNumber.objects.create(
+            sid="PN000000000000000000000000000017",
+            phone_number="+15550000017",
+            country="US",
+        )
+        free_number = SmsNumber.objects.create(
+            sid="PN000000000000000000000000000018",
+            phone_number="+15550000018",
+            country="US",
+        )
+        recent_number = SmsNumber.objects.create(
+            sid="PN000000000000000000000000000019",
+            phone_number="+15550000019",
+            country="US",
+        )
+        paid_number = SmsNumber.objects.create(
+            sid="PN000000000000000000000000000020",
+            phone_number="+15550000020",
+            country="US",
+        )
+
+        free_user = get_user_model().objects.create_user(
+            email="free-sms-owner@example.com",
+            username="free-sms-owner",
+            password="password123",
+        )
+        free_browser_agent = BrowserUseAgent.objects.create(user=free_user, name="Free SMS Browser")
+        free_agent = PersistentAgent.objects.create(
+            user=free_user,
+            name="Free SMS Agent",
+            charter="c",
+            browser_use_agent=free_browser_agent,
+        )
+        free_billing, _ = UserBilling.objects.get_or_create(user=free_user)
+        free_billing.subscription = PlanNames.FREE
+        free_billing.save(update_fields=["subscription"])
+
+        paid_user = get_user_model().objects.create_user(
+            email="paid-sms-owner@example.com",
+            username="paid-sms-owner",
+            password="password123",
+        )
+        paid_browser_agent = BrowserUseAgent.objects.create(user=paid_user, name="Paid SMS Browser")
+        paid_agent = PersistentAgent.objects.create(
+            user=paid_user,
+            name="Paid SMS Agent",
+            charter="c",
+            browser_use_agent=paid_browser_agent,
+        )
+        paid_billing, _ = UserBilling.objects.get_or_create(user=paid_user)
+        paid_billing.subscription = PlanNames.STARTUP
+        paid_billing.save(update_fields=["subscription"])
+
+        detached_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address=detached_number.phone_number,
+        )
+        free_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=free_agent,
+            channel=CommsChannel.SMS,
+            address=free_number.phone_number,
+        )
+        recent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=free_agent,
+            channel=CommsChannel.SMS,
+            address=recent_number.phone_number,
+        )
+        paid_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=paid_agent,
+            channel=CommsChannel.SMS,
+            address=paid_number.phone_number,
+        )
+        external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15550000999",
+        )
+
+        detached_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=detached_endpoint,
+            to_endpoint=external_endpoint,
+            owner_agent=None,
+            body="old detached",
+        )
+        free_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=free_endpoint,
+            to_endpoint=external_endpoint,
+            owner_agent=free_agent,
+            body="old free",
+        )
+        recent_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=recent_endpoint,
+            to_endpoint=external_endpoint,
+            owner_agent=free_agent,
+            body="recent free",
+        )
+        paid_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=paid_endpoint,
+            to_endpoint=external_endpoint,
+            owner_agent=paid_agent,
+            body="old paid",
+        )
+
+        PersistentAgentMessage.objects.filter(pk=detached_message.pk).update(timestamp=old_timestamp)
+        PersistentAgentMessage.objects.filter(pk=free_message.pk).update(timestamp=old_timestamp)
+        PersistentAgentMessage.objects.filter(pk=recent_message.pk).update(timestamp=recent_timestamp)
+        PersistentAgentMessage.objects.filter(pk=paid_message.pk).update(timestamp=old_timestamp)
+
+        candidates = find_sms_number_release_candidates(unused_days=cutoff_days)
+
+        tiers_by_number = {candidate.phone_number: candidate.tier for candidate in candidates}
+        self.assertEqual(
+            tiers_by_number[detached_number.phone_number],
+            SmsNumberReleaseCandidate.DETACHED_UNUSED,
+        )
+        self.assertEqual(
+            tiers_by_number[free_number.phone_number],
+            SmsNumberReleaseCandidate.FREE_DORMANT_UNUSED,
+        )
+        self.assertNotIn(recent_number.phone_number, tiers_by_number)
+        self.assertNotIn(paid_number.phone_number, tiers_by_number)
+
     @override_settings(
         TWILIO_ACCOUNT_SID="AC00000000000000000000000000000000",
         TWILIO_AUTH_TOKEN="test-token",
@@ -700,6 +830,88 @@ class SmsNumberInventoryTests(TestCase):
         self.assertContains(response, "Released 1 SMS number(s) in Twilio")
         self.assertContains(response, "Detached 1 SMS endpoint(s) from agents before release.")
         self.assertContains(response, "Skipped 1 number(s) not found in SMS inventory")
+
+    def test_sms_number_admin_release_candidates_view_shows_grouped_candidates(self):
+        admin_user = get_user_model().objects.create_superuser(
+            email="sms-candidate-admin@example.com",
+            username="sms-candidate-admin",
+            password="password123",
+        )
+        self.client.force_login(admin_user)
+
+        detached_number = SmsNumber.objects.create(
+            sid="PN000000000000000000000000000021",
+            phone_number="+15550000021",
+            country="US",
+        )
+        free_number = SmsNumber.objects.create(
+            sid="PN000000000000000000000000000022",
+            phone_number="+15550000022",
+            country="US",
+        )
+
+        detached_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address=detached_number.phone_number,
+        )
+        free_user = get_user_model().objects.create_user(
+            email="sms-candidate-free@example.com",
+            username="sms-candidate-free",
+            password="password123",
+        )
+        free_browser_agent = BrowserUseAgent.objects.create(user=free_user, name="Candidate Free Browser")
+        free_agent = PersistentAgent.objects.create(
+            user=free_user,
+            name="Candidate Free Agent",
+            charter="c",
+            browser_use_agent=free_browser_agent,
+        )
+        free_billing, _ = UserBilling.objects.get_or_create(user=free_user)
+        free_billing.subscription = PlanNames.FREE
+        free_billing.save(update_fields=["subscription"])
+        free_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=free_agent,
+            channel=CommsChannel.SMS,
+            address=free_number.phone_number,
+        )
+        external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15550000888",
+        )
+
+        detached_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=detached_endpoint,
+            to_endpoint=external_endpoint,
+            owner_agent=None,
+            body="old detached candidate",
+        )
+        free_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=free_endpoint,
+            to_endpoint=external_endpoint,
+            owner_agent=free_agent,
+            body="old free candidate",
+        )
+        old_timestamp = timezone.now() - timedelta(days=120)
+        PersistentAgentMessage.objects.filter(pk=detached_message.pk).update(timestamp=old_timestamp)
+        PersistentAgentMessage.objects.filter(pk=free_message.pk).update(timestamp=old_timestamp)
+
+        response = self.client.get(
+            reverse("admin:smsnumber_release_candidates"),
+            {
+                "unused_days": 90,
+                "include_detached_unused": "1",
+                "include_free_dormant_unused": "1",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Detached Unused")
+        self.assertContains(response, "Free-Plan Dormant Unused")
+        self.assertContains(response, detached_number.phone_number)
+        self.assertContains(response, free_number.phone_number)
+        self.assertContains(response, "Review in Release Form")
 
     def test_sms_number_admin_release_candidates_view_shows_grouped_candidates(self):
         admin_user = get_user_model().objects.create_superuser(
