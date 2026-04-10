@@ -1,4 +1,6 @@
 # admin_forms.py  (optional file)
+import re
+
 from django import forms
 from django.forms import ModelForm
 from .models import (
@@ -351,8 +353,6 @@ class BulkSetUserFlagsForm(forms.Form):
         self.invalid_user_id_tokens: list[str] = []
 
     def clean_user_ids(self):
-        import re
-
         raw = self.cleaned_data["user_ids"]
         tokens = [token for token in re.split(r"[\s,]+", raw.strip()) if token]
         if not tokens:
