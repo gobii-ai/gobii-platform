@@ -612,6 +612,67 @@ class UserFlags(models.Model):
         return cls.objects.get_or_create(user=user)[0]
 
 
+class ImmutableUserFlagSlugError(ValueError):
+    """Raised when attempting to change an existing configured user flag slug."""
+
+
+class UserFlagDefinition(models.Model):
+    """Admin-managed configuration for dynamic per-user flags."""
+
+    slug = models.SlugField(
+        max_length=64,
+        unique=True,
+        help_text="Stable identifier used in code and admin search, for example 'example_flag'.",
+    )
+    description = models.TextField(
+        help_text="Human-readable explanation of what this flag means.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("slug",)
+        verbose_name = "User flag definition"
+        verbose_name_plural = "User flag definitions"
+
+    def __str__(self):
+        return self.slug
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            existing_slug = type(self).objects.filter(pk=self.pk).values_list("slug", flat=True).first()
+            if existing_slug and existing_slug != self.slug:
+                raise ImmutableUserFlagSlugError("User flag slugs are immutable once created.")
+        super().save(*args, **kwargs)
+
+
+class UserFlagAssignment(models.Model):
+    """Presence of a row means the user flag is enabled for that user."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="user_flag_assignments",
+    )
+    flag = models.ForeignKey(
+        UserFlagDefinition,
+        on_delete=models.CASCADE,
+        related_name="user_assignments",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            UniqueConstraint(fields=["user", "flag"], name="unique_user_flag_assignment"),
+        ]
+        verbose_name = "User flag assignment"
+        verbose_name_plural = "User flag assignments"
+
+    def __str__(self):
+        return f"{self.user_id}:{self.flag.slug}"
+
+
 class UserPreference(models.Model):
     """Per-user application preferences persisted across devices."""
 
