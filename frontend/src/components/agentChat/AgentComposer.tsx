@@ -644,7 +644,6 @@ export const AgentComposer = memo(function AgentComposer({
   const composerPlaceholder = disabledReason || (activeHumanInputRequest && activePendingAction?.kind === 'human_input'
     ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
     : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
-  const activePendingActionKind = activePendingAction?.kind ?? null
 
   useEffect(() => {
     if (typeof window === 'undefined') {
