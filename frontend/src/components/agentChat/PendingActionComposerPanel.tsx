@@ -61,30 +61,30 @@ function parseInlineError(error: unknown): string {
 function actionHeading(action: PendingActionRequest): string {
   switch (action.kind) {
     case 'human_input':
-      return 'Needs your reply'
+      return action.requests[0]?.question ?? 'Needs your reply'
     case 'spawn_request':
-      return 'Agent creation request'
+      return 'Create Agent'
     case 'requested_secrets':
-      return 'Requested secrets'
+      return action.secrets[0]?.name ?? 'Requested secret'
     case 'contact_requests':
-      return 'Contact approvals'
+      return action.requests[0]?.name || action.requests[0]?.address || 'Contact approval'
     default:
       return 'Pending action'
   }
 }
 
-function actionMeta(action: PendingActionRequest): string {
+function actionMeta(action: PendingActionRequest): string | null {
   switch (action.kind) {
     case 'human_input':
-      return `${action.count} question${action.count === 1 ? '' : 's'}`
+      return null
     case 'spawn_request':
-      return 'Create or decline'
+      return null
     case 'requested_secrets':
-      return `${action.count} secret${action.count === 1 ? '' : 's'} waiting`
+      return [action.secrets[0]?.key, action.secrets[0]?.domainPattern].filter(Boolean).join(' · ') || null
     case 'contact_requests':
-      return `${action.count} contact${action.count === 1 ? '' : 's'} waiting`
+      return action.requests[0]?.name ? (action.requests[0]?.address ?? null) : null
     default:
-      return ''
+      return null
   }
 }
 
@@ -121,7 +121,6 @@ export function PendingActionComposerPanel({
   const [busySpawnDecision, setBusySpawnDecision] = useState<'approve' | 'decline' | null>(null)
   const [spawnError, setSpawnError] = useState<string | null>(null)
   const [secretValues, setSecretValues] = useState<Record<string, string>>({})
-  const [selectedSecretIds, setSelectedSecretIds] = useState<Record<string, boolean>>({})
   const [makeGlobal, setMakeGlobal] = useState(false)
   const [busySecretsAction, setBusySecretsAction] = useState<'save' | 'remove' | null>(null)
   const [secretError, setSecretError] = useState<string | null>(null)
@@ -132,6 +131,7 @@ export function PendingActionComposerPanel({
   const activeAction = actions.find((action) => action.id === activeActionId) ?? actions[0] ?? null
   const activeIndex = Math.max(0, actions.findIndex((action) => action.id === activeAction?.id))
   const ActiveIcon = activeAction ? actionIcon(activeAction) : MessageSquareQuote
+  const activeActionMeta = activeAction ? actionMeta(activeAction) : null
 
   useEffect(() => {
     if (activeAction?.kind !== 'requested_secrets') {
@@ -139,7 +139,6 @@ export function PendingActionComposerPanel({
     }
     const activeSecretIds = new Set(activeAction.secrets.map((secret) => secret.id))
     setSecretValues((current) => Object.fromEntries(Object.entries(current).filter(([secretId]) => activeSecretIds.has(secretId))))
-    setSelectedSecretIds((current) => Object.fromEntries(Object.entries(current).filter(([secretId]) => activeSecretIds.has(secretId))))
   }, [activeAction])
 
   useEffect(() => {
@@ -150,10 +149,8 @@ export function PendingActionComposerPanel({
       const nextDrafts: Record<string, PendingContactDraft> = {}
       activeAction.requests.forEach((request) => {
         nextDrafts[request.id] = current[request.id] ?? {
-          decision: 'approve',
           allowInbound: request.allowInbound,
           allowOutbound: request.allowOutbound,
-          canConfigure: request.canConfigure,
         }
       })
       return nextDrafts
@@ -203,7 +200,6 @@ export function PendingActionComposerPanel({
     try {
       await onFulfillRequestedSecrets(secretValuesToSubmit, makeGlobal)
       setSecretValues({})
-      setSelectedSecretIds({})
       setMakeGlobal(false)
     } catch (error) {
       setSecretError(parseInlineError(error))
@@ -216,18 +212,15 @@ export function PendingActionComposerPanel({
     if (activeAction.kind !== 'requested_secrets' || !onRemoveRequestedSecrets || busySecretsAction) {
       return
     }
-    const secretIds = activeAction.secrets
-      .filter((secret) => selectedSecretIds[secret.id])
-      .map((secret) => secret.id)
+    const secretIds = activeAction.secrets.map((secret) => secret.id)
     if (!secretIds.length) {
-      setSecretError('Select at least one requested secret to remove.')
+      setSecretError('Requested secret could not be found.')
       return
     }
     setBusySecretsAction('remove')
     setSecretError(null)
     try {
       await onRemoveRequestedSecrets(secretIds)
-      setSelectedSecretIds({})
     } catch (error) {
       setSecretError(parseInlineError(error))
     } finally {
@@ -235,24 +228,30 @@ export function PendingActionComposerPanel({
     }
   }
 
-  const handleResolveContacts = async () => {
+  const handleResolveContacts = async (decision: 'approve' | 'decline', requestId: string) => {
     if (activeAction.kind !== 'contact_requests' || !onResolveContactRequests || busyContacts) {
       return
+    }
+    const request = activeAction.requests.find((candidate) => candidate.id === requestId)
+    if (!request) {
+      return
+    }
+    const draft = contactDrafts[request.id] ?? {
+      allowInbound: request.allowInbound,
+      allowOutbound: request.allowOutbound,
     }
     setBusyContacts(true)
     setContactError(null)
     try {
-      await onResolveContactRequests(
-        activeAction.requests.map((request) => ({
+      await onResolveContactRequests([
+        {
           requestId: request.id,
-          ...(contactDrafts[request.id] ?? {
-            decision: 'approve',
-            allowInbound: request.allowInbound,
-            allowOutbound: request.allowOutbound,
-            canConfigure: request.canConfigure,
-          }),
-        })),
-      )
+          decision,
+          allowInbound: draft.allowInbound,
+          allowOutbound: draft.allowOutbound,
+          canConfigure: false,
+        },
+      ])
     } catch (error) {
       setContactError(parseInlineError(error))
     } finally {
@@ -267,13 +266,15 @@ export function PendingActionComposerPanel({
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
             <ActiveIcon className="h-4 w-4" aria-hidden="true" />
           </span>
-          <div className="min-w-0">
+          <div className={`min-w-0 ${activeActionMeta ? '' : 'flex min-h-9 items-center'}`}>
             <p className="text-[0.95rem] font-semibold leading-6 tracking-[-0.02em] text-slate-900">
               {actionHeading(activeAction)}
             </p>
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-slate-500">
-              {actionMeta(activeAction)}
-            </p>
+            {activeActionMeta ? (
+              <p className="text-xs text-slate-600">
+                {activeActionMeta}
+              </p>
+            ) : null}
           </div>
         </div>
         {actions.length > 1 ? (
@@ -311,6 +312,7 @@ export function PendingActionComposerPanel({
             draftResponses={draftHumanInputResponses}
             disabled={disabled}
             busyRequestId={busyHumanInputRequestId}
+            showQuestion={false}
             onActiveRequestChange={onActiveHumanInputRequestChange}
             onSelectOption={onSelectHumanInputOption}
           />
@@ -333,13 +335,9 @@ export function PendingActionComposerPanel({
             busyAction={busySecretsAction}
             error={secretError}
             secretValues={secretValues}
-            selectedSecretIds={selectedSecretIds}
             makeGlobal={makeGlobal}
             onSecretValueChange={(secretId, value) => {
               setSecretValues((current) => ({ ...current, [secretId]: value }))
-            }}
-            onSecretSelectionChange={(secretId, checked) => {
-              setSelectedSecretIds((current) => ({ ...current, [secretId]: checked }))
             }}
             onMakeGlobalChange={setMakeGlobal}
             onSave={handleSaveSecrets}

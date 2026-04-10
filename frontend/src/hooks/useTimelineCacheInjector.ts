@@ -69,12 +69,12 @@ export function replacePendingHumanInputRequestsInCache(
     const nonHumanActions = existingPendingActions.filter((request) => request.kind !== 'human_input')
     const nextPendingActions = pendingHumanInputRequests.length > 0
       ? [
-          {
-            id: 'human_input',
+          ...pendingHumanInputRequests.map((request) => ({
+            id: `human_input:${request.id}`,
             kind: 'human_input' as const,
-            requests: pendingHumanInputRequests,
-            count: pendingHumanInputRequests.length,
-          },
+            requests: [request],
+            count: 1,
+          })),
           ...nonHumanActions,
         ]
       : nonHumanActions
@@ -114,7 +114,9 @@ export function replacePendingActionRequestsInCache(
       raw: {
         ...lastPage.raw,
         pending_action_requests: pendingActionRequests,
-        pending_human_input_requests: pendingActionRequests.find((request) => request.kind === 'human_input')?.requests ?? [],
+        pending_human_input_requests: pendingActionRequests
+          .filter((request) => request.kind === 'human_input')
+          .flatMap((request) => request.requests),
       },
     }
 

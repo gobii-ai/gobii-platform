@@ -468,10 +468,9 @@ export const AgentComposer = memo(function AgentComposer({
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
 
-  const pendingHumanInputRequests = (
-    pendingActionRequests.find((request) => request.kind === 'human_input')?.requests
-    ?? []
-  )
+  const pendingHumanInputRequests = pendingActionRequests
+    .filter((request) => request.kind === 'human_input')
+    .flatMap((request) => request.requests)
 
   useEffect(() => {
     const node = textareaRef.current

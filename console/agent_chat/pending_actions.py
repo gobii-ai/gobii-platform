@@ -12,16 +12,16 @@ from api.models import (
 from .access import user_can_manage_agent_settings
 
 
-def _build_human_input_action(agent: PersistentAgent) -> dict | None:
-    human_input_requests = list_pending_human_input_requests(agent)
-    if not human_input_requests:
-        return None
-    return {
-        "id": "human_input",
-        "kind": "human_input",
-        "requests": human_input_requests,
-        "count": len(human_input_requests),
-    }
+def _build_human_input_actions(agent: PersistentAgent) -> list[dict]:
+    return [
+        {
+            "id": f"human_input:{request['id']}",
+            "kind": "human_input",
+            "requests": [request],
+            "count": 1,
+        }
+        for request in list_pending_human_input_requests(agent)
+    ]
 
 
 def _serialize_requested_secret(secret: PersistentAgentSecret) -> dict:
@@ -97,9 +97,7 @@ def _expire_pending_contact_requests(agent: PersistentAgent) -> None:
 def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[dict]:
     pending_actions: list[dict] = []
 
-    human_input_action = _build_human_input_action(agent)
-    if human_input_action:
-        pending_actions.append(human_input_action)
+    pending_actions.extend(_build_human_input_actions(agent))
 
     if viewer_user is None or not user_can_manage_agent_settings(
         viewer_user,
@@ -120,37 +118,35 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
     ):
         pending_actions.append(_serialize_spawn_request(agent, spawn_request))
 
-    requested_secrets = list(
+    for secret in (
         PersistentAgentSecret.objects.filter(
             agent=agent,
             requested=True,
         ).order_by("secret_type", "domain_pattern", "name")
-    )
-    if requested_secrets:
+    ):
         pending_actions.append(
             {
-                "id": "requested_secrets",
+                "id": f"requested_secret:{secret.id}",
                 "kind": "requested_secrets",
-                "secrets": [_serialize_requested_secret(secret) for secret in requested_secrets],
-                "count": len(requested_secrets),
+                "secrets": [_serialize_requested_secret(secret)],
+                "count": 1,
                 "fulfillApiUrl": reverse("console_agent_requested_secrets_fulfill", kwargs={"agent_id": agent.id}),
                 "removeApiUrl": reverse("console_agent_requested_secrets_remove_api", kwargs={"agent_id": agent.id}),
             }
         )
 
-    pending_contact_requests = list(
+    for request_obj in (
         CommsAllowlistRequest.objects.filter(
             agent=agent,
             status=CommsAllowlistRequest.RequestStatus.PENDING,
         ).order_by("-requested_at")
-    )
-    if pending_contact_requests:
+    ):
         pending_actions.append(
             {
-                "id": "contact_requests",
+                "id": f"contact_request:{request_obj.id}",
                 "kind": "contact_requests",
-                "requests": [_serialize_contact_request(request_obj) for request_obj in pending_contact_requests],
-                "count": len(pending_contact_requests),
+                "requests": [_serialize_contact_request(request_obj)],
+                "count": 1,
                 "resolveApiUrl": reverse("console_agent_contact_requests_resolve", kwargs={"agent_id": agent.id}),
             }
         )
@@ -159,10 +155,10 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
 
 
 def get_legacy_pending_human_input_requests(pending_actions: list[dict]) -> list[dict]:
+    requests: list[dict] = []
     for action in pending_actions:
         if action.get("kind") == "human_input":
-            requests = action.get("requests")
-            if isinstance(requests, list):
-                return requests
-            return []
-    return []
+            action_requests = action.get("requests")
+            if isinstance(action_requests, list):
+                requests.extend(action_requests)
+    return requests
