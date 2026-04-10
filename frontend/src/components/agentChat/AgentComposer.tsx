@@ -682,7 +682,14 @@ export const AgentComposer = memo(function AgentComposer({
     if (batchRequests.length > 1) {
       const nextUnanswered = batchRequests.find((candidate) => !nextDrafts[candidate.id])
       if (nextUnanswered) {
+        const nextPendingAction = pendingActionRequests.find((candidate) => (
+          candidate.kind === 'human_input'
+          && candidate.requests.some((pendingRequest) => pendingRequest.id === nextUnanswered.id)
+        ))
         setDraftHumanInputResponses(nextDrafts)
+        if (nextPendingAction) {
+          setActivePendingActionId(nextPendingAction.id)
+        }
         setActiveHumanInputRequestId(nextUnanswered.id)
         setBody('')
         requestAnimationFrame(() => adjustTextareaHeight(true))
@@ -731,6 +738,7 @@ export const AgentComposer = memo(function AgentComposer({
     draftHumanInputResponses,
     isSending,
     onRespondHumanInput,
+    pendingActionRequests,
     pendingHumanInputRequests,
   ])
 
@@ -767,7 +775,9 @@ export const AgentComposer = memo(function AgentComposer({
     const nextAction = pendingActionRequests.find((request) => request.id === nextActionId) ?? null
 
     if (currentAction?.kind === 'human_input') {
-      const currentRequest = currentAction.requests[0] ?? null
+      const currentRequest = currentAction.requests.find((request) => request.id === activeHumanInputRequestId)
+        ?? currentAction.requests[0]
+        ?? null
       const trimmedBody = body.trim()
       if (currentRequest) {
         setDraftHumanInputResponses((current) => {
@@ -795,9 +805,12 @@ export const AgentComposer = memo(function AgentComposer({
 
     setActivePendingActionId(nextActionId)
     if (nextAction?.kind === 'human_input') {
-      setActiveHumanInputRequestId(nextAction.requests[0]?.id ?? null)
+      const nextRequest = nextAction.requests.find((request) => request.id === activeHumanInputRequestId)
+        ?? nextAction.requests[0]
+        ?? null
+      setActiveHumanInputRequestId(nextRequest?.id ?? null)
     }
-  }, [activePendingActionId, body, pendingActionRequests])
+  }, [activeHumanInputRequestId, activePendingActionId, body, pendingActionRequests])
 
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
