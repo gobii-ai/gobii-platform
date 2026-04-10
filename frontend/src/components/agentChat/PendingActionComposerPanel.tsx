@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { ChevronLeft, ChevronRight, KeyRound, Mail, MessageSquareQuote, UserRoundPlus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { PendingActionRequest } from '../../types/agentChat'
@@ -96,7 +96,7 @@ function actionIcon(action: PendingActionRequest) {
     case 'human_input':
       return MessageSquareQuote
     case 'spawn_request':
-      return UserRoundPlus
+      return Zap
     case 'requested_secrets':
       return KeyRound
     case 'contact_requests':
