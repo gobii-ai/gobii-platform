@@ -38,21 +38,23 @@ from django.utils.text import get_valid_filename
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import (
-    list_pending_human_input_requests,
     submit_human_input_response,
     submit_human_input_responses_batch,
 )
 from api.agent.comms.message_service import ingest_inbound_message
+from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
 from api.agent.tools.mcp_manager import get_mcp_manager
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from api.models import (
+    AgentSpawnRequest,
     BrowserLLMPolicy,
     BrowserUseAgent,
     BrowserLLMTier,
     BrowserModelEndpoint,
     BrowserTierEndpoint,
+    CommsAllowlistRequest,
     CommsChannel,
     EmbeddingsLLMTier,
     EmbeddingsModelEndpoint,
@@ -78,7 +80,10 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
+    PersistentAgentSecret,
     PersistentAgentSystemMessage,
+    PersistentAgentSystemStep,
+    PersistentAgentStep,
     PersistentLLMTier,
     PersistentModelEndpoint,
     PersistentTierEndpoint,
@@ -141,9 +146,16 @@ from util.trial_enforcement import (
 from console.agent_chat.access import (
     agent_queryset_for,
     resolve_agent_for_request,
+    resolve_manageable_agent_for_request,
     shared_agent_queryset_for,
     user_can_manage_agent,
+    user_can_manage_agent_settings,
     user_is_collaborator,
+)
+from console.agent_chat.pending_actions import (
+    expire_pending_action_requests,
+    get_legacy_pending_human_input_requests,
+    list_pending_action_requests,
 )
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
@@ -209,6 +221,11 @@ from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from api.services.spawn_requests import SpawnRequestResolutionError, SpawnRequestService
+from api.services.persistent_agent_secrets import (
+    ensure_global_secret_capacity_for_agent,
+    move_agent_secret_to_global,
+    validate_agent_secret_globalization,
+)
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.pipedream_apps import (
@@ -290,22 +307,38 @@ def _can_open_agent_billing(request: HttpRequest, agent: PersistentAgent) -> boo
     return bool(membership and membership.role in BILLING_MANAGE_ROLES)
 
 
-def _can_user_resolve_spawn_requests(user, agent: PersistentAgent) -> bool:
-    if user.is_staff:
-        return True
-    if agent.organization_id:
-        membership = OrganizationMembership.objects.filter(
-            user=user,
-            org_id=agent.organization_id,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).first()
-        if not membership:
-            return False
-        return membership.role in (
-            OrganizationMembership.OrgRole.OWNER,
-            OrganizationMembership.OrgRole.ADMIN,
-        )
-    return agent.user_id == user.id
+def _can_user_resolve_spawn_requests(
+    user,
+    agent: PersistentAgent,
+    *,
+    allow_delinquent_personal_chat: bool = False,
+) -> bool:
+    return user_can_manage_agent_settings(
+        user,
+        agent,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+    )
+
+
+def _format_validation_error(error: ValidationError) -> str:
+    if hasattr(error, "message_dict") and error.message_dict:
+        messages: list[str] = []
+        for field_errors in error.message_dict.values():
+            messages.extend(str(message) for message in field_errors)
+        if messages:
+            return " ".join(messages)
+    if hasattr(error, "messages") and error.messages:
+        return " ".join(str(message) for message in error.messages)
+    return str(error)
+
+
+def _pending_action_payload(agent: PersistentAgent, viewer_user) -> dict[str, Any]:
+    expire_pending_action_requests(agent)
+    pending_action_requests = list_pending_action_requests(agent, viewer_user)
+    return {
+        "pending_human_input_requests": get_legacy_pending_human_input_requests(pending_action_requests),
+        "pending_action_requests": pending_action_requests,
+    }
 
 
 class ApiLoginRequiredMixin(LoginRequiredMixin):
@@ -2912,7 +2945,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_url(),
             "signup_preview_state": agent.signup_preview_state,
-            "pending_human_input_requests": list_pending_human_input_requests(agent),
+            **_pending_action_payload(agent, request.user),
         }
         return JsonResponse(payload)
 
@@ -2962,7 +2995,7 @@ class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
         return JsonResponse(
             {
                 "event": serialize_message_event(message),
-                "pending_human_input_requests": list_pending_human_input_requests(agent),
+                **_pending_action_payload(agent, request.user),
             },
             status=201,
         )
@@ -3018,7 +3051,7 @@ class AgentHumanInputRequestBatchResponseAPIView(LoginRequiredMixin, View):
         return JsonResponse(
             {
                 "event": serialize_message_event(message),
-                "pending_human_input_requests": list_pending_human_input_requests(agent),
+                **_pending_action_payload(agent, request.user),
             },
             status=201,
         )
@@ -3045,7 +3078,12 @@ class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
                 payload["request_status"] = exc.request_status
             return JsonResponse(payload, status=exc.status_code)
 
-        return JsonResponse(response_payload)
+        return JsonResponse(
+            {
+                **response_payload,
+                **_pending_action_payload(agent, request.user),
+            }
+        )
 
     def post(self, request: HttpRequest, agent_id: str, spawn_request_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(
@@ -3054,7 +3092,11 @@ class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
-        if not _can_user_resolve_spawn_requests(request.user, agent):
+        if not _can_user_resolve_spawn_requests(
+            request.user,
+            agent,
+            allow_delinquent_personal_chat=True,
+        ):
             return JsonResponse({"error": "Not permitted to approve or decline spawn requests."}, status=403)
 
         try:
@@ -3080,7 +3122,306 @@ class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"error": message_text}, status=400)
 
         transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
-        return JsonResponse(response_payload)
+        return JsonResponse(
+            {
+                **response_payload,
+                **_pending_action_payload(agent, request.user),
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentRequestedSecretsFulfillAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        raw_values = body.get("values")
+        should_make_global = bool(body.get("make_global"))
+        if not isinstance(raw_values, dict):
+            return JsonResponse({"error": "values must be an object keyed by secret id."}, status=400)
+
+        normalized_values: dict[str, str] = {}
+        validation_errors: dict[str, list[str]] = {}
+        for secret_id, value in raw_values.items():
+            normalized_secret_id = str(secret_id or "").strip()
+            normalized_value = str(value or "")
+            if not normalized_secret_id or not normalized_value:
+                continue
+            try:
+                DomainPatternValidator._validate_secret_value(normalized_value)
+            except ValueError as exc:
+                validation_errors[normalized_secret_id] = [str(exc)]
+                continue
+            normalized_values[normalized_secret_id] = normalized_value
+
+        if validation_errors:
+            return JsonResponse({"errors": validation_errors}, status=400)
+        if not normalized_values:
+            return JsonResponse({"error": "Provide at least one requested secret value."}, status=400)
+
+        requested_secrets = list(
+            PersistentAgentSecret.objects.filter(
+                agent=agent,
+                requested=True,
+                id__in=list(normalized_values.keys()),
+            ).order_by("secret_type", "domain_pattern", "name")
+        )
+        if len(requested_secrets) != len(normalized_values):
+            return JsonResponse({"error": "One or more requested secrets could not be found."}, status=404)
+
+        if should_make_global:
+            try:
+                ensure_global_secret_capacity_for_agent(agent, additional_count=len(requested_secrets))
+            except ValidationError as exc:
+                return JsonResponse({"errors": {"make_global": [_format_validation_error(exc)]}}, status=400)
+
+            global_errors: dict[str, list[str]] = {}
+            for secret in requested_secrets:
+                secret.set_value(normalized_values[str(secret.id)])
+                try:
+                    validate_agent_secret_globalization(secret)
+                except ValidationError as exc:
+                    global_errors[str(secret.id)] = [_format_validation_error(exc)]
+            if global_errors:
+                return JsonResponse({"errors": global_errors}, status=400)
+
+        try:
+            with transaction.atomic():
+                updated_count = 0
+                provided_secret_types: set[str] = set()
+                for secret in requested_secrets:
+                    secret.set_value(normalized_values[str(secret.id)])
+                    if should_make_global:
+                        move_agent_secret_to_global(secret)
+                    else:
+                        secret.requested = False
+                        secret.save(update_fields=["encrypted_value", "requested", "updated_at"])
+                    updated_count += 1
+                    provided_secret_types.add(secret.secret_type)
+
+                if updated_count > 0:
+                    step = PersistentAgentStep.objects.create(
+                        agent=agent,
+                        description=f"User provided {updated_count} requested credential(s)",
+                    )
+                    PersistentAgentSystemStep.objects.create(
+                        step=step,
+                        code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED,
+                        notes=f"Secrets provided: {updated_count}",
+                    )
+                    transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_PROVIDED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            "agent_id": str(agent.pk),
+                            "agent_name": agent.name,
+                            "secrets_provided": updated_count,
+                            "secret_types": sorted(provided_secret_types),
+                        },
+                    )
+        except ValidationError as exc:
+            return JsonResponse({"errors": {"__all__": [_format_validation_error(exc)]}}, status=400)
+        except IntegrityError:
+            return JsonResponse(
+                {"errors": {"__all__": ["A secret with that name already exists in this scope."]}},
+                status=400,
+            )
+
+        return JsonResponse(
+            {
+                "message": f"Saved {len(requested_secrets)} requested secret value(s).",
+                "saved_count": len(requested_secrets),
+                **_pending_action_payload(agent, request.user),
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentRequestedSecretsRemoveAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        raw_secret_ids = body.get("secret_ids")
+        if not isinstance(raw_secret_ids, list) or not raw_secret_ids:
+            return JsonResponse({"error": "Provide a non-empty secret_ids array."}, status=400)
+
+        secret_ids = [str(secret_id or "").strip() for secret_id in raw_secret_ids if str(secret_id or "").strip()]
+        if not secret_ids:
+            return JsonResponse({"error": "Provide a non-empty secret_ids array."}, status=400)
+
+        with transaction.atomic():
+            requested_secrets = PersistentAgentSecret.objects.filter(
+                agent=agent,
+                requested=True,
+                id__in=secret_ids,
+            )
+            removed_count = requested_secrets.count()
+            requested_secrets.delete()
+
+        return JsonResponse(
+            {
+                "message": f"Removed {removed_count} requested secret(s).",
+                "removed_count": removed_count,
+                **_pending_action_payload(agent, request.user),
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        responses = body.get("responses")
+        if not isinstance(responses, list) or not responses:
+            return JsonResponse({"error": "Provide a non-empty responses array."}, status=400)
+
+        normalized_responses: list[dict[str, Any]] = []
+        for response in responses:
+            if not isinstance(response, dict):
+                return JsonResponse({"error": "Each response must be an object."}, status=400)
+            request_id = str(response.get("request_id") or "").strip()
+            decision = str(response.get("decision") or "").strip().lower()
+            if not request_id:
+                return JsonResponse({"error": "Each response must include request_id."}, status=400)
+            if decision not in {"approve", "decline"}:
+                return JsonResponse({"error": "decision must be 'approve' or 'decline'."}, status=400)
+            normalized_responses.append(
+                {
+                    "request_id": request_id,
+                    "decision": decision,
+                    "allow_inbound": bool(response.get("allow_inbound", True)),
+                    "allow_outbound": bool(response.get("allow_outbound", True)),
+                    "can_configure": bool(response.get("can_configure", False)),
+                }
+            )
+
+        try:
+            with transaction.atomic():
+                request_ids = [response["request_id"] for response in normalized_responses]
+                request_objects = list(
+                    CommsAllowlistRequest.objects.select_for_update().filter(
+                        agent=agent,
+                        id__in=request_ids,
+                    )
+                )
+                requests_by_id = {str(request_obj.id): request_obj for request_obj in request_objects}
+                if len(requests_by_id) != len(request_ids):
+                    return JsonResponse({"error": "One or more contact requests could not be found."}, status=404)
+
+                response_errors: dict[str, list[str]] = {}
+                for response in normalized_responses:
+                    request_obj = requests_by_id[response["request_id"]]
+                    if request_obj.status != CommsAllowlistRequest.RequestStatus.PENDING:
+                        response_errors[response["request_id"]] = ["This request is no longer pending."]
+                    elif request_obj.is_expired():
+                        response_errors[response["request_id"]] = ["This request has expired."]
+                if response_errors:
+                    return JsonResponse({"errors": response_errors}, status=400)
+
+                approved_count = 0
+                rejected_count = 0
+                approved_addresses: list[str] = []
+
+                for response in normalized_responses:
+                    request_obj = requests_by_id[response["request_id"]]
+                    if response["decision"] == "approve":
+                        request_obj.request_inbound = response["allow_inbound"]
+                        request_obj.request_outbound = response["allow_outbound"]
+                        request_obj.request_configure = response["can_configure"]
+                        request_obj.save(
+                            update_fields=[
+                                "request_inbound",
+                                "request_outbound",
+                                "request_configure",
+                            ]
+                        )
+                        request_obj.approve(invited_by=request.user, skip_invitation=True)
+                        approved_count += 1
+                        approved_addresses.append(request_obj.name or request_obj.address)
+                    else:
+                        request_obj.reject()
+                        rejected_count += 1
+
+                if approved_count > 0:
+                    if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+                        agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+                        agent.save(update_fields=["whitelist_policy"])
+
+                    step = PersistentAgentStep.objects.create(
+                        agent=agent,
+                        description=f"User approved {approved_count} contact request(s)",
+                    )
+                    PersistentAgentSystemStep.objects.create(
+                        step=step,
+                        code=PersistentAgentSystemStep.Code.CONTACTS_APPROVED,
+                        notes=f"Approved: {', '.join(approved_addresses)}",
+                    )
+                    transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
+                        source=AnalyticsSource.WEB,
+                        properties={
+                            "agent_id": str(agent.pk),
+                            "agent_name": agent.name,
+                            "approved_count": approved_count,
+                            "rejected_count": rejected_count,
+                            "invitations_sent": 0,
+                        },
+                    )
+        except ValidationError as exc:
+            return JsonResponse({"errors": {"__all__": [_format_validation_error(exc)]}}, status=400)
+        except ValueError as exc:
+            return JsonResponse({"errors": {"__all__": [str(exc)]}}, status=400)
+
+        return JsonResponse(
+            {
+                "message": (
+                    f"Approved {approved_count} and declined {rejected_count} contact request(s)."
+                    if approved_count or rejected_count
+                    else "No contact requests were updated."
+                ),
+                "approved_count": approved_count,
+                "rejected_count": rejected_count,
+                **_pending_action_payload(agent, request.user),
+            }
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

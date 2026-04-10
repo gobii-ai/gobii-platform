@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { normalizePendingHumanInputRequests } from '../api/agentChat'
+import { normalizePendingActionRequests, normalizePendingHumanInputRequests } from '../api/agentChat'
 import { scheduleLoginRedirect } from '../api/http'
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import type { SignupPreviewState } from '../types/agentRoster'
 import { useAgentChatStore } from '../stores/agentChatStore'
-import { refreshTimelineLatestInCache, replacePendingHumanInputRequestsInCache } from './useTimelineCacheInjector'
+import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, replacePendingHumanInputRequestsInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
 
@@ -440,6 +440,16 @@ export function useAgentChatSocket(
                 queryClient,
                 payloadAgentId,
                 normalizePendingHumanInputRequests(rawHumanInputPayload.pending_human_input_requests),
+              )
+            }
+          } else if (payload?.type === 'pending_action_requests.updated' && payload.payload) {
+            const rawPendingActionPayload = payload.payload as Record<string, unknown>
+            const payloadAgentId = typeof rawPendingActionPayload.agent_id === 'string' ? rawPendingActionPayload.agent_id : null
+            if (payloadAgentId && payloadAgentId === agentIdRef.current) {
+              replacePendingActionRequestsInCache(
+                queryClient,
+                payloadAgentId,
+                normalizePendingActionRequests(rawPendingActionPayload.pending_action_requests),
               )
             }
           } else if (payload?.type === 'credit.event' && payload.payload) {

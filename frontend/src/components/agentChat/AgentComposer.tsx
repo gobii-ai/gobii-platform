@@ -5,8 +5,8 @@ import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
-import { HumanInputComposerPanel } from './HumanInputComposerPanel'
-import type { PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
+import { PendingActionComposerPanel } from './PendingActionComposerPanel'
+import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
@@ -138,8 +138,20 @@ type AgentComposerProps = {
   agentId?: string | null
   agentName?: string | null
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
-  pendingHumanInputRequests?: PendingHumanInputRequest[]
+  pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
+  onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
+  onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
+  onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
+  onResolveContactRequests?: (
+    responses: Array<{
+      requestId: string
+      decision: 'approve' | 'decline'
+      allowInbound: boolean
+      allowOutbound: boolean
+      canConfigure: boolean
+    }>
+  ) => Promise<void>
   disabled?: boolean
   disabledReason?: string | null
   autoFocus?: boolean
@@ -182,8 +194,12 @@ export const AgentComposer = memo(function AgentComposer({
   agentId = null,
   agentName = null,
   onSubmit,
-  pendingHumanInputRequests = [],
+  pendingActionRequests = [],
   onRespondHumanInput,
+  onResolveSpawnRequest,
+  onFulfillRequestedSecrets,
+  onRemoveRequestedSecrets,
+  onResolveContactRequests,
   disabled = false,
   disabledReason = null,
   autoFocus = false,
@@ -224,10 +240,12 @@ export const AgentComposer = memo(function AgentComposer({
   const [attachmentError, setAttachmentError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [activePendingActionId, setActivePendingActionId] = useState<string | null>(null)
   const [activeHumanInputRequestId, setActiveHumanInputRequestId] = useState<string | null>(null)
   const [busyHumanInputRequestId, setBusyHumanInputRequestId] = useState<string | null>(null)
   const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
+  const [pendingActionsCollapsedInsights, setPendingActionsCollapsedInsights] = useState(false)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
@@ -247,7 +265,9 @@ export const AgentComposer = memo(function AgentComposer({
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
   const isProcessingRef = useRef(isProcessing)
-  const resolvedWorkingExpanded = insightsPanelExpandedPreference ?? autoWorkingExpanded
+  const hadPendingActionsRef = useRef(false)
+  const baseWorkingExpanded = insightsPanelExpandedPreference ?? autoWorkingExpanded
+  const resolvedWorkingExpanded = pendingActionsCollapsedInsights ? false : baseWorkingExpanded
 
   useEffect(() => {
     isProcessingRef.current = isProcessing
@@ -266,6 +286,16 @@ export const AgentComposer = memo(function AgentComposer({
     }
     wasProcessingRef.current = isProcessing
   }, [insightsPanelExpandedPreference, isProcessing])
+
+  useEffect(() => {
+    const hasPendingActions = pendingActionRequests.length > 0
+    if (hasPendingActions && !hadPendingActionsRef.current) {
+      setPendingActionsCollapsedInsights(true)
+    } else if (!hasPendingActions && hadPendingActionsRef.current) {
+      setPendingActionsCollapsedInsights(false)
+    }
+    hadPendingActionsRef.current = hasPendingActions
+  }, [pendingActionRequests.length])
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -361,6 +391,9 @@ export const AgentComposer = memo(function AgentComposer({
   // Handle panel expand/collapse toggle
   const handlePanelToggle = useCallback(() => {
     const newExpanded = !resolvedWorkingExpanded
+    if (pendingActionsCollapsedInsights && newExpanded) {
+      setPendingActionsCollapsedInsights(false)
+    }
     if (onInsightsPanelExpandedPreferenceChange) {
       onInsightsPanelExpandedPreferenceChange(newExpanded)
     } else {
@@ -371,7 +404,13 @@ export const AgentComposer = memo(function AgentComposer({
       hasInsights,
       currentInsightType: currentInsight?.insightType ?? null,
     })
-  }, [currentInsight?.insightType, hasInsights, onInsightsPanelExpandedPreferenceChange, resolvedWorkingExpanded])
+  }, [
+    currentInsight?.insightType,
+    hasInsights,
+    onInsightsPanelExpandedPreferenceChange,
+    pendingActionsCollapsedInsights,
+    resolvedWorkingExpanded,
+  ])
 
   // Wrap dismiss handler to track dismissals
   const handleDismissInsight = useCallback((insightId: string) => {
@@ -451,6 +490,10 @@ export const AgentComposer = memo(function AgentComposer({
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
 
+  const pendingHumanInputRequests = pendingActionRequests
+    .filter((request) => request.kind === 'human_input')
+    .flatMap((request) => request.requests)
+
   useEffect(() => {
     const node = textareaRef.current
     if (!node || typeof ResizeObserver === 'undefined') {
@@ -466,6 +509,17 @@ export const AgentComposer = memo(function AgentComposer({
       observer.disconnect()
     }
   }, [adjustTextareaHeight])
+
+  useEffect(() => {
+    if (!pendingActionRequests.length) {
+      setActivePendingActionId(null)
+      return
+    }
+    const hasActiveAction = pendingActionRequests.some((request) => request.id === activePendingActionId)
+    if (!hasActiveAction) {
+      setActivePendingActionId(pendingActionRequests[0]?.id ?? null)
+    }
+  }, [activePendingActionId, pendingActionRequests])
 
   useEffect(() => {
     if (!pendingHumanInputRequests.length) {
@@ -558,6 +612,10 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [])
 
+  const activePendingAction =
+    pendingActionRequests.find((request) => request.id === activePendingActionId)
+    ?? pendingActionRequests[0]
+    ?? null
   const activeHumanInputRequest =
     pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
     ?? null
@@ -566,18 +624,19 @@ export const AgentComposer = memo(function AgentComposer({
     : ''
 
   useEffect(() => {
-    if (!activeHumanInputRequestId) {
+    if (activePendingAction?.kind !== 'human_input' || !activeHumanInputRequestId) {
       return
     }
     setBody((current) => (current === activeHumanInputDraftText ? current : activeHumanInputDraftText))
-  }, [activeHumanInputDraftText, activeHumanInputRequestId])
+  }, [activeHumanInputDraftText, activeHumanInputRequestId, activePendingAction?.kind])
 
   const submitShortcutHint = shouldShowSubmitShortcutHint()
     ? `${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
     : ''
-  const composerPlaceholder = disabledReason || (activeHumanInputRequest
+  const composerPlaceholder = disabledReason || (activeHumanInputRequest && activePendingAction?.kind === 'human_input'
     ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
     : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
+  const activePendingActionKind = activePendingAction?.kind ?? null
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -588,6 +647,7 @@ export const AgentComposer = memo(function AgentComposer({
     })
     return () => window.cancelAnimationFrame(frame)
   }, [
+    activePendingAction,
     activeHumanInputRequestId,
     adjustTextareaHeight,
     composerPlaceholder,
@@ -694,13 +754,52 @@ export const AgentComposer = memo(function AgentComposer({
     setActiveHumanInputRequestId(nextRequestId)
   }, [activeHumanInputRequestId, body, pendingHumanInputRequests])
 
+  const handleActivePendingActionChange = useCallback((nextActionId: string) => {
+    const currentAction = pendingActionRequests.find((request) => request.id === activePendingActionId) ?? null
+    const nextAction = pendingActionRequests.find((request) => request.id === nextActionId) ?? null
+
+    if (currentAction?.kind === 'human_input') {
+      const currentRequest = currentAction.requests[0] ?? null
+      const trimmedBody = body.trim()
+      if (currentRequest) {
+        setDraftHumanInputResponses((current) => {
+          const next = { ...current }
+          const existing = next[currentRequest.id]
+          if (trimmedBody) {
+            next[currentRequest.id] = {
+              ...existing,
+              requestId: currentRequest.id,
+              freeText: trimmedBody,
+            }
+          } else if (existing?.selectedOptionKey) {
+            next[currentRequest.id] = {
+              ...existing,
+              requestId: currentRequest.id,
+              freeText: '',
+            }
+          } else {
+            delete next[currentRequest.id]
+          }
+          return next
+        })
+      }
+    }
+
+    setActivePendingActionId(nextActionId)
+    if (nextAction?.kind === 'human_input') {
+      setActiveHumanInputRequestId(nextAction.requests[0]?.id ?? null)
+    }
+  }, [activePendingActionId, body, pendingActionRequests])
+
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
     if ((!trimmed && attachments.length === 0) || disabled || isSending) {
       return
     }
     const attachmentsSnapshot = attachments.slice()
-    const activeRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null
+    const activeRequest = activePendingActionKind === 'human_input'
+      ? (pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null)
+      : null
     if (activeRequest && trimmed && attachmentsSnapshot.length === 0 && onRespondHumanInput) {
       const submitted = await submitHumanInputResponse(activeRequest, {
         requestId: activeRequest.id,
@@ -744,6 +843,7 @@ export const AgentComposer = memo(function AgentComposer({
     isSending,
     onRespondHumanInput,
     onSubmit,
+    activePendingActionKind,
     pendingHumanInputRequests,
     submitHumanInputResponse,
   ])
@@ -1010,16 +1110,22 @@ export const AgentComposer = memo(function AgentComposer({
           </div>
         ) : null}
 
-        {pendingHumanInputRequests.length > 0 ? (
+        {pendingActionRequests.length > 0 ? (
           <div>
-            <HumanInputComposerPanel
-              requests={pendingHumanInputRequests}
-              activeRequestId={activeHumanInputRequestId}
-              draftResponses={draftHumanInputResponses}
+            <PendingActionComposerPanel
+              actions={pendingActionRequests}
+              activeActionId={activePendingActionId}
+              onActiveActionChange={handleActivePendingActionChange}
               disabled={disabled || isSending}
-              busyRequestId={busyHumanInputRequestId}
-              onActiveRequestChange={handleActiveHumanInputRequestChange}
-              onSelectOption={handleSelectHumanInputOption}
+              activeHumanInputRequestId={activeHumanInputRequestId}
+              draftHumanInputResponses={draftHumanInputResponses}
+              busyHumanInputRequestId={busyHumanInputRequestId}
+              onActiveHumanInputRequestChange={handleActiveHumanInputRequestChange}
+              onSelectHumanInputOption={handleSelectHumanInputOption}
+              onResolveSpawnRequest={onResolveSpawnRequest}
+              onFulfillRequestedSecrets={onFulfillRequestedSecrets}
+              onRemoveRequestedSecrets={onRemoveRequestedSecrets}
+              onResolveContactRequests={onResolveContactRequests}
             />
           </div>
         ) : null}

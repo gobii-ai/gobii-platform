@@ -130,6 +130,77 @@ export type PendingHumanInputRequest = {
   batchSize: number
 }
 
+export type PendingSpawnRequest = {
+  id: string
+  requestId: string
+  requestedCharter: string
+  handoffMessage?: string | null
+  requestReason?: string | null
+  requestedAt?: string | null
+  expiresAt?: string | null
+  decisionApiUrl?: string | null
+}
+
+export type RequestedSecret = {
+  id: string
+  name: string
+  key: string
+  secretType: 'credential' | 'env_var'
+  domainPattern: string
+  description?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export type PendingRequestedSecretsAction = {
+  id: string
+  kind: 'requested_secrets'
+  secrets: RequestedSecret[]
+  count: number
+  fulfillApiUrl?: string | null
+  removeApiUrl?: string | null
+}
+
+export type PendingContactRequest = {
+  id: string
+  channel: string
+  address: string
+  name?: string | null
+  reason?: string | null
+  purpose?: string | null
+  allowInbound: boolean
+  allowOutbound: boolean
+  canConfigure: boolean
+  requestedAt?: string | null
+  expiresAt?: string | null
+}
+
+export type PendingContactRequestsAction = {
+  id: string
+  kind: 'contact_requests'
+  requests: PendingContactRequest[]
+  count: number
+  resolveApiUrl?: string | null
+}
+
+export type PendingHumanInputAction = {
+  id: string
+  kind: 'human_input'
+  requests: PendingHumanInputRequest[]
+  count: number
+}
+
+export type PendingSpawnRequestAction = {
+  id: string
+  kind: 'spawn_request'
+} & PendingSpawnRequest
+
+export type PendingActionRequest =
+  | PendingHumanInputAction
+  | PendingSpawnRequestAction
+  | PendingRequestedSecretsAction
+  | PendingContactRequestsAction
+
 export type MessageEvent = {
   kind: 'message'
   cursor: string
@@ -184,6 +255,7 @@ export type AgentTimelineSnapshot = {
   processingSnapshot?: ProcessingSnapshot
   signupPreviewState?: SignupPreviewState | null
   pendingHumanInputRequests?: PendingHumanInputRequest[]
+  pendingActionRequests?: PendingActionRequest[]
 }
 
 export type StreamEventPayload = {

@@ -27,7 +27,7 @@ import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
-  PendingHumanInputRequest,
+  PendingActionRequest,
   ProcessingWebTask,
   StreamState,
   KanbanBoardSnapshot,
@@ -185,11 +185,23 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
-  pendingHumanInputRequests?: PendingHumanInputRequest[]
+  pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
       | { requestId: string; selectedOptionKey?: string; freeText?: string }
       | { batchId: string; responses: Array<{ requestId: string; selectedOptionKey?: string; freeText?: string }> }
+  ) => Promise<void>
+  onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
+  onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
+  onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
+  onResolveContactRequests?: (
+    responses: Array<{
+      requestId: string
+      decision: 'approve' | 'decline'
+      allowInbound: boolean
+      allowOutbound: boolean
+      canConfigure: boolean
+    }>
   ) => Promise<void>
 }
 
@@ -310,8 +322,12 @@ export function AgentChatLayout({
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
-  pendingHumanInputRequests = [],
+  pendingActionRequests = [],
   onRespondHumanInputRequest,
+  onResolveSpawnRequest,
+  onFulfillRequestedSecrets,
+  onRemoveRequestedSecrets,
+  onResolveContactRequests,
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
@@ -623,7 +639,7 @@ export function AgentChatLayout({
     isWorkingNow,
     onSendMessage,
     promptCount: starterPromptCount,
-    hasPendingHumanInput: pendingHumanInputRequests.length > 0,
+    hasPendingHumanInput: pendingActionRequests.length > 0,
   })
   const hasTimelineEvents = timelineRenderEvents.length > 0
   const showJumpButton = !initialLoading
@@ -993,7 +1009,7 @@ export function AgentChatLayout({
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}
-                {pendingHumanInputRequests.length === 0
+                {pendingActionRequests.length === 0
                 && signupPreviewState === 'none'
                 && (starterPromptsLoading || starterPrompts.length > 0) ? (
                   <StarterPromptSuggestions
@@ -1092,8 +1108,12 @@ export function AgentChatLayout({
               agentId={activeAgentId ?? agentId ?? null}
               agentName={agentName ?? null}
               onSubmit={onSendMessage}
-              pendingHumanInputRequests={pendingHumanInputRequests}
+              pendingActionRequests={pendingActionRequests}
               onRespondHumanInput={onRespondHumanInputRequest}
+              onResolveSpawnRequest={onResolveSpawnRequest}
+              onFulfillRequestedSecrets={onFulfillRequestedSecrets}
+              onRemoveRequestedSecrets={onRemoveRequestedSecrets}
+              onResolveContactRequests={onResolveContactRequests}
               onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}

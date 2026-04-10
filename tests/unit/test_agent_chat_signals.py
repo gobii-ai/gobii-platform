@@ -14,9 +14,11 @@ from django.urls import reverse
 
 from api.agent.comms.message_service import ingest_inbound_webhook_message
 from api.models import (
+    AgentSpawnRequest,
     AgentCollaborator,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    CommsAllowlistRequest,
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentConversation,
@@ -24,6 +26,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
+    PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
     build_web_agent_address,
@@ -73,14 +76,30 @@ class AgentChatSignalTests(TestCase):
         self.collaborator_profile_channel_name = async_to_sync(self.channel_layer.new_channel)(
             "test.agent.profile.collaborator."
         )
+        self.owner_user_stream_channel_name = async_to_sync(self.channel_layer.new_channel)("test.agent.user.owner.")
+        self.collaborator_user_stream_channel_name = async_to_sync(self.channel_layer.new_channel)(
+            "test.agent.user.collaborator."
+        )
         self.group_name = f"agent-chat-{self.agent.id}"
         self.owner_profile_group_name = f"agent-chat-user-{self.user.id}"
         self.collaborator_profile_group_name = f"agent-chat-user-{self.collaborator_user.id}"
+        self.owner_user_stream_group_name = f"agent-chat-{self.agent.id}-user-{self.user.id}"
+        self.collaborator_user_stream_group_name = (
+            f"agent-chat-{self.agent.id}-user-{self.collaborator_user.id}"
+        )
         async_to_sync(self.channel_layer.group_add)(self.group_name, self.timeline_channel_name)
         async_to_sync(self.channel_layer.group_add)(self.owner_profile_group_name, self.owner_profile_channel_name)
         async_to_sync(self.channel_layer.group_add)(
             self.collaborator_profile_group_name,
             self.collaborator_profile_channel_name,
+        )
+        async_to_sync(self.channel_layer.group_add)(
+            self.owner_user_stream_group_name,
+            self.owner_user_stream_channel_name,
+        )
+        async_to_sync(self.channel_layer.group_add)(
+            self.collaborator_user_stream_group_name,
+            self.collaborator_user_stream_channel_name,
         )
 
     def tearDown(self):
@@ -90,12 +109,23 @@ class AgentChatSignalTests(TestCase):
             self.collaborator_profile_group_name,
             self.collaborator_profile_channel_name,
         )
+        async_to_sync(self.channel_layer.group_discard)(
+            self.owner_user_stream_group_name,
+            self.owner_user_stream_channel_name,
+        )
+        async_to_sync(self.channel_layer.group_discard)(
+            self.collaborator_user_stream_group_name,
+            self.collaborator_user_stream_channel_name,
+        )
 
     def _drain_timeline_events(self) -> list[dict]:
+        return self._drain_channel_events(self.timeline_channel_name)
+
+    def _drain_channel_events(self, channel_name: str) -> list[dict]:
         drained: list[dict] = []
         while True:
             try:
-                drained.append(self._receive_with_timeout(timeout=0.05))
+                drained.append(self._receive_with_timeout(channel_name, timeout=0.05))
             except AssertionError:
                 break
         return drained
@@ -409,3 +439,56 @@ class AgentChatSignalTests(TestCase):
         pending_requests = payload.get("pending_human_input_requests", [])
         self.assertEqual(len(pending_requests), 1)
         self.assertEqual(pending_requests[0].get("question"), "What should we do next?")
+
+    @tag("batch_agent_chat")
+    def test_pending_action_updates_are_filtered_per_viewer(self):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel="web",
+            address=build_web_user_address(self.user.id, self.agent.id),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentHumanInputRequest.objects.create(
+                agent=self.agent,
+                conversation=conversation,
+                question="What should we do next?",
+                options_json=[],
+                input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+                requested_via_channel="web",
+            )
+            AgentSpawnRequest.objects.create(
+                agent=self.agent,
+                requested_charter="Handle procurement approvals.",
+                handoff_message="Take over vendor approvals.",
+            )
+            requested_secret = PersistentAgentSecret(
+                agent=self.agent,
+                name="Procurement API Key",
+                description="Used for procurement sync",
+                secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+                domain_pattern="https://procurement.example.com",
+                requested=True,
+            )
+            requested_secret.key = "procurement_api_key"
+            requested_secret.encrypted_value = b""
+            requested_secret.save()
+            CommsAllowlistRequest.objects.create(
+                agent=self.agent,
+                channel="email",
+                address="approver@example.com",
+                reason="Need procurement approval",
+                purpose="Approve vendor contract",
+            )
+
+        owner_event = self._drain_channel_events(self.owner_user_stream_channel_name)[-1]
+        collaborator_event = self._drain_channel_events(self.collaborator_user_stream_channel_name)[-1]
+
+        self.assertEqual(owner_event.get("type"), "pending_action_requests_event")
+        self.assertEqual(collaborator_event.get("type"), "pending_action_requests_event")
+
+        owner_kinds = [item.get("kind") for item in owner_event.get("payload", {}).get("pending_action_requests", [])]
+        collaborator_kinds = [item.get("kind") for item in collaborator_event.get("payload", {}).get("pending_action_requests", [])]
+
+        self.assertEqual(owner_kinds, ["human_input", "spawn_request", "requested_secrets", "contact_requests"])
+        self.assertEqual(collaborator_kinds, ["human_input"])

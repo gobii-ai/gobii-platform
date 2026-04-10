@@ -27,8 +27,10 @@ from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
     AgentCollaborator,
     AgentPeerLink,
+    AgentSpawnRequest,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    CommsAllowlistRequest,
     CommsChannel,
     DeliveryStatus,
     PersistentAgent,
@@ -37,9 +39,11 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentHumanInputRequest,
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
     PersistentAgentWebSession,
@@ -418,6 +422,180 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+
+    @tag("batch_agent_chat")
+    def test_timeline_includes_pending_action_requests_for_manager(self):
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Need operator answers")
+        PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="Which plan should we use?",
+            options_json=[{"key": "pro", "title": "Pro", "description": "Use the Pro plan"}],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        AgentSpawnRequest.objects.create(
+            agent=self.agent,
+            requested_charter="Handle procurement approvals.",
+            handoff_message="Take over vendor approvals.",
+        )
+        requested_secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="Procurement API Key",
+            description="Used for procurement sync",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://procurement.example.com",
+            requested=True,
+        )
+        requested_secret.key = "procurement_api_key"
+        requested_secret.encrypted_value = b""
+        requested_secret.save()
+        CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="approver@example.com",
+            reason="Need procurement approval",
+            purpose="Approve vendor contract",
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item.get("kind") for item in payload.get("pending_action_requests", [])],
+            ["human_input", "spawn_request", "requested_secrets", "contact_requests"],
+        )
+        self.assertEqual(len(payload.get("pending_human_input_requests", [])), 1)
+
+    @tag("batch_agent_chat")
+    def test_timeline_filters_manager_only_pending_actions_for_collaborator(self):
+        collaborator = get_user_model().objects.create_user(
+            username="timeline-collaborator",
+            email="timeline-collaborator@example.com",
+            password="password123",
+        )
+        AgentCollaborator.objects.create(
+            agent=self.agent,
+            user=collaborator,
+            invited_by=self.user,
+        )
+        step = PersistentAgentStep.objects.create(agent=self.agent, description="Need operator answers")
+        PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="Which plan should we use?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        AgentSpawnRequest.objects.create(
+            agent=self.agent,
+            requested_charter="Handle procurement approvals.",
+            handoff_message="Take over vendor approvals.",
+        )
+        requested_secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="Procurement API Key",
+            description="Used for procurement sync",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://procurement.example.com",
+            requested=True,
+        )
+        requested_secret.key = "procurement_api_key"
+        requested_secret.encrypted_value = b""
+        requested_secret.save()
+        CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="approver@example.com",
+            reason="Need procurement approval",
+            purpose="Approve vendor contract",
+        )
+
+        collaborator_client = Client()
+        collaborator_client.force_login(collaborator)
+        response = collaborator_client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(
+            [item.get("kind") for item in payload.get("pending_action_requests", [])],
+            ["human_input"],
+        )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.access.can_user_use_personal_agents_and_api", return_value=False)
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    def test_timeline_includes_requested_secrets_for_delinquent_personal_owner(
+        self,
+        _mock_can_access_personal_agent_chat,
+        _mock_can_use_personal_agents_and_api,
+    ):
+        requested_secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="Procurement API Key",
+            description="Used for procurement sync",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://procurement.example.com",
+            requested=True,
+        )
+        requested_secret.key = "procurement_api_key"
+        requested_secret.encrypted_value = b""
+        requested_secret.save()
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn(
+            "requested_secrets",
+            [item.get("kind") for item in payload.get("pending_action_requests", [])],
+        )
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.access.can_user_use_personal_agents_and_api", return_value=False)
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_requested_secrets_fulfill_api_allows_delinquent_personal_owner(
+        self,
+        mock_delay,
+        _mock_can_access_personal_agent_chat,
+        _mock_can_use_personal_agents_and_api,
+    ):
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="Procurement API Key",
+            description="Used for procurement sync",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://procurement.example.com",
+            requested=True,
+        )
+        secret.key = "procurement_api_key"
+        secret.encrypted_value = b""
+        secret.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/requested-secrets/fulfill/",
+                data=json.dumps(
+                    {
+                        "values": {str(secret.id): "super-secret-value"},
+                        "make_global": False,
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        secret.refresh_from_db()
+        self.assertFalse(secret.requested)
+        self.assertEqual(secret.get_value(), "super-secret-value")
+        mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_chat")
     @patch("api.agent.tasks.process_agent_events_task.delay")
@@ -1452,6 +1630,107 @@ class AgentChatAPITests(TestCase):
             self.assertEqual(snapshot.get("webTasks"), [])
         finally:
             clear_processing_queued_flag(self.agent.id)
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_requested_secrets_fulfill_api_updates_secret_and_returns_pending_actions(self, mock_delay):
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="Procurement API Key",
+            description="Used for procurement sync",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://procurement.example.com",
+            requested=True,
+        )
+        secret.key = "procurement_api_key"
+        secret.encrypted_value = b""
+        secret.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/requested-secrets/fulfill/",
+                data=json.dumps(
+                    {
+                        "values": {str(secret.id): "super-secret-value"},
+                        "make_global": False,
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        secret.refresh_from_db()
+        self.assertFalse(secret.requested)
+        self.assertEqual(secret.get_value(), "super-secret-value")
+        self.assertEqual(response.json().get("pending_action_requests"), [])
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_chat")
+    def test_requested_secrets_remove_api_deletes_selected_requests(self):
+        secret = PersistentAgentSecret(
+            agent=self.agent,
+            name="Procurement API Key",
+            description="Used for procurement sync",
+            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+            domain_pattern="https://procurement.example.com",
+            requested=True,
+        )
+        secret.key = "procurement_api_key"
+        secret.encrypted_value = b""
+        secret.save()
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/requested-secrets/remove/",
+            data=json.dumps({"secret_ids": [str(secret.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PersistentAgentSecret.objects.filter(id=secret.id).exists())
+        self.assertEqual(response.json().get("pending_action_requests"), [])
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_contact_request_resolve_api_approves_with_requested_permissions(self, mock_delay):
+        request_obj = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="approver@example.com",
+            reason="Need procurement approval",
+            purpose="Approve vendor contract",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/contact-requests/resolve/",
+                data=json.dumps(
+                    {
+                        "responses": [
+                            {
+                                "request_id": str(request_obj.id),
+                                "decision": "approve",
+                                "allow_inbound": False,
+                                "allow_outbound": True,
+                                "can_configure": True,
+                            }
+                        ]
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        request_obj.refresh_from_db()
+        self.assertEqual(request_obj.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+        allowlist_entry = self.agent.manual_allowlist.get(
+            channel=CommsChannel.EMAIL,
+            address="approver@example.com",
+        )
+        self.assertFalse(allowlist_entry.allow_inbound)
+        self.assertTrue(allowlist_entry.allow_outbound)
+        self.assertTrue(allowlist_entry.can_configure)
+        self.assertEqual(response.json().get("pending_action_requests"), [])
+        mock_delay.assert_called_once_with(str(self.agent.id))
 
 
     @tag("batch_agent_chat")

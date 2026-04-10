@@ -90,11 +90,20 @@ def user_can_manage_agent(
     return False
 
 
-def user_can_manage_agent_settings(user, agent: PersistentAgent) -> bool:
+def user_can_manage_agent_settings(
+    user,
+    agent: PersistentAgent,
+    *,
+    allow_delinquent_personal_chat: bool = False,
+) -> bool:
     if user.is_staff:
         return True
     if agent.user_id == user.id:
-        return not _is_blocked_personal_owner(user, agent)
+        return not _is_blocked_personal_owner(
+            user,
+            agent,
+            allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+        )
     if agent.organization_id:
         return OrganizationMembership.objects.filter(
             user=user,
@@ -193,7 +202,11 @@ def resolve_manageable_agent(
         allow_shared=False,
         allow_delinquent_personal_chat=allow_delinquent_personal_chat,
     )
-    if not user_can_manage_agent_settings(user, agent):
+    if not user_can_manage_agent_settings(
+        user,
+        agent,
+        allow_delinquent_personal_chat=allow_delinquent_personal_chat,
+    ):
         raise PermissionDenied("Not permitted to manage this agent.")
     return agent
 
