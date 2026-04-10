@@ -78,11 +78,14 @@ function actionMeta(action: PendingActionRequest): string | null {
     case 'human_input':
       return null
     case 'spawn_request':
-      return null
+      return action.requestReason || null
     case 'requested_secrets':
       return [action.secrets[0]?.key, action.secrets[0]?.domainPattern].filter(Boolean).join(' · ') || null
-    case 'contact_requests':
-      return action.requests[0]?.name ? (action.requests[0]?.address ?? null) : null
+    case 'contact_requests': {
+      const request = action.requests[0]
+      const address = request?.name ? (request?.address ?? null) : null
+      return [address, request?.purpose].filter(Boolean).join(' · ') || null
+    }
     default:
       return null
   }

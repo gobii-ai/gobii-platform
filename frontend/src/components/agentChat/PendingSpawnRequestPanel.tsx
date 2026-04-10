@@ -23,28 +23,22 @@ export function PendingSpawnRequestPanel({
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Charter</p>
           <p className="mt-1 whitespace-pre-line rounded-xl bg-white px-3 py-3 text-slate-800">{action.requestedCharter}</p>
         </div>
-        {action.requestReason ? (
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Why this is needed</p>
-            <p className="mt-1 whitespace-pre-line rounded-xl bg-white px-3 py-3 text-slate-800">{action.requestReason}</p>
-          </div>
-        ) : null}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             disabled={disabled || busyDecision !== null}
-            className="inline-flex items-center rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => void onResolve('approve')}
+            className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void onResolve('decline')}
           >
-            {busyDecision === 'approve' ? 'Creating...' : 'Create'}
+            {busyDecision === 'decline' ? 'Declining...' : 'Decline'}
           </button>
           <button
             type="button"
             disabled={disabled || busyDecision !== null}
-            className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => void onResolve('decline')}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void onResolve('approve')}
           >
-            {busyDecision === 'decline' ? 'Declining...' : 'Decline'}
+            {busyDecision === 'approve' ? 'Creating...' : 'Create'}
           </button>
         </div>
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}

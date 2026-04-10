@@ -4,7 +4,7 @@ from uuid import uuid4
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import Client, TestCase, tag
+from django.test import Client, TestCase, override_settings, tag
 
 from api.models import (
     AgentSpawnRequest,
@@ -178,6 +178,44 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
         system_step = getattr(step, "system_step", None)
         self.assertIsNotNone(system_step)
         self.assertEqual(system_step.code, PersistentAgentSystemStep.Code.SYSTEM_DIRECTIVE)
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    @patch("console.agent_chat.access.can_user_use_personal_agents_and_api", return_value=False)
+    @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
+    def test_delinquent_personal_owner_can_decline_spawn_request(
+        self,
+        _mock_can_access_personal_agent_chat,
+        _mock_can_use_personal_agents_and_api,
+    ):
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.owner,
+            name="Spawn API Personal Browser",
+        )
+        personal_agent = PersistentAgent.objects.create(
+            user=self.owner,
+            name="Spawn API Personal Parent",
+            charter="Handle personal operations.",
+            browser_use_agent=browser_agent,
+        )
+        spawn_request = AgentSpawnRequest.objects.create(
+            agent=personal_agent,
+            requested_charter="Handle scheduling followups.",
+            handoff_message="Take over followup scheduling.",
+        )
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session["context_type"] = "personal"
+        session.save()
+
+        response = self.client.post(
+            f"/console/api/agents/{personal_agent.id}/spawn-requests/{spawn_request.id}/decision/",
+            data=json.dumps({"decision": "decline"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("request_status"), AgentSpawnRequest.RequestStatus.REJECTED)
 
     @patch("console.api_views.process_agent_events_task.delay")
     @patch("api.models.AgentSpawnRequest.approve")

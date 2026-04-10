@@ -41,6 +41,12 @@ export function PendingContactRequestsPanel({
       <div className="space-y-3">
         <div className="rounded-xl bg-white px-3 py-3">
           <div className="space-y-3">
+            {activeRequest.reason ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Reason</p>
+                <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{activeRequest.reason}</p>
+              </div>
+            ) : null}
             <div className="grid gap-2 md:grid-cols-2">
               <label className="flex items-start gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
                 <input
@@ -63,18 +69,6 @@ export function PendingContactRequestsPanel({
                 <span>Outbound</span>
               </label>
             </div>
-            {activeRequest.reason ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Reason</p>
-                <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{activeRequest.reason}</p>
-              </div>
-            ) : null}
-            {activeRequest.purpose ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Purpose</p>
-                <p className="mt-1 whitespace-pre-line text-sm text-slate-800">{activeRequest.purpose}</p>
-              </div>
-            ) : null}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">

@@ -65,22 +65,22 @@ export function PendingRequestedSecretsPanel({
             <span className="block text-xs text-slate-600">Share these values across all agents in this scope.</span>
           </span>
         </label>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
             disabled={disabled || busyAction !== null}
-            className="inline-flex items-center rounded-xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => void onSave()}
+            className="inline-flex w-full items-center justify-center rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void onRemove()}
           >
-            {busyAction === 'save' ? 'Saving...' : 'Save provided values'}
+            {busyAction === 'remove' ? 'Removing...' : 'Remove'}
           </button>
           <button
             type="button"
             disabled={disabled || busyAction !== null}
-            className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => void onRemove()}
+            className="inline-flex w-full items-center justify-center rounded-xl bg-sky-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={() => void onSave()}
           >
-            {busyAction === 'remove' ? 'Removing...' : 'Remove request'}
+            {busyAction === 'save' ? 'Saving...' : 'Save'}
           </button>
         </div>
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}

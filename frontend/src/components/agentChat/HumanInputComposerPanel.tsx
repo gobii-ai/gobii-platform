@@ -142,14 +142,14 @@ export function HumanInputComposerPanel({
           </div>
         </div>
       ) : (
-        <div className={`${showQuestion || orderedRequests.length > 1 ? 'mt-3 ' : ''}overflow-hidden rounded-xl border border-slate-200 bg-slate-50`}>
+        <div className={`${showQuestion || orderedRequests.length > 1 ? 'mt-3 ' : ''}rounded-xl border border-slate-200 bg-slate-50`}>
           {activeRequest.options.map((option, index) => {
             const isBusy = busyRequestId === activeRequest.id
             const isSelected = activeDraft?.selectedOptionKey === option.key
             return (
               <div
                 key={option.key}
-                className={`flex items-center gap-1.5 border-b border-slate-200 px-1.5 py-1.5 transition last:border-b-0 ${
+                className={`relative flex items-center gap-1.5 border-b border-slate-200 px-1.5 py-1.5 transition last:border-b-0 ${
                   isSelected
                     ? 'border-sky-300 bg-sky-50'
                     : 'bg-slate-50 hover:bg-slate-100'
