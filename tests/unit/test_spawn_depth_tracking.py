@@ -207,7 +207,23 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             final_branch_depth, 3,
             f"Branch counter should equal number of parallel spawns; got {final_branch_depth}"
         )
-    
+
+    @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
+    @patch('api.tasks.browser_agent_tasks.process_browser_use_task.delay')
+    @patch(
+        'api.agent.tools.spawn_web_task.get_billing_snapshot_for_owner',
+        return_value={"billing_plan": "startup", "billing_is_trial": False},
+    )
+    def test_spawn_web_task_stores_billing_snapshot(self, _mock_snapshot, _mock_delay, _mock_consume_credit):
+        set_budget_context(self.budget_ctx)
+
+        result = execute_spawn_web_task(self.agent, {"prompt": "Open portal.example.com"})
+
+        self.assertEqual(result["status"], "pending")
+        task = BrowserUseAgentTask.objects.get(id=result["task_id"])
+        self.assertEqual(task.billing_plan, "startup")
+        self.assertFalse(task.billing_is_trial)
+
     @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
     def test_sequential_spawn_depth_tracking(self, mock_process_task, _mock_consume_credit):
