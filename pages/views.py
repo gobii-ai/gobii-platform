@@ -111,7 +111,10 @@ from django.utils.html import escape, strip_tags
 from opentelemetry import trace
 from marketing_events.api import capi
 from marketing_events.telemetry import record_fbc_synthesized
-from marketing_events.value_utils import calculate_start_trial_values
+from marketing_events.value_utils import (
+    calculate_start_trial_values,
+    resolve_start_trial_conversion_rate,
+)
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -479,10 +482,15 @@ def _prepare_stripe_or_404() -> None:
 
 
 def _build_checkout_success_url(request, *, event_id: str, price: float, plan: str) -> tuple[str, bool]:
+    conversion_rate = resolve_start_trial_conversion_rate(
+        plan,
+        default_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+        scale_rate=settings.CAPI_START_TRIAL_SCALE_CONV_RATE,
+    )
     _predicted_ltv, conversion_value = calculate_start_trial_values(
         price,
         ltv_multiple=settings.CAPI_LTV_MULTIPLE,
-        conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+        conversion_rate=conversion_rate,
     )
     success_params = {
         "subscribe_success": 1,

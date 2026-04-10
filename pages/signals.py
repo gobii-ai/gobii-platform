@@ -37,7 +37,10 @@ from marketing_events.api import capi
 from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
 from marketing_events.context import build_marketing_context_from_user, extract_click_context
 from marketing_events.telemetry import record_fbc_synthesized
-from marketing_events.value_utils import calculate_start_trial_values
+from marketing_events.value_utils import (
+    calculate_start_trial_values,
+    resolve_start_trial_conversion_rate,
+)
 import logging
 import stripe
 
@@ -972,6 +975,7 @@ def _emit_add_payment_info_from_checkout_context(
         _track_add_payment_info_trial_eligibility_skip(
             owner=owner,
             snapshot=eligibility_snapshot,
+            value=checkout_context.get("value"),
         )
         return False
 
@@ -1162,20 +1166,24 @@ def _track_add_payment_info_trial_eligibility_skip(
     *,
     owner: Any,
     snapshot: Mapping[str, Any],
+    value: Any = None,
 ) -> None:
     owner_id = getattr(owner, "id", None)
+    properties = {
+        "event_name": "AddPaymentInfo",
+        "reason": "trial_eligibility_disallowed",
+        "decision_source": snapshot.get("decision_source"),
+        "trial_eligibility_decision": snapshot.get("decision"),
+        "trial_eligibility_manual_action": snapshot.get("manual_action"),
+        "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
+        "trial_eligibility_policy_send_allowed": False,
+    }
+    if value is not None:
+        properties["value"] = value
     Analytics.track(
         user_id=owner_id,
         event=AnalyticsEvent.CAPI_EVENT_SKIPPED,
-        properties={
-            "event_name": "AddPaymentInfo",
-            "reason": "trial_eligibility_disallowed",
-            "decision_source": snapshot.get("decision_source"),
-            "trial_eligibility_decision": snapshot.get("decision"),
-            "trial_eligibility_manual_action": snapshot.get("manual_action"),
-            "trial_eligibility_reason_codes": list(snapshot.get("reason_codes") or []),
-            "trial_eligibility_policy_send_allowed": False,
-        },
+        properties=properties,
     )
 
 
@@ -3737,10 +3745,15 @@ def handle_subscription_event(event, **kwargs):
 
                     if sub.status == "trialing":
                         value, currency = _calculate_subscription_value(licensed_item)
+                        conversion_rate = resolve_start_trial_conversion_rate(
+                            plan_value,
+                            default_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+                            scale_rate=settings.CAPI_START_TRIAL_SCALE_CONV_RATE,
+                        )
                         predicted_ltv, conversion_value = calculate_start_trial_values(
                             value,
                             ltv_multiple=settings.CAPI_LTV_MULTIPLE,
-                            conversion_rate=settings.CAPI_START_TRIAL_CONV_RATE,
+                            conversion_rate=conversion_rate,
                         )
                         if predicted_ltv is not None:
                             marketing_properties["predicted_ltv"] = predicted_ltv
