@@ -1,7 +1,16 @@
 # admin_forms.py  (optional file)
+import re
+
 from django import forms
 from django.forms import ModelForm
-from .models import CommsChannel, AgentEmailAccount, LLMProvider, StripeConfig, MCPServerConfig
+from .models import (
+    CommsChannel,
+    AgentEmailAccount,
+    LLMProvider,
+    StripeConfig,
+    MCPServerConfig,
+    UserFlagDefinition,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):
@@ -314,6 +323,67 @@ class GrantCreditsByUserIdsForm(forms.Form):
         initial=False,
         help_text="When Dry Run is checked, download a CSV of affected users",
     )
+
+
+class BulkSetUserFlagsForm(forms.Form):
+    user_ids = forms.CharField(
+        label="User IDs",
+        widget=forms.Textarea(
+            attrs={"rows": 6, "placeholder": "Paste user IDs (integers), one per line or comma-separated"}
+        ),
+        help_text="List of user IDs (integers) to update.",
+    )
+    flag = forms.ModelChoiceField(
+        label="Flag",
+        queryset=UserFlagDefinition.objects.order_by("slug"),
+        help_text="Configured user flag to set for the listed users.",
+    )
+    value = forms.TypedChoiceField(
+        label="Value",
+        choices=(
+            ("true", "Enabled"),
+            ("false", "Disabled"),
+        ),
+        coerce=lambda value: value == "true",
+        help_text="Choose whether the selected flag should be enabled or disabled.",
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.invalid_user_id_tokens: list[str] = []
+
+    def clean_user_ids(self):
+        raw = self.cleaned_data["user_ids"]
+        tokens = [token for token in re.split(r"[\s,]+", raw.strip()) if token]
+        if not tokens:
+            raise forms.ValidationError("Enter at least one user ID.")
+
+        parsed_ids: list[int] = []
+        seen_ids: set[int] = set()
+        invalid_tokens: list[str] = []
+
+        for token in tokens:
+            try:
+                user_id = int(token)
+            except ValueError:
+                invalid_tokens.append(token)
+                continue
+
+            if user_id <= 0:
+                invalid_tokens.append(token)
+                continue
+
+            if user_id in seen_ids:
+                continue
+
+            seen_ids.add(user_id)
+            parsed_ids.append(user_id)
+
+        if not parsed_ids:
+            raise forms.ValidationError("Enter at least one valid user ID.")
+
+        self.invalid_user_id_tokens = invalid_tokens
+        return parsed_ids
 
 
 class LLMProviderForm(ModelForm):

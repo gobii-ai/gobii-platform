@@ -1,0 +1,19 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block content %}
+  <div class="module">
+    <h2>{% trans "Bulk Set User Flags" %}</h2>
+    <form method="post" novalidate>
+      {% csrf_token %}
+      <table>
+        {{ form.as_table }}
+      </table>
+      <div class="submit-row">
+        <input type="submit" value="{% trans 'Submit' %}" class="default" />
+        <a href="{{ changelist_url }}" class="button cancel-button">{% trans 'Cancel' %}</a>
+      </div>
+    </form>
+    <p class="help">Paste user IDs separated by commas or new lines, choose a configured flag, then enable or disable it for the listed users.</p>
+  </div>
+{% endblock %}

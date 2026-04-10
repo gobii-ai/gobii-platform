@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 
 import djstripe
@@ -35,6 +36,7 @@ from .admin_forms import (
     TestSmsForm,
     GrantPlanCreditsForm,
     GrantCreditsByUserIdsForm,
+    BulkSetUserFlagsForm,
     AgentEmailAccountForm,
     StripeConfigForm,
     MCPServerConfigAdminForm,
@@ -63,6 +65,7 @@ from .models import (
     AgentComputeSession,
     ComputeSnapshot,
     UserPreference,
+    UserFlagDefinition,
     UserIdentitySignal,
     UserTrialEligibility,
     UserTrialActivation,
@@ -87,6 +90,11 @@ from .services.global_skill_json import (
     import_global_skill_from_payload,
     parse_global_skill_json_bytes,
     serialize_global_skill_to_json_bytes,
+)
+from .services.user_flags import (
+    filter_users_by_flag,
+    get_enabled_user_flag_slugs,
+    set_user_flag,
 )
 from config import settings
 from constants.plans import PlanNamesChoices
@@ -148,6 +156,26 @@ class ApiKeyAdmin(admin.ModelAdmin):
 class UserQuotaAdmin(admin.ModelAdmin):
     list_display = ("user", "agent_limit", "max_intelligence_tier")
     search_fields = ("user__email", "user__id")
+
+
+@admin.register(UserFlagDefinition)
+class UserFlagDefinitionAdmin(admin.ModelAdmin):
+    list_display = ("slug", "description_preview", "created_at", "updated_at")
+    search_fields = ("slug", "description")
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("slug", "description", "created_at", "updated_at")
+
+    @admin.display(description="Description")
+    def description_preview(self, obj):
+        if len(obj.description) <= 80:
+            return obj.description
+        return f"{obj.description[:77]}..."
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly_fields = list(super().get_readonly_fields(request, obj))
+        if obj is not None:
+            readonly_fields.append("slug")
+        return tuple(readonly_fields)
 
 
 @admin.register(StripeConfig)
@@ -1908,6 +1936,7 @@ ADMIN_MANUAL_EXECUTION_PAUSE_REASON = ExecutionPauseReasonChoices.ADMIN_MANUAL_P
 
 
 class CustomUserAdminForm(forms.ModelForm):
+    user_flag_definitions: tuple[UserFlagDefinition, ...] = ()
     execution_paused_admin = forms.BooleanField(
         required=False,
         label="Execution Paused",
@@ -1924,12 +1953,41 @@ class CustomUserAdminForm(forms.ModelForm):
         model = User
         fields = "__all__"
 
+    @staticmethod
+    def user_flag_field_name(definition: UserFlagDefinition) -> str:
+        return f"user_flag_definition_{definition.pk}"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and getattr(self.instance, "pk", None):
             pause_state = get_owner_execution_pause_state(self.instance)
             self.fields["execution_paused_admin"].initial = pause_state["paused"]
             self.fields["execution_pause_reason_admin"].initial = pause_state["reason"]
+
+        self._user_flag_definitions = list(
+            self.user_flag_definitions or tuple(UserFlagDefinition.objects.order_by("slug"))
+        )
+        enabled_flag_slugs = get_enabled_user_flag_slugs(self.instance)
+
+        for definition in self._user_flag_definitions:
+            field_name = self.user_flag_field_name(definition)
+            if field_name not in self.fields:
+                self.fields[field_name] = forms.BooleanField(required=False)
+            self.fields[field_name].label = definition.slug
+            self.fields[field_name].help_text = definition.description
+            self.initial[field_name] = definition.slug in enabled_flag_slugs
+
+    def get_user_flag_field_names(self) -> tuple[str, ...]:
+        return tuple(self.user_flag_field_name(definition) for definition in self._user_flag_definitions)
+
+    def save_user_flags(self, user) -> None:
+        for definition in self._user_flag_definitions:
+            field_name = self.user_flag_field_name(definition)
+            set_user_flag(
+                definition,
+                user,
+                bool(self.cleaned_data.get(field_name, False)),
+            )
 
 # ------------------------------------------------------------------
 # CUSTOM USER ADMIN (Optimized)  ------------------------------------
@@ -1938,10 +1996,29 @@ class CustomUserAdminForm(forms.ModelForm):
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
     form = CustomUserAdminForm
+    change_list_template = "admin/user_change_list.html"
+    USER_FLAG_SEARCH_PATTERN = re.compile(r"^(?P<slug>[-A-Za-z0-9_]+)=(?P<value>true|false)$")
     # Keep lightweight inlines only (flags, referral, agents); omit heavy TaskCredit inline.
     inlines = [UserFlagsInlineForUser, UserReferralInlineForUser, BrowserUseAgentInlineForUser]
 
     actions = ['queue_rollup_for_selected_users']
+
+    def _configured_user_flag_definitions(self) -> list[UserFlagDefinition]:
+        return list(UserFlagDefinition.objects.order_by("slug"))
+
+    def _user_flag_field_names(self) -> tuple[str, ...]:
+        return tuple(
+            CustomUserAdminForm.user_flag_field_name(definition)
+            for definition in self._configured_user_flag_definitions()
+        )
+
+    def _bulk_set_flags_url_name(self) -> str:
+        opts = self.model._meta
+        return f"admin:{opts.app_label}_{opts.model_name}_bulk_set_flags"
+
+    def _changelist_url_name(self) -> str:
+        opts = self.model._meta
+        return f"admin:{opts.app_label}_{opts.model_name}_changelist"
 
     @admin.action(description="Queue metering rollup for selected users")
     def queue_rollup_for_selected_users(self, request, queryset):
@@ -1964,6 +2041,145 @@ class CustomUserAdmin(UserAdmin):
             used_credits=Sum("task_credits__credits_used"),
         )
 
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        base_form = kwargs.get("form") or (self.add_form if obj is None else self.form)
+        definitions = tuple(self._configured_user_flag_definitions()) if obj is not None else ()
+        if not definitions:
+            kwargs["form"] = base_form
+            return super().get_form(request, obj, change=change, **kwargs)
+        dynamic_fields = {
+            CustomUserAdminForm.user_flag_field_name(definition): forms.BooleanField(
+                required=False,
+                label=definition.slug,
+                help_text=definition.description,
+            )
+            for definition in definitions
+        }
+        dynamic_form = type(
+            "DynamicCustomUserAdminForm",
+            (base_form,),
+            dynamic_fields,
+        )
+        dynamic_form.user_flag_definitions = definitions
+        kwargs["form"] = dynamic_form
+        return super().get_form(request, obj, change=change, **kwargs)
+
+    def get_urls(self):
+        urls = super().get_urls()
+        opts = self.model._meta
+        custom = [
+            path(
+                "bulk-set-flags/",
+                self.admin_site.admin_view(self.bulk_set_flags_view),
+                name=f"{opts.app_label}_{opts.model_name}_bulk_set_flags",
+            ),
+        ]
+        return custom + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = dict(extra_context or {})
+        extra_context["bulk_set_user_flags_url"] = reverse(self._bulk_set_flags_url_name())
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def _extract_user_flag_search_filters(
+        self,
+        search_term: str,
+    ) -> tuple[str, list[tuple[UserFlagDefinition, bool]]]:
+        definitions_by_slug = {
+            definition.slug: definition
+            for definition in self._configured_user_flag_definitions()
+        }
+        remaining_terms: list[str] = []
+        flag_filters: list[tuple[UserFlagDefinition, bool]] = []
+
+        for term in (search_term or "").split():
+            match = self.USER_FLAG_SEARCH_PATTERN.fullmatch(term)
+            if match is None:
+                remaining_terms.append(term)
+                continue
+
+            definition = definitions_by_slug.get(match.group("slug"))
+            if definition is None:
+                remaining_terms.append(term)
+                continue
+
+            flag_filters.append(
+                (definition, match.group("value") == "true")
+            )
+
+        return " ".join(remaining_terms), flag_filters
+
+    def get_search_results(self, request, queryset, search_term):
+        filtered_search_term, flag_filters = self._extract_user_flag_search_filters(search_term)
+        queryset, use_distinct = super().get_search_results(request, queryset, filtered_search_term)
+
+        for definition, enabled in flag_filters:
+            queryset = filter_users_by_flag(queryset, definition, enabled=enabled)
+
+        return queryset, use_distinct
+
+    def bulk_set_flags_view(self, request):
+        if not self.has_change_permission(request):
+            self.message_user(request, "You do not have permission to edit users.", messages.ERROR)
+            return HttpResponseRedirect(reverse(self._changelist_url_name()))
+
+        form = BulkSetUserFlagsForm(request.POST or None)
+        context = dict(self.admin_site.each_context(request))
+        context.update(
+            {
+                "opts": self.model._meta,
+                "title": "Bulk Set User Flags",
+                "form": form,
+                "changelist_url": reverse(self._changelist_url_name()),
+            }
+        )
+
+        if request.method == "POST" and form.is_valid():
+            user_ids = form.cleaned_data["user_ids"]
+            flag = form.cleaned_data["flag"]
+            enabled = form.cleaned_data["value"]
+            users_by_id = {
+                user.id: user
+                for user in self.model.objects.filter(id__in=user_ids)
+            }
+            updated_count = 0
+            missing_user_ids: list[int] = []
+
+            for user_id in user_ids:
+                user = users_by_id.get(user_id)
+                if user is None:
+                    missing_user_ids.append(user_id)
+                    continue
+
+                set_user_flag(flag, user, enabled)
+                updated_count += 1
+
+            state_label = "enabled" if enabled else "disabled"
+            self.message_user(
+                request,
+                f"Set '{flag.slug}' to {state_label} for {updated_count} user(s).",
+                messages.SUCCESS,
+            )
+
+            invalid_tokens = getattr(form, "invalid_user_id_tokens", [])
+            if invalid_tokens:
+                self.message_user(
+                    request,
+                    f"Skipped invalid user ID tokens: {', '.join(invalid_tokens)}.",
+                    messages.WARNING,
+                )
+
+            if missing_user_ids:
+                self.message_user(
+                    request,
+                    f"Skipped missing user IDs: {', '.join(str(user_id) for user_id in missing_user_ids)}.",
+                    messages.WARNING,
+                )
+
+            return HttpResponseRedirect(reverse(self._changelist_url_name()))
+
+        return TemplateResponse(request, "admin/bulk_set_user_flags.html", context)
+
 
     # Add a summary field for task credits (read-only).
     def get_readonly_fields(self, request, obj=None):
@@ -1972,9 +2188,14 @@ class CustomUserAdmin(UserAdmin):
         return base + ("taskcredit_summary_link", "timezone_display", "execution_paused_at_display")
 
     def get_fieldsets(self, request, obj=None):
+        if obj is None:
+            return super().get_fieldsets(request, obj)
         # Append a dedicated "Task Credits" fieldset to the default ones.
         fieldsets = list(super().get_fieldsets(request, obj))
         fieldsets.append(("Preferences", {"fields": ("timezone_display",)}))
+        configured_user_flag_fields = self._user_flag_field_names()
+        if configured_user_flag_fields:
+            fieldsets.append(("Configured User Flags", {"fields": configured_user_flag_fields}))
         fieldsets.append(("Task Credits", {"fields": ("taskcredit_summary_link",)}))
         if obj is not None:
             fieldsets.append(
@@ -2032,6 +2253,9 @@ class CustomUserAdmin(UserAdmin):
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
+        save_user_flags = getattr(form, "save_user_flags", None)
+        if callable(save_user_flags):
+            save_user_flags(obj)
 
         if not change:
             return

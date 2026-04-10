@@ -350,12 +350,39 @@ class Analytics:
         return bool(settings.SEGMENT_WRITE_KEY)
 
     @staticmethod
+    def _build_user_flag_traits(user_id) -> dict[str, Any]:
+        if user_id in (None, ""):
+            return {}
+
+        try:
+            from api.models import UserFlagAssignment
+
+            user_flag_slugs = list(
+                UserFlagAssignment.objects.filter(user_id=user_id)
+                .order_by("flag__slug")
+                .values_list("flag__slug", flat=True)
+            )
+        except Exception:
+            logger.exception(
+                "Failed to load dynamic user flags for analytics identify user=%s",
+                user_id,
+            )
+            return {}
+
+        return {
+            "user_flags": user_flag_slugs,
+        }
+
+    @staticmethod
     @tracer.start_as_current_span("ANALYTICS Identify")
     def identify(user_id, traits):
         if Analytics._is_analytics_enabled():
+            traits = dict(traits or {})
             context = {
                 'ip': '0',
             }
+
+            traits.update(Analytics._build_user_flag_traits(user_id))
 
             if 'date_joined' in traits:
                 try:
