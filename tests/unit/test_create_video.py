@@ -8,6 +8,7 @@ from api.agent.tools.create_video import (
     GeneratedVideoResult,
     VideoGenerationResponseError,
     _generate_video,
+    _normalize_video_size_for_model,
     _wait_for_video_completion,
     get_create_video_tool,
     execute_create_video,
@@ -167,6 +168,26 @@ class GenerateVideoTests(TestCase):
 
 
 @tag("batch_video_generation")
+class NormalizeVideoSizeForModelTests(TestCase):
+    def test_ltx_alias_is_normalized(self):
+        self.assertEqual(
+            _normalize_video_size_for_model("ltx-2-3-fast", "4k"),
+            "3840x2160",
+        )
+
+    def test_ltx_rejects_unsupported_size(self):
+        with self.assertRaises(ValueError) as ctx:
+            _normalize_video_size_for_model("ltx-2-3-fast", "1280x720")
+        self.assertIn("Supported sizes", str(ctx.exception))
+
+    def test_non_ltx_keeps_canonicalized_size(self):
+        self.assertEqual(
+            _normalize_video_size_for_model("some-other-video-model", "1920×1080"),
+            "1920x1080",
+        )
+
+
+@tag("batch_video_generation")
 class ExecuteCreateVideoTests(TestCase):
     def test_missing_prompt_returns_error(self):
         agent = MagicMock()
@@ -218,6 +239,73 @@ class ExecuteCreateVideoTests(TestCase):
         self.assertEqual(result["file"], "$[/exports/test.mp4]")
         self.assertEqual(result["model"], "sora-2")
         mock_write.assert_called_once()
+
+    @patch("api.agent.tools.create_video._generate_video")
+    @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
+    @patch("api.agent.tools.create_video.resolve_export_target")
+    def test_ltx_unsupported_size_returns_clear_error(
+        self,
+        mock_resolve,
+        mock_configs,
+        mock_generate,
+    ):
+        mock_resolve.return_value = ("/exports/test.mp4", False, None)
+        mock_configs.return_value = [_make_config(model="ltx-2-3-fast", endpoint_key="ltx-fast")]
+
+        agent = MagicMock()
+        result = execute_create_video(
+            agent,
+            {
+                "prompt": "a polar bear",
+                "file_path": "/exports/test.mp4",
+                "size": "1280x720",
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Unsupported size '1280x720'", result["message"])
+        self.assertIn("1920x1080", result["message"])
+        mock_generate.assert_not_called()
+
+    @patch("api.agent.tools.create_video.set_agent_variable")
+    @patch("api.agent.tools.create_video.build_signed_filespace_download_url", return_value="https://signed/url")
+    @patch("api.agent.tools.create_video.write_bytes_to_dir")
+    @patch("api.agent.tools.create_video._log_video_generation_completion")
+    @patch("api.agent.tools.create_video._generate_video")
+    @patch("api.agent.tools.create_video.get_create_video_generation_llm_configs")
+    @patch("api.agent.tools.create_video.resolve_export_target")
+    def test_ltx_alias_size_is_normalized_before_generation(
+        self,
+        mock_resolve,
+        mock_configs,
+        mock_generate,
+        mock_log,
+        mock_write,
+        mock_signed_url,
+        mock_set_var,
+    ):
+        mock_resolve.return_value = ("/exports/test.mp4", False, None)
+        mock_configs.return_value = [_make_config(model="ltx-2-3-fast", endpoint_key="ltx-fast")]
+        mock_generate.return_value = GeneratedVideoResult(
+            video_bytes=b"video-data",
+            mime_type="video/mp4",
+            response=_make_video_obj(),
+        )
+        mock_write.return_value = {"status": "ok", "path": "/exports/test.mp4", "node_id": "node-123"}
+
+        agent = MagicMock()
+        agent.id = "agent-123"
+        result = execute_create_video(
+            agent,
+            {
+                "prompt": "a polar bear",
+                "file_path": "/exports/test.mp4",
+                "size": "4k",
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(mock_generate.call_args.kwargs["size"], "3840x2160")
 
     @patch("api.agent.tools.create_video._log_video_generation_completion")
     @patch("api.agent.tools.create_video._generate_video")

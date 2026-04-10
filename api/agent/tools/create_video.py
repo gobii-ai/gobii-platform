@@ -23,6 +23,18 @@ logger = logging.getLogger(__name__)
 MAX_POLL_SECONDS = 600
 POLL_INTERVAL_SECONDS = 5
 
+_LTX_ALLOWED_VIDEO_SIZES = {
+    "1920x1080",
+    "2560x1440",
+    "3840x2160",
+}
+_LTX_SIZE_ALIASES = {
+    "1080p": "1920x1080",
+    "1440p": "2560x1440",
+    "4k": "3840x2160",
+    "uhd": "3840x2160",
+}
+
 
 @dataclass(frozen=True)
 class GeneratedVideoResult:
@@ -35,6 +47,32 @@ class VideoGenerationResponseError(ValueError):
     def __init__(self, message: str, *, response: Any = None) -> None:
         super().__init__(message)
         self.response = response
+
+
+def _canonicalize_video_size(raw_size: str | None) -> str | None:
+    if raw_size is None:
+        return None
+    normalized = raw_size.strip().lower()
+    if not normalized:
+        return None
+    normalized = normalized.replace("×", "x").replace(" ", "")
+    return _LTX_SIZE_ALIASES.get(normalized, normalized)
+
+
+def _normalize_video_size_for_model(model_name: str, raw_size: str | None) -> str | None:
+    normalized = _canonicalize_video_size(raw_size)
+    if normalized is None:
+        return None
+
+    model_key = (model_name or "").strip().lower()
+    if model_key.startswith("ltx-") and normalized not in _LTX_ALLOWED_VIDEO_SIZES:
+        allowed = ", ".join(sorted(_LTX_ALLOWED_VIDEO_SIZES))
+        raise ValueError(
+            f"Unsupported size '{raw_size}' for model {model_name}. "
+            f"Supported sizes: {allowed}."
+        )
+
+    return normalized
 
 
 def _log_video_generation_completion(
@@ -217,7 +255,10 @@ def get_create_video_tool() -> Dict[str, Any]:
                     },
                     "size": {
                         "type": "string",
-                        "description": "Optional resolution like '1920x1080', '1080x1920', '1280x720'.",
+                        "description": (
+                            "Optional output resolution. Supported values vary by model "
+                            "(for example '1920x1080', '2560x1440', '3840x2160')."
+                        ),
                     },
                     "source_image": {
                         "type": "string",
@@ -277,11 +318,12 @@ def execute_create_video(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             errors.append(f"{config.endpoint_key or config.model}: endpoint does not support image-to-video")
             continue
         try:
+            normalized_size = _normalize_video_size_for_model(config.model, size)
             generated = _generate_video(
                 config,
                 prompt=prompt.strip(),
                 duration=duration,
-                size=size,
+                size=normalized_size,
                 source_image_bytes=source_image_bytes,
             )
             _log_video_generation_completion(agent=agent, model_name=config.model, response=generated.response)
