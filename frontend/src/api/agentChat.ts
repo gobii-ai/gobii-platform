@@ -551,9 +551,25 @@ export type ProcessingStatusResponse = {
   signup_preview_state?: SignupPreviewState | null
 }
 
+export type StopAgentResponse = {
+  stopping: boolean
+  cancelledWebTaskCount: number
+  processing_active: boolean
+  processing_snapshot?: ProcessingSnapshot
+}
+
 export async function fetchProcessingStatus(agentId: string): Promise<ProcessingStatusResponse> {
   const url = `/console/api/agents/${agentId}/processing/`
   return jsonFetch<ProcessingStatusResponse>(url)
+}
+
+export async function stopAgentProcessing(agentId: string): Promise<StopAgentResponse> {
+  const url = `/console/api/agents/${agentId}/stop/`
+  return jsonFetch<StopAgentResponse>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
 }
 
 type WebSessionPayload = {

@@ -79,6 +79,45 @@ def _enforce_personal_api_access_or_raise(user, *, organization=None):
         raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
 
 
+def cancel_browser_use_task(
+    task: BrowserUseAgentTask,
+    *,
+    agent_id: str | None = None,
+    source: str = AnalyticsSource.API,
+) -> bool:
+    """Cancel an active browser task and run the standard side effects."""
+    if task.status not in [
+        BrowserUseAgentTask.StatusChoices.PENDING,
+        BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+    ]:
+        return False
+
+    resolved_agent_id = agent_id or (str(task.agent.id) if task.agent_id else None)
+    task.status = BrowserUseAgentTask.StatusChoices.CANCELLED
+    task.updated_at = timezone.now()
+    task.save(update_fields=['status', 'updated_at'])
+
+    try:
+        trigger_task_webhook(task)
+    except Exception:
+        logger.exception("Unexpected error while triggering webhook for cancelled task %s", task.id)
+
+    cancel_props = Analytics.with_org_properties(
+        {
+            'task_id': str(task.id),
+            'agent_id': resolved_agent_id,
+        },
+        organization=getattr(task, "organization", None),
+    )
+    Analytics.track_event(
+        user_id=task.user_id,
+        event=AnalyticsEvent.TASK_CANCELLED,
+        source=source,
+        properties=cancel_props.copy(),
+    )
+    return True
+
+
 # Standard Pagination (can be customized or moved to settings)
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
@@ -659,32 +698,8 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         with traced("POST Cancel Task", user_id=task.user_id) as span:
             span.set_attribute('task.id', str(task.id))
             span.set_attribute('agent.id', str(agentId))
-            if task.status in [BrowserUseAgentTask.StatusChoices.PENDING, BrowserUseAgentTask.StatusChoices.IN_PROGRESS]:
-                task.status = BrowserUseAgentTask.StatusChoices.CANCELLED
-                task.updated_at = timezone.now()
-                with traced("DB-UPDATE Task"):
-                    task.save(update_fields=['status', 'updated_at'])
-                    span.add_event('TASK Cancelled', {'agent.id': str(agentId)})
-
-                try:
-                    trigger_task_webhook(task)
-                except Exception:
-                    logger.exception("Unexpected error while triggering webhook for cancelled task %s", task.id)
-
-                cancel_props = Analytics.with_org_properties(
-                    {
-                        'task_id': str(task.id),
-                        'agent_id': str(agentId),
-                    },
-                    organization=getattr(task, "organization", None),
-                )
-                Analytics.track_event(
-                    user_id=task.user_id,
-                    event=AnalyticsEvent.TASK_CANCELLED,
-                    source=AnalyticsSource.API,
-                    properties=cancel_props.copy(),
-                )
-
+            if cancel_browser_use_task(task, agent_id=str(agentId) if agentId else None, source=AnalyticsSource.API):
+                span.add_event('TASK Cancelled', {'agent.id': str(agentId)})
                 return Response({'status': 'cancelled', 'message': 'Task has been cancelled.'}, status=status.HTTP_200_OK)
             else:
                 return Response(

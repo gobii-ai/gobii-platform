@@ -1444,6 +1444,61 @@
   box-shadow: none;
 }
 
+.composer-send-button--stop {
+  animation: composerStopButtonPulse 1.8s ease-in-out infinite;
+}
+
+.composer-send-button--stop:hover:not([disabled]) {
+  box-shadow:
+    0 4px 12px rgba(99, 102, 241, 0.3),
+    0 8px 24px rgba(79, 70, 229, 0.2);
+}
+
+.composer-send-button--stop:active:not([disabled]) {
+  box-shadow:
+    0 2px 6px rgba(99, 102, 241, 0.2),
+    0 4px 12px rgba(79, 70, 229, 0.12);
+}
+
+.composer-send-button--stop-busy {
+  animation-duration: 1s;
+}
+
+.composer-send-button-stop-icon {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 0.14rem;
+  background: currentColor;
+  display: inline-block;
+  animation: composerStopIconBeat 1.8s ease-in-out infinite;
+}
+
+@keyframes composerStopButtonPulse {
+  0%, 100% {
+    box-shadow:
+      0 2px 8px rgba(99, 102, 241, 0.2),
+      0 4px 16px rgba(79, 70, 229, 0.15),
+      0 0 0 0 rgba(129, 140, 248, 0.18);
+  }
+  50% {
+    box-shadow:
+      0 4px 12px rgba(99, 102, 241, 0.28),
+      0 8px 20px rgba(79, 70, 229, 0.18),
+      0 0 0 8px rgba(129, 140, 248, 0);
+  }
+}
+
+@keyframes composerStopIconBeat {
+  0%, 100% {
+    transform: scale(0.94);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
 .composer-input-surface {
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05), 0 8px 24px rgba(15, 23, 42, 0.04);
   background: rgba(255, 255, 255, 0.98);
@@ -1765,19 +1820,12 @@
   background: rgba(99, 102, 241, 0.04);
 }
 
-.composer-working-pip {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 9999px;
-  background: var(--composer-accent, #6366f1);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
-  animation: composerPipPulse 2s ease-in-out infinite;
-  transform: translateY(1px);
-}
-
-@keyframes composerPipPulse {
-  0%, 100% { box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
-  50% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15); }
+.composer-working-indicator {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: #6366f1;
+  opacity: 0.88;
+  flex-shrink: 0;
 }
 
 .composer-working-status {

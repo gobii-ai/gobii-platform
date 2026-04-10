@@ -15,6 +15,8 @@ _QUEUED_KEY_TEMPLATE = "agent-event-processing:queued:{agent_id}"
 _DEFAULT_QUEUE_TTL_SECONDS = 3600
 _HEARTBEAT_KEY_TEMPLATE = "agent-event-processing:heartbeat:{agent_id}"
 _DEFAULT_HEARTBEAT_TTL_SECONDS = 600
+_STOP_REQUESTED_KEY_TEMPLATE = "agent-event-processing:stop-requested:{agent_id}"
+_DEFAULT_STOP_REQUESTED_TTL_SECONDS = 3600
 _QUEUED_AGENT_SET_KEY = "agent-event-processing:index:queued"
 _HEARTBEAT_AGENT_SET_KEY = "agent-event-processing:index:heartbeat"
 _LOCKED_AGENT_SET_KEY = "agent-event-processing:index:locked"
@@ -38,6 +40,10 @@ def _queued_key(agent_id: Union[str, UUID]) -> str:
 
 def _heartbeat_key(agent_id: Union[str, UUID]) -> str:
     return _HEARTBEAT_KEY_TEMPLATE.format(agent_id=agent_id)
+
+
+def _stop_requested_key(agent_id: Union[str, UUID]) -> str:
+    return _STOP_REQUESTED_KEY_TEMPLATE.format(agent_id=agent_id)
 
 
 def processing_lock_storage_keys(agent_id: Union[str, UUID]) -> tuple[str, str]:
@@ -166,6 +172,42 @@ def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None
         redis_client.srem(_HEARTBEAT_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to clear pending processing state for agent %s", agent_id)
+
+
+def set_processing_stop_requested(
+    agent_id: Union[str, UUID],
+    *,
+    ttl: int = _DEFAULT_STOP_REQUESTED_TTL_SECONDS,
+    client=None,
+) -> None:
+    """Record a graceful stop request for the agent."""
+    try:
+        redis_client = client or get_redis_client()
+        if ttl > 0:
+            redis_client.set(_stop_requested_key(agent_id), "1", ex=ttl)
+        else:
+            redis_client.set(_stop_requested_key(agent_id), "1")
+    except Exception:
+        logger.exception("Failed to set stop request for agent %s", agent_id)
+
+
+def is_processing_stop_requested(agent_id: Union[str, UUID], client=None) -> bool:
+    """Check whether a graceful stop has been requested for the agent."""
+    try:
+        redis_client = client or get_redis_client()
+        return bool(redis_client.exists(_stop_requested_key(agent_id)))
+    except Exception:
+        logger.exception("Failed to check stop request for agent %s", agent_id)
+        return False
+
+
+def clear_processing_stop_requested(agent_id: Union[str, UUID], client=None) -> None:
+    """Clear the graceful stop request for the agent."""
+    try:
+        redis_client = client or get_redis_client()
+        redis_client.delete(_stop_requested_key(agent_id))
+    except Exception:
+        logger.exception("Failed to clear stop request for agent %s", agent_id)
 
 
 def is_processing_queued(agent_id: Union[str, UUID], client=None) -> bool:

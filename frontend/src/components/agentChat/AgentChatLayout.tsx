@@ -128,6 +128,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   taskPackCanManageBilling?: boolean
   taskPackUpdating?: boolean
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
+  onStopProcessing?: () => void | Promise<void>
+  stopProcessingBusy?: boolean
+  stopProcessingRequested?: boolean
   addonsTrial?: TrialInfo | null
   taskQuota?: TaskQuotaInfo | null
   showTaskCreditsWarning?: boolean
@@ -268,6 +271,9 @@ export function AgentChatLayout({
   taskPackCanManageBilling = false,
   taskPackUpdating = false,
   onUpdateTaskPacks,
+  onStopProcessing,
+  stopProcessingBusy = false,
+  stopProcessingRequested = false,
   addonsTrial = null,
   taskQuota = null,
   showTaskCreditsWarning = false,
@@ -604,6 +610,9 @@ export function AgentChatLayout({
   const isActivelyStreamingContent = hasStreamingContent && isStreaming
   const showTypingIndicator = Boolean(awaitingResponse || processingActive || isStreaming)
   const hideTypingIndicator = isActivelyStreamingContent || hasMoreNewer
+  const typingStatusText = stopProcessingRequested
+    ? 'Stopping...'
+    : deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showScheduledResumeEvent = Boolean(
@@ -1044,7 +1053,7 @@ export function AgentChatLayout({
 
                 {showTypingIndicator ? (
                   <TypingIndicator
-                    statusText={deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })}
+                    statusText={typingStatusText}
                     agentColorHex={agentColorHex || undefined}
                     agentAvatarUrl={agentAvatarUrl}
                     agentFirstName={agentFirstName}
@@ -1141,6 +1150,9 @@ export function AgentChatLayout({
               intelligenceError={llmTierError}
               onOpenTaskPacks={resolvedOpenTaskPacks}
               canManageAgent={canManageAgent}
+              onStopProcessing={onStopProcessing}
+              stopProcessingBusy={stopProcessingBusy}
+              stopProcessingRequested={stopProcessingRequested}
               disabled={composerDisabled}
               disabledReason={composerDisabledReason}
               submitError={composerError}
