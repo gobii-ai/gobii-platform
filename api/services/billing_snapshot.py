@@ -17,8 +17,6 @@ _BILLING_SNAPSHOT_ERRORS = (
     ObjectDoesNotExist,
     OperationalError,
     ProgrammingError,
-    TypeError,
-    ValueError,
 )
 
 
