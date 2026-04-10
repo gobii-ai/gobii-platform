@@ -731,6 +731,43 @@ export const AgentComposer = memo(function AgentComposer({
     setActiveHumanInputRequestId(nextRequestId)
   }, [activeHumanInputRequestId, body, pendingHumanInputRequests])
 
+  const handleActivePendingActionChange = useCallback((nextActionId: string) => {
+    const currentAction = pendingActionRequests.find((request) => request.id === activePendingActionId) ?? null
+    const nextAction = pendingActionRequests.find((request) => request.id === nextActionId) ?? null
+
+    if (currentAction?.kind === 'human_input') {
+      const currentRequest = currentAction.requests[0] ?? null
+      const trimmedBody = body.trim()
+      if (currentRequest) {
+        setDraftHumanInputResponses((current) => {
+          const next = { ...current }
+          const existing = next[currentRequest.id]
+          if (trimmedBody) {
+            next[currentRequest.id] = {
+              ...existing,
+              requestId: currentRequest.id,
+              freeText: trimmedBody,
+            }
+          } else if (existing?.selectedOptionKey) {
+            next[currentRequest.id] = {
+              ...existing,
+              requestId: currentRequest.id,
+              freeText: '',
+            }
+          } else {
+            delete next[currentRequest.id]
+          }
+          return next
+        })
+      }
+    }
+
+    setActivePendingActionId(nextActionId)
+    if (nextAction?.kind === 'human_input') {
+      setActiveHumanInputRequestId(nextAction.requests[0]?.id ?? null)
+    }
+  }, [activePendingActionId, body, pendingActionRequests])
+
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
     if ((!trimmed && attachments.length === 0) || disabled || isSending) {
@@ -1054,7 +1091,7 @@ export const AgentComposer = memo(function AgentComposer({
             <PendingActionComposerPanel
               actions={pendingActionRequests}
               activeActionId={activePendingActionId}
-              onActiveActionChange={setActivePendingActionId}
+              onActiveActionChange={handleActivePendingActionChange}
               disabled={disabled || isSending}
               activeHumanInputRequestId={activeHumanInputRequestId}
               draftHumanInputResponses={draftHumanInputResponses}
