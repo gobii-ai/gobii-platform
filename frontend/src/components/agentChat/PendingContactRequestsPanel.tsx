@@ -28,7 +28,7 @@ export function PendingContactRequestsPanel({
   onSubmit,
 }: PendingContactRequestsPanelProps) {
   return (
-    <PendingActionSectionCard toneClass="border-amber-200 bg-amber-50/65" title="Review contact access" meta="Approve or decline in place">
+    <PendingActionSectionCard toneClass="border-amber-200 bg-amber-50/65" title="Review contact access">
       <div className="space-y-3">
         {action.requests.map((request) => {
           const draft = contactDrafts[request.id] ?? {

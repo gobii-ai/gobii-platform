@@ -31,7 +31,7 @@ export function PendingRequestedSecretsPanel({
   onRemove,
 }: PendingRequestedSecretsPanelProps) {
   return (
-    <PendingActionSectionCard toneClass="border-sky-200 bg-sky-50/55" title="Provide secret values" meta="Saved inline">
+    <PendingActionSectionCard toneClass="border-sky-200 bg-sky-50/55" title="Provide secret values">
       <div className="space-y-3">
         {action.secrets.map((secret) => (
           <div key={secret.id} className="rounded-xl bg-white px-3 py-3">

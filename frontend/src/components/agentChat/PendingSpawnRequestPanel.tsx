@@ -17,7 +17,7 @@ export function PendingSpawnRequestPanel({
   onResolve,
 }: PendingSpawnRequestPanelProps) {
   return (
-    <PendingActionSectionCard toneClass="border-emerald-200 bg-emerald-50/55" title="Specialist handoff" meta="Create or decline">
+    <PendingActionSectionCard toneClass="border-emerald-200 bg-emerald-50/55" title="Specialist handoff">
       <div className="space-y-3 text-sm text-slate-700">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Charter</p>
