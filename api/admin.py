@@ -1,6 +1,7 @@
 import logging
 import re
 import uuid
+from urllib.parse import urlencode
 
 import djstripe
 from django import forms
@@ -44,6 +45,7 @@ from api.services.schedule_enforcement import (
 )
 from api.agent.core.schedule_parser import ScheduleParser
 from .admin_forms import (
+    FindReleaseCandidatesForm,
     ReleaseSmsNumbersForm,
     TestSmsForm,
     GrantPlanCreditsForm,
@@ -98,7 +100,12 @@ from django.db.models import Sum
 from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
 from .tasks.sms_tasks import sync_twilio_numbers, send_test_sms
-from .services.sms_number_inventory import release_sms_number, retire_sms_number
+from .services.sms_number_inventory import (
+    SmsNumberReleaseCandidate,
+    find_sms_number_release_candidates,
+    release_sms_number,
+    retire_sms_number,
+)
 from .services.global_skill_json import (
     import_global_skill_from_payload,
     parse_global_skill_json_bytes,
@@ -5171,6 +5178,11 @@ class SmsNumberAdmin(admin.ModelAdmin):
                 name="smsnumber_release",
             ),
             path(
+                "release-candidates/",
+                self.admin_site.admin_view(self.release_candidates_view),
+                name="smsnumber_release_candidates",
+            ),
+            path(
                 "sync/",  # /admin/api/smsnumber/sync/
                 self.admin_site.admin_view(self.sync_view),
                 name="smsnumber_sync",
@@ -5241,7 +5253,13 @@ class SmsNumberAdmin(admin.ModelAdmin):
             messages.error(request, "Permission denied.")
             return HttpResponseRedirect(changelist_url)
 
-        form = ReleaseSmsNumbersForm(request.POST or None)
+        initial = {}
+        if request.method != "POST":
+            prefilled_numbers = (request.GET.get("phone_numbers") or "").strip()
+            if prefilled_numbers:
+                initial["phone_numbers"] = prefilled_numbers
+
+        form = ReleaseSmsNumbersForm(request.POST or None, initial=initial)
         if request.method == "POST" and form.is_valid():
             requested_numbers = form.cleaned_data["phone_numbers"]
             sms_numbers_by_phone = {
@@ -5327,6 +5345,70 @@ class SmsNumberAdmin(admin.ModelAdmin):
         )
 
         return TemplateResponse(request, "admin/smsnumber_release_form.html", context)
+
+    def release_candidates_view(self, request):
+        changelist_url = reverse("admin:api_smsnumber_changelist")
+        if not request.user.has_perm("api.view_smsnumber"):
+            messages.error(request, "Permission denied.")
+            return HttpResponseRedirect(changelist_url)
+
+        form = FindReleaseCandidatesForm(request.GET or None)
+        has_results = bool(request.GET)
+        candidates = []
+        if has_results and form.is_valid():
+            candidates = find_sms_number_release_candidates(
+                unused_days=form.cleaned_data["unused_days"],
+                include_detached_unused=form.cleaned_data["include_detached_unused"],
+                include_free_dormant_unused=form.cleaned_data["include_free_dormant_unused"],
+            )
+
+        grouped_candidates = {
+            SmsNumberReleaseCandidate.DETACHED_UNUSED: [],
+            SmsNumberReleaseCandidate.FREE_DORMANT_UNUSED: [],
+        }
+        for candidate in candidates:
+            grouped_candidates.setdefault(candidate.tier, []).append(
+                {
+                    "phone_number": candidate.phone_number,
+                    "friendly_name": candidate.friendly_name,
+                    "last_activity_at": candidate.last_activity_at,
+                    "owner_agent_name": candidate.owner_agent_name,
+                    "owner_email": candidate.owner_email,
+                    "owner_plan": candidate.owner_plan,
+                    "sms_number_change_url": reverse("admin:api_smsnumber_change", args=[candidate.sms_number_id]),
+                    "endpoint_change_url": (
+                        reverse("admin:api_persistentagentcommsendpoint_change", args=[candidate.endpoint_id])
+                        if candidate.endpoint_id
+                        else ""
+                    ),
+                    "owner_agent_change_url": (
+                        reverse("admin:api_persistentagent_change", args=[candidate.owner_agent_id])
+                        if candidate.owner_agent_id
+                        else ""
+                    ),
+                }
+            )
+
+        suggested_numbers = "\n".join(candidate.phone_number for candidate in candidates)
+        release_review_url = ""
+        if suggested_numbers:
+            release_review_url = (
+                f"{reverse('admin:smsnumber_release')}?{urlencode({'phone_numbers': suggested_numbers})}"
+            )
+
+        context = dict(
+            self.admin_site.each_context(request),
+            opts=self.model._meta,
+            form=form,
+            title="Find SMS Release Candidates",
+            changelist_url=changelist_url,
+            has_results=has_results,
+            grouped_candidates=grouped_candidates,
+            suggested_numbers=suggested_numbers,
+            release_review_url=release_review_url,
+        )
+
+        return TemplateResponse(request, "admin/smsnumber_release_candidates.html", context)
 
 
 @admin.register(LinkShortener)

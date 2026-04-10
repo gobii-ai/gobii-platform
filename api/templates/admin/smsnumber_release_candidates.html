@@ -1,0 +1,100 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{{ changelist_url }}">{% trans 'Sms numbers' %}</a>
+    &rsaquo; Find Release Candidates
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>Choose an inactivity window and review candidate numbers by tier before sending any of them to the release form.</p>
+
+  <form method="get" novalidate>
+    <fieldset class="module aligned">
+      {{ form.as_p }}
+    </fieldset>
+    <div class="submit-row">
+      <a class="button" href="{{ changelist_url }}">Back to SMS Numbers</a>
+      <button type="submit" class="button default">Find Candidates</button>
+    </div>
+  </form>
+
+  {% if has_results %}
+    <h2>Suggested Numbers</h2>
+    {% if suggested_numbers %}
+      <textarea rows="10" cols="60" readonly>{{ suggested_numbers }}</textarea>
+      <p>
+        <a class="button" href="{{ release_review_url }}">Review in Release Form</a>
+      </p>
+    {% else %}
+      <p>No release candidates found for the selected criteria.</p>
+    {% endif %}
+
+    {% if grouped_candidates.detached_unused %}
+      <h2>Detached Unused ({{ grouped_candidates.detached_unused|length }})</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Number</th>
+            <th>Friendly Name</th>
+            <th>Last Activity</th>
+            <th>Endpoint</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for candidate in grouped_candidates.detached_unused %}
+            <tr>
+              <td><a href="{{ candidate.sms_number_change_url }}">{{ candidate.phone_number }}</a></td>
+              <td>{{ candidate.friendly_name|default:"-" }}</td>
+              <td>{% if candidate.last_activity_at %}{{ candidate.last_activity_at }}{% else %}Never{% endif %}</td>
+              <td>
+                {% if candidate.endpoint_change_url %}
+                  <a href="{{ candidate.endpoint_change_url }}">Detached endpoint</a>
+                {% else %}
+                  No endpoint row
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    {% if grouped_candidates.free_dormant_unused %}
+      <h2>Free-Plan Dormant Unused ({{ grouped_candidates.free_dormant_unused|length }})</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Number</th>
+            <th>Friendly Name</th>
+            <th>Last Activity</th>
+            <th>Owner Agent</th>
+            <th>Owner Email</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for candidate in grouped_candidates.free_dormant_unused %}
+            <tr>
+              <td><a href="{{ candidate.sms_number_change_url }}">{{ candidate.phone_number }}</a></td>
+              <td>{{ candidate.friendly_name|default:"-" }}</td>
+              <td>{% if candidate.last_activity_at %}{{ candidate.last_activity_at }}{% else %}Never{% endif %}</td>
+              <td>
+                {% if candidate.owner_agent_change_url %}
+                  <a href="{{ candidate.owner_agent_change_url }}">{{ candidate.owner_agent_name }}</a>
+                {% else %}
+                  {{ candidate.owner_agent_name|default:"-" }}
+                {% endif %}
+              </td>
+              <td>{{ candidate.owner_email|default:"-" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% endif %}
+{% endblock %}
