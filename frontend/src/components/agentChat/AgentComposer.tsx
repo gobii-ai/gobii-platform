@@ -614,6 +614,7 @@ export const AgentComposer = memo(function AgentComposer({
   const composerPlaceholder = disabledReason || (activeHumanInputRequest && activePendingAction?.kind === 'human_input'
     ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
     : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
+  const activePendingActionKind = activePendingAction?.kind ?? null
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -774,7 +775,7 @@ export const AgentComposer = memo(function AgentComposer({
       return
     }
     const attachmentsSnapshot = attachments.slice()
-    const activeRequest = activePendingAction?.kind === 'human_input'
+    const activeRequest = activePendingActionKind === 'human_input'
       ? (pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null)
       : null
     if (activeRequest && trimmed && attachmentsSnapshot.length === 0 && onRespondHumanInput) {
@@ -820,6 +821,7 @@ export const AgentComposer = memo(function AgentComposer({
     isSending,
     onRespondHumanInput,
     onSubmit,
+    activePendingActionKind,
     pendingHumanInputRequests,
     submitHumanInputResponse,
   ])

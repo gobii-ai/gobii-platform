@@ -94,6 +94,11 @@ def _expire_pending_contact_requests(agent: PersistentAgent) -> None:
     )
 
 
+def expire_pending_action_requests(agent: PersistentAgent) -> None:
+    _expire_pending_spawn_requests(agent)
+    _expire_pending_contact_requests(agent)
+
+
 def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[dict]:
     pending_actions: list[dict] = []
 
@@ -105,9 +110,6 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
         allow_delinquent_personal_chat=True,
     ):
         return pending_actions
-
-    _expire_pending_spawn_requests(agent)
-    _expire_pending_contact_requests(agent)
 
     for spawn_request in (
         AgentSpawnRequest.objects.filter(

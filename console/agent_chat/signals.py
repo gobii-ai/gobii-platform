@@ -35,8 +35,10 @@ from console.agent_audit.serializers import (
 )
 from console.agent_chat.realtime import send_user_group_event, user_profile_group_name
 
+from .access import user_can_manage_agent_settings
 from .kanban_events import persist_kanban_event
 from .pending_actions import (
+    expire_pending_action_requests,
     get_legacy_pending_human_input_requests,
     list_pending_action_requests,
 )
@@ -168,13 +170,24 @@ def emit_pending_action_requests_update(agent: PersistentAgent) -> None:
     user_ids = sorted(_resolve_profile_listener_user_ids(agent))
     viewers_by_id = user_model.objects.in_bulk(user_ids)
     timestamp = timezone.now().isoformat()
+    expire_pending_action_requests(agent)
+    manager_payload: list[dict] | None = None
+    collaborator_payload: list[dict] | None = None
     for user_id in user_ids:
         viewer = viewers_by_id.get(user_id)
         if viewer is None:
             continue
+        if user_can_manage_agent_settings(viewer, agent, allow_delinquent_personal_chat=True):
+            if manager_payload is None:
+                manager_payload = list_pending_action_requests(agent, viewer)
+            pending_action_requests = manager_payload
+        else:
+            if collaborator_payload is None:
+                collaborator_payload = list_pending_action_requests(agent, viewer)
+            pending_action_requests = collaborator_payload
         payload = {
             "agent_id": str(agent.id),
-            "pending_action_requests": list_pending_action_requests(agent, viewer),
+            "pending_action_requests": pending_action_requests,
             "timestamp": timestamp,
         }
         send_user_group_event(str(agent.id), user_id, "pending_action_requests_event", payload)

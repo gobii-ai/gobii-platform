@@ -153,6 +153,7 @@ from console.agent_chat.access import (
     user_is_collaborator,
 )
 from console.agent_chat.pending_actions import (
+    expire_pending_action_requests,
     get_legacy_pending_human_input_requests,
     list_pending_action_requests,
 )
@@ -332,6 +333,7 @@ def _format_validation_error(error: ValidationError) -> str:
 
 
 def _pending_action_payload(agent: PersistentAgent, viewer_user) -> dict[str, Any]:
+    expire_pending_action_requests(agent)
     pending_action_requests = list_pending_action_requests(agent, viewer_user)
     return {
         "pending_human_input_requests": get_legacy_pending_human_input_requests(pending_action_requests),
