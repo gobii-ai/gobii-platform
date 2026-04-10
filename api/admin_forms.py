@@ -2,8 +2,8 @@ import re
 from decimal import Decimal
 
 import phonenumbers
-import re
 
+# admin_forms.py  (optional file)
 from django import forms
 from django.contrib.admin.widgets import AdminSplitDateTime
 from django.forms import ModelForm
@@ -210,12 +210,6 @@ class GlobalAgentSkillImportForm(forms.Form):
         label="Skill JSON file",
         help_text="Upload a JSON file exported from Global Skills admin.",
     )
-import phonenumbers
-from django.utils import timezone
-from decimal import Decimal
-from constants.plans import PlanNamesChoices
-from constants.grant_types import GrantTypeChoices
-from django.contrib.admin.widgets import AdminSplitDateTime
 
 class TestSmsForm(forms.Form):
     to      = forms.CharField(label="Destination number")
@@ -438,6 +432,8 @@ class BulkSetUserFlagsForm(forms.Form):
         self.invalid_user_id_tokens: list[str] = []
 
     def clean_user_ids(self):
+        import re
+
         raw = self.cleaned_data["user_ids"]
         tokens = [token for token in re.split(r"[\s,]+", raw.strip()) if token]
         if not tokens:
