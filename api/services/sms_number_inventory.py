@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from django.conf import settings
 import logging
+from datetime import timedelta
 from dataclasses import dataclass
 
 from django.conf import settings
@@ -69,6 +70,8 @@ class SmsNumberReleaseCandidate:
             return "Free-plan dormant unused"
         return self.tier
 from api.models import CommsChannel, PersistentAgentCommsEndpoint, SmsNumber, SmsProvider
+from api.models import PersistentAgentMessage
+from constants.plans import PlanNames
 from util.integrations import twilio_status
 
 try:
@@ -95,6 +98,31 @@ class SmsNumberReleaseResult:
     @property
     def succeeded(self) -> bool:
         return not self.error
+
+
+@dataclass(frozen=True)
+class SmsNumberReleaseCandidate:
+    DETACHED_UNUSED = "detached_unused"
+    FREE_DORMANT_UNUSED = "free_dormant_unused"
+
+    sms_number_id: str
+    phone_number: str
+    friendly_name: str
+    tier: str
+    last_activity_at: object = None
+    endpoint_id: str | None = None
+    owner_agent_id: str | None = None
+    owner_agent_name: str = ""
+    owner_email: str = ""
+    owner_plan: str = PlanNames.FREE
+
+    @property
+    def tier_label(self) -> str:
+        if self.tier == self.DETACHED_UNUSED:
+            return "Detached unused"
+        if self.tier == self.FREE_DORMANT_UNUSED:
+            return "Free-plan dormant unused"
+        return self.tier
 
 
 def sms_number_is_in_use(sms_number: SmsNumber) -> bool:
@@ -337,6 +365,101 @@ def release_sms_number(sms_number: SmsNumber) -> SmsNumberReleaseResult:
         twilio_released=True,
         twilio_message=twilio_message,
     )
+
+
+def find_sms_number_release_candidates(
+    *,
+    unused_days: int,
+    include_detached_unused: bool = True,
+    include_free_dormant_unused: bool = True,
+) -> list[SmsNumberReleaseCandidate]:
+    """
+    Return Twilio SMS numbers that look safe to review for manual release.
+    """
+    if unused_days < 1:
+        raise ValidationError({"unused_days": "Unused days must be at least 1."})
+    if not include_detached_unused and not include_free_dormant_unused:
+        return []
+
+    endpoint_qs = PersistentAgentCommsEndpoint.objects.filter(
+        channel=CommsChannel.SMS,
+        address__iexact=OuterRef("phone_number"),
+    ).order_by()
+    latest_message_qs = PersistentAgentMessage.objects.filter(
+        Q(
+            from_endpoint__channel=CommsChannel.SMS,
+            from_endpoint__address__iexact=OuterRef("phone_number"),
+        )
+        | Q(
+            to_endpoint__channel=CommsChannel.SMS,
+            to_endpoint__address__iexact=OuterRef("phone_number"),
+        )
+    ).order_by("-timestamp")
+
+    cutoff = timezone.now() - timedelta(days=unused_days)
+    candidate_rows = (
+        SmsNumber.objects.filter(
+            provider=SmsProvider.TWILIO,
+            is_active=True,
+            released_at__isnull=True,
+        )
+        .annotate(
+            endpoint_id=Subquery(endpoint_qs.values("id")[:1]),
+            endpoint_owner_agent_id=Subquery(endpoint_qs.values("owner_agent_id")[:1]),
+            endpoint_owner_agent_name=Coalesce(
+                Subquery(endpoint_qs.values("owner_agent__name")[:1]),
+                Value("", output_field=CharField()),
+            ),
+            endpoint_owner_email=Coalesce(
+                Subquery(endpoint_qs.values("owner_agent__user__email")[:1]),
+                Value("", output_field=CharField()),
+            ),
+            endpoint_owner_plan=Coalesce(
+                Subquery(endpoint_qs.values("owner_agent__user__billing__subscription")[:1]),
+                Value(PlanNames.FREE, output_field=CharField()),
+            ),
+            last_activity_at=Subquery(
+                latest_message_qs.values("timestamp")[:1],
+                output_field=DateTimeField(),
+            ),
+        )
+        .filter(Q(last_activity_at__lt=cutoff) | Q(last_activity_at__isnull=True))
+        .order_by("last_activity_at", "phone_number")
+    )
+
+    candidates = []
+    for sms_number in candidate_rows:
+        if include_detached_unused and sms_number.endpoint_owner_agent_id is None:
+            tier = SmsNumberReleaseCandidate.DETACHED_UNUSED
+        elif (
+            include_free_dormant_unused
+            and sms_number.endpoint_owner_agent_id is not None
+            and sms_number.endpoint_owner_plan == PlanNames.FREE
+        ):
+            tier = SmsNumberReleaseCandidate.FREE_DORMANT_UNUSED
+        else:
+            continue
+
+        candidates.append(
+            SmsNumberReleaseCandidate(
+                sms_number_id=str(sms_number.id),
+                phone_number=sms_number.phone_number,
+                friendly_name=sms_number.friendly_name,
+                tier=tier,
+                last_activity_at=sms_number.last_activity_at,
+                endpoint_id=str(sms_number.endpoint_id) if sms_number.endpoint_id else None,
+                owner_agent_id=(
+                    str(sms_number.endpoint_owner_agent_id)
+                    if sms_number.endpoint_owner_agent_id
+                    else None
+                ),
+                owner_agent_name=sms_number.endpoint_owner_agent_name,
+                owner_email=sms_number.endpoint_owner_email,
+                owner_plan=sms_number.endpoint_owner_plan,
+            )
+        )
+
+    return candidates
 
 
 def find_sms_number_release_candidates(
