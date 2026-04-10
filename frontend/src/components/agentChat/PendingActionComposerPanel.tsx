@@ -106,6 +106,16 @@ function actionIcon(action: PendingActionRequest) {
   }
 }
 
+function getActiveHumanInputRequest(
+  action: PendingActionRequest | null,
+  activeHumanInputRequestId: string | null,
+) {
+  if (!action || action.kind !== 'human_input') {
+    return null
+  }
+  return action.requests.find((request) => request.id === activeHumanInputRequestId) ?? action.requests[0] ?? null
+}
+
 export function PendingActionComposerPanel({
   actions,
   activeActionId,
@@ -132,9 +142,15 @@ export function PendingActionComposerPanel({
   const [contactError, setContactError] = useState<string | null>(null)
 
   const activeAction = actions.find((action) => action.id === activeActionId) ?? actions[0] ?? null
+  const activeHumanInputRequest = getActiveHumanInputRequest(activeAction, activeHumanInputRequestId)
   const activeIndex = Math.max(0, actions.findIndex((action) => action.id === activeAction?.id))
   const ActiveIcon = activeAction ? actionIcon(activeAction) : MessageSquareQuote
-  const activeActionMeta = activeAction ? actionMeta(activeAction) : null
+  const activeActionHeading = activeAction?.kind === 'human_input'
+    ? (activeHumanInputRequest?.question ?? 'Needs your reply')
+    : (activeAction ? actionHeading(activeAction) : 'Pending action')
+  const activeActionMeta = activeAction?.kind === 'human_input'
+    ? null
+    : (activeAction ? actionMeta(activeAction) : null)
 
   useEffect(() => {
     if (activeAction?.kind !== 'requested_secrets') {
@@ -271,7 +287,7 @@ export function PendingActionComposerPanel({
           </span>
           <div className={`min-w-0 ${activeActionMeta ? '' : 'flex min-h-9 items-center'}`}>
             <p className="min-w-0 text-[0.95rem] font-semibold leading-6 tracking-[-0.02em] text-slate-900">
-              {actionHeading(activeAction)}
+              {activeActionHeading}
             </p>
             {activeActionMeta ? (
               <p className="text-xs text-slate-600">

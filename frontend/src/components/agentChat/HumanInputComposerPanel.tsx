@@ -98,7 +98,7 @@ export function HumanInputComposerPanel({
           </div>
         </div>
       ) : (
-        <div className={`${showQuestion || orderedRequests.length > 1 ? 'mt-3 ' : ''}rounded-xl border border-slate-200 bg-slate-50`}>
+        <div className={`${showQuestion || orderedRequests.length > 1 ? 'mt-3 ' : ''}overflow-hidden rounded-xl border border-slate-200 bg-slate-50`}>
           {activeRequest.options.map((option, index) => {
             const isBusy = busyRequestId === activeRequest.id
             const isSelected = activeDraft?.selectedOptionKey === option.key
