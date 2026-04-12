@@ -66,6 +66,7 @@ from .models import (
     ComputeSnapshot,
     UserPreference,
     UserFlagDefinition,
+    UserFingerprintVisit,
     UserIdentitySignal,
     UserTrialEligibility,
     UserTrialActivation,
@@ -1809,6 +1810,100 @@ class UserIdentitySignalAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     )
+
+    def has_add_permission(self, request):
+        return False
+
+
+@admin.register(UserFingerprintVisit)
+class UserFingerprintVisitAdmin(admin.ModelAdmin):
+    list_display = (
+        "user",
+        "source",
+        "fingerprint_event_id",
+        "fetch_status",
+        "country_code",
+        "suspect_score",
+        "vpn",
+        "proxy",
+        "tor",
+        "tampering",
+        "high_activity_device",
+        "event_timestamp",
+        "fetched_at",
+    )
+    search_fields = (
+        "user__email",
+        "user__id",
+        "fingerprint_event_id",
+        "fingerprint_visitor_id",
+        "asn_name",
+    )
+    list_filter = (
+        "fetch_status",
+        "source",
+        "vpn",
+        "proxy",
+        "tor",
+        "tampering",
+        "high_activity_device",
+        "country_code",
+    )
+    readonly_fields = (
+        "user",
+        "source",
+        "fingerprint_event_id",
+        "fingerprint_visitor_id",
+        "fetch_status",
+        "fetch_attempt_count",
+        "last_fetch_attempt_at",
+        "fetched_at",
+        "error_message",
+        "event_timestamp",
+        "visitor_first_seen_at",
+        "replayed",
+        "visitor_found",
+        "visitor_confidence_score",
+        "suspect_score",
+        "bot",
+        "vpn",
+        "vpn_confidence",
+        "proxy",
+        "proxy_confidence",
+        "proxy_type",
+        "tor",
+        "tampering",
+        "tampering_confidence",
+        "tampering_ml_score",
+        "high_activity_device",
+        "ip_blocklist_email_spam",
+        "ip_blocklist_attack_source",
+        "ip_blocklist_tor_node",
+        "datacenter",
+        "asn",
+        "asn_name",
+        "asn_type",
+        "country_code",
+        "country_name",
+        "subdivision_name",
+        "city_name",
+        "timezone",
+        "ip_address",
+        "browser_name",
+        "browser_major_version",
+        "browser_full_version",
+        "os",
+        "os_version",
+        "device",
+        "sdk",
+        "velocity",
+        "vpn_methods",
+        "tampering_details",
+        "raw_payload",
+        "created_at",
+        "updated_at",
+    )
+    fields = readonly_fields
 
     def has_add_permission(self, request):
         return False

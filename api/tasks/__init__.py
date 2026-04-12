@@ -38,6 +38,8 @@ from .maintenance_tasks import (
     prune_prompt_archives,
 )
 
+from .fingerprint_tasks import fetch_user_fingerprint_visit_task  # noqa: F401
+
 # Sandbox compute tasks
 from .sandbox_compute import discover_mcp_tools, sync_filespace_after_call  # noqa: F401
 from .sandbox_compute_lifecycle import sweep_idle_sandbox_sessions  # noqa: F401
