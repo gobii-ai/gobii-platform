@@ -18,6 +18,7 @@ from api.models import (
     UserTrialEligibilityAutoStatusChoices,
     UserTrialEligibilityManualActionChoices,
 )
+from api.services.user_fingerprint import stage_user_fingerprint_visit
 from constants.plans import PlanNames
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import IntegrationDisabledError
@@ -237,6 +238,13 @@ def capture_request_identity_signals_and_attribution(
         UserAttribution.objects.update_or_create(
             user=user,
             defaults=attribution_defaults,
+        )
+
+    if include_fpjs:
+        stage_user_fingerprint_visit(
+            user,
+            source=source,
+            signal_values=signal_values,
         )
 
     return signal_values
