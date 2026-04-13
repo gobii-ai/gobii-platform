@@ -8,6 +8,7 @@ from waffle.testutils import override_flag
 
 from api.models import EntitlementDefinition, Plan, PlanVersion, PlanVersionEntitlement
 from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
+from pages.models import CallToAction
 
 
 @tag("batch_pages")
@@ -82,6 +83,24 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertEqual(plans[PlanNames.SCALE]["cta"], "Start 14-day Free Trial")
         self.assertIsNone(plans[PlanNames.STARTUP]["trial_cancel_text"])
         self.assertIsNone(plans[PlanNames.SCALE]["trial_cancel_text"])
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_uses_cta_registry_for_enterprise_request_call_text(self, mock_get_stripe_settings):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+        cta, _ = CallToAction.objects.get_or_create(
+            slug="cta_enterprise_request_call",
+            defaults={"description": "Enterprise request call CTA."},
+        )
+        cta.add_version("Talk to sales")
+
+        response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Talk to sales")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% load static %}
 {% load waffle_tags %}
+{% load cta_tags %}
 {% block title %}Pricing - Gobii{% endblock %}
 {% block head_extras %}
   {{ block.super }}
@@ -148,7 +149,7 @@
           <p class="mt-3 text-sm text-slate-500">Enterprise plans with dedicated infrastructure, SLAs, and custom governance.</p>
         </div>
         <a href="{% url 'proprietary:prequalify' %}" class="mt-6 md:mt-0 inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-600 text-white font-semibold shadow-sm hover:bg-blue-700 transition whitespace-nowrap">
-          Request a call
+          {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         </a>
       </div>
