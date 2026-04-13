@@ -1,5 +1,6 @@
 from urllib.parse import parse_qs, urlparse
 from types import SimpleNamespace
+from unittest.mock import PropertyMock, patch
 
 from allauth.core import context
 from allauth.core.exceptions import ImmediateHttpResponse
@@ -20,10 +21,18 @@ from config.socialaccount_adapter import (
 )
 
 PROVIDER_LOGIN_CASES = {
-    "linkedin_oauth2": ("linkedin_oauth2_login", "www.linkedin.com"),
+    "linkedin": ("openid_connect_login", "www.linkedin.com"),
     "microsoft": ("microsoft_login", "login.microsoftonline.com"),
     "google": ("google_login", "accounts.google.com"),
     "facebook": ("facebook_login", "www.facebook.com"),
+}
+
+LINKEDIN_OPENID_CONFIG = {
+    "authorization_endpoint": "https://www.linkedin.com/oauth/v2/authorization",
+    "token_endpoint": "https://www.linkedin.com/oauth/v2/accessToken",
+    "userinfo_endpoint": "https://api.linkedin.com/v2/userinfo",
+    "jwks_uri": "https://www.linkedin.com/oauth/openid/jwks",
+    "issuer": "https://www.linkedin.com",
 }
 
 
@@ -33,21 +42,43 @@ class SocialAccountProviderTests(TestCase):
         self.site = Site.objects.get_current()
 
     def _create_social_app(self, provider: str) -> SocialApp:
+        app_kwargs = {
+            "provider": provider,
+            "name": f"{provider}-oauth",
+            "client_id": "dummy-client",
+            "secret": "dummy-secret",
+        }
+        if provider == "linkedin":
+            app_kwargs.update(
+                {
+                    "provider": "openid_connect",
+                    "provider_id": "linkedin",
+                    "name": "LinkedIn",
+                    "settings": {"server_url": "https://www.linkedin.com/oauth"},
+                }
+            )
         app = SocialApp.objects.create(
-            provider=provider,
-            name=f"{provider}-oauth",
-            client_id="dummy-client",
-            secret="dummy-secret",
+            **app_kwargs,
         )
         app.sites.add(self.site)
         return app
 
-    def test_supported_provider_login_flows_redirect_to_expected_hosts(self) -> None:
+    @patch(
+        "allauth.socialaccount.providers.openid_connect.views.OpenIDConnectOAuth2Adapter.openid_config",
+        new_callable=PropertyMock,
+    )
+    def test_supported_provider_login_flows_redirect_to_expected_hosts(
+        self,
+        mock_openid_config,
+    ) -> None:
+        mock_openid_config.return_value = LINKEDIN_OPENID_CONFIG
+
         for provider, (url_name, expected_host) in PROVIDER_LOGIN_CASES.items():
             with self.subTest(provider=provider):
                 self._create_social_app(provider)
 
-                response = self.client.get(reverse(url_name))
+                url_kwargs = {"provider_id": "linkedin"} if provider == "linkedin" else {}
+                response = self.client.get(reverse(url_name, kwargs=url_kwargs))
 
                 self.assertEqual(response.status_code, 302)
                 parsed = urlparse(response["Location"])
@@ -74,7 +105,8 @@ class SocialAccountProviderTests(TestCase):
 
         for provider, (url_name, _) in PROVIDER_LOGIN_CASES.items():
             with self.subTest(provider=provider):
-                request = RequestFactory().get(reverse(url_name))
+                url_kwargs = {"provider_id": "linkedin"} if provider == "linkedin" else {}
+                request = RequestFactory().get(reverse(url_name, kwargs=url_kwargs))
                 request.user = AnonymousUser()
 
                 session_middleware = SessionMiddleware(lambda req: None)

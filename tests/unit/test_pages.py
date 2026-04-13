@@ -2333,11 +2333,23 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 class AuthLinkTests(TestCase):
     @staticmethod
     def _create_social_app(provider: str) -> SocialApp:
+        app_kwargs = {
+            "provider": provider,
+            "name": f"{provider}-oauth",
+            "client_id": "dummy-client",
+            "secret": "dummy-secret",
+        }
+        if provider == "linkedin":
+            app_kwargs.update(
+                {
+                    "provider": "openid_connect",
+                    "provider_id": "linkedin",
+                    "name": "LinkedIn",
+                    "settings": {"server_url": "https://www.linkedin.com/oauth"},
+                }
+            )
         app = SocialApp.objects.create(
-            provider=provider,
-            name=f"{provider}-oauth",
-            client_id="dummy-client",
-            secret="dummy-secret",
+            **app_kwargs,
         )
         app.sites.add(Site.objects.get_current())
         return app
@@ -2430,7 +2442,7 @@ class AuthLinkTests(TestCase):
 
     @tag("batch_pages")
     def test_login_page_renders_configured_social_providers_in_fixed_order_with_tracking_attrs(self):
-        for provider in ("facebook", "google", "linkedin_oauth2", "microsoft"):
+        for provider in ("facebook", "google", "linkedin", "microsoft"):
             self._create_social_app(provider)
 
         response = self.client.get(reverse("account_login"))
@@ -2442,7 +2454,7 @@ class AuthLinkTests(TestCase):
         buttons = soup.select("a[data-social-provider]")
         provider_ids = [button["data-social-provider"] for button in buttons]
 
-        self.assertEqual(provider_ids, ["linkedin_oauth2", "microsoft", "google", "facebook"])
+        self.assertEqual(provider_ids, ["linkedin", "microsoft", "google", "facebook"])
         for button in buttons:
             provider_id = button["data-social-provider"]
             self.assertTrue(button.has_attr("data-social-auth-link"))
@@ -2466,7 +2478,7 @@ class AuthLinkTests(TestCase):
         provider_ids = [button["data-social-provider"] for button in buttons]
 
         self.assertEqual(provider_ids, ["google", "facebook"])
-        self.assertNotIn("linkedin_oauth2", provider_ids)
+        self.assertNotIn("linkedin", provider_ids)
         self.assertNotIn("microsoft", provider_ids)
         for button in buttons:
             self.assertTrue(button.has_attr("data-social-signup-link"))
@@ -2475,20 +2487,16 @@ class AuthLinkTests(TestCase):
 
     @tag("batch_pages")
     def test_social_signup_completion_page_uses_custom_template(self):
-        app = self._create_social_app("linkedin_oauth2")
-        request = RequestFactory().get(reverse("linkedin_oauth2_login"))
+        app = self._create_social_app("linkedin")
+        request = RequestFactory().get(reverse("openid_connect_login", kwargs={"provider_id": "linkedin"}))
         provider = app.get_provider(request)
         sociallogin = provider.sociallogin_from_response(
             request,
             {
-                "id": "linkedin-user-123",
-                "firstName": {
-                    "localized": {"en_US": "Pat"},
-                    "preferredLocale": {"country": "US", "language": "en"},
-                },
-                "lastName": {
-                    "localized": {"en_US": "Lee"},
-                    "preferredLocale": {"country": "US", "language": "en"},
+                "userinfo": {
+                    "sub": "linkedin-user-123",
+                    "given_name": "Pat",
+                    "family_name": "Lee",
                 },
             },
         )

@@ -294,7 +294,7 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
-    "allauth.socialaccount.providers.linkedin_oauth2",
+    "allauth.socialaccount.providers.openid_connect",
     "allauth.socialaccount.providers.microsoft",
     "allauth.socialaccount.providers.google",
     "allauth.socialaccount.providers.facebook",
