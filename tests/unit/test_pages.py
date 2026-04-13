@@ -2508,6 +2508,24 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 @tag("batch_pages")
 class AuthLinkTests(TestCase):
     @tag("batch_pages")
+    def test_auth_url_with_utms_preserves_existing_query_and_fragment(self):
+        request = SimpleNamespace(
+            session={
+                "utm_querystring": "?utm_source=newsletter&utm_campaign=fall",
+            }
+        )
+
+        url = page_views._auth_url_with_utms("/accounts/signup/?existing=1#top", request)
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(parsed.path, "/accounts/signup/")
+        self.assertEqual(parsed.fragment, "top")
+        self.assertEqual(params.get("existing"), ["1"])
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("utm_campaign"), ["fall"])
+
+    @tag("batch_pages")
     def test_signup_page_signin_link_includes_utms(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
