@@ -40,6 +40,7 @@ from billing.checkout_metadata import (
 from pages.signals import (
     handle_checkout_session_event,
     handle_subscription_event,
+    handle_user_logged_in,
     handle_user_signed_up,
     handle_invoice_payment_failed,
     handle_setup_intent_created,
@@ -47,7 +48,7 @@ from pages.signals import (
     handle_setup_intent_succeeded,
     handle_invoice_payment_succeeded,
 )
-from util.analytics import AnalyticsEvent
+from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
 from api.services.owner_execution_pause import resume_owner_execution as real_resume_owner_execution
 from constants.stripe import (
@@ -154,9 +155,11 @@ class UserSignedUpSignalTests(TestCase):
         context_campaign = track_call["context"]["campaign"]
 
         self.assertEqual(properties["plan"], PlanNames.FREE)
+        self.assertEqual(properties["auth_method"], "email")
         self.assertEqual(properties["utm_source_first"], "first-source")
         self.assertEqual(properties["utm_source_last"], "last-source")
         self.assertEqual(context_campaign["source"], "last-source")
+        self.assertEqual(request.session["signup_auth_method"], "email")
 
     @patch("pages.signals.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=True))
     @patch("pages.signals.Analytics.track")
@@ -226,6 +229,26 @@ class UserSignedUpSignalTests(TestCase):
             self.user,
             assessment_source=SIGNAL_SOURCE_SIGNUP,
         )
+
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_social_signup_tracks_auth_provider(self, _mock_identify, mock_track):
+        request = self.factory.get("/accounts/linkedin_oauth2/login/")
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        sociallogin = SimpleNamespace(
+            account=SimpleNamespace(provider="linkedin_oauth2"),
+        )
+
+        handle_user_signed_up(sender=None, request=request, user=self.user, sociallogin=sociallogin)
+
+        properties = mock_track.call_args.kwargs["properties"]
+        self.assertEqual(properties["auth_method"], "social")
+        self.assertEqual(properties["auth_provider"], "linkedin_oauth2")
+        self.assertEqual(request.session["signup_auth_method"], "social")
+        self.assertEqual(request.session["signup_auth_provider"], "linkedin_oauth2")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_REGISTRATION_VALUE=12.5)
     @patch("pages.signals.capi")
@@ -332,6 +355,56 @@ class UserSignedUpSignalTests(TestCase):
         # Should use existing _fbc cookie, not synthesize
         self.assertEqual(click_ids.get("fbc"), "fb.1.existing.cookie-fbc-value")
         mock_record_fbc_synthesized.assert_not_called()
+
+
+@tag("batch_pages")
+class UserLoggedInSignalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="login-user",
+            email="login@example.com",
+            password="pw",
+        )
+        self.factory = RequestFactory()
+
+    @patch("pages.signals.capture_request_identity_signals_and_attribution")
+    @patch("pages.signals.Analytics.track_event")
+    @patch("pages.signals.Analytics.identify")
+    def test_social_login_tracks_auth_provider(
+        self,
+        mock_identify,
+        mock_track_event,
+        mock_capture_request_identity_signals,
+    ):
+        request = self.factory.get("/accounts/linkedin_oauth2/login/")
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session["account_authentication_methods"] = [
+            {"method": "socialaccount", "provider": "linkedin_oauth2"}
+        ]
+        request.session.save()
+
+        handle_user_logged_in(sender=None, request=request, user=self.user)
+
+        mock_capture_request_identity_signals.assert_called_once_with(
+            self.user,
+            request,
+            source="login",
+            include_fpjs=False,
+        )
+        mock_identify.assert_called_once()
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.LOGGED_IN)
+        self.assertEqual(kwargs["source"], AnalyticsSource.WEB)
+        self.assertEqual(
+            kwargs["properties"],
+            {
+                "auth_method": "social",
+                "auth_provider": "linkedin_oauth2",
+            },
+        )
 
 
 @tag("batch_pages")

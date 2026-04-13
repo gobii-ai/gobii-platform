@@ -2342,6 +2342,8 @@ class ClearSignupTrackingView(View):
             'userId': str(request.user.id) if request.user.is_authenticated else '',
             'emailHash': analytics_data.get('email_hash', ''),
             'idHash': analytics_data.get('id_hash', ''),
+            'authMethod': request.session.get('signup_auth_method', 'email'),
+            'authProvider': request.session.get('signup_auth_provider', ''),
             'registrationValue': float(getattr(settings, 'CAPI_REGISTRATION_VALUE', 0) or 0),
             # Include pixel IDs so client knows which to fire
             'pixels': {
@@ -2355,7 +2357,13 @@ class ClearSignupTrackingView(View):
 
         # Clear the session flag and related data
         del request.session['show_signup_tracking']
-        for key in ('signup_event_id', 'signup_user_id', 'signup_email_hash'):
+        for key in (
+            'signup_event_id',
+            'signup_user_id',
+            'signup_email_hash',
+            'signup_auth_method',
+            'signup_auth_provider',
+        ):
             if key in request.session:
                 del request.session[key]
 

@@ -65,6 +65,13 @@
     };
   }
 
+  function buildDatasetProps(element) {
+    return compactProperties({
+      auth_provider: element.dataset.analyticsAuthProvider || '',
+      auth_surface: element.dataset.analyticsAuthSurface || ''
+    });
+  }
+
   function getElementLabel(element) {
     if (!element) {
       return '';
@@ -106,7 +113,7 @@
       authenticated: form.dataset.authenticated || ''
     });
 
-    track(getEventName(), Object.assign({}, buildBaseProps(form), properties));
+    track(getEventName(), Object.assign({}, buildBaseProps(form), properties, buildDatasetProps(form)));
   }
 
   function trackClick(element) {
@@ -128,7 +135,7 @@
       cta_type: 'click'
     });
 
-    track(getEventName(), Object.assign({}, buildBaseProps(element), properties));
+    track(getEventName(), Object.assign({}, buildBaseProps(element), properties, buildDatasetProps(element)));
   }
 
   function isTrackedPage() {

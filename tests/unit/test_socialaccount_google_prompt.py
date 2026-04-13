@@ -19,20 +19,42 @@ from config.socialaccount_adapter import (
     OAUTH_CHARTER_COOKIE,
 )
 
+PROVIDER_LOGIN_CASES = {
+    "linkedin_oauth2": ("linkedin_oauth2_login", "www.linkedin.com"),
+    "microsoft": ("microsoft_login", "login.microsoftonline.com"),
+    "google": ("google_login", "accounts.google.com"),
+    "facebook": ("facebook_login", "www.facebook.com"),
+}
+
 
 @tag("batch_email")
-class GoogleSocialAccountTests(TestCase):
+class SocialAccountProviderTests(TestCase):
     def setUp(self) -> None:
-        site = Site.objects.get_current()
-        self.app = SocialApp.objects.create(
-            provider="google",
-            name="google",
+        self.site = Site.objects.get_current()
+
+    def _create_social_app(self, provider: str) -> SocialApp:
+        app = SocialApp.objects.create(
+            provider=provider,
+            name=f"{provider}-oauth",
             client_id="dummy-client",
             secret="dummy-secret",
         )
-        self.app.sites.add(site)
+        app.sites.add(self.site)
+        return app
+
+    def test_supported_provider_login_flows_redirect_to_expected_hosts(self) -> None:
+        for provider, (url_name, expected_host) in PROVIDER_LOGIN_CASES.items():
+            with self.subTest(provider=provider):
+                self._create_social_app(provider)
+
+                response = self.client.get(reverse(url_name))
+
+                self.assertEqual(response.status_code, 302)
+                parsed = urlparse(response["Location"])
+                self.assertIn(expected_host, parsed.netloc)
 
     def test_login_flow_includes_select_account_prompt(self) -> None:
+        self._create_social_app("google")
         response = self.client.get(reverse("google_login"))
 
         self.assertEqual(response.status_code, 302)
@@ -50,46 +72,37 @@ class GoogleSocialAccountTests(TestCase):
             password="dummy-pass",
         )
 
-        request = RequestFactory().get(reverse("google_login"))
-        request.user = AnonymousUser()
+        for provider, (url_name, _) in PROVIDER_LOGIN_CASES.items():
+            with self.subTest(provider=provider):
+                request = RequestFactory().get(reverse(url_name))
+                request.user = AnonymousUser()
 
-        session_middleware = SessionMiddleware(lambda req: None)
-        session_middleware.process_request(request)
-        request.session.save()
+                session_middleware = SessionMiddleware(lambda req: None)
+                session_middleware.process_request(request)
+                request.session.save()
 
-        storage = FallbackStorage(request)
-        setattr(request, "_messages", storage)
+                storage = FallbackStorage(request)
+                setattr(request, "_messages", storage)
 
-        provider = self.app.get_provider(request)
-        sociallogin = provider.sociallogin_from_response(
-            request,
-            {
-                "sub": "1234567890",
-                "email": "existing@example.com",
-                "email_verified": True,
-                "given_name": "Existing",
-                "family_name": "User",
-            },
-        )
+                sociallogin = SimpleNamespace(
+                    account=SimpleNamespace(pk=None, provider=provider),
+                    user=SimpleNamespace(email="existing@example.com"),
+                )
 
-        context.request = request
-        self.addCleanup(lambda: setattr(context, "request", None))
+                with context.request_context(request):
+                    adapter = GobiiSocialAccountAdapter(request)
+                    with self.assertRaises(ImmediateHttpResponse) as exc:
+                        adapter.pre_social_login(request, sociallogin)
 
-        sociallogin.lookup()
+                response = exc.exception.response
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["Location"], reverse("account_login"))
 
-        adapter = GobiiSocialAccountAdapter(request)
-        with self.assertRaises(ImmediateHttpResponse) as exc:
-            adapter.pre_social_login(request, sociallogin)
-
-        response = exc.exception.response
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], reverse("account_login"))
-
-        rendered_messages = list(storage)
-        self.assertTrue(
-            any("already have an account" in msg.message for msg in rendered_messages),
-            "Expected a helpful error message instructing the user to sign in via email/password.",
-        )
+                rendered_messages = list(storage)
+                self.assertTrue(
+                    any("already have an account" in msg.message for msg in rendered_messages),
+                    "Expected a helpful error message instructing the user to sign in via email/password.",
+                )
 
     def test_pre_social_login_restores_attribution_keys_from_cookie(self) -> None:
         request = RequestFactory().get(reverse("google_login"))
