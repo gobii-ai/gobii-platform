@@ -216,14 +216,16 @@ def ensure_steps_compacted(
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work: fetch & summarise *outside* the lock.
     raw_steps_struct = _fetch_and_structurise_steps(agent, lower_bound, snapshot_until)
-
-    try:
-        with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
-            summarise_span.set_attribute("steps.count", len(raw_steps_struct))
-            new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
-    except Exception:  # pragma: no cover – downstream can retry
-        logger.exception("step summarise_fn failed; skipping compaction for agent %s", agent.id)
-        return
+    if not raw_steps_struct:
+        new_summary = previous_summary
+    else:
+        try:
+            with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
+                summarise_span.set_attribute("steps.count", len(raw_steps_struct))
+                new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
+        except Exception:  # pragma: no cover – downstream can retry
+            logger.exception("step summarise_fn failed; skipping compaction for agent %s", agent.id)
+            return
 
     # ------------------------------ Phase 3 ------------------------------ #
     # Persist snapshot under lock if no-one beat us.
@@ -425,9 +427,6 @@ def llm_summarise_steps(
         agent: Optional agent instance for config lookup.
         routing_profile: Optional LLMRoutingProfile for eval routing.
     """
-
-    if not steps:
-        return previous
 
     # Convert structured dataclasses to concise text lines.
     step_lines: list[str] = [s.to_summary_str() for s in steps]
