@@ -160,6 +160,11 @@ from console.secrets_api_views import (
     AgentSecretDetailAPIView,
     AgentSecretPromoteAPIView,
 )
+from console.system_skill_profiles_api_views import (
+    SystemSkillProfileListAPIView,
+    SystemSkillProfileDetailAPIView,
+    SystemSkillProfileSetDefaultAPIView,
+)
 from console.email_settings.views import (
     AgentEmailSettingsAPIView,
     AgentEmailSettingsEnsureAccountAPIView,
@@ -192,6 +197,7 @@ from console.views import (
     ConsoleLLMConfigView,
     MCPServerManagementView,
     GlobalSecretsView,
+    SystemSkillProfilesView,
     MCPOAuthCallbackPageView,
     AgentEmailOAuthCallbackPageView,
     PersistentAgentChatShellView,
@@ -310,6 +316,11 @@ urlpatterns = [
     path("console/evals/<uuid:suite_run_id>/", ConsoleEvalsDetailView.as_view(), name="console-evals-detail"),
     path("console/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditView.as_view(), name="console-agent-audit"),
     path("console/secrets/", GlobalSecretsView.as_view(), name="console-secrets"),
+    path(
+        "console/system-skills/<slug:skill_key>/profiles/",
+        SystemSkillProfilesView.as_view(),
+        name="console-system-skill-profiles",
+    ),
     path("console/advanced/mcp-servers/", MCPServerManagementView.as_view(), name="console-mcp-servers"),
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
     path("console/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="console-email-oauth-callback-view"),
@@ -524,6 +535,21 @@ urlpatterns = [
     # Global + agent secrets API
     path("console/api/secrets/", GlobalSecretListAPIView.as_view(), name="console-global-secret-list"),
     path("console/api/secrets/<uuid:secret_id>/", GlobalSecretDetailAPIView.as_view(), name="console-global-secret-detail"),
+    path(
+        "console/api/system-skills/<slug:skill_key>/profiles/",
+        SystemSkillProfileListAPIView.as_view(),
+        name="console-system-skill-profile-list",
+    ),
+    path(
+        "console/api/system-skills/<slug:skill_key>/profiles/<uuid:profile_id>/",
+        SystemSkillProfileDetailAPIView.as_view(),
+        name="console-system-skill-profile-detail",
+    ),
+    path(
+        "console/api/system-skills/<slug:skill_key>/profiles/<uuid:profile_id>/default/",
+        SystemSkillProfileSetDefaultAPIView.as_view(),
+        name="console-system-skill-profile-set-default",
+    ),
     path("console/api/agents/<uuid:agent_id>/secrets/", AgentSecretListAPIView.as_view(), name="console-agent-secret-list"),
     path("console/api/agents/<uuid:agent_id>/secrets/<uuid:secret_id>/", AgentSecretDetailAPIView.as_view(), name="console-agent-secret-detail"),
     path("console/api/agents/<uuid:agent_id>/secrets/<uuid:secret_id>/promote/", AgentSecretPromoteAPIView.as_view(), name="console-agent-secret-promote"),

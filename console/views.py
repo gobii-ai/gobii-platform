@@ -5990,8 +5990,8 @@ class StaffAgentAuditView(SystemAdminRequiredMixin, TemplateView):
         return context
 
 
-class MCPServerOwnerMixin:
-    """Shared owner resolution logic for MCP server management views."""
+class ConsoleOwnerScopeMixin:
+    """Shared owner resolution logic for owner-scoped console management views."""
 
     owner_scope: str | None = None
     owner_user = None
@@ -6006,7 +6006,7 @@ class MCPServerOwnerMixin:
         if context.current_context.type == 'organization':
             membership = context.current_membership
             if membership is None or not context.can_manage_org_agents:
-                raise PermissionDenied("You do not have permission to manage organization MCP servers.")
+                raise PermissionDenied("You do not have permission to manage organization resources.")
             return ('organization', None, membership.org)
         return ('user', self.request.user, None)
 
@@ -6027,7 +6027,7 @@ class MCPServerOwnerMixin:
         return self.request.user.get_full_name() or self.request.user.username
 
 
-class MCPServerManagementView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateView):
+class MCPServerManagementView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
     template_name = "console/mcp_servers.html"
 
     def dispatch(self, request, *args, **kwargs):
@@ -6046,13 +6046,31 @@ class MCPServerManagementView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateVie
         return context
 
 
-class GlobalSecretsView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateView):
+class GlobalSecretsView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
     """React-based global secrets management page."""
     template_name = "console/global_secrets.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["owner_scope"] = self.owner_scope
+        return context
+
+
+class SystemSkillProfilesView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
+    """React-based system skill profile management page."""
+
+    template_name = "console/system_skill_profiles.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        skill_key = kwargs.get("skill_key")
+        context.update(
+            {
+                "owner_scope": self.owner_scope,
+                "skill_key": skill_key,
+                "list_url": reverse("console-system-skill-profile-list", args=[skill_key]),
+            }
+        )
         return context
 
 

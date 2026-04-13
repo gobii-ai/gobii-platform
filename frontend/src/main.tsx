@@ -27,6 +27,7 @@ const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/A
 const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
 const AgentEmailSettingsScreen = lazy(async () => ({ default: (await import('./screens/AgentEmailSettingsScreen')).AgentEmailSettingsScreen }))
 const GlobalSecretsScreen = lazy(async () => ({ default: (await import('./screens/GlobalSecretsScreen')).GlobalSecretsScreen }))
+const SystemSkillProfilesScreen = lazy(async () => ({ default: (await import('./screens/SystemSkillProfilesScreen')).SystemSkillProfilesScreen }))
 const AgentSecretsScreen = lazy(async () => ({ default: (await import('./screens/AgentSecretsScreen')).AgentSecretsScreen }))
 const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
@@ -287,6 +288,20 @@ switch (appName) {
       <GlobalSecretsScreen
         listUrl={listUrl}
         ownerScope={mountNode.dataset.ownerScope}
+      />
+    )
+    break
+  }
+  case 'system-skill-profiles': {
+    const listUrl = mountNode.dataset.listUrl
+    if (!listUrl) {
+      throw new Error('System skill profile list URL is required')
+    }
+    screen = (
+      <SystemSkillProfilesScreen
+        listUrl={listUrl}
+        ownerScope={mountNode.dataset.ownerScope}
+        skillKey={mountNode.dataset.skillKey}
       />
     )
     break
