@@ -210,6 +210,40 @@ class AttachmentGuidanceTests(SimpleTestCase):
             "<root>\n  <item>Gobii</item>\n</root>",
         )
 
+    def test_create_file_query_decodes_utf8_bytes(self):
+        execution = self._execute_create_file_query(
+            {
+                "query": "SELECT transcript_blob FROM report_data",
+                "file_path": "/exports/transcript.txt",
+                "mime_type": "text/plain",
+            },
+            rows=[{"transcript_blob": b"Title: Gobii\n"}],
+            columns=["transcript_blob"],
+        )
+
+        write_call = execution["write_bytes_to_dir_mock"].call_args.kwargs
+        self.assertEqual(write_call["content_bytes"].decode("utf-8"), "Title: Gobii\n")
+
+    def test_create_file_query_errors_for_non_utf8_bytes(self):
+        execution = self._execute_create_file_query(
+            {
+                "query": "SELECT transcript_blob FROM report_data",
+                "file_path": "/exports/transcript.txt",
+                "mime_type": "text/plain",
+            },
+            rows=[{"transcript_blob": b"\xff\xfe"}],
+            columns=["transcript_blob"],
+        )
+
+        self.assertEqual(
+            execution["result"],
+            {
+                "status": "error",
+                "message": "Query returned binary data that is not valid UTF-8 text.",
+            },
+        )
+        execution["write_bytes_to_dir_mock"].assert_not_called()
+
     def test_create_file_errors_when_both_content_and_query_are_provided(self):
         result = execute_create_file(
             self.agent,

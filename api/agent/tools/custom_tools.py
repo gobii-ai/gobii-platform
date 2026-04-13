@@ -307,7 +307,6 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
         schema["properties"] = {}
     elif not isinstance(properties, dict):
         return None
-    property_names = set(schema["properties"].keys())
     required = schema.get("required")
     if required is None:
         schema["required"] = []
@@ -317,7 +316,7 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
         normalized_required: list[str] = []
         seen: set[str] = set()
         for item in required:
-            if item not in property_names or item in seen:
+            if item in seen:
                 continue
             seen.add(item)
             normalized_required.append(item)

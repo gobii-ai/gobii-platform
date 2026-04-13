@@ -52,6 +52,11 @@ def _blocked_export_hint(file_path: str, mime_type: str) -> str | None:
 def _coerce_query_scalar(value: object) -> str:
     if value is None:
         return ""
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Query returned binary data that is not valid UTF-8 text.") from exc
     return str(value)
 
 
@@ -143,10 +148,11 @@ def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
                     "Query must return exactly 1 row and 1 column for create_file query exports."
                 ),
             }
-        content_to_write = _coerce_query_scalar(rows[0].get(columns[0]))
+        try:
+            content_to_write = _coerce_query_scalar(rows[0].get(columns[0]))
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
     else:
-        if not has_content:
-            return {"status": "error", "message": "Missing required parameter: content"}
         content_to_write = content
 
     content_bytes = content_to_write.encode("utf-8")
