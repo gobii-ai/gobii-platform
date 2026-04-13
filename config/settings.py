@@ -294,7 +294,10 @@ INSTALLED_APPS = [
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
+    "allauth.socialaccount.providers.linkedin_oauth2",
+    "allauth.socialaccount.providers.microsoft",
     "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.facebook",
     "storages",
     "django_htmx",
     "waffle",
@@ -601,6 +604,9 @@ ACCOUNT_DEFAULT_HTTP_PROTOCOL = env.str("ACCOUNT_DEFAULT_HTTP_PROTOCOL", "https"
 ACCOUNT_EMAIL_CONFIRMATION_EXPIRE_DAYS = 10
 
 SOCIALACCOUNT_PROVIDERS = {
+    "facebook": {
+        "METHOD": "oauth2",
+    },
     "google": {
         "AUTH_PARAMS": {
             "prompt": "select_account",

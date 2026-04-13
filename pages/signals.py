@@ -124,6 +124,55 @@ TRIAL_CONVERSION_PAYMENT_FAILED_FINAL_EVENT = "TrialConversionPaymentFailedFinal
 SUBSCRIPTION_PAYMENT_FAILED_EVENT = "SubscriptionPaymentFailed"
 
 
+def _normalize_auth_method(method: str | None) -> str:
+    normalized = (method or "").strip().lower()
+    if normalized == "socialaccount":
+        return "social"
+    if normalized in {"password", "code"}:
+        return "email"
+    return ""
+
+
+def _get_latest_authentication_entry(request) -> Mapping[str, Any] | None:
+    methods = request.session.get("account_authentication_methods", [])
+    if not methods:
+        return None
+    latest = methods[-1]
+    if isinstance(latest, Mapping):
+        return latest
+    return None
+
+
+def _build_auth_tracking_properties(
+    request,
+    *,
+    sociallogin: Any | None = None,
+    default_to_email: bool = False,
+) -> dict[str, str]:
+    if sociallogin is not None:
+        provider = (getattr(getattr(sociallogin, "account", None), "provider", None) or "").strip()
+        properties = {"auth_method": "social"}
+        if provider:
+            properties["auth_provider"] = provider
+        return properties
+
+    latest = _get_latest_authentication_entry(request)
+    if latest is not None:
+        auth_method = _normalize_auth_method(str(latest.get("method") or ""))
+        properties: dict[str, str] = {}
+        if auth_method:
+            properties["auth_method"] = auth_method
+        provider = (str(latest.get("provider") or "")).strip()
+        if auth_method == "social" and provider:
+            properties["auth_provider"] = provider
+        if properties:
+            return properties
+
+    if default_to_email:
+        return {"auth_method": "email"}
+    return {}
+
+
 def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
     """Fetch a Stripe customer with subscriber eagerly loaded.
 
@@ -1829,7 +1878,18 @@ def _sync_dedicated_ip_allocations(owner, owner_type: str, source_data: Any, str
 def handle_user_signed_up(sender, request, user, **kwargs):
     logger.info(f"New user signed up: {user.email}")
 
+    auth_properties = _build_auth_tracking_properties(
+        request,
+        sociallogin=kwargs.get("sociallogin"),
+        default_to_email=True,
+    )
     request.session['show_signup_tracking'] = True
+    request.session["signup_auth_method"] = auth_properties.get("auth_method", "email")
+    auth_provider = auth_properties.get("auth_provider", "")
+    if auth_provider:
+        request.session["signup_auth_provider"] = auth_provider
+    else:
+        request.session.pop("signup_auth_provider", None)
     client_ip = _safe_client_ip(request)
 
     # Example: fire off an analytics event
@@ -2099,6 +2159,7 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             **{f'{k}_first': v for k, v in first_click.items()},
             **{f'{k}_last': v for k, v in last_click.items()},
         }
+        event_properties.update(auth_properties)
 
         if landing_first:
             event_properties['landing_code_first'] = landing_first
@@ -2258,6 +2319,7 @@ def handle_user_logged_in(sender, request, user, **kwargs):
     logger.info(f"User logged in: {user.id} ({user.email})")
 
     try:
+        auth_properties = _build_auth_tracking_properties(request)
         capture_request_identity_signals_and_attribution(
             user,
             request,
@@ -2275,7 +2337,7 @@ def handle_user_logged_in(sender, request, user, **kwargs):
             user_id=user.id,
             event=AnalyticsEvent.LOGGED_IN,
             source=AnalyticsSource.WEB,
-            properties={}
+            properties=auth_properties,
         )
         logger.info("Analytics tracking successful for login.")
     except Exception:
