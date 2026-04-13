@@ -8200,6 +8200,158 @@ class GlobalSecret(SecretModelMixin, models.Model):
         return f"Global Secret '{self.name}' ({self.key}) for {owner} on {self.domain_pattern}"
 
 
+class SystemSkillProfile(models.Model):
+    """Owner-scoped reusable configuration profile for a code-defined system skill."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="system_skill_profiles",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="system_skill_profiles",
+    )
+    skill_key = models.CharField(max_length=128)
+    profile_key = models.CharField(max_length=128)
+    label = models.CharField(max_length=128)
+    is_default = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(user__isnull=False, organization__isnull=True))
+                    | (models.Q(user__isnull=True, organization__isnull=False))
+                ),
+                name="system_skill_profile_exactly_one_owner",
+            ),
+            UniqueConstraint(
+                fields=["user", "skill_key", "profile_key"],
+                name="unique_system_skill_profile_user_key",
+                condition=models.Q(user__isnull=False),
+            ),
+            UniqueConstraint(
+                fields=["organization", "skill_key", "profile_key"],
+                name="unique_system_skill_profile_org_key",
+                condition=models.Q(organization__isnull=False),
+            ),
+            UniqueConstraint(
+                fields=["user", "skill_key"],
+                name="unique_system_skill_profile_default_user",
+                condition=models.Q(user__isnull=False, is_default=True),
+            ),
+            UniqueConstraint(
+                fields=["organization", "skill_key"],
+                name="unique_system_skill_profile_default_org",
+                condition=models.Q(organization__isnull=False, is_default=True),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "skill_key"], name="ssp_user_skill_idx"),
+            models.Index(fields=["organization", "skill_key"], name="ssp_org_skill_idx"),
+        ]
+        ordering = ["skill_key", "label", "profile_key"]
+
+    @property
+    def owner_scope(self) -> str:
+        return "organization" if self.organization_id else "user"
+
+    def clean(self):
+        super().clean()
+        if not self.user_id and not self.organization_id:
+            raise ValidationError("A system skill profile must belong to either a user or an organization.")
+        if self.user_id and self.organization_id:
+            raise ValidationError("A system skill profile cannot belong to both a user and an organization.")
+        self.skill_key = str(self.skill_key or "").strip()
+        self.profile_key = str(self.profile_key or "").strip()
+        self.label = str(self.label or "").strip()
+        if not self.skill_key:
+            raise ValidationError({"skill_key": "skill_key is required."})
+        if not self.profile_key:
+            raise ValidationError({"profile_key": "profile_key is required."})
+        if not re.match(r"^[a-z0-9_][a-z0-9_-]*$", self.profile_key):
+            raise ValidationError(
+                {"profile_key": "profile_key must use lowercase letters, numbers, underscores, or hyphens."}
+            )
+        if not self.label:
+            self.label = self.profile_key.replace("_", " ").replace("-", " ").strip().title()
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"SystemSkillProfile<{self.skill_key}:{self.profile_key}>"
+
+
+class SystemSkillProfileSecret(models.Model):
+    """Encrypted per-field secret value stored under a system skill profile."""
+
+    KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    profile = models.ForeignKey(
+        "SystemSkillProfile",
+        on_delete=models.CASCADE,
+        related_name="secrets",
+    )
+    key = models.CharField(max_length=64)
+    encrypted_value = models.BinaryField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["profile", "key"],
+                name="unique_system_skill_profile_secret_key",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["profile", "key"], name="ssp_secret_profile_key_idx"),
+        ]
+        ordering = ["key"]
+
+    def clean(self):
+        super().clean()
+        key = str(self.key or "").strip().upper()
+        if not self.KEY_PATTERN.match(key):
+            raise ValidationError({"key": "Environment variable key must match ^[A-Z_][A-Z0-9_]*$."})
+        self.key = key
+        if not self.encrypted_value:
+            raise ValidationError({"encrypted_value": "Secret value is required."})
+
+    def set_value(self, value: str):
+        from .domain_validation import DomainPatternValidator
+        from .encryption import SecretsEncryption
+
+        DomainPatternValidator._validate_secret_value(value)
+        self.encrypted_value = SecretsEncryption.encrypt_value(value)
+
+    def get_value(self) -> str:
+        if not self.encrypted_value:
+            return ""
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.decrypt_value(self.encrypted_value)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"SystemSkillProfileSecret<{self.profile_id}:{self.key}>"
+
+
 class PersistentAgentWebhook(models.Model):
     """Outbound webhook endpoint configured for a persistent agent."""
 
