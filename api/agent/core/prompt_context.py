@@ -83,6 +83,7 @@ from .llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
 )
+from . import internal_reasoning
 from .promptree import Prompt, hmt
 from .step_compaction import llm_summarise_steps
 
@@ -125,7 +126,6 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
-INTERNAL_REASONING_PREFIX = "Internal reasoning:"
 # Keep internal reasoning previews short in unified history; shrink with HMT instead of dropping early context.
 INTERNAL_REASONING_DISPLAY_LIMIT_BYTES = 3000
 KANBAN_DONE_SUMMARY_LIMIT = 5
@@ -176,7 +176,6 @@ __all__ = [
     "build_prompt_context",
     "add_budget_awareness_sections",
     "get_agent_tools",
-    "INTERNAL_REASONING_PREFIX",
 ]
 
 _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
@@ -220,6 +219,54 @@ def browser_task_unified_history_limit() -> int:
     """Return max completed browser tasks included in unified history."""
 
     return get_prompt_settings().browser_task_unified_history_limit
+
+
+def _get_recent_prompt_history_steps(
+    *,
+    agent: PersistentAgent,
+    step_cutoff: datetime,
+    visible_limit: int,
+    reasoning_limit: int,
+) -> List[PersistentAgentStep]:
+    """Fetch enough recent steps to fill the visible window after reasoning capping."""
+
+    if visible_limit <= 0:
+        return []
+
+    step_qs = (
+        PersistentAgentStep.objects.filter(
+            agent=agent,
+            created_at__gt=step_cutoff,
+        )
+        .select_related("tool_call", "system_step")
+        .defer("tool_call__result")
+        .order_by("-created_at")
+    )
+
+    filtered_steps: List[PersistentAgentStep] = []
+    reasoning_seen = 0
+    chunk_size = max(visible_limit, reasoning_limit + 1, 10)
+    offset = 0
+
+    while len(filtered_steps) < visible_limit:
+        chunk = list(step_qs[offset:offset + chunk_size])
+        if not chunk:
+            break
+        offset += len(chunk)
+
+        for step in chunk:
+            if internal_reasoning.is_internal_reasoning_description(step.description):
+                if reasoning_seen >= reasoning_limit:
+                    continue
+                reasoning_seen += 1
+            filtered_steps.append(step)
+            if len(filtered_steps) >= visible_limit:
+                break
+
+        if len(chunk) < chunk_size:
+            break
+
+    return filtered_steps
 
 
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
@@ -5242,13 +5289,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     comms_cutoff = comm_snap.snapshot_until if comm_snap else epoch
 
     # ---- collect recent items ---------------------------------------- #
-    steps = list(
-        PersistentAgentStep.objects.filter(
-            agent=agent, created_at__gt=step_cutoff
-        )
-        .select_related("tool_call", "system_step")
-        .defer("tool_call__result")
-        .order_by("-created_at")[:limit_tool_history]
+    steps = _get_recent_prompt_history_steps(
+        agent=agent,
+        step_cutoff=step_cutoff,
+        visible_limit=limit_tool_history,
+        reasoning_limit=get_prompt_settings().internal_reasoning_history_limit,
     )
     messages = list(
         PersistentAgentMessage.objects.filter(
@@ -5356,14 +5401,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
             description_text = s.description or "No description"
-            is_internal_reasoning = description_text.startswith(INTERNAL_REASONING_PREFIX)
+            is_internal_reasoning = internal_reasoning.is_internal_reasoning_description(description_text)
             if is_internal_reasoning:
-                raw_reasoning = description_text[len(INTERNAL_REASONING_PREFIX):]
+                raw_reasoning = internal_reasoning.strip_internal_reasoning_prefix(description_text)
                 shrunk_reasoning = _shrink_internal_reasoning(raw_reasoning)
                 description_text = (
-                    f"{INTERNAL_REASONING_PREFIX} {shrunk_reasoning}"
+                    f"{internal_reasoning.INTERNAL_REASONING_PREFIX} {shrunk_reasoning}"
                     if shrunk_reasoning
-                    else INTERNAL_REASONING_PREFIX
+                    else internal_reasoning.INTERNAL_REASONING_PREFIX
                 )
             components = {
                 "description": f"[{s.created_at.isoformat()}] {description_text}"

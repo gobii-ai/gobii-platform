@@ -26,6 +26,7 @@ DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT = 60
 DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT = DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT
 DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT = DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT
 DEFAULT_BROWSER_TASK_UNIFIED_HISTORY_LIMIT = 20
+DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT = 3
 DEFAULT_STANDARD_ENABLED_TOOL_LIMIT = 40
 DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT = 40
 DEFAULT_MAX_ENABLED_TOOL_LIMIT = 40
@@ -34,7 +35,7 @@ DEFAULT_ULTRA_MAX_ENABLED_TOOL_LIMIT = DEFAULT_MAX_ENABLED_TOOL_LIMIT
 DEFAULT_UNIFIED_HISTORY_LIMIT = getattr(settings, "PA_RAW_MSG_LIMIT", 20) + getattr(settings, "PA_RAW_STEP_LIMIT", 100)
 DEFAULT_UNIFIED_HISTORY_HYSTERESIS = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
 
-_CACHE_KEY = "prompt_settings:v5"
+_CACHE_KEY = "prompt_settings:v6"
 _CACHE_TTL_SECONDS = 300
 
 
@@ -56,6 +57,7 @@ class PromptSettings:
     ultra_tool_call_history_limit: int
     ultra_max_tool_call_history_limit: int
     browser_task_unified_history_limit: int
+    internal_reasoning_history_limit: int
     standard_enabled_tool_limit: int
     premium_enabled_tool_limit: int
     max_enabled_tool_limit: int
@@ -91,6 +93,7 @@ def _serialise(config) -> dict:
         "ultra_tool_call_history_limit": config.ultra_tool_call_history_limit,
         "ultra_max_tool_call_history_limit": config.ultra_max_tool_call_history_limit,
         "browser_task_unified_history_limit": config.browser_task_unified_history_limit,
+        "internal_reasoning_history_limit": config.internal_reasoning_history_limit,
         "standard_enabled_tool_limit": config.standard_enabled_tool_limit,
         "premium_enabled_tool_limit": config.premium_enabled_tool_limit,
         "max_enabled_tool_limit": config.max_enabled_tool_limit,
@@ -140,6 +143,7 @@ def get_prompt_settings() -> PromptSettings:
             ultra_tool_call_history_limit=DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT,
             ultra_max_tool_call_history_limit=DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
             browser_task_unified_history_limit=DEFAULT_BROWSER_TASK_UNIFIED_HISTORY_LIMIT,
+            internal_reasoning_history_limit=DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT,
             standard_enabled_tool_limit=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
             premium_enabled_tool_limit=DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
             max_enabled_tool_limit=DEFAULT_MAX_ENABLED_TOOL_LIMIT,
