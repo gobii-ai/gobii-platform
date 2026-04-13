@@ -93,6 +93,11 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving", agent_addons)
 
         self.assertIn(f"/console/agents/{self.agent.id}/", agent_settings)
+        self.assertIn("The agent settings UI is a single page.", agent_settings)
+        self.assertIn("Do not invent subpage links", agent_settings)
+        self.assertIn("Only use explicitly listed URLs", agent_settings)
+        self.assertIn(f"/console/agents/{self.agent.id}/secrets/", agent_settings)
+        self.assertIn(f"/console/agents/{self.agent.id}/email/", agent_settings)
         self.assertIn("Agent email settings", email_settings)
         self.assertIn("SMTP (outbound)", email_settings)
         self.assertIn("IMAP (inbound)", email_settings)
