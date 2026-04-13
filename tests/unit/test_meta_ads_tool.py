@@ -1,11 +1,14 @@
 import os
-from contextlib import ExitStack
+import sqlite3
+import tempfile
+from contextlib import ExitStack, contextmanager
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
 from api.agent.tools.meta_ads import execute_meta_ads
+from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tools.tool_manager import enable_tools, execute_enabled_tool
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentEnabledTool, SystemSkillProfile
 from api.services.system_skill_profiles import set_default_system_skill_profile, upsert_system_skill_profile_values
@@ -68,6 +71,17 @@ def _mock_graph_response(*, payload: dict, status_code: int = 200, headers: dict
     response.json.return_value = payload
     response.text = ""
     return response
+
+
+@contextmanager
+def _agent_sqlite_test_db():
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        db_path = os.path.join(tmp_dir, "state.db")
+        token = set_sqlite_db_path(db_path)
+        try:
+            yield db_path
+        finally:
+            reset_sqlite_db_path(token)
 
 
 @tag("batch_mcp_tools")
@@ -178,12 +192,23 @@ class MetaAdsToolTests(TestCase):
             headers={"x-app-usage": '{"call_count":1}'},
         )
 
-        result = execute_meta_ads(self.agent, {"operation": "accounts"})
+        with _agent_sqlite_test_db() as db_path:
+            result = execute_meta_ads(self.agent, {"operation": "accounts"})
 
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["profile_key"], "default")
-        self.assertEqual(result["rows"][0]["id"], "act_123")
-        self.assertIn("x-app-usage", result["rate_limit_headers"])
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["profile_key"], "default")
+            self.assertEqual(result["rows_synced"], 1)
+            self.assertEqual(result["destination_table"], "meta_ads_raw")
+            self.assertIn("x-app-usage", result["rate_limit_headers"])
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    "SELECT operation, entity_level, entity_id, entity_name FROM meta_ads_raw"
+                ).fetchone()
+                self.assertEqual(row, ("accounts", "account", "act_123", "Main Account"))
+            finally:
+                conn.close()
 
         mock_get.assert_called_once()
         url = mock_get.call_args.args[0]
@@ -250,24 +275,106 @@ class MetaAdsToolTests(TestCase):
             headers={"x-fb-ads-insights-throttle": '{"app_id_util_pct":10}'},
         )
 
-        result = execute_meta_ads(
-            self.agent,
-            {"operation": "performance_snapshot", "level": "campaign", "date_preset": "last_7d"},
+        with _agent_sqlite_test_db() as db_path:
+            result = execute_meta_ads(
+                self.agent,
+                {"operation": "performance_snapshot", "level": "campaign", "date_preset": "last_7d"},
+            )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["destination_table"], "meta_ads_performance")
+            self.assertEqual(result["rows_synced"], 1)
+            self.assertEqual(result["summary"]["purchase_count"], 3.0)
+            self.assertEqual(result["summary"]["lead_count"], 4.0)
+            self.assertEqual(result["summary"]["purchase_value"], 450.0)
+            self.assertEqual(result["summary"]["cost_per_purchase"], 41.8333)
+            self.assertEqual(result["summary"]["cost_per_lead"], 31.375)
+            self.assertNotIn("normalized_rows", result)
+            self.assertIn("sqlite_query_hints", result)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT entity_id, purchase_count, purchase_value, blended_roas, cost_per_purchase
+                    FROM meta_ads_performance
+                    """
+                ).fetchone()
+                self.assertEqual(row, ("cmp_1", 3.0, 450.0, 3.59, 41.8333))
+            finally:
+                conn.close()
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_performance_snapshot_allows_custom_destination_table(self, mock_get):
+        _create_meta_profile(user=self.user, profile_key="default", is_default=True)
+        mock_get.return_value = _mock_graph_response(
+            payload={
+                "data": [
+                    {
+                        "campaign_id": "cmp_1",
+                        "campaign_name": "Prospecting",
+                        "impressions": "1000",
+                        "reach": "700",
+                        "spend": "125.50",
+                        "clicks": "25",
+                        "date_start": "2026-04-01",
+                        "date_stop": "2026-04-07",
+                    }
+                ]
+            }
         )
 
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["summary"]["purchase_count"], 3.0)
-        self.assertEqual(result["summary"]["lead_count"], 4.0)
-        self.assertEqual(result["summary"]["purchase_value"], 450.0)
-        self.assertEqual(result["summary"]["cost_per_purchase"], 41.8333)
-        self.assertEqual(result["summary"]["cost_per_lead"], 31.375)
-        row = result["normalized_rows"][0]
-        self.assertEqual(row["entity_id"], "cmp_1")
-        self.assertEqual(row["standard_actions"]["purchase"], 3.0)
-        self.assertEqual(row["standard_purchase_roas"]["purchase"], 3.59)
-        self.assertEqual(row["derived_metrics"]["blended_roas"], 3.59)
-        self.assertEqual(row["derived_metrics"]["cost_per_purchase"], 41.8333)
-        self.assertIn("sqlite_batch", result["sqlite_recommendation"])
+        with _agent_sqlite_test_db() as db_path:
+            result = execute_meta_ads(
+                self.agent,
+                {
+                    "operation": "performance_snapshot",
+                    "destination_table": "marketing_meta_daily",
+                },
+            )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["destination_table"], "marketing_meta_daily")
+            conn = sqlite3.connect(db_path)
+            try:
+                synced = conn.execute("SELECT COUNT(*) FROM marketing_meta_daily").fetchone()[0]
+                self.assertEqual(synced, 1)
+            finally:
+                conn.close()
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_rejects_unsafe_destination_table_name(self, mock_get):
+        _create_meta_profile(user=self.user, profile_key="default", is_default=True)
+        mock_get.return_value = _mock_graph_response(payload={"data": []})
+
+        with _agent_sqlite_test_db():
+            result = execute_meta_ads(
+                self.agent,
+                {
+                    "operation": "performance_snapshot",
+                    "destination_table": "meta_ads;DROP TABLE users",
+                },
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Destination table name", result["message"])
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_rejects_reserved_destination_table_name(self, mock_get):
+        _create_meta_profile(user=self.user, profile_key="default", is_default=True)
+        mock_get.return_value = _mock_graph_response(payload={"data": []})
+
+        with _agent_sqlite_test_db():
+            result = execute_meta_ads(
+                self.agent,
+                {
+                    "operation": "accounts",
+                    "destination_table": "meta_ads_performance",
+                },
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("reserved", result["message"].lower())
 
     @patch("api.agent.tools.meta_ads.requests.get")
     def test_execute_meta_ads_conversion_quality_returns_quality_rows(self, mock_get):
@@ -306,15 +413,30 @@ class MetaAdsToolTests(TestCase):
             }
         )
 
-        result = execute_meta_ads(self.agent, {"operation": "conversion_quality"})
+        with _agent_sqlite_test_db() as db_path:
+            result = execute_meta_ads(self.agent, {"operation": "conversion_quality"})
 
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["dataset_id"], "pixel-123")
-        self.assertEqual(result["summary"]["event_count"], 2)
-        self.assertEqual(result["summary"]["events_with_diagnostics"], 1)
-        self.assertEqual(result["summary"]["realtime_event_count"], 1)
-        self.assertEqual(result["summary"]["avg_event_match_quality_score"], 7.0)
-        self.assertEqual(result["quality_rows"][0]["event_name"], "Purchase")
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["dataset_id"], "pixel-123")
+            self.assertEqual(result["destination_table"], "meta_ads_conversion_quality")
+            self.assertEqual(result["summary"]["event_count"], 2)
+            self.assertEqual(result["summary"]["events_with_diagnostics"], 1)
+            self.assertEqual(result["summary"]["realtime_event_count"], 1)
+            self.assertEqual(result["summary"]["avg_event_match_quality_score"], 7.0)
+            self.assertNotIn("quality_rows", result)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT event_name, event_match_quality_score, diagnostics_count, upload_frequency
+                    FROM meta_ads_conversion_quality
+                    ORDER BY event_name ASC
+                    """
+                ).fetchone()
+                self.assertEqual(row, ("Lead", 6.5, 0, "hourly"))
+            finally:
+                conn.close()
 
     @patch("api.agent.tools.meta_ads.requests.get")
     def test_execute_enabled_tool_records_usage_for_hidden_meta_tool(self, mock_get):

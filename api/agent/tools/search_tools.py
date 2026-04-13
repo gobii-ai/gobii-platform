@@ -38,7 +38,6 @@ from .tool_manager import (
     enable_tools,
     CREATE_IMAGE_TOOL_NAME,
     HTTP_REQUEST_TOOL_NAME,
-    SQLITE_TOOL_NAME,
     get_available_builtin_tool_entries,
     get_available_custom_tool_entries,
     get_enabled_tool_limit,
@@ -722,11 +721,11 @@ def _search_with_llm(
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
-    if SQLITE_TOOL_NAME in available_names:
-        system_prompt += (
-            "\n- Think in small composable primitives. If the user needs recurring monitoring, comparisons over time, "
-            "or anomaly detection, prefer pairing data-source tools or skills with sqlite_batch instead of expecting one tool to do everything.\n"
-        )
+    system_prompt += (
+        "\n- Think in small composable primitives. If the user needs recurring monitoring, comparisons over time, "
+        "or anomaly detection, prefer tools or skills that sync data directly into SQLite. Then use sqlite_batch "
+        "to query the synced tables instead of shuttling rows through context.\n"
+    )
     if global_skill_lines:
         system_prompt += (
             "\n- Only include skill names that appear in Available global skills.\n"
