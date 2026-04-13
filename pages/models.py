@@ -1,6 +1,7 @@
 from django.db import models
 from django.utils import timezone
 from django.db.models import F
+from django.conf import settings
 import random
 import string
 
@@ -90,3 +91,93 @@ class MiniModeCampaignPattern(models.Model):
 
     def __str__(self):
         return self.pattern
+
+
+class ImmutableCallToActionSlugError(ValueError):
+    """Raised when attempting to change a CTA slug after creation."""
+
+
+class CallToAction(models.Model):
+    """Stable CTA identity whose text evolves through append-only versions."""
+
+    slug = models.SlugField(
+        max_length=128,
+        unique=True,
+        help_text="Stable identifier used in templates, for example 'cta_homepage_main'.",
+    )
+    description = models.TextField(
+        help_text="Human-readable explanation of where this CTA is used.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("slug",)
+        verbose_name = "CTA"
+        verbose_name_plural = "CTAs"
+
+    def __str__(self):
+        return self.slug
+
+    @property
+    def current_version(self):
+        if not self.pk:
+            return None
+        return self.versions.first()
+
+    @property
+    def current_text(self) -> str:
+        version = self.current_version
+        return version.text if version else ""
+
+    def add_version(self, text: str, *, created_by=None):
+        normalized_text = (text or "").strip()
+        if not normalized_text:
+            raise ValueError("CTA text cannot be blank.")
+        if not self.pk:
+            raise ValueError("CTA must be saved before adding versions.")
+        return self.versions.create(text=normalized_text, created_by=created_by)
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            existing_slug = type(self).objects.filter(pk=self.pk).values_list("slug", flat=True).first()
+            if existing_slug and existing_slug != self.slug:
+                raise ImmutableCallToActionSlugError("CTA slugs are immutable once created.")
+        super().save(*args, **kwargs)
+
+
+class CallToActionVersion(models.Model):
+    """A historical CTA text revision. The newest row is the active version."""
+
+    cta = models.ForeignKey(
+        CallToAction,
+        on_delete=models.CASCADE,
+        related_name="versions",
+    )
+    text = models.TextField(
+        help_text="The customer-facing CTA text rendered in templates.",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_cta_versions",
+        help_text="Admin user who created this CTA version.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-id")
+        verbose_name = "CTA version"
+        verbose_name_plural = "CTA versions"
+
+    def __str__(self):
+        timestamp = self.created_at.isoformat() if self.created_at else "unsaved"
+        return f"{self.cta.slug} @ {timestamp}"
+
+    def save(self, *args, **kwargs):
+        self.text = (self.text or "").strip()
+        if not self.text:
+            raise ValueError("CTA version text cannot be blank.")
+        super().save(*args, **kwargs)

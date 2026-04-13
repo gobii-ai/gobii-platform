@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load vite_tags %}
+{% load cta_tags %}
 
 {% block title %}Gobii - Pre-qualification{% endblock %}
 
@@ -159,7 +160,7 @@
             <div class="flex flex-col sm:flex-row sm:items-center gap-4">
               <button type="submit" data-prequal-submit
                 class="inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-sm font-medium text-white hover:bg-blue-700 transition">
-                Request a call
+                {% cta_text "cta_enterprise_request_call" fallback="Request a call" %}
               </button>
               <p class="text-xs text-slate-500">We respond within 1-2 business days.</p>
             </div>
