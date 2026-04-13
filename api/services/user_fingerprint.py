@@ -151,6 +151,22 @@ def is_fingerprint_server_api_configured() -> bool:
     return bool(settings.FINGERPRINT_SERVER_API_KEY.strip())
 
 
+def _fingerprint_processing_stale_after() -> dt.timedelta:
+    stale_after_seconds = max(int(settings.FINGERPRINT_SERVER_PROCESSING_STALE_SECONDS), 60)
+    return dt.timedelta(seconds=stale_after_seconds)
+
+
+def _is_processing_visit_stale(visit: UserFingerprintVisit) -> bool:
+    if visit.fetch_status != UserFingerprintVisitFetchStatusChoices.PROCESSING:
+        return False
+
+    last_attempt_at = visit.last_fetch_attempt_at or visit.updated_at or visit.created_at
+    if last_attempt_at is None:
+        return True
+
+    return last_attempt_at <= timezone.now() - _fingerprint_processing_stale_after()
+
+
 def _enqueue_fingerprint_visit_refresh(visit_id: int) -> None:
     from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
 
@@ -198,7 +214,7 @@ def stage_user_fingerprint_visit(
         elif visit.fetch_status in {
             UserFingerprintVisitFetchStatusChoices.FAILED,
             UserFingerprintVisitFetchStatusChoices.NOT_CONFIGURED,
-        }:
+        } or _is_processing_visit_stale(visit):
             updates["fetch_status"] = UserFingerprintVisitFetchStatusChoices.PENDING
             updates["error_message"] = ""
             should_enqueue = True

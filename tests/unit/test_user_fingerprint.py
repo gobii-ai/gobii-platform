@@ -1,8 +1,10 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase, override_settings, tag
+from django.utils import timezone
 
 from api.models import UserFingerprintVisit, UserFingerprintVisitFetchStatusChoices
 from api.services.trial_abuse import (
@@ -116,6 +118,43 @@ class UserFingerprintVisitTests(TestCase):
 
     @override_settings(
         FINGERPRINT_SERVER_API_KEY="fp_secret",
+        FINGERPRINT_SERVER_PROCESSING_STALE_SECONDS=60,
+    )
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")
+    def test_capture_request_identity_signals_requeues_stale_processing_visit(self, delay_mock):
+        user = self._create_user("fingerprint-stale-processing@example.com")
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PROCESSING,
+            last_fetch_attempt_at=timezone.now() - timedelta(minutes=10),
+        )
+        request = self.factory.post(
+            "/signup",
+            {
+                "ufp": "visitor-123",
+                "ufpr": "request-456",
+            },
+        )
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        request.COOKIES = {}
+
+        with self.captureOnCommitCallbacks(execute=True):
+            capture_request_identity_signals_and_attribution(
+                user,
+                request,
+                source=SIGNAL_SOURCE_SIGNUP,
+                include_fpjs=True,
+            )
+
+        visit = UserFingerprintVisit.objects.get(user=user, fingerprint_event_id="request-456")
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
+        delay_mock.assert_called_once_with(visit.id)
+
+    @override_settings(
+        FINGERPRINT_SERVER_API_KEY="fp_secret",
         FINGERPRINT_SERVER_API_URL="https://api.fpjs.io",
         FINGERPRINT_SERVER_API_TIMEOUT_SECONDS=5,
     )
@@ -212,3 +251,33 @@ class UserFingerprintVisitTests(TestCase):
         self.assertEqual(visit.asn_name, "VNPT Corp")
         self.assertIsNotNone(visit.event_timestamp)
         self.assertEqual(visit.raw_payload["event_id"], payload["event_id"])
+
+    @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.retry")
+    @patch("api.tasks.fingerprint_tasks.refresh_user_fingerprint_visit", side_effect=OverflowError("bad timestamp"))
+    def test_fetch_user_fingerprint_visit_task_resets_unexpected_error_to_pending(
+        self,
+        _refresh_mock,
+        retry_mock,
+    ):
+        user = self._create_user("fingerprint-unexpected-error@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        )
+        retry_mock.side_effect = RuntimeError("retry scheduled")
+
+        with self.assertRaisesRegex(RuntimeError, "retry scheduled"):
+            fetch_user_fingerprint_visit_task(visit.id)
+
+        visit.refresh_from_db()
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
+        self.assertEqual(visit.error_message, "bad timestamp")
+        retry_mock.assert_called_once()
+
+    def test_fetch_user_fingerprint_visit_task_is_late_acked(self):
+        self.assertTrue(fetch_user_fingerprint_visit_task.acks_late)
+        self.assertTrue(fetch_user_fingerprint_visit_task.reject_on_worker_lost)

@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
     ignore_result=True,
     max_retries=4,
     name="api.fetch_user_fingerprint_visit",
+    acks_late=True,
+    reject_on_worker_lost=True,
 )
 def fetch_user_fingerprint_visit_task(self, visit_id: int) -> None:
     visit = UserFingerprintVisit.objects.filter(pk=visit_id).first()
@@ -74,3 +76,20 @@ def fetch_user_fingerprint_visit_task(self, visit_id: int) -> None:
             error_message=str(exc),
         )
         logger.warning("Fingerprint visit %s failed permanently: %s", visit.pk, exc)
+    except Exception as exc:
+        if self.request.retries >= self.max_retries:
+            UserFingerprintVisit.objects.filter(pk=visit.pk).update(
+                fetch_status=UserFingerprintVisitFetchStatusChoices.FAILED,
+                error_message=str(exc),
+            )
+            logger.exception("Fingerprint visit %s failed with an unexpected error", visit.pk)
+            raise
+
+        # Keep unexpected task-boundary failures visible while making the row
+        # recoverable. This prevents visits from staying wedged in processing.
+        UserFingerprintVisit.objects.filter(pk=visit.pk).update(
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+            error_message=str(exc),
+        )
+        logger.exception("Fingerprint visit %s hit an unexpected retryable error", visit.pk)
+        raise self.retry(exc=exc, countdown=min(300, 15 * (2 ** self.request.retries)))
