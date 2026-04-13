@@ -228,45 +228,39 @@ def _get_recent_prompt_history_steps(
     visible_limit: int,
     reasoning_limit: int,
 ) -> List[PersistentAgentStep]:
-    """Fetch enough recent steps to fill the visible window after reasoning capping."""
+    """Return recent steps with bounded reasoning history and deterministic ordering."""
 
     if visible_limit <= 0:
         return []
 
-    step_qs = (
+    reasoning_prefix = internal_reasoning.INTERNAL_REASONING_PREFIX
+    query_kwargs = {
+        "agent": agent,
+        "created_at__gt": step_cutoff,
+    }
+    base_qs = (
         PersistentAgentStep.objects.filter(
-            agent=agent,
-            created_at__gt=step_cutoff,
+            **query_kwargs,
         )
         .select_related("tool_call", "system_step")
         .defer("tool_call__result")
-        .order_by("-created_at")
+        .order_by("-created_at", "-id")
     )
 
-    filtered_steps: List[PersistentAgentStep] = []
-    reasoning_seen = 0
-    chunk_size = max(visible_limit, reasoning_limit + 1, 10)
-    offset = 0
+    non_reasoning_steps = list(
+        base_qs.exclude(description__startswith=reasoning_prefix)[:visible_limit]
+    )
+    reasoning_steps = list(
+        base_qs.filter(description__startswith=reasoning_prefix)[
+            : min(reasoning_limit, visible_limit)
+        ]
+    )
 
-    while len(filtered_steps) < visible_limit:
-        chunk = list(step_qs[offset:offset + chunk_size])
-        if not chunk:
-            break
-        offset += len(chunk)
-
-        for step in chunk:
-            if internal_reasoning.is_internal_reasoning_description(step.description):
-                if reasoning_seen >= reasoning_limit:
-                    continue
-                reasoning_seen += 1
-            filtered_steps.append(step)
-            if len(filtered_steps) >= visible_limit:
-                break
-
-        if len(chunk) < chunk_size:
-            break
-
-    return filtered_steps
+    return sorted(
+        non_reasoning_steps + reasoning_steps,
+        key=lambda step: (step.created_at, str(step.id)),
+        reverse=True,
+    )[:visible_limit]
 
 
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
@@ -4580,7 +4574,7 @@ def _get_system_instruction(
         "```\n"
 
         "For MCP tools (Google Sheets, Slack, etc.), just call the tool. If it needs auth, it'll return a connect link—share that with the user and wait. "
-        "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations. "
+        "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
         "When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
         "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
@@ -5405,11 +5399,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             if is_internal_reasoning:
                 raw_reasoning = internal_reasoning.strip_internal_reasoning_prefix(description_text)
                 shrunk_reasoning = _shrink_internal_reasoning(raw_reasoning)
-                description_text = (
-                    f"{internal_reasoning.INTERNAL_REASONING_PREFIX} {shrunk_reasoning}"
-                    if shrunk_reasoning
-                    else internal_reasoning.INTERNAL_REASONING_PREFIX
-                )
+                description_text = internal_reasoning.build_internal_reasoning_description(shrunk_reasoning)
             components = {
                 "description": f"[{s.created_at.isoformat()}] {description_text}"
             }
