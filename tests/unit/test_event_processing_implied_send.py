@@ -8,7 +8,8 @@ from django.test import TestCase, tag
 from django.utils import timezone
 
 from api.agent.core import event_processing as ep
-from api.agent.core.prompt_context import INTERNAL_REASONING_PREFIX, _get_implied_send_context
+from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
+from api.agent.core.prompt_context import _get_implied_send_context
 from api.models import (
     BrowserUseAgent,
     CommsChannel,

@@ -43,6 +43,7 @@ from ...models import (
 import logging
 from opentelemetry import trace
 
+from . import internal_reasoning
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
@@ -215,14 +216,16 @@ def ensure_steps_compacted(
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work: fetch & summarise *outside* the lock.
     raw_steps_struct = _fetch_and_structurise_steps(agent, lower_bound, snapshot_until)
-
-    try:
-        with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
-            summarise_span.set_attribute("steps.count", len(raw_steps_struct))
-            new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
-    except Exception:  # pragma: no cover – downstream can retry
-        logger.exception("step summarise_fn failed; skipping compaction for agent %s", agent.id)
-        return
+    if not raw_steps_struct:
+        new_summary = previous_summary
+    else:
+        try:
+            with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
+                summarise_span.set_attribute("steps.count", len(raw_steps_struct))
+                new_summary = summarise_fn(previous_summary, raw_steps_struct, safety_identifier)
+        except Exception:  # pragma: no cover – downstream can retry
+            logger.exception("step summarise_fn failed; skipping compaction for agent %s", agent.id)
+            return
 
     # ------------------------------ Phase 3 ------------------------------ #
     # Persist snapshot under lock if no-one beat us.
@@ -278,6 +281,7 @@ def _fetch_and_structurise_steps(
             created_at__gt=lower_exclusive,
             created_at__lte=upper_inclusive,
         )
+        .exclude(description__startswith=internal_reasoning.INTERNAL_REASONING_PREFIX)
         .select_related("tool_call", "cron_trigger", "system_step")
         # Defer the potentially huge text blob – we'll bulk-fetch it later.
         .defer("tool_call__result")
@@ -385,6 +389,9 @@ def _default_summarise(previous: str, steps: Sequence[StepData], safety_identifi
     "--- Recent Steps ---" header.  Used as a fallback when LLM summarisation
     fails and for deterministic behavior in tests.
     """
+
+    if not steps:
+        return previous
 
     # Split by type for deterministic output useful in tests.
     recent_lines: List[str] = ["--- Recent Steps (%d) ---" % len(steps)]

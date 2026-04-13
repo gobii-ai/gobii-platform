@@ -93,6 +93,11 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving", agent_addons)
 
         self.assertIn(f"/console/agents/{self.agent.id}/", agent_settings)
+        self.assertIn("The agent settings UI is a single page.", agent_settings)
+        self.assertIn("Do not invent subpage links", agent_settings)
+        self.assertIn("Only use explicitly listed URLs", agent_settings)
+        self.assertIn(f"/console/agents/{self.agent.id}/secrets/", agent_settings)
+        self.assertIn(f"/console/agents/{self.agent.id}/email/", agent_settings)
         self.assertIn("Agent email settings", email_settings)
         self.assertIn("SMTP (outbound)", email_settings)
         self.assertIn("IMAP (inbound)", email_settings)
@@ -108,6 +113,8 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("login credentials for `spawn_web_task`", contents)
         self.assertIn("`secret_type='env_var'`", contents)
         self.assertIn("`os.environ`", contents)
+        self.assertIn("Avoid 2FA/MFA unless the user explicitly asks for it", contents)
+        self.assertIn("those flows may hit system limitations", contents)
 
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_biases_toward_custom_tools_for_bulk_work(self, _mock_sandbox):

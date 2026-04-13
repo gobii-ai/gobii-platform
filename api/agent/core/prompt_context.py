@@ -83,6 +83,7 @@ from .llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
 )
+from . import internal_reasoning
 from .promptree import Prompt, hmt
 from .step_compaction import llm_summarise_steps
 
@@ -125,7 +126,6 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
-INTERNAL_REASONING_PREFIX = "Internal reasoning:"
 # Keep internal reasoning previews short in unified history; shrink with HMT instead of dropping early context.
 INTERNAL_REASONING_DISPLAY_LIMIT_BYTES = 3000
 KANBAN_DONE_SUMMARY_LIMIT = 5
@@ -176,7 +176,6 @@ __all__ = [
     "build_prompt_context",
     "add_budget_awareness_sections",
     "get_agent_tools",
-    "INTERNAL_REASONING_PREFIX",
 ]
 
 _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
@@ -220,6 +219,48 @@ def browser_task_unified_history_limit() -> int:
     """Return max completed browser tasks included in unified history."""
 
     return get_prompt_settings().browser_task_unified_history_limit
+
+
+def _get_recent_prompt_history_steps(
+    *,
+    agent: PersistentAgent,
+    step_cutoff: datetime,
+    visible_limit: int,
+    reasoning_limit: int,
+) -> List[PersistentAgentStep]:
+    """Return recent steps with bounded reasoning history and deterministic ordering."""
+
+    if visible_limit <= 0:
+        return []
+
+    reasoning_prefix = internal_reasoning.INTERNAL_REASONING_PREFIX
+    query_kwargs = {
+        "agent": agent,
+        "created_at__gt": step_cutoff,
+    }
+    base_qs = (
+        PersistentAgentStep.objects.filter(
+            **query_kwargs,
+        )
+        .select_related("tool_call", "system_step")
+        .defer("tool_call__result")
+        .order_by("-created_at", "-id")
+    )
+
+    non_reasoning_steps = list(
+        base_qs.exclude(description__startswith=reasoning_prefix)[:visible_limit]
+    )
+    reasoning_steps = list(
+        base_qs.filter(description__startswith=reasoning_prefix)[
+            : min(reasoning_limit, visible_limit)
+        ]
+    )
+
+    return sorted(
+        non_reasoning_steps + reasoning_steps,
+        key=lambda step: (step.created_at, str(step.id)),
+        reverse=True,
+    )[:visible_limit]
 
 
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
@@ -1902,17 +1943,25 @@ def _build_agent_addons_section() -> str:
 def _build_agent_settings_section(agent: PersistentAgent, *, plan_id: str | None = None) -> str:
     """Return a bullet-style list of configurable settings for the agent."""
     agent_config_url = _build_console_url("agent_detail", pk=agent.id)
+    secrets_url = _build_console_url("agent_secrets", pk=agent.id)
+    email_settings_url = _build_console_url("agent_email_settings", pk=agent.id)
     contact_requests_url = _build_console_url("agent_contact_requests", pk=agent.id)
     settings_lines: list[str] = [
         "Agent name.",
-        "Agent secrets: usernames and passwords the agent can use to authenticate to services.",
+        f"Agent secrets: usernames and passwords the agent can use to authenticate to services. Manage secrets at {secrets_url}.",
         "Active status: Activate or deactivate this agent.",
         ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
         " or if they want to remove the task credit limit."),
         "Dedicated IP assignment.",
-        "Custom email settings.",
+        f"Custom email settings: manage at {email_settings_url}.",
         "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
-        f"Contact requests: review pending requests at {contact_requests_url}.",
+        (
+            "Route note: The agent settings UI is a single page. Do not invent subpage links for secrets, "
+            "webhooks, MCP servers, peer links, intelligence, task credits, or other settings sections. "
+            "Only use explicitly listed URLs such as secrets, contact requests, or email settings; otherwise send the "
+            "main agent settings page."
+        ),
+        f"Contact requests: user can view pending requests at {contact_requests_url}.",
         "MCP servers to connect the agent to external services.",
         "Peer links to communicate with other agents.",
         "Inbound webhooks to let external systems trigger the agent, and outbound webhooks to send data to external services.",
@@ -2160,7 +2209,8 @@ def build_prompt_context(
         (
             "Request credentials only when you'll use them immediately: use domain-scoped credentials for `http_request`, "
             "login credentials for `spawn_web_task`, and `secret_type='env_var'` for custom tools, `python_exec`, `run_command`, "
-            "or MCP servers that read secrets from `os.environ`."
+            "or MCP servers that read secrets from `os.environ`. Avoid 2FA/MFA unless the user explicitly asks for it, "
+            "because those flows may hit system limitations; prefer non-2FA paths when available."
         ),
         weight=1,
         non_shrinkable=True
@@ -4524,7 +4574,8 @@ def _get_system_instruction(
         "```\n"
 
         "For MCP tools (Google Sheets, Slack, etc.), just call the tool. If it needs auth, it'll return a connect link—share that with the user and wait. "
-        "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
+        "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
+        "When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
         "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
         "Use it before broad web search when the task may map to a known site/platform/domain tool, and whenever you're unsure which tool family fits best. "
@@ -5232,13 +5283,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     comms_cutoff = comm_snap.snapshot_until if comm_snap else epoch
 
     # ---- collect recent items ---------------------------------------- #
-    steps = list(
-        PersistentAgentStep.objects.filter(
-            agent=agent, created_at__gt=step_cutoff
-        )
-        .select_related("tool_call", "system_step")
-        .defer("tool_call__result")
-        .order_by("-created_at")[:limit_tool_history]
+    steps = _get_recent_prompt_history_steps(
+        agent=agent,
+        step_cutoff=step_cutoff,
+        visible_limit=limit_tool_history,
+        reasoning_limit=get_prompt_settings().internal_reasoning_history_limit,
     )
     messages = list(
         PersistentAgentMessage.objects.filter(
@@ -5346,15 +5395,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
             description_text = s.description or "No description"
-            is_internal_reasoning = description_text.startswith(INTERNAL_REASONING_PREFIX)
+            is_internal_reasoning = internal_reasoning.is_internal_reasoning_description(description_text)
             if is_internal_reasoning:
-                raw_reasoning = description_text[len(INTERNAL_REASONING_PREFIX):]
+                raw_reasoning = internal_reasoning.strip_internal_reasoning_prefix(description_text)
                 shrunk_reasoning = _shrink_internal_reasoning(raw_reasoning)
-                description_text = (
-                    f"{INTERNAL_REASONING_PREFIX} {shrunk_reasoning}"
-                    if shrunk_reasoning
-                    else INTERNAL_REASONING_PREFIX
-                )
+                description_text = internal_reasoning.build_internal_reasoning_description(shrunk_reasoning)
             components = {
                 "description": f"[{s.created_at.isoformat()}] {description_text}"
             }

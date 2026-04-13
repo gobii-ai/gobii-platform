@@ -35,6 +35,7 @@ from constants.plans import (
     OrganizationPlanNamesChoices,
 )
 from api.services.prompt_settings import (
+    DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT,
     DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
     DEFAULT_MAX_PROMPT_TOKEN_BUDGET,
     DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
@@ -1913,6 +1914,11 @@ class PromptConfig(models.Model):
         default=DEFAULT_BROWSER_TASK_UNIFIED_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Maximum number of completed browser tasks included in unified history.",
+    )
+    internal_reasoning_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT,
+        validators=[MinValueValidator(0)],
+        help_text="Maximum number of recent internal reasoning steps included in prompt context.",
     )
     standard_enabled_tool_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,

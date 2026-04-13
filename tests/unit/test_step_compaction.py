@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.contrib.auth import get_user_model
 from django.conf import settings
 
+from api.agent.core.internal_reasoning import build_internal_reasoning_description
 from api.agent.core.step_compaction import ensure_steps_compacted
 from api.models import (
     BrowserUseAgent,
@@ -243,6 +244,78 @@ class StepCompactionTests(TestCase):
         self.assertIn("⏰ Cron: 0 */6 * * *", snapshot.summary)  # cron trigger
         self.assertIn("⚙️  System[PROCESS_EVENTS]", snapshot.summary)  # system step
         self.assertIn("📝 Some generic operation", snapshot.summary)  # generic step
+
+    @tag("batch_step_compaction")
+    def test_summary_omits_internal_reasoning_steps(self):
+        """Internal reasoning should not be copied into compacted step summaries."""
+        base_time = self.agent.created_at
+
+        self._make_generic_step(
+            base_time + timedelta(seconds=1),
+            build_internal_reasoning_description("draft reply"),
+        )
+        self._make_tool_call_step(
+            base_time + timedelta(seconds=2),
+            "search_tools",
+            "found matches",
+        )
+        self._make_generic_step(
+            base_time + timedelta(seconds=3),
+            "Reviewed permit requirements",
+        )
+        self._make_cron_trigger_step(
+            base_time + timedelta(seconds=4),
+            "0 */6 * * *",
+        )
+        self._make_generic_step(
+            base_time + timedelta(seconds=5),
+            build_internal_reasoning_description("ask for clarification"),
+        )
+        self._make_system_step(
+            base_time + timedelta(seconds=6),
+            "PROCESS_EVENTS",
+            "processed queue",
+        )
+
+        ensure_steps_compacted(agent=self.agent)
+
+        snapshot = PersistentAgentStepSnapshot.objects.first()
+        self.assertIsNotNone(snapshot)
+        self.assertNotIn("draft reply", snapshot.summary)
+        self.assertNotIn("ask for clarification", snapshot.summary)
+        self.assertIn("🔧 search_tools", snapshot.summary)
+        self.assertIn("📝 Reviewed permit requirements", snapshot.summary)
+
+    @override_settings(PA_RAW_STEP_LIMIT=3, PA_STEP_COMPACTION_TAIL=0)
+    @tag("batch_step_compaction")
+    def test_reasoning_only_compaction_preserves_existing_summary(self):
+        """A reasoning-only batch should advance the snapshot without changing its summary."""
+        base_time = self.agent.created_at
+        for idx in range(4):
+            self._make_generic_step(
+                base_time + timedelta(seconds=idx + 1),
+                f"Visible step {idx}",
+            )
+
+        ensure_steps_compacted(agent=self.agent)
+
+        first_snapshot = PersistentAgentStepSnapshot.objects.order_by("-snapshot_until").first()
+        self.assertIsNotNone(first_snapshot)
+
+        reasoning_start = base_time + timedelta(seconds=10)
+        for idx in range(4):
+            self._make_generic_step(
+                reasoning_start + timedelta(seconds=idx),
+                build_internal_reasoning_description(f"reasoning-only {idx}"),
+            )
+
+        ensure_steps_compacted(agent=self.agent)
+
+        latest_snapshot = PersistentAgentStepSnapshot.objects.order_by("-snapshot_until").first()
+        self.assertIsNotNone(latest_snapshot)
+        self.assertNotEqual(latest_snapshot.id, first_snapshot.id)
+        self.assertEqual(latest_snapshot.summary, first_snapshot.summary)
+        self.assertGreater(latest_snapshot.snapshot_until, first_snapshot.snapshot_until)
 
     def test_large_tool_result_truncation(self):
         """Test that large tool results are properly truncated."""

@@ -35,6 +35,7 @@ from api.agent.core.processing_flags import (
     set_processing_stop_requested,
     set_processing_queued_flag,
 )
+from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
 from api.agent.core.prompt_context import (
     get_agent_tools,
     get_prompt_token_budget,
@@ -77,7 +78,7 @@ from api.models import (
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from api.agent.core.llm_config import AgentLLMTier
-from api.services.prompt_settings import invalidate_prompt_settings_cache
+from api.services.prompt_settings import get_prompt_settings, invalidate_prompt_settings_cache
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
     get_tool_settings_for_plan,
@@ -97,6 +98,7 @@ class PromptContextBuilderTests(TestCase):
     """Unit tests for `build_prompt_context`."""
 
     def setUp(self):
+        self.addCleanup(invalidate_prompt_settings_cache)
         self.user = User.objects.create_user(
             username="prompt_tester@example.com",
             email="prompt_tester@example.com",
@@ -1080,6 +1082,80 @@ class PromptContextBuilderTests(TestCase):
         content = user_message['content']
         self.assertIn("_tool_call>", content)
         self.assertIn("<cost>1.234 credits</cost>", content)
+
+    def test_prompt_context_limits_internal_reasoning_steps(self):
+        """Unified history should keep only the newest configured reasoning steps."""
+        base_time = timezone.now()
+        descriptions = [
+            f"{INTERNAL_REASONING_PREFIX} reasoning one",
+            f"{INTERNAL_REASONING_PREFIX} reasoning two",
+            "Follow up with the user",
+            f"{INTERNAL_REASONING_PREFIX} reasoning three",
+            f"{INTERNAL_REASONING_PREFIX} reasoning four",
+        ]
+
+        for idx, description in enumerate(descriptions):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description=description,
+            )
+            PersistentAgentStep.objects.filter(pk=step.pk).update(
+                created_at=base_time + timedelta(seconds=idx)
+            )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertNotIn("reasoning one", content)
+        self.assertIn("reasoning two", content)
+        self.assertIn("reasoning three", content)
+        self.assertIn("reasoning four", content)
+        self.assertIn("Follow up with the user", content)
+
+    def test_prompt_context_overfetches_past_filtered_reasoning_steps(self):
+        """Hidden reasoning-only slices should not crowd out older visible steps."""
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.standard_tool_call_history_limit = 5
+        config.standard_unified_history_limit = 5
+        config.standard_unified_history_hysteresis = 2
+        config.internal_reasoning_history_limit = 0
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        base_time = timezone.now()
+        crowding_reasoning_count = 12
+        for idx in range(crowding_reasoning_count):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description=f"{INTERNAL_REASONING_PREFIX} hidden reasoning {idx}",
+            )
+            PersistentAgentStep.objects.filter(pk=step.pk).update(
+                created_at=base_time + timedelta(seconds=idx + 1)
+            )
+
+        visible_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Older visible step",
+        )
+        PersistentAgentStep.objects.filter(pk=visible_step.pk).update(
+            created_at=base_time
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("Older visible step", content)
+        self.assertNotIn("hidden reasoning", content)
 
     def test_mcp_servers_listed_in_prompt(self):
         """Accessible MCP servers should be enumerated in the prompt context."""
@@ -2891,6 +2967,17 @@ class PromptConfigFunctionTests(TestCase):
 
         self.assertEqual(browser_task_unified_history_limit(), 12)
 
+    def test_internal_reasoning_history_limit_setting(self):
+        invalidate_prompt_settings_cache()
+        self.assertEqual(get_prompt_settings().internal_reasoning_history_limit, 3)
+
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.internal_reasoning_history_limit = 7
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        self.assertEqual(get_prompt_settings().internal_reasoning_history_limit, 7)
+
     def test_tool_search_auto_enable_apps_setting(self):
         config, _ = ToolConfig.objects.get_or_create(plan_name=PlanNamesChoices.FREE)
         config.tool_search_auto_enable_apps = False
@@ -2903,6 +2990,7 @@ class PromptConfigFunctionTests(TestCase):
         admin_view = PromptConfigAdmin(PromptConfig, django_admin.site)
 
         self.assertIn("browser_task_unified_history_limit", admin_view.list_display)
+        self.assertIn("internal_reasoning_history_limit", admin_view.list_display)
 
         unified_fields = next(
             fields["fields"]
@@ -2910,6 +2998,7 @@ class PromptConfigFunctionTests(TestCase):
             if title == "Unified history limits"
         )
         self.assertIn("browser_task_unified_history_limit", unified_fields)
+        self.assertIn("internal_reasoning_history_limit", unified_fields)
 
     def test_tool_config_admin_exposes_tool_search_auto_enable_apps(self):
         admin_view = ToolConfigAdmin(ToolConfig, django_admin.site)
