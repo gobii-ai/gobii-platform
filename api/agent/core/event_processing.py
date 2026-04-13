@@ -105,8 +105,8 @@ from .llm_config import (
 from api.agent.events import publish_agent_event, AgentEventType
 from api.agent.comms.message_service import send_owner_daily_credit_hard_limit_notice
 from api.evals.execution import get_current_eval_routing_profile
+from .internal_reasoning import build_internal_reasoning_description
 from .prompt_context import (
-    INTERNAL_REASONING_PREFIX,
     build_prompt_context,
     get_agent_daily_credit_state,
     get_agent_tools,
@@ -4557,7 +4557,7 @@ def _run_agent_loop(
                         return
                     step_kwargs = {
                         "agent": agent,
-                        "description": f"{INTERNAL_REASONING_PREFIX} {reasoning_text}",
+                        "description": build_internal_reasoning_description(reasoning_text),
                     }
                     _attach_completion(step_kwargs)
                     step = PersistentAgentStep.objects.create(**step_kwargs)

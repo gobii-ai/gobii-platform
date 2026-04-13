@@ -43,6 +43,7 @@ from ...models import (
 import logging
 from opentelemetry import trace
 
+from . import internal_reasoning
 from .llm_config import get_summarization_llm_config
 from .llm_utils import run_completion
 from .token_usage import log_agent_completion, set_usage_span_attributes
@@ -278,6 +279,7 @@ def _fetch_and_structurise_steps(
             created_at__gt=lower_exclusive,
             created_at__lte=upper_inclusive,
         )
+        .exclude(description__startswith=internal_reasoning.INTERNAL_REASONING_PREFIX)
         .select_related("tool_call", "cron_trigger", "system_step")
         # Defer the potentially huge text blob – we'll bulk-fetch it later.
         .defer("tool_call__result")
@@ -386,6 +388,9 @@ def _default_summarise(previous: str, steps: Sequence[StepData], safety_identifi
     fails and for deterministic behavior in tests.
     """
 
+    if not steps:
+        return previous
+
     # Split by type for deterministic output useful in tests.
     recent_lines: List[str] = ["--- Recent Steps (%d) ---" % len(steps)]
     for s in steps:
@@ -420,6 +425,9 @@ def llm_summarise_steps(
         agent: Optional agent instance for config lookup.
         routing_profile: Optional LLMRoutingProfile for eval routing.
     """
+
+    if not steps:
+        return previous
 
     # Convert structured dataclasses to concise text lines.
     step_lines: list[str] = [s.to_summary_str() for s in steps]
