@@ -165,6 +165,7 @@ from ...models import (
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
+from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_MESSAGE,
     EXECUTION_PAUSE_NOTE,
@@ -4233,6 +4234,10 @@ def _run_agent_loop(
         logger.debug("Autotool heuristic check failed", exc_info=True)
 
     tools = get_agent_tools(agent)
+    owner = resolve_agent_owner(agent)
+    # Completion billing metadata is effectively scoped to this processing run,
+    # so resolve it once instead of repeating owner plan lookups each iteration.
+    billing_snapshot = get_billing_snapshot_for_owner(owner)
 
     # Track cumulative token usage across all iterations
     cumulative_token_usage = {
@@ -4517,6 +4522,7 @@ def _run_agent_loop(
                             agent=agent,
                             eval_run_id=eval_run_id,
                             thinking_content=thinking_content,
+                            **billing_snapshot,
                             **token_usage_fields,
                         )
                     return completion

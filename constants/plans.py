@@ -55,3 +55,10 @@ class UserPlanNamesChoices(models.TextChoices):
 class OrganizationPlanNamesChoices(models.TextChoices):
     FREE = PlanNames.FREE, "Free"
     ORG_TEAM = PlanNames.ORG_TEAM, "Team"
+
+
+class PlanSlugsChoices(models.TextChoices):
+    FREE = PlanSlugs.FREE, "Free"
+    STARTUP = PlanSlugs.STARTUP, "Startup"
+    SCALE = PlanSlugs.SCALE, "Scale"
+    ORG_TEAM = PlanSlugs.ORG_TEAM, "Team"

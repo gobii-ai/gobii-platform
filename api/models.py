@@ -30,6 +30,7 @@ from constants.grant_types import GrantTypeChoices
 from constants.plans import (
     PlanNames,
     PlanNamesChoices,
+    PlanSlugsChoices,
     UserPlanNamesChoices,
     OrganizationPlanNamesChoices,
 )
@@ -2341,6 +2342,18 @@ class BrowserUseAgentTask(models.Model):
         null=True,
         blank=True,
         help_text="Total USD cost (input + output).",
+    )
+    billing_plan = models.CharField(
+        max_length=32,
+        choices=PlanSlugsChoices.choices,
+        null=True,
+        blank=True,
+        help_text="Billing plan snapshot when this task row was created.",
+    )
+    billing_is_trial = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Whether the billing owner was in trial when this task row was created.",
     )
     llm_model = models.CharField(
         max_length=256,
@@ -10515,6 +10528,18 @@ class PersistentAgentCompletion(models.Model):
         null=True,
         blank=True,
         help_text="Total USD cost (input + output).",
+    )
+    billing_plan = models.CharField(
+        max_length=32,
+        choices=PlanSlugsChoices.choices,
+        null=True,
+        blank=True,
+        help_text="Billing plan snapshot when this completion row was created.",
+    )
+    billing_is_trial = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Whether the billing owner was in trial when this completion row was created.",
     )
 
     credits_cost = models.DecimalField(

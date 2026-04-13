@@ -203,6 +203,23 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.response_id, "resp_123")
         self.assertEqual(completion.request_duration_ms, 321)
 
+    @patch(
+        "api.services.billing_snapshot.get_billing_snapshot_for_owner",
+        return_value={"billing_plan": "startup", "billing_is_trial": True},
+    )
+    def test_log_agent_completion_stores_billing_snapshot(self, _mock_snapshot):
+        response = make_completion_response(provider="openai")
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TAG,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(agent=self.agent).latest("created_at")
+        self.assertEqual(completion.billing_plan, "startup")
+        self.assertTrue(completion.billing_is_trial)
+
     @patch("api.agent.core.event_processing.litellm.get_model_info")
     def test_cost_fields_populated_from_litellm(self, mock_get_model_info):
         """_completion_with_failover should include cost breakdown when pricing exists."""
