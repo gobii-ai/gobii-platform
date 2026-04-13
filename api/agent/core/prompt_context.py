@@ -1902,17 +1902,25 @@ def _build_agent_addons_section() -> str:
 def _build_agent_settings_section(agent: PersistentAgent, *, plan_id: str | None = None) -> str:
     """Return a bullet-style list of configurable settings for the agent."""
     agent_config_url = _build_console_url("agent_detail", pk=agent.id)
+    secrets_url = _build_console_url("agent_secrets", pk=agent.id)
+    email_settings_url = _build_console_url("agent_email_settings", pk=agent.id)
     contact_requests_url = _build_console_url("agent_contact_requests", pk=agent.id)
     settings_lines: list[str] = [
         "Agent name.",
-        "Agent secrets: usernames and passwords the agent can use to authenticate to services.",
+        f"Agent secrets: usernames and passwords the agent can use to authenticate to services. Manage secrets at {secrets_url}.",
         "Active status: Activate or deactivate this agent.",
         ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
         " or if they want to remove the task credit limit."),
         "Dedicated IP assignment.",
-        "Custom email settings.",
+        f"Custom email settings: manage at {email_settings_url}.",
         "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
-        f"Contact requests: review pending requests at {contact_requests_url}.",
+        (
+            "Route note: The agent settings UI is a single page. Do not invent subpage links for secrets, "
+            "webhooks, MCP servers, peer links, intelligence, task credits, or other settings sections. "
+            "Only use explicitly listed URLs such as secrets, contact requests, or email settings; otherwise send the "
+            "main agent settings page."
+        ),
+        f"Contact requests: user can view pending requests at {contact_requests_url}.",
         "MCP servers to connect the agent to external services.",
         "Peer links to communicate with other agents.",
         "Inbound webhooks to let external systems trigger the agent, and outbound webhooks to send data to external services.",
