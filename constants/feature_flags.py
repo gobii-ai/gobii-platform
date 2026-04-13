@@ -38,6 +38,9 @@ CTA_CONTINUE_AGENT_BTN = "cta_continue_agent_btn"
 # Controls whether pricing trial CTA helper text emphasizes no charge during the trial.
 CTA_NO_CHARGE_DURING_TRIAL = "cta_no_charge_during_trial"
 
+# Controls whether anonymous marketing CTA flows go to signup before continuing.
+CTA_SIGNUP_FIRST = "cta_signup_first"
+
 # Controls whether personal no-plan users get a built-in starter charter when
 # entering immersive new-agent flow without saved draft state.
 PERSONAL_AGENT_SIGNUP_STARTER_CHARTER = "personal_agent_signup_starter_charter"

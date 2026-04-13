@@ -73,6 +73,7 @@ from util.trial_eligibility import (
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
+from constants.feature_flags import CTA_SIGNUP_FIRST
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
@@ -80,6 +81,7 @@ from util.urls import (
     build_immersive_chat_url,
     normalize_return_to,
 )
+from util.waffle_flags import is_waffle_flag_active
 from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
 from api.services.pipedream_apps import (
     PipedreamCatalogError,
@@ -239,14 +241,20 @@ def _additional_tasks_price_id_for_plan(stripe_settings, plan_target: str) -> st
 
 
 
-def _login_url_with_utms(request) -> str:
-    """Append stored UTM query params to the login URL when available."""
-    base_url = resolve_url(settings.LOGIN_URL)
+def _auth_url_with_utms(base_url: str, request) -> str:
+    """Append stored UTM query params to an auth URL when available."""
     utm_qs = request.session.get("utm_querystring") or ""
     if utm_qs:
         separator = "&" if "?" in base_url else "?"
         return f"{base_url}{separator}{utm_qs}"
     return base_url
+
+
+def _cta_auth_url_with_utms(request) -> str:
+    """Resolve the auth destination for anonymous CTA flows."""
+    if is_waffle_flag_active(CTA_SIGNUP_FIRST, request, default=False):
+        return _auth_url_with_utms(reverse("account_signup"), request)
+    return _auth_url_with_utms(resolve_url(settings.LOGIN_URL), request)
 
 
 def _track_web_event_for_request(
@@ -1059,7 +1067,7 @@ class HomeAgentSpawnView(TemplateView):
             )
             response = redirect_to_login(
                 next=app_next_url,
-                login_url=_login_url_with_utms(request),
+                login_url=_cta_auth_url_with_utms(request),
             )
             charter_data = _build_oauth_charter_cookie_payload(
                 request,
@@ -1246,7 +1254,7 @@ class PretrainedWorkerHireView(View):
 
         response = redirect_to_login(
             next=app_next_url,
-            login_url=_login_url_with_utms(request),
+            login_url=_cta_auth_url_with_utms(request),
         )
 
         # Also store charter in a signed cookie for OAuth flows where session
@@ -1417,7 +1425,7 @@ class PublicTemplateHireView(View):
 
         response = redirect_to_login(
             next=app_next_url,
-            login_url=_login_url_with_utms(request),
+            login_url=_cta_auth_url_with_utms(request),
         )
 
         charter_data = _build_oauth_charter_cookie_payload(
@@ -1482,7 +1490,7 @@ class EngineeringProSignupView(View):
             )
             return redirect_to_login(
                 next=app_next_url,
-                login_url=_login_url_with_utms(request),
+                login_url=_cta_auth_url_with_utms(request),
             )
 
         next_url = reverse("proprietary:pro_checkout")
@@ -1496,7 +1504,7 @@ class EngineeringProSignupView(View):
 
         return redirect_to_login(
             next=next_url,
-            login_url=_login_url_with_utms(request),
+            login_url=_cta_auth_url_with_utms(request),
         )
 
 
@@ -1594,7 +1602,7 @@ class LandingLaunchView(View):
         else:
             response = redirect_to_login(
                 next=app_next_url,
-                login_url=_login_url_with_utms(request),
+                login_url=_cta_auth_url_with_utms(request),
             )
             charter_data = _build_oauth_charter_cookie_payload(
                 request,

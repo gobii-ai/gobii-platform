@@ -1,9 +1,12 @@
+from urllib.parse import parse_qs, urlparse
+
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from unittest.mock import patch
+from waffle.testutils import override_flag
 
 from agents.services import PretrainedWorkerTemplateService
 from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PublicProfile
@@ -207,6 +210,57 @@ class PublicTemplateViewsTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+
+    @tag("batch_public_templates")
+    def test_public_template_hire_redirects_to_signup_when_cta_signup_first_enabled(self):
+        user = get_user_model().objects.create_user(username="owner4", email="owner4@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="harbor-signal")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-signup-first",
+            public_profile=profile,
+            slug="sales-desk-signup",
+            display_name="Sales Desk",
+            tagline="Qualify inbound leads",
+            description="Screens leads and drafts follow-ups.",
+            charter="Qualify leads and draft next steps.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Sales",
+        )
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_source=template-directory"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(
+                reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+                data={
+                    "source_page": "public_template_detail",
+                    "trial_onboarding": "1",
+                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_source"), ["template-directory"])
+
         session = self.client.session
         self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
         self.assertEqual(
