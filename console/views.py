@@ -374,7 +374,7 @@ def build_llm_intelligence_props(
         can_edit = True
     disabled_reason = None
     if not can_edit and settings.GOBII_PROPRIETARY_MODE:
-        disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
+        disabled_reason = "Upgrade to adjust intelligence levels."
 
     tiers = list(IntelligenceTier.objects.order_by("credit_multiplier", "rank"))
     expected_keys = {tier.value for tier in AgentLLMTier}

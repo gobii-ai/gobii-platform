@@ -51,6 +51,7 @@ export function AgentIntelligenceSelector({
   error,
 }: IntelligenceSelectorProps) {
   const [open, setOpen] = useState(false)
+  const showUpgradeNote = Boolean(config.disabledReason)
   const options = useMemo(() => {
     const resolvedMaxRank = typeof config.maxAllowedTierRank === 'number'
       ? config.maxAllowedTierRank
@@ -145,25 +146,40 @@ export function AgentIntelligenceSelector({
                       {EMOJI_MAP[option.key] ?? ''}
                     </span>
                     <span className="composer-intelligence-option-label">{option.label}</span>
-                    <span className="composer-intelligence-option-multiplier">
-                      {option.multiplier ? `${option.multiplier}×` : ''}
-                    </span>
                     <span
-                      className={`composer-intelligence-option-lock${
-                        option.locked ? '' : ' composer-intelligence-option-lock--placeholder'
+                      className={`composer-intelligence-option-multiplier${
+                        option.locked ? ' composer-intelligence-option-multiplier--locked' : ''
                       }`}
-                      aria-hidden={option.locked ? undefined : 'true'}
                     >
-                      <Lock size={12} strokeWidth={2} />
-                      <span>Unlock</span>
+                      {option.locked ? (
+                        <Lock size={12} strokeWidth={2} />
+                      ) : option.multiplier ? `${option.multiplier}×` : ''}
                     </span>
                   </>
                 )}
               </ListBoxItem>
             ))}
           </ListBox>
-          {config.disabledReason ? (
-            <div className="composer-intelligence-note">{config.disabledReason}</div>
+          {showUpgradeNote ? (
+            <div className="composer-intelligence-note">
+              {onUpsell ? (
+                <>
+                  <button
+                    type="button"
+                    className="composer-intelligence-note-link"
+                    onClick={() => {
+                      void onUpsell()
+                      setOpen(false)
+                    }}
+                  >
+                    Upgrade
+                  </button>
+                  <span> to adjust intelligence levels.</span>
+                </>
+              ) : (
+                <span>Upgrade to adjust intelligence levels.</span>
+              )}
+            </div>
           ) : null}
           {error ? <div className="composer-intelligence-error">{error}</div> : null}
           {onOpenTaskPacks ? (

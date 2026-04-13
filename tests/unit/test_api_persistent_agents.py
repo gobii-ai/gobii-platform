@@ -216,12 +216,13 @@ class AgentEventProcessingTests(TestCase):
 
         fake_redis = MagicMock()
         fake_redis.get.return_value = None
+        fake_redis.exists.return_value = False
         fake_redis.register_script.return_value = MagicMock()
 
         with patch('api.agent.core.event_processing.TaskCreditService.get_user_task_credits_available', return_value=1), \
              patch('api.agent.core.event_processing._process_agent_events_locked') as mock_locked, \
              patch('api.agent.core.event_processing.get_redis_client', return_value=fake_redis), \
-             patch('pottery.Redlock', return_value=mock_lock):
+             patch('api.agent.core.event_processing.Redlock', return_value=mock_lock):
             process_agent_events(self.agent.id)
 
         mock_locked.assert_called_once()
@@ -236,6 +237,7 @@ class AgentEventProcessingTests(TestCase):
         # Mock Redis client and Redlock to avoid Redis connection
         mock_redis_client.return_value = MagicMock()
         mock_redis_client.return_value.get.return_value = None
+        mock_redis_client.return_value.exists.return_value = False
         mock_redis_client.return_value.register_script.return_value = MagicMock()
         mock_lock = MagicMock()
         mock_lock.acquire.return_value = True

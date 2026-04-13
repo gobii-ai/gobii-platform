@@ -1,6 +1,6 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
@@ -183,6 +183,9 @@ type AgentComposerProps = {
   intelligenceError?: string | null
   onOpenTaskPacks?: () => void
   canManageAgent?: boolean
+  onStopProcessing?: () => void | Promise<void>
+  stopProcessingBusy?: boolean
+  stopProcessingRequested?: boolean
   submitError?: string | null
   showSubmitErrorUpgrade?: boolean
   maxAttachmentBytes?: number | null
@@ -229,6 +232,9 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceError = null,
   onOpenTaskPacks,
   canManageAgent = true,
+  onStopProcessing,
+  stopProcessingBusy = false,
+  stopProcessingRequested = false,
   submitError = null,
   showSubmitErrorUpgrade = false,
   maxAttachmentBytes = null,
@@ -303,6 +309,8 @@ export const AgentComposer = memo(function AgentComposer({
   const showPipedreamAppsControl = Boolean(
     canManageAgent && pipedreamAppsSettingsUrl && pipedreamAppSearchUrl,
   )
+  const isStopping = Boolean(isProcessing && stopProcessingRequested)
+  const showStopProcessing = Boolean(isProcessing && !isStopping && agentId && canManageAgent && onStopProcessing)
   const handleIntelligenceUpsell = useCallback(async () => {
     const authenticated = await ensureAuthenticated()
     if (!authenticated) {
@@ -636,7 +644,6 @@ export const AgentComposer = memo(function AgentComposer({
   const composerPlaceholder = disabledReason || (activeHumanInputRequest && activePendingAction?.kind === 'human_input'
     ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
     : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
-  const activePendingActionKind = activePendingAction?.kind ?? null
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -674,7 +681,14 @@ export const AgentComposer = memo(function AgentComposer({
     if (batchRequests.length > 1) {
       const nextUnanswered = batchRequests.find((candidate) => !nextDrafts[candidate.id])
       if (nextUnanswered) {
+        const nextPendingAction = pendingActionRequests.find((candidate) => (
+          candidate.kind === 'human_input'
+          && candidate.requests.some((pendingRequest) => pendingRequest.id === nextUnanswered.id)
+        ))
         setDraftHumanInputResponses(nextDrafts)
+        if (nextPendingAction) {
+          setActivePendingActionId(nextPendingAction.id)
+        }
         setActiveHumanInputRequestId(nextUnanswered.id)
         setBody('')
         requestAnimationFrame(() => adjustTextareaHeight(true))
@@ -723,6 +737,7 @@ export const AgentComposer = memo(function AgentComposer({
     draftHumanInputResponses,
     isSending,
     onRespondHumanInput,
+    pendingActionRequests,
     pendingHumanInputRequests,
   ])
 
@@ -759,7 +774,9 @@ export const AgentComposer = memo(function AgentComposer({
     const nextAction = pendingActionRequests.find((request) => request.id === nextActionId) ?? null
 
     if (currentAction?.kind === 'human_input') {
-      const currentRequest = currentAction.requests[0] ?? null
+      const currentRequest = currentAction.requests.find((request) => request.id === activeHumanInputRequestId)
+        ?? currentAction.requests[0]
+        ?? null
       const trimmedBody = body.trim()
       if (currentRequest) {
         setDraftHumanInputResponses((current) => {
@@ -787,9 +804,12 @@ export const AgentComposer = memo(function AgentComposer({
 
     setActivePendingActionId(nextActionId)
     if (nextAction?.kind === 'human_input') {
-      setActiveHumanInputRequestId(nextAction.requests[0]?.id ?? null)
+      const nextRequest = nextAction.requests.find((request) => request.id === activeHumanInputRequestId)
+        ?? nextAction.requests[0]
+        ?? null
+      setActiveHumanInputRequestId(nextRequest?.id ?? null)
     }
-  }, [activePendingActionId, body, pendingActionRequests])
+  }, [activeHumanInputRequestId, activePendingActionId, body, pendingActionRequests])
 
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
@@ -797,17 +817,20 @@ export const AgentComposer = memo(function AgentComposer({
       return
     }
     const attachmentsSnapshot = attachments.slice()
-    const activeRequest = activePendingActionKind === 'human_input'
-      ? (pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null)
-      : null
-    if (activeRequest && trimmed && attachmentsSnapshot.length === 0 && onRespondHumanInput) {
-      const submitted = await submitHumanInputResponse(activeRequest, {
-        requestId: activeRequest.id,
-        freeText: trimmed,
-      })
-      if (submitted) {
-        return
+    const activeRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
+      ?? pendingHumanInputRequests[0]
+      ?? null
+    if (activeRequest && onRespondHumanInput) {
+      if (trimmed && attachmentsSnapshot.length === 0) {
+        const submitted = await submitHumanInputResponse(activeRequest, {
+          requestId: activeRequest.id,
+          freeText: trimmed,
+        })
+        if (submitted) {
+          return
+        }
       }
+      return
     }
     if (onSubmit) {
       try {
@@ -843,7 +866,6 @@ export const AgentComposer = memo(function AgentComposer({
     isSending,
     onRespondHumanInput,
     onSubmit,
-    activePendingActionKind,
     pendingHumanInputRequests,
     submitHumanInputResponse,
   ])
@@ -1019,9 +1041,9 @@ export const AgentComposer = memo(function AgentComposer({
             >
               {isProcessing ? (
                 <>
-                  <span className="composer-working-pip" aria-hidden="true" />
+                  <Sparkles className="composer-working-indicator" aria-hidden="true" />
                   <span className="composer-working-status">
-                    <strong>{agentFirstName}</strong> is working
+                    <strong>{agentFirstName}</strong> is {isStopping ? 'stopping' : 'working'}
                     <span className="composer-working-ellipsis" aria-label="working">
                       <span className="composer-working-dot" />
                       <span className="composer-working-dot" />
@@ -1193,28 +1215,49 @@ export const AgentComposer = memo(function AgentComposer({
                   error={intelligenceError}
                 />
               ) : null}
-              <button
-                type="submit"
-                className="composer-send-button"
-                disabled={disabled || isSending || (!body.trim() && attachments.length === 0)}
-                title={disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)}
-                aria-label={isSending ? 'Sending message' : 'Send message'}
-              >
-                {isSending ? (
-                  <span className="inline-flex items-center justify-center">
-                    <span
-                      className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
-                      aria-hidden="true"
-                    />
-                    <span className="sr-only">Sending</span>
-                  </span>
-                ) : (
-                  <>
-                    <ArrowUp className="h-4 w-4" aria-hidden="true" />
-                    <span className="sr-only">Send</span>
-                  </>
-                )}
-              </button>
+              {showStopProcessing ? (
+                <button
+                  type="button"
+                  className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
+                  disabled={stopProcessingBusy}
+                  title={stopProcessingBusy ? 'Stopping' : 'Stop'}
+                  aria-label={stopProcessingBusy ? 'Stopping agent' : 'Stop agent'}
+                  onClick={(event) => {
+                    event.preventDefault()
+                    void onStopProcessing?.()
+                  }}
+                >
+                  <span className="composer-send-button-stop-icon" aria-hidden="true" />
+                  <span className="sr-only">{stopProcessingBusy ? 'Stopping' : 'Stop'}</span>
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className="composer-send-button"
+                  disabled={disabled || isSending || stopProcessingBusy || (!body.trim() && attachments.length === 0)}
+                  title={
+                    stopProcessingBusy
+                      ? 'Stopping'
+                      : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
+                  }
+                  aria-label={stopProcessingBusy ? 'Stopping agent' : isSending ? 'Sending message' : 'Send message'}
+                >
+                  {isSending ? (
+                    <span className="inline-flex items-center justify-center">
+                      <span
+                        className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
+                        aria-hidden="true"
+                      />
+                      <span className="sr-only">Sending</span>
+                    </span>
+                  ) : (
+                    <>
+                      <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                      <span className="sr-only">Send</span>
+                    </>
+                  )}
+                </button>
+              )}
             </div>
             {attachments.length > 0 ? (
               <div className="flex flex-wrap gap-2 pt-0.5 text-xs">

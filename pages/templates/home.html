@@ -315,7 +315,7 @@
                         {% for option in llm_intelligence.options %}
                           <button
                             type="button"
-                            class="grid w-full grid-cols-[20px_1fr_42px_76px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-indigo-50/30 {% if option.key == preferred_llm_tier %}bg-indigo-50/40{% endif %}"
+                            class="grid w-full grid-cols-[20px_1fr_42px] items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-indigo-50/30 {% if option.key == preferred_llm_tier %}bg-indigo-50/40{% endif %}"
                             data-intelligence-option
                             data-tier="{{ option.key }}"
                             data-label="{{ option.label }}"
@@ -329,34 +329,46 @@
                           >
                             <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
                             <span class="min-w-0 truncate text-[13px] font-medium whitespace-nowrap {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{{ option.label }}</span>
-                            <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
                             {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
                               {% if option.rank > llm_intelligence.maxAllowedTierRank %}
-                                <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
+                                <span class="inline-flex items-center justify-end text-amber-600" data-intelligence-lock>
                                   <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <rect x="3" y="11" width="18" height="11" rx="2"></rect>
                                     <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                                   </svg>
-                                  Unlock
                                 </span>
                               {% else %}
-                                <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
+                                <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
                               {% endif %}
                             {% else %}
                               {% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
-                                <span class="inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" data-intelligence-lock>
+                                <span class="inline-flex items-center justify-end text-amber-600" data-intelligence-lock>
                                   <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                                     <rect x="3" y="11" width="18" height="11" rx="2"></rect>
                                     <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                                   </svg>
-                                  Unlock
                                 </span>
                               {% else %}
-                                <span class="invisible inline-flex items-center justify-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 whitespace-nowrap" aria-hidden="true"></span>
+                                <span class="text-right text-[11px] tabular-nums whitespace-nowrap {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
                               {% endif %}
                             {% endif %}
                           </button>
                         {% endfor %}
+                        {% if llm_intelligence.disabledReason %}
+                          <div class="px-3 pt-1 pb-2 text-[11px] text-slate-500">
+                            {% if llm_intelligence.upgradeUrl %}
+                              <a
+                                href="{{ llm_intelligence.upgradeUrl }}"
+                                class="font-semibold text-indigo-600 transition hover:text-indigo-500"
+                              >
+                                Upgrade
+                              </a>
+                              <span> to adjust intelligence levels.</span>
+                            {% else %}
+                              <span>Upgrade to adjust intelligence levels.</span>
+                            {% endif %}
+                          </div>
+                        {% endif %}
                       </div>
                     </div>
                     {% endif %}

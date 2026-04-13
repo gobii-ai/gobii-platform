@@ -42,6 +42,11 @@ from api.agent.comms.human_input_requests import (
     submit_human_input_responses_batch,
 )
 from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.core.processing_flags import (
+    clear_processing_stop_requested,
+    clear_processing_work_state,
+    set_processing_stop_requested,
+)
 from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
@@ -51,6 +56,7 @@ from api.models import (
     AgentSpawnRequest,
     BrowserLLMPolicy,
     BrowserUseAgent,
+    BrowserUseAgentTask,
     BrowserLLMTier,
     BrowserModelEndpoint,
     BrowserTierEndpoint,
@@ -194,6 +200,7 @@ from console.agent_creation import (
 )
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
+from api.views import cancel_browser_use_task
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
@@ -6205,6 +6212,64 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_active": snapshot.active,
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
                 "signup_preview_state": agent.signup_preview_state,
+            }
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentStopAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        if not user_can_manage_agent(
+            request.user,
+            agent,
+            allow_delinquent_personal_chat=True,
+        ):
+            return JsonResponse({"error": "Not permitted to stop this agent."}, status=403)
+
+        set_processing_stop_requested(agent.id)
+        clear_processing_work_state(agent.id)
+
+        cancelled_web_task_count = 0
+        if getattr(agent, "browser_use_agent_id", None):
+            active_tasks = BrowserUseAgentTask.objects.alive().filter(
+                agent_id=agent.browser_use_agent_id,
+                status__in=[
+                    BrowserUseAgentTask.StatusChoices.PENDING,
+                    BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+                ],
+            )
+            for task in active_tasks:
+                if cancel_browser_use_task(
+                    task,
+                    agent_id=str(agent.browser_use_agent_id),
+                    source=AnalyticsSource.WEB,
+                ):
+                    cancelled_web_task_count += 1
+
+        snapshot = build_processing_snapshot(agent)
+        if not snapshot.active:
+            clear_processing_stop_requested(agent.id)
+        try:
+            from console.agent_chat.signals import _broadcast_processing
+
+            _broadcast_processing(agent)
+        except Exception:
+            logger.debug("Failed to broadcast processing update after stop for agent %s", agent.id, exc_info=True)
+
+        return JsonResponse(
+            {
+                "stopping": True,
+                "cancelledWebTaskCount": cancelled_web_task_count,
+                "processing_active": snapshot.active,
+                "processing_snapshot": serialize_processing_snapshot(snapshot),
             }
         )
 
