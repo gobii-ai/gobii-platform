@@ -34,7 +34,7 @@ class ClearSignupTrackingViewTests(TestCase):
         session["signup_user_id"] = str(self.user.id)
         session["signup_email_hash"] = "unused-when-authenticated"
         session["signup_auth_method"] = "social"
-        session["signup_auth_provider"] = "linkedin_oauth2"
+        session["signup_auth_provider"] = "linkedin"
         session.save()
 
         response = self.client.get(reverse("pages:clear_signup_tracking"))
@@ -53,7 +53,7 @@ class ClearSignupTrackingViewTests(TestCase):
             hashlib.sha256(str(self.user.id).encode("utf-8")).hexdigest(),
         )
         self.assertEqual(payload["authMethod"], "social")
-        self.assertEqual(payload["authProvider"], "linkedin_oauth2")
+        self.assertEqual(payload["authProvider"], "linkedin")
         self.assertEqual(payload["registrationValue"], 12.5)
         self.assertEqual(payload["pixels"]["ga"], "G-TEST123")
         self.assertEqual(payload["pixels"]["reddit"], "reddit-123")

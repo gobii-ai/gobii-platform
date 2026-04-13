@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.apps import apps
 from django.conf import settings
 from django.test import RequestFactory, TestCase, tag, override_settings
+from django.urls import reverse
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
 from waffle.testutils import override_flag
@@ -233,22 +234,22 @@ class UserSignedUpSignalTests(TestCase):
     @patch("pages.signals.Analytics.track")
     @patch("pages.signals.Analytics.identify")
     def test_social_signup_tracks_auth_provider(self, _mock_identify, mock_track):
-        request = self.factory.get("/accounts/linkedin_oauth2/login/")
+        request = self.factory.get(reverse("openid_connect_login", kwargs={"provider_id": "linkedin"}))
         middleware = SessionMiddleware(lambda req: None)
         middleware.process_request(request)
         request.session.save()
 
         sociallogin = SimpleNamespace(
-            account=SimpleNamespace(provider="linkedin_oauth2"),
+            account=SimpleNamespace(provider="linkedin"),
         )
 
         handle_user_signed_up(sender=None, request=request, user=self.user, sociallogin=sociallogin)
 
         properties = mock_track.call_args.kwargs["properties"]
         self.assertEqual(properties["auth_method"], "social")
-        self.assertEqual(properties["auth_provider"], "linkedin_oauth2")
+        self.assertEqual(properties["auth_provider"], "linkedin")
         self.assertEqual(request.session["signup_auth_method"], "social")
-        self.assertEqual(request.session["signup_auth_provider"], "linkedin_oauth2")
+        self.assertEqual(request.session["signup_auth_provider"], "linkedin")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_REGISTRATION_VALUE=12.5)
     @patch("pages.signals.capi")
@@ -376,11 +377,11 @@ class UserLoggedInSignalTests(TestCase):
         mock_track_event,
         mock_capture_request_identity_signals,
     ):
-        request = self.factory.get("/accounts/linkedin_oauth2/login/")
+        request = self.factory.get(reverse("openid_connect_login", kwargs={"provider_id": "linkedin"}))
         middleware = SessionMiddleware(lambda req: None)
         middleware.process_request(request)
         request.session["account_authentication_methods"] = [
-            {"method": "socialaccount", "provider": "linkedin_oauth2"}
+            {"method": "socialaccount", "provider": "linkedin"}
         ]
         request.session.save()
 
@@ -402,7 +403,7 @@ class UserLoggedInSignalTests(TestCase):
             kwargs["properties"],
             {
                 "auth_method": "social",
-                "auth_provider": "linkedin_oauth2",
+                "auth_provider": "linkedin",
             },
         )
 
