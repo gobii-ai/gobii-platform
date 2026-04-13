@@ -89,8 +89,12 @@ class MetaAdsToolTests(TestCase):
 
         self.assertEqual(result["status"], "action_required")
         self.assertEqual(result["skill_key"], "meta_ads_platform")
+        self.assertEqual(result["selected_profile_key"], "default")
         self.assertIn("META_APP_ID", result["required_fields"])
         self.assertIn("/console/system-skills/meta_ads_platform/profiles/", result["setup_url"])
+        self.assertTrue(SystemSkillProfile.objects.filter(user=self.user, profile_key="default").exists())
+        self.assertGreater(len(result["setup_steps"]), 0)
+        self.assertGreater(len(result["setup_docs"]), 0)
 
     def test_execute_meta_ads_requires_explicit_profile_when_multiple_and_no_default(self):
         _create_meta_profile(user=self.user, profile_key="client_a")
@@ -102,6 +106,57 @@ class MetaAdsToolTests(TestCase):
         self.assertEqual(result["status"], "action_required")
         self.assertEqual(result["available_profiles"], ["client_a", "client_b"])
         self.assertIn("Multiple Meta Ads profiles are configured", result["result"])
+        self.assertIn("Do not guess", result["agent_guidance"])
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_doctor_performs_live_validation(self, mock_get):
+        _create_meta_profile(user=self.user, profile_key="default", is_default=True)
+        mock_get.side_effect = [
+            _mock_graph_response(
+                payload={"data": [{"id": "act_123", "name": "Main Account", "account_status": 1}]},
+                headers={"x-app-usage": '{"call_count":1}'},
+            ),
+            _mock_graph_response(
+                payload={"id": "act_123", "name": "Main Account", "account_status": 1},
+                headers={"x-ad-account-usage": '{"acc_id_util_pct":1}'},
+            ),
+        ]
+
+        result = execute_meta_ads(self.agent, {"operation": "doctor"})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["profile_key"], "default")
+        self.assertEqual(result["accessible_account_sample_count"], 1)
+        self.assertIn("connected", result["result"])
+        self.assertEqual(mock_get.call_count, 2)
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_doctor_checks_dataset_quality_when_configured(self, mock_get):
+        _create_meta_profile(
+            user=self.user,
+            profile_key="default",
+            is_default=True,
+            values={
+                "META_APP_ID": "app-123",
+                "META_APP_SECRET": "secret-123",
+                "META_SYSTEM_USER_TOKEN": "token-123",
+                "META_AD_ACCOUNT_ID": "act_123",
+                "META_API_VERSION": "v25.0",
+                "META_DATASET_ID": "pixel-123",
+            },
+        )
+        mock_get.side_effect = [
+            _mock_graph_response(payload={"data": [{"id": "act_123", "name": "Main Account", "account_status": 1}]}),
+            _mock_graph_response(payload={"id": "act_123", "name": "Main Account", "account_status": 1}),
+            _mock_graph_response(payload={"web": [{"event_name": "Purchase"}, {"event_name": "Lead"}]}),
+        ]
+
+        result = execute_meta_ads(self.agent, {"operation": "doctor"})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["dataset_id"], "pixel-123")
+        self.assertEqual(result["dataset_quality_event_sample_count"], 2)
+        self.assertEqual(mock_get.call_count, 3)
 
     @patch("api.agent.tools.meta_ads.requests.get")
     def test_execute_meta_ads_accounts_uses_default_profile_and_business_id(self, mock_get):
@@ -138,7 +193,8 @@ class MetaAdsToolTests(TestCase):
         self.assertEqual(params["limit"], 100)
         self.assertIn("appsecret_proof", params)
 
-    def test_execute_meta_ads_explicit_profile_key_overrides_default(self):
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_explicit_profile_key_overrides_default(self, mock_get):
         _create_meta_profile(user=self.user, profile_key="default", is_default=True)
         _create_meta_profile(
             user=self.user,
@@ -151,6 +207,10 @@ class MetaAdsToolTests(TestCase):
                 "META_API_VERSION": "v25.0",
             },
         )
+        mock_get.side_effect = [
+            _mock_graph_response(payload={"data": [{"id": "act_456"}]}),
+            _mock_graph_response(payload={"id": "act_456", "account_status": 1}),
+        ]
 
         result = execute_meta_ads(self.agent, {"operation": "doctor", "profile_key": "client_b"})
 
@@ -158,10 +218,113 @@ class MetaAdsToolTests(TestCase):
         self.assertEqual(result["profile_key"], "client_b")
         self.assertEqual(result["default_account_id"], "act_456")
 
-    def test_execute_enabled_tool_records_usage_for_hidden_meta_tool(self):
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_performance_snapshot_returns_normalized_rows(self, mock_get):
+        _create_meta_profile(user=self.user, profile_key="default", is_default=True)
+        mock_get.return_value = _mock_graph_response(
+            payload={
+                "data": [
+                    {
+                        "campaign_id": "cmp_1",
+                        "campaign_name": "Prospecting",
+                        "impressions": "1000",
+                        "reach": "700",
+                        "spend": "125.50",
+                        "clicks": "25",
+                        "inline_link_clicks": "20",
+                        "actions": [
+                            {"action_type": "offsite_conversion.fb_pixel_purchase", "value": "3"},
+                            {"action_type": "lead", "value": "4"},
+                        ],
+                        "action_values": [
+                            {"action_type": "offsite_conversion.fb_pixel_purchase", "value": "450.00"},
+                        ],
+                        "purchase_roas": [
+                            {"action_type": "offsite_conversion.fb_pixel_purchase", "value": "3.59"},
+                        ],
+                        "date_start": "2026-04-01",
+                        "date_stop": "2026-04-07",
+                    }
+                ]
+            },
+            headers={"x-fb-ads-insights-throttle": '{"app_id_util_pct":10}'},
+        )
+
+        result = execute_meta_ads(
+            self.agent,
+            {"operation": "performance_snapshot", "level": "campaign", "date_preset": "last_7d"},
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["summary"]["purchase_count"], 3.0)
+        self.assertEqual(result["summary"]["lead_count"], 4.0)
+        self.assertEqual(result["summary"]["purchase_value"], 450.0)
+        self.assertEqual(result["summary"]["cost_per_purchase"], 41.8333)
+        self.assertEqual(result["summary"]["cost_per_lead"], 31.375)
+        row = result["normalized_rows"][0]
+        self.assertEqual(row["entity_id"], "cmp_1")
+        self.assertEqual(row["standard_actions"]["purchase"], 3.0)
+        self.assertEqual(row["standard_purchase_roas"]["purchase"], 3.59)
+        self.assertEqual(row["derived_metrics"]["blended_roas"], 3.59)
+        self.assertEqual(row["derived_metrics"]["cost_per_purchase"], 41.8333)
+        self.assertIn("sqlite_batch", result["sqlite_recommendation"])
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_conversion_quality_returns_quality_rows(self, mock_get):
+        _create_meta_profile(
+            user=self.user,
+            profile_key="default",
+            is_default=True,
+            values={
+                "META_APP_ID": "app-123",
+                "META_APP_SECRET": "secret-123",
+                "META_SYSTEM_USER_TOKEN": "token-123",
+                "META_AD_ACCOUNT_ID": "act_123",
+                "META_API_VERSION": "v25.0",
+                "META_DATASET_ID": "pixel-123",
+            },
+        )
+        mock_get.return_value = _mock_graph_response(
+            payload={
+                "web": [
+                    {
+                        "event_name": "Purchase",
+                        "event_match_quality": {
+                            "composite_score": 7.5,
+                            "diagnostics": [{"name": "Mismatch"}],
+                        },
+                        "acr": {"percentage": 22.4},
+                        "data_freshness": {"upload_frequency": "real_time"},
+                    },
+                    {
+                        "event_name": "Lead",
+                        "event_match_quality": {"composite_score": 6.5, "diagnostics": []},
+                        "event_potential_aly_acr_increase": {"percentage": 14.2},
+                        "data_freshness": {"upload_frequency": "hourly"},
+                    },
+                ]
+            }
+        )
+
+        result = execute_meta_ads(self.agent, {"operation": "conversion_quality"})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["dataset_id"], "pixel-123")
+        self.assertEqual(result["summary"]["event_count"], 2)
+        self.assertEqual(result["summary"]["events_with_diagnostics"], 1)
+        self.assertEqual(result["summary"]["realtime_event_count"], 1)
+        self.assertEqual(result["summary"]["avg_event_match_quality_score"], 7.0)
+        self.assertEqual(result["quality_rows"][0]["event_name"], "Purchase")
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_enabled_tool_records_usage_for_hidden_meta_tool(self, mock_get):
         _create_meta_profile(user=self.user, profile_key="default", is_default=True)
         enable_result = enable_tools(self.agent, ["meta_ads"], include_hidden_builtin=True)
         self.assertEqual(enable_result["status"], "success")
+        mock_get.side_effect = [
+            _mock_graph_response(payload={"data": [{"id": "act_123"}]}),
+            _mock_graph_response(payload={"id": "act_123", "account_status": 1}),
+        ]
 
         row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="meta_ads")
         self.assertEqual(row.usage_count, 0)
@@ -173,3 +336,18 @@ class MetaAdsToolTests(TestCase):
         row.refresh_from_db()
         self.assertEqual(row.usage_count, 1)
         self.assertIsNotNone(row.last_used_at)
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    def test_execute_meta_ads_returns_action_required_when_live_auth_check_fails(self, mock_get):
+        _create_meta_profile(user=self.user, profile_key="default", is_default=True)
+        mock_get.return_value = _mock_graph_response(
+            payload={"error": {"message": "Invalid OAuth access token.", "code": 190}},
+            status_code=400,
+        )
+
+        result = execute_meta_ads(self.agent, {"operation": "doctor"})
+
+        self.assertEqual(result["status"], "action_required")
+        self.assertIn("Invalid OAuth access token", result["auth_error"])
+        self.assertIn("developer registration", result["agent_guidance"].lower())
+        self.assertEqual(result["selected_profile_key"], "default")

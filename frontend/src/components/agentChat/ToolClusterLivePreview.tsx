@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { ExternalLink, Search } from 'lucide-react'
+import { ExternalLink, Search, ShieldCheck, Wand2 } from 'lucide-react'
 import { useAgentChatStore } from '../../stores/agentChatStore'
 import { formatRelativeTimestamp } from '../../util/time'
 import { getFriendlyToolInfo, type FriendlyToolInfo } from '../tooling/toolMetadata'
@@ -41,10 +41,16 @@ type EntryVisual = {
   searchItems: SearchPreviewItem[]
   searchTotal: number | null
   enabledToolInfos: FriendlyToolInfo[]
+  enabledSkillChips: CapabilityChip[]
   scrapeTargets: ScrapeTargetItem[]
   previewImageUrl: string | null
   previewVideoUrl: string | null
   pageTitle: string | null
+}
+
+type CapabilityChip = {
+  kind: 'skill' | 'system_skill'
+  label: string
 }
 
 type ScrapeTargetItem = {
@@ -245,6 +251,14 @@ function pickText(value: unknown): string | null {
   }
   const trimmed = value.trim()
   return trimmed.length ? trimmed : null
+}
+
+function humanizeCapabilityLabel(value: string): string {
+  const normalized = value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!normalized) {
+    return value
+  }
+  return normalized.replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
 function normalizeSearchPreviewItem(rawTitle: string | null, rawUrl: string | null): SearchPreviewItem | null {
@@ -737,6 +751,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
         searchItems: searchPreview.items,
         searchTotal: effectiveTotal,
         enabledToolInfos: [],
+        enabledSkillChips: [],
         scrapeTargets: [],
         previewImageUrl: null,
         previewVideoUrl: null,
@@ -750,8 +765,19 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       ...outcome.alreadyEnabledTools,
     ]
     const enabledToolInfos = enabledToolNames.map((rawName) => getFriendlyToolInfo(rawName))
-    const badge = enabledToolInfos.length
-      ? `${enabledToolInfos.length} enabled`
+    const enabledSkillChips: CapabilityChip[] = [
+      ...outcome.enabledSkills,
+      ...outcome.alreadyEnabledSkills,
+    ].map((name): CapabilityChip => ({ kind: 'skill', label: humanizeCapabilityLabel(name) }))
+    enabledSkillChips.push(
+      ...[
+        ...outcome.enabledSystemSkills,
+        ...outcome.alreadyEnabledSystemSkills,
+      ].map((name): CapabilityChip => ({ kind: 'system_skill', label: humanizeCapabilityLabel(name) })),
+    )
+    const enabledCapabilityCount = enabledToolInfos.length + enabledSkillChips.length
+    const badge = enabledCapabilityCount
+      ? `${enabledCapabilityCount} enabled`
       : outcome.toolCount !== null
         ? `${outcome.toolCount} match${outcome.toolCount === 1 ? '' : 'es'}`
         : null
@@ -762,6 +788,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: [],
       searchTotal: null,
       enabledToolInfos,
+      enabledSkillChips,
       scrapeTargets: [],
       previewImageUrl: null,
       previewVideoUrl: null,
@@ -781,6 +808,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: searchPreview.items,
       searchTotal: effectiveTotal,
       enabledToolInfos: [],
+      enabledSkillChips: [],
       scrapeTargets: [],
       previewImageUrl: null,
       previewVideoUrl: null,
@@ -798,6 +826,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: [],
       searchTotal: null,
       enabledToolInfos: [],
+      enabledSkillChips: [],
       scrapeTargets,
       previewImageUrl: null,
       previewVideoUrl: null,
@@ -814,6 +843,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: [],
       searchTotal: null,
       enabledToolInfos: [],
+      enabledSkillChips: [],
       scrapeTargets: [],
       previewImageUrl: null,
       previewVideoUrl: null,
@@ -837,6 +867,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
       searchItems: [],
       searchTotal: null,
       enabledToolInfos: [],
+      enabledSkillChips: [],
       scrapeTargets: [],
       previewImageUrl,
       previewVideoUrl,
@@ -852,6 +883,7 @@ function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor
     searchItems: [],
     searchTotal: null,
     enabledToolInfos: [],
+    enabledSkillChips: [],
     scrapeTargets,
     previewImageUrl: null,
     previewVideoUrl: null,
@@ -1115,6 +1147,7 @@ export function ToolClusterLivePreview({
             const detailText = item.activity.detail
             const linkedInProfile = item.activity.kind === 'linkedin' ? visual.linkedInProfile : null
             const searchItems = item.activity.kind === 'search' ? visual.searchItems : []
+            const hasCapabilityCards = visual.enabledToolInfos.length > 0 || visual.enabledSkillChips.length > 0
             const previewImageUrl = visual.previewImageUrl
             const previewVideoUrl = visual.previewVideoUrl
             const isVisualActivity = item.activity.kind === 'chart' || item.activity.kind === 'image' || item.activity.kind === 'video'
@@ -1226,7 +1259,7 @@ export function ToolClusterLivePreview({
                 data-active={isHighlighted ? 'true' : 'false'}
                 data-kind={item.activity.kind}
                 data-has-results={searchItems.length > 0 ? 'true' : 'false'}
-                data-has-tools={visual.enabledToolInfos.length > 0 ? 'true' : 'false'}
+                data-has-tools={hasCapabilityCards ? 'true' : 'false'}
                 data-new={isNew ? 'true' : 'false'}
                 data-profile-card={linkedInProfile ? 'true' : 'false'}
                 role="button"
@@ -1283,7 +1316,7 @@ export function ToolClusterLivePreview({
                       />
                     ) : null}
                   </motion.span>
-                ) : !searchItems.length && !visual.enabledToolInfos.length ? (
+                ) : !searchItems.length && !hasCapabilityCards ? (
                   <motion.span
                     className={`tool-cluster-live-preview__entry-icon ${entry.iconBgClass} ${entry.iconColorClass}`}
                     animate={
@@ -1307,7 +1340,7 @@ export function ToolClusterLivePreview({
                 <span className="tool-cluster-live-preview__entry-header">
                   <span className="tool-cluster-live-preview__entry-main">
                     <span className="tool-cluster-live-preview__entry-label-row">
-                      {searchItems.length > 0 || visual.enabledToolInfos.length > 0 ? (
+                      {searchItems.length > 0 || hasCapabilityCards ? (
                         <motion.span
                           className={`tool-cluster-live-preview__entry-icon tool-cluster-live-preview__entry-icon--inline ${entry.iconBgClass} ${entry.iconColorClass}`}
                           animate={
@@ -1416,7 +1449,7 @@ export function ToolClusterLivePreview({
                         >
                           {visual.pageTitle}
                         </motion.span>
-                      ) : detailText && !visual.enabledToolInfos.length && !searchItems.length && !visual.scrapeTargets.length ? (
+                      ) : detailText && !hasCapabilityCards && !searchItems.length && !visual.scrapeTargets.length ? (
                         <motion.span
                           key={`${entry.id}-detail-${detailText}`}
                           className="tool-cluster-live-preview__entry-caption"
@@ -1429,7 +1462,7 @@ export function ToolClusterLivePreview({
                         </motion.span>
                       ) : null}
                     </AnimatePresence>
-                    {!visual.enabledToolInfos.length && visual.snippet && visual.snippet !== detailText && searchItems.length === 0 && !visual.scrapeTargets.length ? (
+                    {!hasCapabilityCards && visual.snippet && visual.snippet !== detailText && searchItems.length === 0 && !visual.scrapeTargets.length ? (
                       <span className="tool-cluster-live-preview__entry-context">{visual.snippet}</span>
                     ) : null}
                   </span>
@@ -1484,7 +1517,7 @@ export function ToolClusterLivePreview({
                     ))}
                   </ul>
                 ) : null}
-                {visual.enabledToolInfos.length ? (
+                {hasCapabilityCards ? (
                   <div className="tool-cluster-live-preview__enabled-tools-section">
                     <div className="tool-cluster-live-preview__enabled-tools">
                       {visual.enabledToolInfos.map((info, cardIndex) => {
@@ -1508,6 +1541,37 @@ export function ToolClusterLivePreview({
                               <CardIcon aria-hidden="true" />
                             </span>
                             <span className="tool-cluster-live-preview__enabled-tool-card-label">{info.label}</span>
+                          </motion.div>
+                        )
+                      })}
+                      {visual.enabledSkillChips.map((chip, chipIndex) => {
+                        const ChipIcon = chip.kind === 'system_skill' ? ShieldCheck : Wand2
+                        const delayIndex = visual.enabledToolInfos.length + chipIndex
+                        return (
+                          <motion.div
+                            key={`chip-${chip.kind}-${chip.label}`}
+                            className="tool-cluster-live-preview__enabled-tool-card"
+                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 10, scale: 0.94 }}
+                            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                            transition={{
+                              duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
+                              ease: [0.22, 1, 0.36, 1],
+                              delay: reduceMotion ? 0 : isLatestEvent
+                                ? 0.1 + delayIndex * 0.12
+                                : delayIndex * 0.015,
+                            }}
+                            whileHover={reduceMotion ? undefined : { scale: 1.04, y: -1 }}
+                          >
+                            <span
+                              className={`tool-cluster-live-preview__enabled-tool-card-icon ${
+                                chip.kind === 'system_skill' ? 'bg-blue-100 text-blue-600' : 'bg-violet-100 text-violet-600'
+                              }`}
+                            >
+                              <ChipIcon aria-hidden="true" />
+                            </span>
+                            <span className="tool-cluster-live-preview__enabled-tool-card-label">
+                              {chip.kind === 'system_skill' ? `${chip.label} skill` : chip.label}
+                            </span>
                           </motion.div>
                         )
                       })}

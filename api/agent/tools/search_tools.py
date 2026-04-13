@@ -38,6 +38,7 @@ from .tool_manager import (
     enable_tools,
     CREATE_IMAGE_TOOL_NAME,
     HTTP_REQUEST_TOOL_NAME,
+    SQLITE_TOOL_NAME,
     get_available_builtin_tool_entries,
     get_available_custom_tool_entries,
     get_enabled_tool_limit,
@@ -296,10 +297,12 @@ def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
         if not isinstance(name, str) or not name:
             continue
         description = _strip_description(_tool_attr(skill, "description", "") or "")
+        instructions = _strip_description(_tool_attr(skill, "instructions", "") or "")
         if hasattr(skill, "get_effective_tool_ids"):
             normalized_tools = list(skill.get_effective_tool_ids())
         else:
             normalized_tools = list(normalize_skill_tool_ids(_tool_attr(skill, "tools", []) or []))
+        use_when = description or instructions
         tool_text = ", ".join(normalized_tools) if normalized_tools else "(none)"
         raw_secrets = _tool_attr(skill, "secrets", []) or []
         secret_text = ", ".join(
@@ -308,9 +311,9 @@ def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
             if isinstance(secret, dict)
         ) or "(none)"
         line = f"- {name}"
-        if description:
-            line += f": {description}"
-        line += f" | tools: {tool_text}"
+        if use_when:
+            line += f" | use when: {use_when}"
+        line += f" | enables: {tool_text}"
         line += f" | secrets: {secret_text}"
         lines.append(line)
     return lines
@@ -323,11 +326,19 @@ def _build_system_skill_lines(system_skills: Iterable[Any]) -> list[str]:
         if not isinstance(skill_key, str) or not skill_key:
             continue
         search_summary = _strip_description(_tool_attr(skill, "search_summary", "") or "")
+        enables = list(_tool_attr(skill, "enables", ()) or ())
+        use_when = list(_tool_attr(skill, "use_when", ()) or ())
         tool_names = list(_tool_attr(skill, "tool_names", ()) or ())
+        enable_text = ", ".join(str(item).strip() for item in enables if str(item).strip())
+        use_when_text = ", ".join(str(item).strip() for item in use_when if str(item).strip())
         tool_text = ", ".join(tool_names) if tool_names else "(none)"
         line = f"- {skill_key}"
         if search_summary:
             line += f": {search_summary}"
+        if use_when_text:
+            line += f" | use when: {use_when_text}"
+        if enable_text:
+            line += f" | enables: {enable_text}"
         line += f" | tools: {tool_text}"
         lines.append(line)
     return lines
@@ -711,15 +722,22 @@ def _search_with_llm(
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
+    if SQLITE_TOOL_NAME in available_names:
+        system_prompt += (
+            "\n- Think in small composable primitives. If the user needs recurring monitoring, comparisons over time, "
+            "or anomaly detection, prefer pairing data-source tools or skills with sqlite_batch instead of expecting one tool to do everything.\n"
+        )
     if global_skill_lines:
         system_prompt += (
             "\n- Only include skill names that appear in Available global skills.\n"
             "Call enable_global_skills with skill_names copied verbatim from the Available global skills list.\n"
+            "- Treat global skills as capability bundles. Use the `use when` and `enables` guidance to decide when a skill should be enabled.\n"
         )
     if system_skill_lines:
         system_prompt += (
             "\n- Only include skill keys that appear in Available system skills.\n"
             "Call enable_system_skills with skill_keys copied verbatim from the Available system skills list.\n"
+            "- Treat system skills as capability bundles. Prefer enabling one when the query matches its `use when` guidance or needs the capabilities listed under `enables`.\n"
         )
     if app_lines:
         if auto_enable_apps and enable_apps_callback is not None:

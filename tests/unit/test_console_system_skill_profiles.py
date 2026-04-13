@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import ExitStack
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -9,7 +10,15 @@ from django.urls import reverse
 from waffle.models import Flag
 
 from api.agent.system_skills.registry import SystemSkillDefinition, SystemSkillField
-from api.models import Organization, OrganizationMembership, SystemSkillProfile, SystemSkillProfileSecret
+from api.models import (
+    BrowserUseAgent,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+    PersistentAgentEnabledTool,
+    SystemSkillProfile,
+    SystemSkillProfileSecret,
+)
 
 
 User = get_user_model()
@@ -18,6 +27,18 @@ User = get_user_model()
 def _ensure_encryption_key():
     if not os.environ.get("GOBII_ENCRYPTION_KEY"):
         os.environ["GOBII_ENCRYPTION_KEY"] = "test-key-for-system-skill-profiles-123"
+
+
+def _create_test_agent(*, user, name: str) -> PersistentAgent:
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(BrowserUseAgent, "select_random_proxy", return_value=None))
+        browser = BrowserUseAgent.objects.create(user=user, name=f"{name}-browser")
+        return PersistentAgent.objects.create(
+            user=user,
+            name=name,
+            charter="",
+            browser_use_agent=browser,
+        )
 
 
 def _meta_ads_definition() -> SystemSkillDefinition:
@@ -132,6 +153,21 @@ class ConsoleSystemSkillProfileTests(TestCase):
         self.assertEqual(len(list_payload["profiles"]), 1)
         self.assertEqual(list_payload["definition"]["skill_key"], "meta_ads_platform")
         self.assertEqual(list_payload["definition"]["default_values"]["META_API_VERSION"], "v25.0")
+        self.assertIn("setup_steps", list_payload["definition"])
+        self.assertIn("setup_docs", list_payload["definition"])
+        self.assertIn("how_to_get", list_payload["definition"]["fields"][0])
+
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    def test_create_profile_requeues_agents_with_enabled_system_skill_tool(self, mock_process_delay):
+        agent = _create_test_agent(user=self.user, name="Waiting Meta Ads Agent")
+        PersistentAgentEnabledTool.objects.create(agent=agent, tool_full_name="meta_ads", tool_name="meta_ads")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self._create_profile("default")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["triggered_agent_count"], 1)
+        mock_process_delay.assert_called_once_with(str(agent.id))
 
     def test_system_skill_profiles_page_mounts_personal_context(self):
         response = self.client.get(reverse("console-system-skill-profiles", args=["meta_ads_platform"]))
@@ -184,7 +220,8 @@ class ConsoleSystemSkillProfileTests(TestCase):
         self.assertTrue(first_profile.is_default)
         self.assertFalse(second_profile.is_default)
 
-    def test_patch_profile_updates_values_and_can_clear_optional_field(self):
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    def test_patch_profile_updates_values_and_can_clear_optional_field(self, mock_process_delay):
         create_response = self._create_profile(
             "default",
             values={
@@ -196,26 +233,31 @@ class ConsoleSystemSkillProfileTests(TestCase):
             },
         )
         profile_id = create_response.json()["profile"]["id"]
+        agent = _create_test_agent(user=self.user, name="System Skill Profile Agent")
+        PersistentAgentEnabledTool.objects.create(agent=agent, tool_full_name="meta_ads", tool_name="meta_ads")
 
-        response = self.client.patch(
-            reverse("console-system-skill-profile-detail", args=["meta_ads_platform", profile_id]),
-            data=json.dumps(
-                {
-                    "label": "Primary Account",
-                    "values": {
-                        "META_AD_ACCOUNT_ID": "act_999",
-                        "META_API_VERSION": None,
-                    },
-                }
-            ),
-            content_type="application/json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                reverse("console-system-skill-profile-detail", args=["meta_ads_platform", profile_id]),
+                data=json.dumps(
+                    {
+                        "label": "Primary Account",
+                        "values": {
+                            "META_AD_ACCOUNT_ID": "act_999",
+                            "META_API_VERSION": None,
+                        },
+                    }
+                ),
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["triggered_agent_count"], 1)
         profile = SystemSkillProfile.objects.get(pk=profile_id)
         self.assertEqual(profile.label, "Primary Account")
         self.assertEqual(profile.secrets.get(key="META_AD_ACCOUNT_ID").get_value(), "act_999")
         self.assertFalse(SystemSkillProfileSecret.objects.filter(profile=profile, key="META_API_VERSION").exists())
+        mock_process_delay.assert_called_once_with(str(agent.id))
 
     def test_delete_default_profile_promotes_only_remaining_profile(self):
         first_response = self._create_profile("default")

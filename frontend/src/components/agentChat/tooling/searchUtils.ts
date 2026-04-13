@@ -21,6 +21,10 @@ export type ToolSearchOutcome = {
   tools: NormalizedToolSuggestion[]
   enabledTools: string[]
   alreadyEnabledTools: string[]
+  enabledSkills: string[]
+  alreadyEnabledSkills: string[]
+  enabledSystemSkills: string[]
+  alreadyEnabledSystemSkills: string[]
   evictedTools: string[]
   invalidTools: string[]
   externalResources: ExternalResource[]
@@ -33,6 +37,10 @@ const EMPTY_OUTCOME: ToolSearchOutcome = {
   tools: [],
   enabledTools: [],
   alreadyEnabledTools: [],
+  enabledSkills: [],
+  alreadyEnabledSkills: [],
+  enabledSystemSkills: [],
+  alreadyEnabledSystemSkills: [],
   evictedTools: [],
   invalidTools: [],
   externalResources: [],
@@ -178,10 +186,16 @@ export function parseToolSearchResult(input: unknown): ToolSearchOutcome {
   const toolCount = toolCountValue !== null ? toolCountValue : tools.length ? tools.length : null
 
   const toolsSection = getSection(input, 'tools')
+  const skillsSection = getSection(input, 'skills')
+  const systemSkillsSection = getSection(input, 'system_skills')
   const enabledTools = collectStrings(
     (toolsSection?.enabled ?? (input as { enabled_tools?: unknown }).enabled_tools ?? (input as { enabled?: unknown }).enabled),
   )
   const alreadyEnabledTools = collectStrings(toolsSection?.already_enabled ?? (input as { already_enabled?: unknown }).already_enabled)
+  const enabledSkills = collectStrings(skillsSection?.enabled)
+  const alreadyEnabledSkills = collectStrings(skillsSection?.already_enabled)
+  const enabledSystemSkills = collectStrings(systemSkillsSection?.enabled)
+  const alreadyEnabledSystemSkills = collectStrings(systemSkillsSection?.already_enabled)
   const evictedTools = collectStrings(toolsSection?.evicted ?? (input as { evicted?: unknown }).evicted)
   const invalidTools = collectStrings(toolsSection?.invalid ?? (input as { invalid?: unknown }).invalid)
 
@@ -211,6 +225,10 @@ export function parseToolSearchResult(input: unknown): ToolSearchOutcome {
     tools,
     enabledTools,
     alreadyEnabledTools,
+    enabledSkills,
+    alreadyEnabledSkills,
+    enabledSystemSkills,
+    alreadyEnabledSystemSkills,
     evictedTools,
     invalidTools,
     externalResources,

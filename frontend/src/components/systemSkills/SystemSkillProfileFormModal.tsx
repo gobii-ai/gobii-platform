@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { KeyRound } from 'lucide-react'
+import { ExternalLink, KeyRound } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type {
@@ -33,6 +33,7 @@ export function SystemSkillProfileFormModal({
   const [errors, setErrors] = useState<Record<string, string[]>>({})
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({})
   const [clearFields, setClearFields] = useState<Record<string, boolean>>({})
+  const isBootstrapSetup = isEdit && !editProfile.complete && editProfile.present_keys.length === 0
 
   const handleFieldChange = (key: string, value: string) => {
     setFieldValues((current) => ({ ...current, [key]: value }))
@@ -112,7 +113,7 @@ export function SystemSkillProfileFormModal({
         className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm disabled:opacity-60"
         disabled={busy}
       >
-        {busy ? 'Saving\u2026' : isEdit ? 'Update Profile' : 'Create Profile'}
+        {busy ? 'Saving\u2026' : isBootstrapSetup ? 'Save Credentials' : isEdit ? 'Update Profile' : 'Create Profile'}
       </button>
       <button
         type="button"
@@ -127,8 +128,14 @@ export function SystemSkillProfileFormModal({
 
   return (
     <Modal
-      title={isEdit ? 'Edit Profile' : 'Add Profile'}
-      subtitle={isEdit ? `Update ${editProfile.label}` : `Create a ${definition.name} profile`}
+      title={isBootstrapSetup ? 'Complete Setup' : isEdit ? 'Edit Profile' : 'Add Profile'}
+      subtitle={
+        isBootstrapSetup
+          ? `Add the required credentials for ${definition.name}`
+          : isEdit
+            ? `Update ${editProfile.label}`
+            : `Create a ${definition.name} profile`
+      }
       onClose={onClose}
       footer={footer}
       widthClass="sm:max-w-2xl"
@@ -210,6 +217,28 @@ export function SystemSkillProfileFormModal({
                   {field.required ? ' *' : ''}
                 </label>
                 {field.description && <p className="mt-1 text-xs text-slate-500">{field.description}</p>}
+                {field.how_to_get && (
+                  <div className="mt-3 rounded-lg bg-blue-50 px-3 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">How To Get This</p>
+                    <p className="mt-1 text-sm text-blue-900">{field.how_to_get}</p>
+                    {field.docs.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {field.docs.map((doc) => (
+                          <a
+                            key={`${field.key}-${doc.url}`}
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-medium text-blue-700 transition hover:bg-blue-100"
+                          >
+                            {doc.title}
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <input
                   id={`field-${field.key}`}
                   type="password"
