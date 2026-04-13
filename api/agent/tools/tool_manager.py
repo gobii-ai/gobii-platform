@@ -42,7 +42,11 @@ from .create_video import (
     execute_create_video,
     is_video_generation_available_for_agent,
 )
-from .custom_tools import execute_custom_tool, is_custom_tools_available_for_agent
+from .custom_tools import (
+    execute_custom_tool,
+    is_custom_tools_available_for_agent,
+    normalize_custom_tool_parameters_schema,
+)
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .meta_ads import get_meta_ads_tool, execute_meta_ads
@@ -319,11 +323,14 @@ def get_available_custom_tool_entries(
 
     catalog: Dict[str, ToolCatalogEntry] = {}
     for tool in PersistentAgentCustomTool.objects.filter(agent=agent).order_by("tool_name"):
+        parameters_schema = normalize_custom_tool_parameters_schema(tool.parameters_schema)
+        if parameters_schema is None:
+            parameters_schema = {"type": "object", "properties": {}, "required": []}
         catalog[tool.tool_name] = ToolCatalogEntry(
             provider="custom",
             full_name=tool.tool_name,
             description=tool.description,
-            parameters=tool.parameters_schema or {"type": "object", "properties": {}},
+            parameters=parameters_schema,
             tool_server="custom",
             tool_name=tool.tool_name,
             server_config_id=None,
@@ -896,13 +903,16 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         for tool in enabled_custom_tools:
             if tool.tool_name in existing_names:
                 continue
+            parameters_schema = normalize_custom_tool_parameters_schema(tool.parameters_schema)
+            if parameters_schema is None:
+                parameters_schema = {"type": "object", "properties": {}, "required": []}
             definitions.append(
                 {
                     "type": "function",
                     "function": {
                         "name": tool.tool_name,
                         "description": tool.description,
-                        "parameters": tool.parameters_schema or {"type": "object", "properties": {}},
+                        "parameters": parameters_schema,
                     },
                 }
             )

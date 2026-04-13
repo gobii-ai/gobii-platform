@@ -4465,9 +4465,10 @@ def _get_system_instruction(
 
         "```\n"
         "# File exports\n"
-        "Use create_file for text-based formats.\n"
+        "Use create_file for text-based formats and document exports. In query mode, the query must return exactly one row and one column; that single value becomes the file contents.\n"
         "If exporting CSV or PDF, use create_csv or create_pdf instead. You may need to search for these tools if you need them but don't have them available."
-        "create_csv can take raw CSV or query='SELECT ...' to export from SQLite. \n"
+        "create_csv can take raw CSV or query='SELECT ...' to export from SQLite, but only for CSV/tabular output. \n"
+        "PDF export: create_pdf(html='...') when you need a PDF.\n"
         "CSV export: create_csv(file_path='/exports/your-file.csv'); pass result.attach to a send tool's attachments.\n"
         "```\n\n"
         f"{image_generation_skill}"
