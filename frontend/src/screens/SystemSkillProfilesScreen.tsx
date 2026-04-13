@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, CircleAlert, ExternalLink, Plus, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, CircleAlert, Plus } from 'lucide-react'
 
 import {
   createSystemSkillProfile,
@@ -34,6 +34,7 @@ export function SystemSkillProfilesScreen({
   const [modal, showModal] = useModal()
   const [banner, setBanner] = useState<string | null>(null)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
+  const [handledInitialSetupLink, setHandledInitialSetupLink] = useState(false)
 
   const { data, isLoading, error } = useQuery({
     queryKey,
@@ -113,6 +114,34 @@ export function SystemSkillProfilesScreen({
     ))
   }, [bootstrapProfile, definition, handleEdit, handleSuccess, listUrl, showModal])
 
+  useEffect(() => {
+    if (handledInitialSetupLink || !definition) {
+      return
+    }
+
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('setup') !== '1') {
+      setHandledInitialSetupLink(true)
+      return
+    }
+
+    const requestedProfileKey = url.searchParams.get('profile_key')?.trim() || null
+    const requestedProfile = requestedProfileKey
+      ? profiles.find((profile) => profile.profile_key === requestedProfileKey) ?? null
+      : null
+
+    if (requestedProfile) {
+      handleEdit(requestedProfile)
+    } else {
+      handleCreate()
+    }
+
+    url.searchParams.delete('setup')
+    url.searchParams.delete('profile_key')
+    window.history.replaceState({}, '', `${url.pathname}${url.search ? url.search : ''}${url.hash}`)
+    setHandledInitialSetupLink(true)
+  }, [definition, handleCreate, handleEdit, handledInitialSetupLink, profiles])
+
   const handleDelete = useCallback(
     (profile: SystemSkillProfileDTO) => {
       showModal((onClose) => (
@@ -158,6 +187,9 @@ export function SystemSkillProfilesScreen({
                 A default profile is ready. Add the credentials below to finish onboarding.
               </p>
             )}
+            <p className="mt-2 text-sm text-slate-600">
+              Need help getting these credentials? Ask your agent and it will walk you through setup.
+            </p>
           </div>
           <button
             type="button"
@@ -170,89 +202,6 @@ export function SystemSkillProfilesScreen({
           </button>
         </div>
       </div>
-
-      {definition && (
-        <div className="overflow-hidden rounded-xl border border-blue-200/60 bg-blue-50/80 shadow-xl backdrop-blur-sm">
-          <div className="p-4 sm:p-6">
-            <div className="flex gap-x-4">
-              <div className="shrink-0">
-                <ShieldCheck className="h-6 w-6 text-blue-600" />
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h2 className="text-sm font-semibold text-blue-900">Setup</h2>
-                  <p className="mt-1 text-sm text-blue-800">{definition.setup_instructions}</p>
-                </div>
-                {definition.setup_steps.length > 0 && (
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Checklist</h3>
-                    <ol className="mt-2 space-y-2 text-sm text-blue-900">
-                      {definition.setup_steps.map((step, index) => (
-                        <li key={`${index}-${step}`} className="flex gap-3">
-                          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/80 text-xs font-semibold text-blue-700">
-                            {index + 1}
-                          </span>
-                          <span>{step}</span>
-                        </li>
-                      ))}
-                    </ol>
-                  </div>
-                )}
-                {definition.setup_docs.length > 0 && (
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Docs</h3>
-                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                      {definition.setup_docs.map((doc) => (
-                        <a
-                          key={doc.url}
-                          href={doc.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="rounded-lg bg-white/85 px-3 py-3 text-sm text-blue-900 transition hover:bg-white"
-                        >
-                          <span className="flex items-center gap-2 font-medium">
-                            {doc.title}
-                            <ExternalLink className="h-3.5 w-3.5 text-blue-600" />
-                          </span>
-                          {doc.description && <span className="mt-1 block text-xs text-blue-700">{doc.description}</span>}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Fields</h3>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {definition.fields.map((field) => (
-                      <span
-                        key={field.key}
-                        className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                          field.required ? 'bg-blue-100 text-blue-800' : 'bg-white/80 text-blue-700'
-                        }`}
-                      >
-                        {field.key}
-                        {!field.required && field.default ? ` = ${field.default}` : ''}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                {definition.troubleshooting_tips.length > 0 && (
-                  <div>
-                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Troubleshooting</h3>
-                    <ul className="mt-2 space-y-2 text-sm text-blue-900">
-                      {definition.troubleshooting_tips.map((tip) => (
-                        <li key={tip} className="rounded-lg bg-white/70 px-3 py-2">
-                          {tip}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {banner && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{banner}</div>}
       {(errorBanner || listError) && (
@@ -306,17 +255,15 @@ export function SystemSkillProfilesScreen({
                         ) : (
                           <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
                             <CircleAlert className="h-3.5 w-3.5" />
-                            Missing {profile.missing_required_keys.join(', ')}
+                            Needs setup
                           </span>
                         )}
                       </div>
-                      <div className="flex flex-wrap gap-2 text-xs text-slate-500">
-                        {profile.present_keys.map((key) => (
-                          <span key={key} className="rounded-full bg-slate-50 px-2 py-1 text-slate-600">
-                            {key}
-                          </span>
-                        ))}
-                      </div>
+                      {!profile.complete && (
+                        <p className="text-sm text-slate-500">
+                          Add the required credentials to finish onboarding. Need help? Ask your agent.
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap gap-2">

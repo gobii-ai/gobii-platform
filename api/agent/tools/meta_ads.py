@@ -8,6 +8,7 @@ import json
 import logging
 import sqlite3
 from typing import Any, Optional
+from urllib.parse import urlencode
 import uuid
 
 import requests
@@ -1229,12 +1230,30 @@ def _sync_conversion_quality_rows(
                 logger.debug("Failed to close SQLite connection after Meta conversion-quality sync", exc_info=True)
 
 
-def _build_setup_path(skill_key: str) -> str:
-    return reverse("console-system-skill-profiles", args=[skill_key])
+def _build_setup_path(
+    skill_key: str,
+    *,
+    open_setup: bool = False,
+    profile_key: Optional[str] = None,
+) -> str:
+    path = reverse("console-system-skill-profiles", args=[skill_key])
+    query: dict[str, str] = {}
+    if open_setup:
+        query["setup"] = "1"
+    if profile_key:
+        query["profile_key"] = str(profile_key).strip()
+    if not query:
+        return path
+    return f"{path}?{urlencode(query)}"
 
 
-def _build_setup_url(skill_key: str) -> str:
-    relative_url = _build_setup_path(skill_key)
+def _build_setup_url(
+    skill_key: str,
+    *,
+    open_setup: bool = False,
+    profile_key: Optional[str] = None,
+) -> str:
+    relative_url = _build_setup_path(skill_key, open_setup=open_setup, profile_key=profile_key)
     base_url = str(settings.PUBLIC_SITE_URL or "").strip().rstrip("/")
     if not base_url:
         return relative_url
@@ -1290,7 +1309,11 @@ def _base_onboarding_payload(*, setup_note: Optional[str] = None) -> dict[str, A
         "troubleshooting_tips": list(definition.troubleshooting_tips),
         "agent_guidance": (
             setup_note
-            or "Help the user finish the setup steps, point them to the docs when they get stuck, then retry Meta Ads once they confirm the profile is updated."
+            or (
+                "Keep the initial response short. Direct the user to the credential form, tell them you can walk them "
+                "through Meta developer setup if they want help, and only expand into the detailed setup steps or docs "
+                "if they ask or the setup still fails."
+            )
         ),
     }
 
@@ -1329,12 +1352,13 @@ def _default_setup_note_for_resolution(
     was_bootstrapped = bool(resolution.get("was_bootstrapped"))
     if was_bootstrapped:
         return (
-            f"A default Meta Ads profile '{selected_profile_key}' was created automatically. Walk the user through "
-            "developer registration, app creation, system-user setup, and token generation until the profile is complete."
+            f"Keep the first response brief. Tell the user a default Meta Ads profile '{selected_profile_key}' is ready, "
+            "send them to the credential form, and offer to walk them through developer registration, app creation, "
+            "system-user setup, and token generation if they want help."
         )
     return (
-        f"Meta Ads profile '{selected_profile_key}' is not ready. Walk the user through the setup checklist and docs, "
-        "ask which step they are stuck on if needed, then retry once they update the profile."
+        f"Keep the first response brief. Send the user to the credential form for Meta Ads profile '{selected_profile_key}', "
+        "offer help getting the values, and use the full checklist or docs only if they ask or the setup still fails."
     )
 
 
@@ -1344,12 +1368,21 @@ def _profile_action_required(
     profile_key: Optional[str] = None,
     setup_note: Optional[str] = None,
 ) -> dict[str, Any]:
-    setup_path = _build_setup_path(SYSTEM_SKILL_KEY)
-    setup_url = setup_path
-    setup_url_absolute = _build_setup_url(SYSTEM_SKILL_KEY)
     available_profiles = list(resolution.get("available_profile_keys") or [])
-
     status = resolution.get("status")
+    selected_profile_key = getattr(resolution.get("profile"), "profile_key", None)
+    open_setup = status == "incomplete_profile"
+    setup_path = _build_setup_path(
+        SYSTEM_SKILL_KEY,
+        open_setup=open_setup,
+        profile_key=selected_profile_key if open_setup else None,
+    )
+    setup_url = setup_path
+    setup_url_absolute = _build_setup_url(
+        SYSTEM_SKILL_KEY,
+        open_setup=open_setup,
+        profile_key=selected_profile_key if open_setup else None,
+    )
     if status == "profile_not_found":
         result = (
             f"Meta Ads profile '{profile_key}' was not found. "
@@ -1370,12 +1403,13 @@ def _profile_action_required(
         if was_bootstrapped:
             result = (
                 f"I created a default Meta Ads profile '{selected_profile_key}' for you. "
-                f"Open {setup_path} and fill in these values: {', '.join(missing_required_keys)}."
+                f"Open the credential form here: {setup_path}. "
+                f"Add these values: {', '.join(missing_required_keys)}. If you want help getting them, ask me."
             )
         else:
             result = (
                 f"Meta Ads profile '{selected_profile_key}' is missing required values: {', '.join(missing_required_keys)}. "
-                f"Complete the profile here: {setup_path}"
+                f"Open the credential form here: {setup_path}. If you want help getting them, ask me."
             )
     else:
         result = (
@@ -1392,7 +1426,7 @@ def _profile_action_required(
         "skill_key": SYSTEM_SKILL_KEY,
         "available_profiles": available_profiles,
         "selection_required": status == "multiple_profiles",
-        "selected_profile_key": getattr(resolution.get("profile"), "profile_key", None),
+        "selected_profile_key": selected_profile_key,
     }
     payload.update(
         _base_onboarding_payload(
@@ -1456,14 +1490,15 @@ def _credentials_action_required(
         resolution,
         profile_key=profile_key,
         setup_note=(
-            "The saved Meta credentials or permissions did not pass a live check. Walk the user through developer registration, app setup, "
-            "system user assignment, and token generation, then retry once they confirm the profile is updated."
+            "Keep the first response short. Direct the user to the credential form, explain that the saved Meta credentials or permissions "
+            "failed a live check, and offer to help troubleshoot developer registration, app setup, system-user assignment, or token generation. "
+            "Use the detailed steps and docs only if they ask or the next attempt still fails."
         ),
     )
     payload["result"] = (
         f"Meta Ads profile '{selected_profile_key}' needs attention before monitoring can start. "
         f"Live check failed with: {error_message} "
-        f"Open {payload['setup_path']}, review the onboarding steps and docs, update the profile, and then retry."
+        f"Open the credential form here: {payload['setup_path']}. If you want help fixing it, ask me and I will walk you through it."
     )
     payload["auth_error"] = error_message
     payload["selected_profile_key"] = selected_profile_key
