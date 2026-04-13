@@ -60,6 +60,7 @@ from api.agent.tools.search_tools import (
     get_search_tools_tool,
     search_tools,
 )
+from api.agent.system_skills.registry import SystemSkillDefinition
 from api.services.prompt_settings import invalidate_prompt_settings_cache
 from api.services.tool_settings import invalidate_tool_settings_cache
 from tests.utils.llm_seed import seed_persistent_basic
@@ -1666,6 +1667,224 @@ class MCPToolFunctionsTests(TestCase):
         tool_defs = mock_run_completion.call_args.kwargs["tools"]
         self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools"])
         mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_includes_system_skill_prompt_section_for_matching_query(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = SystemSkillDefinition(
+            skill_key="meta_ads_platform",
+            name="Meta Ads Platform",
+            search_summary="Monitor and report on Meta ads data.",
+            tool_names=("meta_ads",),
+            query_aliases=("meta ads", "facebook ads"),
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        hidden_builtin = {
+            "definition": lambda: {
+                "type": "function",
+                "function": {
+                    "name": "meta_ads",
+                    "description": "Read Meta ads data.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            "search_hidden": True,
+        }
+
+        with (
+            patch.dict(
+                "api.agent.system_skills.registry.SYSTEM_SKILL_REGISTRY",
+                {"meta_ads_platform": skill},
+                clear=True,
+            ),
+            patch.dict(
+                "api.agent.tools.tool_manager.BUILTIN_TOOL_REGISTRY",
+                {"meta_ads": hidden_builtin},
+                clear=False,
+            ),
+        ):
+            result = search_tools(self.agent, "monitor my meta ads")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Available system skills:", user_message)
+        self.assertIn(
+            "- meta_ads_platform: Monitor and report on Meta ads data. | tools: meta_ads",
+            user_message,
+        )
+        self.assertNotIn("Available tools:\n- meta_ads: Read Meta ads data.", user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual(
+            [tool_def["function"]["name"] for tool_def in tool_defs],
+            ["enable_tools", "enable_system_skills"],
+        )
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_omits_system_skill_prompt_section_for_non_matching_query(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = SystemSkillDefinition(
+            skill_key="meta_ads_platform",
+            name="Meta Ads Platform",
+            search_summary="Monitor and report on Meta ads data.",
+            tool_names=("meta_ads",),
+            query_aliases=("meta ads", "facebook ads"),
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        hidden_builtin = {
+            "definition": lambda: {
+                "type": "function",
+                "function": {
+                    "name": "meta_ads",
+                    "description": "Read Meta ads data.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            "search_hidden": True,
+        }
+
+        with (
+            patch.dict(
+                "api.agent.system_skills.registry.SYSTEM_SKILL_REGISTRY",
+                {"meta_ads_platform": skill},
+                clear=True,
+            ),
+            patch.dict(
+                "api.agent.tools.tool_manager.BUILTIN_TOOL_REGISTRY",
+                {"meta_ads": hidden_builtin},
+                clear=False,
+            ),
+        ):
+            result = search_tools(self.agent, "read some local files")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn("Available system skills:", user_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools"])
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools._fallback_builtin_selection')
+    def test_search_tools_enables_system_skill_hidden_builtin(
+        self,
+        mock_fallback_builtin_selection,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+    ):
+        skill = SystemSkillDefinition(
+            skill_key="meta_ads_platform",
+            name="Meta Ads Platform",
+            search_summary="Monitor and report on Meta ads data.",
+            tool_names=("meta_ads",),
+            query_aliases=("meta ads", "facebook ads"),
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+        mock_fallback_builtin_selection.return_value = ["read_file"]
+
+        msg = MagicMock()
+        msg.content = "Enable the Meta Ads skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_system_skills",
+                    "arguments": json.dumps({"skill_keys": ["meta_ads_platform"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        hidden_builtin = {
+            "definition": lambda: {
+                "type": "function",
+                "function": {
+                    "name": "meta_ads",
+                    "description": "Read Meta ads data.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            "executor": lambda _agent, _params: {"status": "ok"},
+            "search_hidden": True,
+        }
+
+        with (
+            patch.dict(
+                "api.agent.system_skills.registry.SYSTEM_SKILL_REGISTRY",
+                {"meta_ads_platform": skill},
+                clear=True,
+            ),
+            patch.dict(
+                "api.agent.tools.tool_manager.BUILTIN_TOOL_REGISTRY",
+                {"meta_ads": hidden_builtin},
+                clear=False,
+            ),
+        ):
+            result = search_tools(self.agent, "monitor my meta ads")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["system_skills"]["enabled"], ["meta_ads_platform"])
+        self.assertEqual(result["system_skills"]["already_enabled"], [])
+        self.assertEqual(result["system_skills"]["invalid"], [])
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="meta_ads").exists()
+        )
+        mock_fallback_builtin_selection.assert_not_called()
 
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')

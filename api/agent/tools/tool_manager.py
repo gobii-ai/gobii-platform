@@ -45,6 +45,7 @@ from .create_video import (
 from .custom_tools import execute_custom_tool, is_custom_tools_available_for_agent
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
+from .meta_ads import get_meta_ads_tool, execute_meta_ads
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
 from .static_tools import get_static_tool_names
@@ -100,6 +101,7 @@ CREATE_IMAGE_TOOL_NAME = "create_image"
 CREATE_VIDEO_TOOL_NAME = "create_video"
 PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
+META_ADS_TOOL_NAME = "meta_ads"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
@@ -204,16 +206,27 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_run_command,
         "sandbox_only": True,
     },
+    META_ADS_TOOL_NAME: {
+        "definition": get_meta_ads_tool,
+        "executor": execute_meta_ads,
+        "search_hidden": True,
+        "system_skill_key": "meta_ads_platform",
+    },
 }
 
 
 def _is_builtin_tool_available(
     tool_name: str,
     agent: Optional[PersistentAgent],
+    *,
+    include_hidden: bool = False,
 ) -> bool:
     """Return whether a builtin tool should be exposed for this agent."""
     entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     if not entry:
+        return False
+
+    if entry.get("search_hidden") and not include_hidden:
         return False
 
     if entry.get("sandbox_only"):
@@ -270,11 +283,13 @@ def _build_builtin_catalog_entry(
 
 def get_available_builtin_tool_entries(
     agent: Optional[PersistentAgent],
+    *,
+    include_hidden: bool = False,
 ) -> Dict[str, "ToolCatalogEntry"]:
     """Return builtin tool catalog entries available to the provided agent."""
     catalog: Dict[str, ToolCatalogEntry] = {}
     for name, registry_entry in BUILTIN_TOOL_REGISTRY.items():
-        if not _is_builtin_tool_available(name, agent):
+        if not _is_builtin_tool_available(name, agent, include_hidden=include_hidden):
             continue
         entry = _build_builtin_catalog_entry(name, registry_entry)
         if entry:
@@ -358,7 +373,11 @@ def get_enabled_tool_limit(agent: Optional[PersistentAgent]) -> int:
         return _normalize_tool_limit(None, fallback)
 
 
-def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalogEntry]:
+def _build_available_tool_index(
+    agent: PersistentAgent,
+    *,
+    include_hidden_builtin: bool = False,
+) -> Dict[str, ToolCatalogEntry]:
     """Build an index of enableable tools across all providers."""
     manager = _get_manager()
     catalog: Dict[str, ToolCatalogEntry] = {}
@@ -374,7 +393,7 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
             server_config_id=info.config_id,
         )
 
-    catalog.update(get_available_builtin_tool_entries(agent))
+    catalog.update(get_available_builtin_tool_entries(agent, include_hidden=include_hidden_builtin))
     catalog.update(get_available_custom_tool_entries(agent))
 
     return catalog
@@ -552,9 +571,14 @@ def _apply_tool_metadata(row: PersistentAgentEnabledTool, entry: Optional[ToolCa
     return updates
 
 
-def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str, Any]:
+def enable_tools(
+    agent: PersistentAgent,
+    tool_names: Iterable[str],
+    *,
+    include_hidden_builtin: bool = False,
+) -> Dict[str, Any]:
     """Enable multiple tools for an agent, respecting the tiered cap."""
-    catalog = _build_available_tool_index(agent)
+    catalog = _build_available_tool_index(agent, include_hidden_builtin=include_hidden_builtin)
     manager = _get_manager()
     limit = get_enabled_tool_limit(agent)
 
@@ -888,7 +912,7 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
         if not registry_entry:
             continue
-        if not _is_builtin_tool_available(row.tool_full_name, agent):
+        if not _is_builtin_tool_available(row.tool_full_name, agent, include_hidden=True):
             continue
         tool_def = _build_builtin_tool_definition(row.tool_full_name, registry_entry)
         if not tool_def:
@@ -935,7 +959,7 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
 
     Attempts fuzzy matching for MCP tools when exact match fails.
     """
-    catalog = _build_available_tool_index(agent)
+    catalog = _build_available_tool_index(agent, include_hidden_builtin=True)
 
     # Try exact match first
     entry = catalog.get(tool_name)

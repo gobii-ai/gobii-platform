@@ -26,6 +26,8 @@ from ...services.pipedream_apps import (
 )
 from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
+from ..system_skills import shortlist_system_skills
+from ..system_skills.service import enable_system_skills
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
@@ -314,10 +316,28 @@ def _build_global_skill_lines(global_skills: Iterable[Any]) -> list[str]:
     return lines
 
 
+def _build_system_skill_lines(system_skills: Iterable[Any]) -> list[str]:
+    lines: list[str] = []
+    for skill in system_skills:
+        skill_key = _tool_attr(skill, "skill_key")
+        if not isinstance(skill_key, str) or not skill_key:
+            continue
+        search_summary = _strip_description(_tool_attr(skill, "search_summary", "") or "")
+        tool_names = list(_tool_attr(skill, "tool_names", ()) or ())
+        tool_text = ", ".join(tool_names) if tool_names else "(none)"
+        line = f"- {skill_key}"
+        if search_summary:
+            line += f": {search_summary}"
+        line += f" | tools: {tool_text}"
+        lines.append(line)
+    return lines
+
+
 def _build_search_tool_definitions(
     *,
     max_items: int,
     include_global_skills: bool,
+    include_system_skills: bool,
     include_app_enablement: bool,
 ) -> list[dict[str, Any]]:
     tool_defs: list[dict[str, Any]] = [
@@ -385,6 +405,32 @@ def _build_search_tool_definitions(
                 },
             }
         )
+    if include_system_skills:
+        tool_defs.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_system_skills",
+                    "description": (
+                        "Enable code-defined system skills by enabling their hidden underlying tools. "
+                        "Use exact skill keys from the Available system skills list."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "skill_keys": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": 1,
+                                "maxItems": 20,
+                                "description": "List of exact system skill keys to enable",
+                            },
+                        },
+                        "required": ["skill_keys"],
+                    },
+                },
+            }
+        )
     if include_app_enablement:
         tool_defs.append(
             {
@@ -417,6 +463,7 @@ def _build_search_tool_definitions(
 def _parse_search_tool_calls(tool_calls: Iterable[Any], *, provider_name: str) -> dict[str, list[Any]]:
     requested_tools: list[str] = []
     requested_skills: list[str] = []
+    requested_system_skills: list[str] = []
     requested_apps: list[str] = []
     external_resources: list[dict[str, str]] = []
 
@@ -455,6 +502,12 @@ def _parse_search_tool_calls(tool_calls: Iterable[Any], *, provider_name: str) -
                     for skill_name in skill_names:
                         if isinstance(skill_name, str) and skill_name not in requested_skills:
                             requested_skills.append(skill_name)
+            elif function_name == "enable_system_skills":
+                skill_keys = arguments.get("skill_keys") or []
+                if isinstance(skill_keys, list):
+                    for skill_key in skill_keys:
+                        if isinstance(skill_key, str) and skill_key not in requested_system_skills:
+                            requested_system_skills.append(skill_key)
             elif function_name == "enable_apps":
                 app_slugs = arguments.get("app_slugs") or []
                 if isinstance(app_slugs, list):
@@ -467,6 +520,7 @@ def _parse_search_tool_calls(tool_calls: Iterable[Any], *, provider_name: str) -
     return {
         "tools": requested_tools,
         "skills": requested_skills,
+        "system_skills": requested_system_skills,
         "apps": requested_apps,
         "external_resources": external_resources,
     }
@@ -555,6 +609,7 @@ def _search_with_llm(
     empty_message: str,
     *,
     global_skill_catalog: Optional[Iterable[Any]] = None,
+    system_skill_catalog: Optional[Iterable[Any]] = None,
     enable_apps_callback: Optional[Callable[[PersistentAgent, List[str]], Dict[str, Any]]] = None,
     pipedream_app_catalog: Optional[Iterable[Any]] = None,
     enabled_app_slugs: Optional[Iterable[str]] = None,
@@ -562,16 +617,18 @@ def _search_with_llm(
 ) -> ToolSearchResult:
     tools = list(catalog)
     global_skills = list(global_skill_catalog or [])
+    system_skills = list(system_skill_catalog or [])
     app_catalog = list(pipedream_app_catalog or [])
     logger.info(
-        "search_tools.%s: %d tools available, %d global skills available, %d pipedream apps available",
+        "search_tools.%s: %d tools available, %d global skills available, %d system skills available, %d pipedream apps available",
         provider_name,
         len(tools),
         len(global_skills),
+        len(system_skills),
         len(app_catalog),
     )
 
-    if not tools and not global_skills and not app_catalog:
+    if not tools and not global_skills and not system_skills and not app_catalog:
         return {"status": "success", "tools": [], "message": empty_message}
     available_names = {
         _tool_attr(tool, "full_name") or _tool_attr(tool, "name")
@@ -581,6 +638,11 @@ def _search_with_llm(
         _tool_attr(skill, "name")
         for skill in global_skills
         if isinstance(_tool_attr(skill, "name"), str)
+    }
+    available_system_skill_keys = {
+        _tool_attr(skill, "skill_key")
+        for skill in system_skills
+        if isinstance(_tool_attr(skill, "skill_key"), str)
     }
 
     tool_lines: List[str] = []
@@ -615,6 +677,7 @@ def _search_with_llm(
         logger.exception("search_tools.%s: failed to log compact catalog preview", provider_name)
 
     global_skill_lines = _build_global_skill_lines(global_skills)
+    system_skill_lines = _build_system_skill_lines(system_skills)
     app_lines = _build_app_lines(app_catalog, enabled_app_slugs=enabled_app_slugs)
     enable_apps_manually_url = _build_console_url("console-mcp-servers")
     manual_app_guidance = (
@@ -653,18 +716,24 @@ def _search_with_llm(
             "\n- Only include skill names that appear in Available global skills.\n"
             "Call enable_global_skills with skill_names copied verbatim from the Available global skills list.\n"
         )
+    if system_skill_lines:
+        system_prompt += (
+            "\n- Only include skill keys that appear in Available system skills.\n"
+            "Call enable_system_skills with skill_keys copied verbatim from the Available system skills list.\n"
+        )
     if app_lines:
         if auto_enable_apps and enable_apps_callback is not None:
             system_prompt += (
                 "\n- Only include app slugs that appear in Available Pipedream apps.\n"
                 "Call enable_apps with app_slugs copied verbatim from the Available Pipedream apps list.\n"
-                "Do not call enable_tools or enable_global_skills in the same response as enable_apps.\n"
+                "Do not call enable_tools, enable_global_skills, or enable_system_skills in the same response as enable_apps.\n"
                 "If a needed Pipedream app is not enabled yet, call enable_apps with exact app slugs and stop there.\n"
                 "Do this sparingly and only if you truly require the integration. "
                 "You may already have the tools you need for integration via http_request or other methods."
                 "Example (placeholders, do not copy names):\n"
                 "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
                 "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
+                "skill_keys: [\"<SYSTEM_SKILL_KEY_FROM_LIST>\"]\n"
                 "app_slugs: [\"<APP_SLUG_FROM_LIST>\"]\n"
             )
         else:
@@ -675,16 +744,20 @@ def _search_with_llm(
                 "Example (placeholders, do not copy names):\n"
                 "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
                 "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
+                "skill_keys: [\"<SYSTEM_SKILL_KEY_FROM_LIST>\"]\n"
             )
     else:
         system_prompt += (
             "\nExample (placeholders, do not copy names):\n"
             "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
             "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
+            "skill_keys: [\"<SYSTEM_SKILL_KEY_FROM_LIST>\"]\n"
         )
     user_prompt = f"Query: {query}\n\nAvailable tools:\n" + "\n".join(tool_lines)
     if global_skill_lines:
         user_prompt += "\n\nAvailable global skills:\n" + "\n".join(global_skill_lines)
+    if system_skill_lines:
+        user_prompt += "\n\nAvailable system skills:\n" + "\n".join(system_skill_lines)
     if app_lines:
         user_prompt += (
             "\n\nAvailable Pipedream apps:\n"
@@ -692,7 +765,7 @@ def _search_with_llm(
             + "\n\nUse ONLY tool names, skill names, and app slugs from the lists above."
         )
         if auto_enable_apps and enable_apps_callback is not None:
-            user_prompt += " If none match, do not call enable_tools, enable_global_skills, or enable_apps."
+            user_prompt += " If none match, do not call enable_tools, enable_global_skills, enable_system_skills, or enable_apps."
         else:
             user_prompt += (
                 f' If a needed app is not enabled, you may tell the user to go to "Add Apps" '
@@ -700,10 +773,10 @@ def _search_with_llm(
                 "Do this sparingly and only if you truly require the integration. "
                 "You may already have the tools you need for integration via http_request or other methods."
             )
-            user_prompt += " If none match, do not call enable_tools or enable_global_skills."
+            user_prompt += " If none match, do not call enable_tools, enable_global_skills, or enable_system_skills."
     else:
-        user_prompt += "\n\nUse ONLY tool names and skill names from the lists above."
-        user_prompt += " If none match, do not call enable_tools or enable_global_skills."
+        user_prompt += "\n\nUse ONLY tool names, skill names, and skill keys from the lists above."
+        user_prompt += " If none match, do not call enable_tools, enable_global_skills, or enable_system_skills."
 
     try:
         failover_configs = get_llm_config_with_failover(
@@ -726,6 +799,7 @@ def _search_with_llm(
                 tool_defs = _build_search_tool_definitions(
                     max_items=max_items,
                     include_global_skills=bool(global_skill_lines),
+                    include_system_skills=bool(system_skill_lines),
                     include_app_enablement=bool(app_lines and auto_enable_apps and enable_apps_callback is not None),
                 )
 
@@ -778,6 +852,12 @@ def _search_with_llm(
                     provider_name=provider_name,
                     item_label="global skill names",
                 )
+                requested_system_skills = _normalize_requested_selection(
+                    parsed_calls["system_skills"],
+                    available_system_skill_keys,
+                    provider_name=provider_name,
+                    item_label="system skill keys",
+                )
                 requested_apps = parsed_calls["apps"]
                 external_resources = parsed_calls["external_resources"]
                 enabled_apps_result = None
@@ -829,6 +909,17 @@ def _search_with_llm(
                     except Exception as err:  # pragma: no cover - defensive enabling
                         logger.error("search_tools.%s: enable_global_skills failed: %s", provider_name, err)
 
+                enabled_system_skills_result = None
+                if requested_system_skills:
+                    try:
+                        enabled_system_skills_result = enable_system_skills(
+                            agent,
+                            requested_system_skills,
+                            available_skills=system_skills,
+                        )
+                    except Exception as err:  # pragma: no cover - defensive enabling
+                        logger.error("search_tools.%s: enable_system_skills failed: %s", provider_name, err)
+
                 enabled_result = None
                 if requested:
                     try:
@@ -858,6 +949,14 @@ def _search_with_llm(
                 )
                 _append_section_summary(
                     message_lines,
+                    enabled_system_skills_result,
+                    enabled_label="Enabled system skills",
+                    already_enabled_label="Already enabled system skills",
+                    evicted_label="Evicted (LRU)",
+                    invalid_label="Invalid system skills",
+                )
+                _append_section_summary(
+                    message_lines,
                     enabled_result,
                     enabled_label="Enabled tools",
                     already_enabled_label="Already enabled tools",
@@ -866,7 +965,7 @@ def _search_with_llm(
                 )
 
                 # Fallback only when the model made no explicit tool or skill selection.
-                if not requested and not requested_skills:
+                if not requested and not requested_skills and not requested_system_skills:
                     fallback = _fallback_builtin_selection(query or "", content_text or "", available_names)
                     fallback = [name for name in fallback if name in available_names]
                     if fallback:
@@ -897,11 +996,19 @@ def _search_with_llm(
                         or enabled_global_skills_result.get("already_enabled")
                     )
                 )
+                system_skills_were_enabled = (
+                    enabled_system_skills_result
+                    and enabled_system_skills_result.get("status") == "success"
+                    and (
+                        enabled_system_skills_result.get("enabled")
+                        or enabled_system_skills_result.get("already_enabled")
+                    )
+                )
                 tools_were_enabled = enabled_result and enabled_result.get("status") == "success" and (
                     enabled_result.get("enabled") or enabled_result.get("already_enabled")
                 )
 
-                if not message_lines and not tools_were_enabled and not skills_were_enabled:
+                if not message_lines and not tools_were_enabled and not skills_were_enabled and not system_skills_were_enabled:
                     # Make it explicit when no tools were enabled
                     message_lines.append(
                         "No matching tools or global skills found for your query. "
@@ -923,6 +1030,13 @@ def _search_with_llm(
                         response_payload["skills"]["failed"] = list(
                             enabled_global_skills_result.get("failed", [])
                         )
+                if enabled_system_skills_result and enabled_system_skills_result.get("status") == "success":
+                    response_payload["system_skills"] = _section_payload(
+                        enabled=enabled_system_skills_result.get("enabled", []),
+                        already_enabled=enabled_system_skills_result.get("already_enabled", []),
+                        evicted=enabled_system_skills_result.get("evicted", []),
+                        invalid=enabled_system_skills_result.get("invalid", []),
+                    )
                 if enabled_result and enabled_result.get("status") == "success":
                     response_payload["tools"] = _section_payload(
                         enabled=enabled_result.get("enabled", []),
@@ -975,6 +1089,9 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         }
         for entry in get_available_builtin_tool_entries(agent).values()
     ]
+    hidden_builtin_names = set(
+        get_available_builtin_tool_entries(agent, include_hidden=True).keys()
+    )
     custom_catalog: List[Dict[str, Any]] = [
         {
             "full_name": entry.full_name,
@@ -984,6 +1101,10 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         for entry in get_available_custom_tool_entries(agent).values()
     ]
     global_skill_catalog = get_compatible_global_skills(agent)
+    system_skill_catalog = shortlist_system_skills(
+        query,
+        available_tool_names=hidden_builtin_names,
+    )
 
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog
     pipedream_app_catalog: list[Any] = []
@@ -1011,6 +1132,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         enable_callback=enable_tools,
         empty_message="No tools available",
         global_skill_catalog=global_skill_catalog,
+        system_skill_catalog=system_skill_catalog,
         enable_apps_callback=(
             partial(
                 enable_pipedream_apps_for_agent,
