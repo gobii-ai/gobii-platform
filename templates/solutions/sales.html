@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% load static %}
+{% load cta_tags %}
 
 {% block title %}AI Sales Agents - Automate Lead Gen & Outreach | Gobii{% endblock %}
 
@@ -153,7 +154,11 @@
             <input type="hidden" name="trial_onboarding" value="1" />
             <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
-              {% if not user.is_authenticated or solution_spawn_requires_trial %}Start Free Trial{% else %}Spawn Agent{% endif %}
+              {% if not user.is_authenticated or solution_spawn_requires_trial %}
+                {% cta_text "cta_sales_launch_btn_unauth" fallback="Start Free Trial" %}
+              {% else %}
+                {% cta_text "cta_sales_launch_btn_auth" fallback="Spawn Agent" %}
+              {% endif %}
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
