@@ -1,5 +1,5 @@
 from datetime import timezone, datetime
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from types import SimpleNamespace
 import uuid
 
@@ -244,10 +244,8 @@ def _additional_tasks_price_id_for_plan(stripe_settings, plan_target: str) -> st
 def _auth_url_with_utms(base_url: str, request) -> str:
     """Append stored UTM query params to an auth URL when available."""
     utm_qs = request.session.get("utm_querystring") or ""
-    if utm_qs:
-        separator = "&" if "?" in base_url else "?"
-        return f"{base_url}{separator}{utm_qs}"
-    return base_url
+    params = dict(parse_qsl(str(utm_qs).lstrip("?")))
+    return append_query_params(base_url, params)
 
 
 def _cta_auth_url_with_utms(request) -> str:
