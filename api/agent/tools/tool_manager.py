@@ -314,6 +314,29 @@ class ToolCatalogEntry:
     server_config_id: Optional[str] = None
 
 
+def _custom_tool_parameters_for_llm(parameters_schema: Any) -> Dict[str, Any]:
+    normalized = normalize_custom_tool_parameters_schema(parameters_schema)
+    if normalized is None:
+        return {"type": "object", "properties": {}, "required": []}
+
+    schema = dict(normalized)
+    properties = dict(schema.get("properties") or {})
+    changed = False
+    for required_name in schema.get("required") or []:
+        if required_name in properties:
+            continue
+        properties[required_name] = {
+            "type": "string",
+            "description": (
+                "Required parameter inferred from schema.required because no explicit property definition was provided."
+            ),
+        }
+        changed = True
+    if changed:
+        schema["properties"] = properties
+    return schema
+
+
 def get_available_custom_tool_entries(
     agent: Optional[PersistentAgent],
 ) -> Dict[str, ToolCatalogEntry]:
@@ -323,14 +346,11 @@ def get_available_custom_tool_entries(
 
     catalog: Dict[str, ToolCatalogEntry] = {}
     for tool in PersistentAgentCustomTool.objects.filter(agent=agent).order_by("tool_name"):
-        parameters_schema = normalize_custom_tool_parameters_schema(tool.parameters_schema)
-        if parameters_schema is None:
-            parameters_schema = {"type": "object", "properties": {}, "required": []}
         catalog[tool.tool_name] = ToolCatalogEntry(
             provider="custom",
             full_name=tool.tool_name,
             description=tool.description,
-            parameters=parameters_schema,
+            parameters=_custom_tool_parameters_for_llm(tool.parameters_schema),
             tool_server="custom",
             tool_name=tool.tool_name,
             server_config_id=None,
@@ -903,16 +923,13 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         for tool in enabled_custom_tools:
             if tool.tool_name in existing_names:
                 continue
-            parameters_schema = normalize_custom_tool_parameters_schema(tool.parameters_schema)
-            if parameters_schema is None:
-                parameters_schema = {"type": "object", "properties": {}, "required": []}
             definitions.append(
                 {
                     "type": "function",
                     "function": {
                         "name": tool.tool_name,
                         "description": tool.description,
-                        "parameters": parameters_schema,
+                        "parameters": _custom_tool_parameters_for_llm(tool.parameters_schema),
                     },
                 }
             )

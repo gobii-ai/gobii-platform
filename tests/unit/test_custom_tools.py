@@ -163,7 +163,7 @@ class CustomToolsTests(TestCase):
 
         self.assertEqual(normalized, ("custom_weather_tool", "custom_weather_tool"))
 
-    def test_normalize_custom_tool_parameters_schema_drops_missing_required_fields(self):
+    def test_normalize_custom_tool_parameters_schema_preserves_missing_required_fields(self):
         schema = normalize_custom_tool_parameters_schema(
             {
                 "type": "object",
@@ -183,7 +183,7 @@ class CustomToolsTests(TestCase):
                     "result_id": {"type": "string"},
                     "file_path": {"type": "string"},
                 },
-                "required": ["file_path"],
+                "required": ["result_id flocks", "file_path"],
             },
         )
 
@@ -351,7 +351,7 @@ class CustomToolsTests(TestCase):
 
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager._get_manager")
-    def test_tool_manager_sanitizes_invalid_persisted_custom_tool_required_fields(
+    def test_tool_manager_preserves_required_fields_and_synthesizes_missing_properties(
         self,
         mock_get_manager,
         _mock_custom_available,
@@ -390,7 +390,16 @@ class CustomToolsTests(TestCase):
 
         self.assertEqual(
             tool_def["function"]["parameters"]["required"],
-            ["file_path"],
+            ["result_id flocks", "file_path"],
+        )
+        self.assertEqual(
+            tool_def["function"]["parameters"]["properties"]["result_id flocks"],
+            {
+                "type": "string",
+                "description": (
+                    "Required parameter inferred from schema.required because no explicit property definition was provided."
+                ),
+            },
         )
 
     def test_create_custom_tool_definition_mentions_direct_tool_and_sqlite_access(self):
