@@ -4781,21 +4781,39 @@ class PersistentAgentPromptArchiveAdmin(admin.ModelAdmin):
 
 @admin.register(UserBilling)
 class UserBillingAdmin(admin.ModelAdmin):
+    list_select_related = ('user', 'plan_version', 'plan_version__plan')
+    autocomplete_fields = ('plan_version',)
     list_display = [
         'id',
         'user_id',
         'user',
         'subscription',
+        'plan_version',
         'max_extra_tasks',
         'max_contacts_per_agent',
         'billing_cycle_anchor',
     ]
     list_filter = ['subscription', 'user_id']
-    search_fields = ['id', 'subscription', 'user__email', 'user__username']
+    search_fields = [
+        'id',
+        'subscription',
+        'user__email',
+        'user__username',
+        'plan_version__plan__slug',
+        'plan_version__version_code',
+        'plan_version__legacy_plan_code',
+    ]
     readonly_fields = ['id', 'user']
     fieldsets = (
         (None, {
-            'fields': ('id', 'user', 'subscription', 'billing_cycle_anchor', 'downgraded_at')
+            'fields': (
+                'id',
+                'user',
+                'subscription',
+                'plan_version',
+                'billing_cycle_anchor',
+                'downgraded_at',
+            )
         }),
         ('Contact and Task Limits', {
             'fields': ('max_extra_tasks', 'max_contacts_per_agent'),
@@ -4843,12 +4861,14 @@ class UserBillingAdmin(admin.ModelAdmin):
 
 @admin.register(OrganizationBilling)
 class OrganizationBillingAdmin(admin.ModelAdmin):
-    list_select_related = ('organization',)
+    list_select_related = ('organization', 'plan_version', 'plan_version__plan')
+    autocomplete_fields = ('plan_version',)
     list_display = [
         'id',
         'organization_id',
         'organization',
         'subscription',
+        'plan_version',
         'billing_cycle_anchor',
         'stripe_customer_id',
         'stripe_subscription_id',
@@ -4856,7 +4876,16 @@ class OrganizationBillingAdmin(admin.ModelAdmin):
         'cancel_at_period_end',
     ]
     list_filter = ['subscription', 'cancel_at_period_end']
-    search_fields = ['id', 'organization__name', 'organization__id', 'stripe_customer_id', 'stripe_subscription_id']
+    search_fields = [
+        'id',
+        'organization__name',
+        'organization__id',
+        'stripe_customer_id',
+        'stripe_subscription_id',
+        'plan_version__plan__slug',
+        'plan_version__version_code',
+        'plan_version__legacy_plan_code',
+    ]
     readonly_fields = ['id', 'organization', 'created_at', 'updated_at']
 
 
