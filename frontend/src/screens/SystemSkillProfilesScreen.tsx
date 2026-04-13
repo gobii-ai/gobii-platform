@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, CircleAlert, Plus, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, CircleAlert, ExternalLink, Plus, ShieldCheck } from 'lucide-react'
 
 import {
   createSystemSkillProfile,
@@ -47,38 +47,31 @@ export function SystemSkillProfilesScreen({
   const description = isOrganizationScope
     ? 'Manage reusable encrypted profiles for this organization.'
     : 'Manage reusable encrypted profiles for your account.'
+  const bootstrapProfile = profiles.length === 1 && !profiles[0]?.complete ? profiles[0] : null
+  const primaryActionLabel = bootstrapProfile ? 'Complete Setup' : profiles.length > 0 ? 'Add Another Profile' : 'Add Profile'
 
   const refresh = useCallback(() => {
     queryClient.invalidateQueries({ queryKey })
   }, [queryClient, queryKey])
 
+  const formatSuccessMessage = useCallback((message: string, triggeredAgentCount?: number) => {
+    if (!triggeredAgentCount) {
+      return message
+    }
+    return `${message} Requeued ${triggeredAgentCount} agent${triggeredAgentCount === 1 ? '' : 's'}.`
+  }, [])
+
   const handleSuccess = useCallback(
-    (message: string) => {
-      setBanner(message)
+    (message: string, triggeredAgentCount?: number) => {
+      setBanner(formatSuccessMessage(message, triggeredAgentCount))
       setErrorBanner(null)
       refresh()
     },
-    [refresh],
+    [formatSuccessMessage, refresh],
   )
 
   const detailUrl = (profileId: string) => `${listUrl}${profileId}/`
   const defaultUrl = (profileId: string) => `${listUrl}${profileId}/default/`
-
-  const handleCreate = useCallback(() => {
-    if (!definition) {
-      return
-    }
-    showModal((onClose) => (
-      <SystemSkillProfileFormModal
-        definition={definition}
-        onClose={onClose}
-        onSubmit={async (payload) => {
-          await createSystemSkillProfile(listUrl, payload as CreateSystemSkillProfilePayload)
-          handleSuccess('Profile created.')
-        }}
-      />
-    ))
-  }, [definition, handleSuccess, listUrl, showModal])
 
   const handleEdit = useCallback(
     (profile: SystemSkillProfileDTO) => {
@@ -91,14 +84,34 @@ export function SystemSkillProfilesScreen({
           editProfile={profile}
           onClose={onClose}
           onSubmit={async (payload) => {
-            await updateSystemSkillProfile(detailUrl(profile.id), payload as UpdateSystemSkillProfilePayload)
-            handleSuccess('Profile updated.')
+            const response = await updateSystemSkillProfile(detailUrl(profile.id), payload as UpdateSystemSkillProfilePayload)
+            handleSuccess('Profile updated.', response.triggered_agent_count)
           }}
         />
       ))
     },
     [definition, handleSuccess, showModal],
   )
+
+  const handleCreate = useCallback(() => {
+    if (bootstrapProfile) {
+      handleEdit(bootstrapProfile)
+      return
+    }
+    if (!definition) {
+      return
+    }
+    showModal((onClose) => (
+      <SystemSkillProfileFormModal
+        definition={definition}
+        onClose={onClose}
+        onSubmit={async (payload) => {
+          const response = await createSystemSkillProfile(listUrl, payload as CreateSystemSkillProfilePayload)
+          handleSuccess('Profile created.', response.triggered_agent_count)
+        }}
+      />
+    ))
+  }, [bootstrapProfile, definition, handleEdit, handleSuccess, listUrl, showModal])
 
   const handleDelete = useCallback(
     (profile: SystemSkillProfileDTO) => {
@@ -107,8 +120,8 @@ export function SystemSkillProfilesScreen({
           profileLabel={profile.label}
           onClose={onClose}
           onConfirm={async () => {
-            await deleteSystemSkillProfile(detailUrl(profile.id))
-            handleSuccess('Profile deleted.')
+            const response = await deleteSystemSkillProfile(detailUrl(profile.id))
+            handleSuccess('Profile deleted.', response.triggered_agent_count)
           }}
         />
       ))
@@ -119,8 +132,8 @@ export function SystemSkillProfilesScreen({
   const handleSetDefault = useCallback(
     async (profile: SystemSkillProfileDTO) => {
       try {
-        await setDefaultSystemSkillProfile(defaultUrl(profile.id))
-        handleSuccess(`Default profile updated to ${profile.label}.`)
+        const response = await setDefaultSystemSkillProfile(defaultUrl(profile.id))
+        handleSuccess(`Default profile updated to ${profile.label}.`, response.triggered_agent_count)
       } catch (err) {
         setErrorBanner(err instanceof Error ? err.message : 'Failed to set default profile.')
       }
@@ -140,6 +153,11 @@ export function SystemSkillProfilesScreen({
             </h1>
             <p className="mt-1 text-sm text-slate-500">{description}</p>
             {definition?.search_summary && <p className="mt-2 text-sm text-slate-600">{definition.search_summary}</p>}
+            {bootstrapProfile && (
+              <p className="mt-2 text-sm font-medium text-blue-700">
+                A default profile is ready. Add the credentials below to finish onboarding.
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -148,7 +166,7 @@ export function SystemSkillProfilesScreen({
             className="inline-flex w-max items-center gap-x-2 rounded-lg border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60"
           >
             <Plus className="h-4 w-4" />
-            Add Profile
+            {primaryActionLabel}
           </button>
         </div>
       </div>
@@ -165,8 +183,45 @@ export function SystemSkillProfilesScreen({
                   <h2 className="text-sm font-semibold text-blue-900">Setup</h2>
                   <p className="mt-1 text-sm text-blue-800">{definition.setup_instructions}</p>
                 </div>
+                {definition.setup_steps.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Checklist</h3>
+                    <ol className="mt-2 space-y-2 text-sm text-blue-900">
+                      {definition.setup_steps.map((step, index) => (
+                        <li key={`${index}-${step}`} className="flex gap-3">
+                          <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/80 text-xs font-semibold text-blue-700">
+                            {index + 1}
+                          </span>
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                {definition.setup_docs.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Docs</h3>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      {definition.setup_docs.map((doc) => (
+                        <a
+                          key={doc.url}
+                          href={doc.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-lg bg-white/85 px-3 py-3 text-sm text-blue-900 transition hover:bg-white"
+                        >
+                          <span className="flex items-center gap-2 font-medium">
+                            {doc.title}
+                            <ExternalLink className="h-3.5 w-3.5 text-blue-600" />
+                          </span>
+                          {doc.description && <span className="mt-1 block text-xs text-blue-700">{doc.description}</span>}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Required Fields</h3>
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Fields</h3>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {definition.fields.map((field) => (
                       <span
@@ -181,6 +236,18 @@ export function SystemSkillProfilesScreen({
                     ))}
                   </div>
                 </div>
+                {definition.troubleshooting_tips.length > 0 && (
+                  <div>
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-blue-700">Troubleshooting</h3>
+                    <ul className="mt-2 space-y-2 text-sm text-blue-900">
+                      {definition.troubleshooting_tips.map((tip) => (
+                        <li key={tip} className="rounded-lg bg-white/70 px-3 py-2">
+                          {tip}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -205,7 +272,7 @@ export function SystemSkillProfilesScreen({
           <div className="px-6 py-4">
             <h2 className="text-lg font-semibold text-slate-800">Profiles</h2>
             <p className="mt-1 text-sm text-slate-500">
-              Profiles are reusable owner-scoped credential sets. Agents can select them by profile key.
+              Profiles are reusable owner-scoped credential sets. Agents can select them by profile key, but the default profile is used automatically.
             </p>
           </div>
 

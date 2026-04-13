@@ -1,11 +1,19 @@
 import { jsonFetch, jsonRequest } from './http'
 
+export type SystemSkillDocLinkDTO = {
+  title: string
+  url: string
+  description: string
+}
+
 export type SystemSkillFieldDTO = {
   key: string
   name: string
   description: string
   required: boolean
   default: string | null
+  how_to_get: string
+  docs: SystemSkillDocLinkDTO[]
 }
 
 export type SystemSkillDefinitionDTO = {
@@ -15,6 +23,9 @@ export type SystemSkillDefinitionDTO = {
   fields: SystemSkillFieldDTO[]
   default_values: Record<string, string>
   setup_instructions: string
+  setup_steps: string[]
+  setup_docs: SystemSkillDocLinkDTO[]
+  troubleshooting_tips: string[]
 }
 
 export type SystemSkillProfileDTO = {
@@ -41,6 +52,7 @@ export type SystemSkillProfileMutationResponse = {
   message: string
   owner_scope?: string
   definition?: SystemSkillDefinitionDTO
+  triggered_agent_count?: number
 }
 
 export type CreateSystemSkillProfilePayload = {
@@ -85,7 +97,9 @@ export function updateSystemSkillProfile(
   })
 }
 
-export function deleteSystemSkillProfile(detailUrl: string): Promise<{ ok: boolean; message: string }> {
+export function deleteSystemSkillProfile(
+  detailUrl: string,
+): Promise<{ ok: boolean; message: string; triggered_agent_count?: number }> {
   return jsonRequest(detailUrl, {
     method: 'DELETE',
     includeCsrf: true,

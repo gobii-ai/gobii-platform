@@ -1555,7 +1555,10 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result["status"], "success")
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertIn("Available global skills:", user_message)
-        self.assertIn("- ops-report: Generate an ops report | tools: sqlite_batch | secrets: (none)", user_message)
+        self.assertIn("- ops-report | use when: Generate an ops report | enables: sqlite_batch | secrets: (none)", user_message)
+        system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Treat global skills as capability bundles", system_message)
+        self.assertIn("small composable primitives", system_message)
         tool_defs = mock_run_completion.call_args.kwargs["tools"]
         self.assertEqual(
             [tool_def["function"]["name"] for tool_def in tool_defs],
@@ -1684,6 +1687,8 @@ class MCPToolFunctionsTests(TestCase):
             name="Meta Ads Platform",
             search_summary="Monitor and report on Meta ads data.",
             tool_names=("meta_ads",),
+            enables=("live Meta ads reporting", "campaign health checks"),
+            use_when=("monitor Meta ads", "check Meta campaign performance"),
             query_aliases=("meta ads", "facebook ads"),
         )
         mock_manager = MagicMock()
@@ -1731,10 +1736,12 @@ class MCPToolFunctionsTests(TestCase):
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertIn("Available system skills:", user_message)
         self.assertIn(
-            "- meta_ads_platform: Monitor and report on Meta ads data. | tools: meta_ads",
+            "- meta_ads_platform: Monitor and report on Meta ads data. | use when: monitor Meta ads, check Meta campaign performance | enables: live Meta ads reporting, campaign health checks | tools: meta_ads",
             user_message,
         )
         self.assertNotIn("Available tools:\n- meta_ads: Read Meta ads data.", user_message)
+        system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Treat system skills as capability bundles", system_message)
         tool_defs = mock_run_completion.call_args.kwargs["tools"]
         self.assertEqual(
             [tool_def["function"]["name"] for tool_def in tool_defs],
@@ -1758,6 +1765,8 @@ class MCPToolFunctionsTests(TestCase):
             name="Meta Ads Platform",
             search_summary="Monitor and report on Meta ads data.",
             tool_names=("meta_ads",),
+            enables=("live Meta ads reporting",),
+            use_when=("monitor Meta ads",),
             query_aliases=("meta ads", "facebook ads"),
         )
         mock_manager = MagicMock()
@@ -1824,6 +1833,8 @@ class MCPToolFunctionsTests(TestCase):
             name="Meta Ads Platform",
             search_summary="Monitor and report on Meta ads data.",
             tool_names=("meta_ads",),
+            enables=("live Meta ads reporting",),
+            use_when=("monitor Meta ads",),
             query_aliases=("meta ads", "facebook ads"),
         )
         mock_manager = MagicMock()

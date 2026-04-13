@@ -5,6 +5,15 @@ from typing import Mapping, Optional
 
 
 @dataclass(frozen=True)
+class SystemSkillDocLink:
+    """A documentation link surfaced only during setup and troubleshooting."""
+
+    title: str
+    url: str
+    description: str = ""
+
+
+@dataclass(frozen=True)
 class SystemSkillField:
     """A single profile field required or accepted by a system skill."""
 
@@ -13,6 +22,8 @@ class SystemSkillField:
     description: str = ""
     required: bool = True
     default: Optional[str] = None
+    how_to_get: str = ""
+    docs: tuple[SystemSkillDocLink, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -23,11 +34,18 @@ class SystemSkillDefinition:
     name: str
     search_summary: str
     tool_names: tuple[str, ...]
+    enables: tuple[str, ...] = ()
+    use_when: tuple[str, ...] = ()
     query_aliases: tuple[str, ...] = ()
     required_profile_fields: tuple[SystemSkillField, ...] = ()
     optional_profile_fields: tuple[SystemSkillField, ...] = ()
     default_values: Mapping[str, str] = field(default_factory=dict)
     setup_instructions: str = ""
+    setup_steps: tuple[str, ...] = ()
+    setup_docs: tuple[SystemSkillDocLink, ...] = ()
+    troubleshooting_tips: tuple[str, ...] = ()
+    bootstrap_profile_key: str = "default"
+    bootstrap_profile_label: str = ""
 
     def profile_fields(self) -> tuple[SystemSkillField, ...]:
         return tuple(self.required_profile_fields) + tuple(self.optional_profile_fields)
@@ -37,6 +55,8 @@ class SystemSkillDefinition:
             self.skill_key.replace("_", " "),
             self.name,
             *self.query_aliases,
+            *self.use_when,
+            *self.enables,
         ]
         seen: set[str] = set()
         normalized: list[str] = []

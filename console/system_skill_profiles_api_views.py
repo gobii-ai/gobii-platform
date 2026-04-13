@@ -15,6 +15,7 @@ from api.services.system_skill_profiles import (
     set_default_system_skill_profile,
     summarize_profile_status,
     system_skill_profiles_queryset_for_owner,
+    trigger_agents_for_system_skill_profile_change,
     upsert_system_skill_profile_values,
 )
 from console.context_helpers import build_console_context
@@ -55,11 +56,30 @@ def _serialize_definition(skill_key: str) -> dict[str, object]:
                 "description": field.description,
                 "required": field.required,
                 "default": field.default,
+                "how_to_get": field.how_to_get,
+                "docs": [
+                    {
+                        "title": doc.title,
+                        "url": doc.url,
+                        "description": doc.description,
+                    }
+                    for doc in field.docs
+                ],
             }
             for field in definition.profile_fields()
         ],
         "default_values": dict(definition.default_values),
         "setup_instructions": definition.setup_instructions,
+        "setup_steps": list(definition.setup_steps),
+        "setup_docs": [
+            {
+                "title": doc.title,
+                "url": doc.url,
+                "description": doc.description,
+            }
+            for doc in definition.setup_docs
+        ],
+        "troubleshooting_tips": list(definition.troubleshooting_tips),
     }
 
 
@@ -130,6 +150,11 @@ class SystemSkillProfileListAPIView(LoginRequiredMixin, View):
                 if should_default:
                     set_default_system_skill_profile(profile)
                 upsert_system_skill_profile_values(profile, values, definition=get_system_skill_definition(skill_key))
+                triggered_agent_count = trigger_agents_for_system_skill_profile_change(
+                    owner_user=owner_user,
+                    owner_org=owner_org,
+                    skill_key=skill_key,
+                )
         except ValidationError as exc:
             errors = exc.message_dict if hasattr(exc, "message_dict") else {"__all__": [str(exc)]}
             return JsonResponse({"errors": errors}, status=400)
@@ -145,6 +170,7 @@ class SystemSkillProfileListAPIView(LoginRequiredMixin, View):
                 "definition": definition,
                 "profile": _serialize_profile(profile),
                 "message": "System skill profile created.",
+                "triggered_agent_count": triggered_agent_count,
             },
             status=201,
         )
@@ -194,11 +220,22 @@ class SystemSkillProfileDetailAPIView(LoginRequiredMixin, View):
                         values,
                         definition=get_system_skill_definition(skill_key),
                     )
+                triggered_agent_count = trigger_agents_for_system_skill_profile_change(
+                    owner_user=profile.user,
+                    owner_org=profile.organization,
+                    skill_key=skill_key,
+                )
         except ValidationError as exc:
             errors = exc.message_dict if hasattr(exc, "message_dict") else {"__all__": [str(exc)]}
             return JsonResponse({"errors": errors}, status=400)
 
-        return JsonResponse({"profile": _serialize_profile(profile), "message": "System skill profile updated."})
+        return JsonResponse(
+            {
+                "profile": _serialize_profile(profile),
+                "message": "System skill profile updated.",
+                "triggered_agent_count": triggered_agent_count,
+            }
+        )
 
     def delete(self, request: HttpRequest, skill_key: str, profile_id, *args: Any, **kwargs: Any):
         profile = self._get_profile(request, skill_key, profile_id)
@@ -210,10 +247,19 @@ class SystemSkillProfileDetailAPIView(LoginRequiredMixin, View):
             pk=profile.pk
         )
         remaining_ids = list(scope_qs.values_list("id", flat=True))
+        owner_user = profile.user
+        owner_org = profile.organization
         profile.delete()
         if was_default and len(remaining_ids) == 1:
             SystemSkillProfile.objects.filter(pk=remaining_ids[0]).update(is_default=True)
-        return JsonResponse({"ok": True, "message": "System skill profile deleted."})
+        triggered_agent_count = trigger_agents_for_system_skill_profile_change(
+            owner_user=owner_user,
+            owner_org=owner_org,
+            skill_key=skill_key,
+        )
+        return JsonResponse(
+            {"ok": True, "message": "System skill profile deleted.", "triggered_agent_count": triggered_agent_count}
+        )
 
 
 class SystemSkillProfileSetDefaultAPIView(LoginRequiredMixin, View):
@@ -227,4 +273,15 @@ class SystemSkillProfileSetDefaultAPIView(LoginRequiredMixin, View):
 
         with transaction.atomic():
             set_default_system_skill_profile(profile)
-        return JsonResponse({"profile": _serialize_profile(profile), "message": "Default profile updated."})
+            triggered_agent_count = trigger_agents_for_system_skill_profile_change(
+                owner_user=profile.user,
+                owner_org=profile.organization,
+                skill_key=skill_key,
+            )
+        return JsonResponse(
+            {
+                "profile": _serialize_profile(profile),
+                "message": "Default profile updated.",
+                "triggered_agent_count": triggered_agent_count,
+            }
+        )
