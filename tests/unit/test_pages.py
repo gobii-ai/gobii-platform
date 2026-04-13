@@ -556,6 +556,28 @@ class HomePageTests(TestCase):
         self.assertEqual(params.get("utm_source"), ["newsletter"])
 
     @tag("batch_pages")
+    def test_home_spawn_redirects_to_signup_when_cta_signup_first_enabled(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_source=newsletter"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(reverse("pages:home_agent_spawn"), {"charter": "Custom charter"})
+
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+
+    @tag("batch_pages")
     def test_home_spawn_redirect_stashes_oauth_fallback_cookie(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
@@ -931,6 +953,42 @@ class LandingPageLaunchTests(TestCase):
         )
 
     @tag("batch_pages")
+    def test_landing_launch_redirects_anon_to_signup_when_cta_signup_first_enabled(self):
+        landing = LandingPage.objects.create(
+            charter="Launch anonymously",
+            utm_source="paid-social",
+        )
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session["utm_first_touch"] = {"utm_source": "meta", "utm_medium": "paid_social"}
+        session["utm_last_touch"] = {"utm_source": "meta", "utm_campaign": "retargeting"}
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.get(reverse("pages:landing_launch", kwargs={"code": landing.code}))
+
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("utm_source"), ["paid-social"])
+        self.assertEqual(params.get("utm_medium"), ["paid_social"])
+        self.assertEqual(params.get("utm_campaign"), ["retargeting"])
+
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(next_params.get("g"), [landing.code])
+        self.assertEqual(next_params.get("utm_source"), ["paid-social"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+    @tag("batch_pages")
     def test_landing_launch_clears_stale_trial_onboarding_state(self):
         user = get_user_model().objects.create_user(
             email="launch-onboarding@test.com",
@@ -1167,6 +1225,40 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(attribution_payload.get("utm_querystring"), "utm_medium=ads")
 
     @tag("batch_pages")
+    def test_hire_redirects_to_signup_when_cta_signup_first_enabled(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session["utm_first_touch"] = {"utm_source": "meta", "utm_medium": "paid_social"}
+        session["utm_last_touch"] = {"utm_source": "meta", "utm_campaign": "retargeting"}
+        session["click_ids_first"] = {"gclid": "first-gclid"}
+        session["click_ids_last"] = {"gclid": "last-gclid"}
+        session["fbclid_first"] = "first-fbclid"
+        session["fbclid_last"] = "last-fbclid"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(
+                reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code})
+            )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
+    @tag("batch_pages")
     def test_hire_redirects_to_login_for_pro_flow(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1182,6 +1274,34 @@ class PretrainedWorkerHireRedirectTests(TestCase):
 
         parsed = urlparse(response["Location"])
         self.assertEqual(parsed.path, reverse("account_login"))
+
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), [reverse("proprietary:pro_checkout")])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        session = self.client.session
+        self.assertEqual(
+            session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
+            reverse("agent_quick_spawn"),
+        )
+
+    @tag("batch_pages")
+    def test_hire_redirects_to_signup_for_pro_flow_when_cta_signup_first_enabled(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(
+                reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+                {"flow": "pro"},
+            )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
 
         params = parse_qs(parsed.query)
         self.assertEqual(params.get("next"), [reverse("proprietary:pro_checkout")])
@@ -1425,6 +1545,64 @@ class EngineeringProSignupTests(TestCase):
 
         parsed = urlparse(response["Location"])
         self.assertEqual(parsed.path, reverse("account_login"))
+
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_API_KEYS,
+        )
+        self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+
+    @tag("batch_pages")
+    def test_engineering_default_redirects_anon_to_signup_when_cta_signup_first_enabled(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(reverse("pages:engineering_pro_signup"))
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), [reverse("proprietary:pro_checkout")])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        session = self.client.session
+        self.assertEqual(
+            session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
+            reverse("api_keys"),
+        )
+
+    @tag("batch_pages")
+    def test_engineering_trial_onboarding_redirects_anon_to_signup_when_cta_signup_first_enabled(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        with override_flag("cta_signup_first", active=True):
+            response = self.client.post(
+                reverse("pages:engineering_pro_signup"),
+                {
+                    "trial_onboarding": "1",
+                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_API_KEYS,
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
 
         params = parse_qs(parsed.query)
         next_url = params.get("next")[0]
@@ -2329,6 +2507,24 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
 @tag("batch_pages")
 class AuthLinkTests(TestCase):
+    @tag("batch_pages")
+    def test_auth_url_with_utms_preserves_existing_query_and_fragment(self):
+        request = SimpleNamespace(
+            session={
+                "utm_querystring": "?utm_source=newsletter&utm_campaign=fall",
+            }
+        )
+
+        url = page_views._auth_url_with_utms("/accounts/signup/?existing=1#top", request)
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(parsed.path, "/accounts/signup/")
+        self.assertEqual(parsed.fragment, "top")
+        self.assertEqual(params.get("existing"), ["1"])
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("utm_campaign"), ["fall"])
+
     @tag("batch_pages")
     def test_signup_page_signin_link_includes_utms(self):
         session = self.client.session
