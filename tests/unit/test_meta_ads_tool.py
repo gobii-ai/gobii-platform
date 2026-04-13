@@ -106,6 +106,8 @@ class MetaAdsToolTests(TestCase):
         self.assertEqual(result["selected_profile_key"], "default")
         self.assertIn("META_APP_ID", result["required_fields"])
         self.assertIn("/console/system-skills/meta_ads_platform/profiles/", result["setup_url"])
+        self.assertIn("setup=1", result["setup_url"])
+        self.assertIn("profile_key=default", result["setup_url"])
         self.assertTrue(SystemSkillProfile.objects.filter(user=self.user, profile_key="default").exists())
         self.assertGreater(len(result["setup_steps"]), 0)
         self.assertGreater(len(result["setup_docs"]), 0)
@@ -121,6 +123,7 @@ class MetaAdsToolTests(TestCase):
         self.assertEqual(result["available_profiles"], ["client_a", "client_b"])
         self.assertIn("Multiple Meta Ads profiles are configured", result["result"])
         self.assertIn("Do not guess", result["agent_guidance"])
+        self.assertNotIn("setup=1", result["setup_url"])
 
     @patch("api.agent.tools.meta_ads.requests.get")
     def test_execute_meta_ads_doctor_performs_live_validation(self, mock_get):
@@ -473,3 +476,5 @@ class MetaAdsToolTests(TestCase):
         self.assertIn("Invalid OAuth access token", result["auth_error"])
         self.assertIn("developer registration", result["agent_guidance"].lower())
         self.assertEqual(result["selected_profile_key"], "default")
+        self.assertIn("setup=1", result["setup_url"])
+        self.assertIn("If you want help fixing it, ask me", result["result"])

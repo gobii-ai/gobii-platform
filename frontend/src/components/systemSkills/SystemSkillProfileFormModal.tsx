@@ -144,6 +144,10 @@ export function SystemSkillProfileFormModal({
       iconColorClass="text-blue-600"
     >
       <form id="system-skill-profile-form" onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
+        <p className="text-sm text-slate-600">
+          Need help? Ask your agent to walk you through setup.
+        </p>
+
         {allErrors.length > 0 && (
           <div className="rounded-md bg-red-50 p-3">
             {allErrors.map((message, index) => (
