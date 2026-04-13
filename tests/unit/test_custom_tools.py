@@ -37,6 +37,7 @@ from api.agent.tools.tool_manager import (
     get_available_tool_ids,
     get_enabled_tool_definitions,
 )
+from api.services.system_skill_profiles import set_default_system_skill_profile, upsert_system_skill_profile_values
 from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
 from api.services.sandbox_compute import SandboxComputeService, SandboxSessionUpdate, LocalSandboxBackend
 from api.models import (
@@ -49,6 +50,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentSecret,
     PersistentAgentStep,
+    SystemSkillProfile,
     TaskCredit,
     UserQuota,
 )
@@ -88,6 +90,28 @@ class CustomToolsTests(TestCase):
         secret.set_value(value)
         secret.save()
         return secret
+
+    def _create_meta_ads_profile(self, *, profile_key: str = "default", is_default: bool = True) -> SystemSkillProfile:
+        profile = SystemSkillProfile.objects.create(
+            user=self.user,
+            skill_key="meta_ads_platform",
+            profile_key=profile_key,
+            label="Meta Ads Profile",
+            is_default=False,
+        )
+        upsert_system_skill_profile_values(
+            profile,
+            {
+                "META_APP_ID": "app-123",
+                "META_APP_SECRET": "secret-123",
+                "META_SYSTEM_USER_TOKEN": "token-123",
+                "META_AD_ACCOUNT_ID": "act_123",
+                "META_API_VERSION": "v25.0",
+            },
+        )
+        if is_default:
+            set_default_system_skill_profile(profile)
+        return profile
 
     @staticmethod
     def _build_runnable_tool_source(run_body: str, *, imports: str = "") -> str:
@@ -1047,6 +1071,68 @@ class CustomToolsTests(TestCase):
             exec_params={"value": 1},
             parent_step=None,
         )
+
+    @patch("api.agent.tools.meta_ads.requests.get")
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool")
+    def test_custom_tool_bridge_allows_hidden_meta_ads_builtin(
+        self,
+        mock_ensure_credit,
+        mock_meta_get,
+    ):
+        self._create_meta_ads_profile()
+        custom_tool = PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Wrapper",
+            tool_name="custom_wrapper",
+            description="Calls nested tools.",
+            source_path="/tools/wrapper.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        response_obj = MagicMock()
+        response_obj.status_code = 200
+        response_obj.headers = {"x-app-usage": '{"call_count":1}'}
+        response_obj.json.return_value = {
+            "data": [
+                {
+                    "id": "act_123",
+                    "account_id": "123",
+                    "name": "Main Account",
+                    "account_status": 1,
+                }
+            ]
+        }
+        response_obj.text = ""
+        mock_meta_get.return_value = response_obj
+        mock_ensure_credit.return_value = {"cost": Decimal("0.000"), "credit": None}
+
+        token = build_custom_tool_bridge_token(self.agent, custom_tool)
+
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            response = self.client.post(
+                reverse("api:custom-tool-bridge-execute"),
+                data=json.dumps({"tool_name": "meta_ads", "params": {"operation": "accounts"}}),
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {token}",
+            )
+
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["status"], "success")
+            self.assertEqual(payload["operation"], "accounts")
+            self.assertEqual(payload["destination_table"], "meta_ads_raw")
+            self.assertEqual(payload["rows_synced"], 1)
+            self.assertTrue(
+                PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="meta_ads").exists()
+            )
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    "SELECT operation, profile_key, entity_level, entity_id, entity_name FROM meta_ads_raw"
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertEqual(row, ("accounts", "default", "account", "act_123", "Main Account"))
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_prompt_summary_reports_saved_and_enabled_custom_tools(self, _mock_sandbox):
