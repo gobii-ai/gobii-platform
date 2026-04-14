@@ -1,5 +1,5 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
-import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
@@ -498,9 +498,12 @@ export const AgentComposer = memo(function AgentComposer({
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
 
-  const pendingHumanInputRequests = pendingActionRequests
-    .filter((request) => request.kind === 'human_input')
-    .flatMap((request) => request.requests)
+  const pendingHumanInputRequests = useMemo(
+    () => pendingActionRequests
+      .filter((request) => request.kind === 'human_input')
+      .flatMap((request) => request.requests),
+    [pendingActionRequests],
+  )
 
   useEffect(() => {
     const node = textareaRef.current
@@ -533,7 +536,9 @@ export const AgentComposer = memo(function AgentComposer({
     if (!pendingHumanInputRequests.length) {
       setActiveHumanInputRequestId(null)
       setBusyHumanInputRequestId(null)
-      setDraftHumanInputResponses({})
+      setDraftHumanInputResponses((current) => (
+        Object.keys(current).length === 0 ? current : {}
+      ))
       return
     }
     const hasActiveRequest = pendingHumanInputRequests.some((request) => request.id === activeHumanInputRequestId)
