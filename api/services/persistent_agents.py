@@ -1,7 +1,6 @@
 import logging
 import re
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from django.core.exceptions import ValidationError
@@ -28,12 +27,12 @@ from api.models import (
 )
 from api.services.agent_email_aliases import get_default_agent_email_endpoint
 from api.services.daily_credit_limits import (
+    calculate_default_daily_credit_limit,
     calculate_daily_credit_slider_bounds,
     get_tier_credit_multiplier,
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from config import settings
-from constants.plans import PlanNamesChoices
 
 
 logger = logging.getLogger(__name__)
@@ -162,42 +161,19 @@ class PersistentAgentProvisioningService:
             # Apply plan-specific default daily credit limits
             if settings.GOBII_PROPRIETARY_MODE:
                 owner = organization or user
-                plan_value = getattr(getattr(owner, "billing", None), "subscription", PlanNamesChoices.FREE)
-
-                try:
-                    plan_choice = PlanNamesChoices(plan_value)
-                except ValueError:
-                    plan_choice = PlanNamesChoices.FREE
-
-                plan_default_targets = {
-                    PlanNamesChoices.FREE: settings.DEFAULT_AGENT_DAILY_CREDIT_TARGET,
-                    PlanNamesChoices.STARTUP: settings.PAID_AGENT_DAILY_CREDIT_TARGET,
-                    PlanNamesChoices.SCALE: settings.PAID_AGENT_DAILY_CREDIT_TARGET,
-                    PlanNamesChoices.ORG_TEAM: settings.PAID_AGENT_DAILY_CREDIT_TARGET,
-                }
-
-                soft_target_value = plan_default_targets.get(plan_choice)
-                if soft_target_value is not None:
-                    soft_target_default = Decimal(str(soft_target_value))
-                    if soft_target_default <= Decimal("0"):
-                        persistent_agent.daily_credit_limit = int(soft_target_default)
-                        persistent_agent.save(update_fields=["daily_credit_limit"])
-                    else:
-                        tier_multiplier = get_tier_credit_multiplier(computed_tier)
-                        credit_settings = get_daily_credit_settings_for_owner(owner)
-                        slider_bounds = calculate_daily_credit_slider_bounds(
-                            credit_settings,
-                            tier_multiplier=tier_multiplier,
-                        )
-                        scaled = (soft_target_default * tier_multiplier).to_integral_value(
-                            rounding=ROUND_HALF_UP
-                        )
-                        if scaled < slider_bounds["slider_min"]:
-                            scaled = slider_bounds["slider_min"]
-                        if scaled > slider_bounds["slider_limit_max"]:
-                            scaled = slider_bounds["slider_limit_max"]
-                        persistent_agent.daily_credit_limit = int(scaled)
-                        persistent_agent.save(update_fields=["daily_credit_limit"])
+                tier_multiplier = get_tier_credit_multiplier(computed_tier)
+                credit_settings = get_daily_credit_settings_for_owner(owner)
+                slider_bounds = calculate_daily_credit_slider_bounds(
+                    credit_settings,
+                    tier_multiplier=tier_multiplier,
+                )
+                persistent_agent.daily_credit_limit = calculate_default_daily_credit_limit(
+                    credit_settings.default_daily_credit_target,
+                    tier_multiplier=tier_multiplier,
+                    slider_min=slider_bounds["slider_min"],
+                    slider_max=slider_bounds["slider_limit_max"],
+                )
+                persistent_agent.save(update_fields=["daily_credit_limit"])
 
             if template_code:
                 template = PretrainedWorkerTemplateService.get_template_by_code(template_code)

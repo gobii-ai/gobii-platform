@@ -181,6 +181,7 @@ class PlanVersionResolverTests(TestCase):
             slider_min=10,
             slider_max=100,
             slider_step=5,
+            default_daily_credit_target=10,
             burn_rate_threshold_per_hour=3,
             burn_rate_window_minutes=60,
             hard_limit_multiplier=2,

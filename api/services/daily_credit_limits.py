@@ -87,3 +87,24 @@ def scale_daily_credit_limit_for_tier_change(
     if scaled < slider_min:
         scaled = slider_min
     return int(scaled)
+
+
+def calculate_default_daily_credit_limit(
+    default_daily_credit_target: int,
+    *,
+    tier_multiplier: Decimal | None,
+    slider_min: Decimal,
+    slider_max: Decimal,
+) -> int:
+    soft_target_default = Decimal(str(default_daily_credit_target))
+    if soft_target_default <= Decimal("0"):
+        return int(soft_target_default)
+
+    scaled = (soft_target_default * _coerce_multiplier(tier_multiplier)).to_integral_value(
+        rounding=ROUND_HALF_UP
+    )
+    if scaled < slider_min:
+        scaled = slider_min
+    if scaled > slider_max:
+        scaled = slider_max
+    return int(scaled)
