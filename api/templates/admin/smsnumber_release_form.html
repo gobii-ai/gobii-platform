@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' 'api' %}">API</a>
+    &rsaquo; <a href="{{ changelist_url }}">{% trans 'Sms numbers' %}</a>
+    &rsaquo; Release SMS Numbers
+  </div>
+{% endblock %}
+
+{% block content %}
+  <h1>{{ title }}</h1>
+  <p>Paste one or more Twilio SMS inventory numbers to detach them from agents, retire them locally, and then release them in Twilio.</p>
+  <p>Endpoint rows and message history are preserved for audit and history.</p>
+  <p><a href="{% url 'admin:smsnumber_release_candidates' %}">Find release candidates first</a></p>
+  <form method="post" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      {{ form.as_p }}
+    </fieldset>
+    <div class="submit-row">
+      <a class="button" href="{{ changelist_url }}">Cancel</a>
+      <button type="submit" class="button default">Release Numbers</button>
+    </div>
+  </form>
+{% endblock %}
