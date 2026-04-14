@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Data Deletion Policy · Gobii{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Learn how to request deletion of your personal data from Gobii.">
+{% endblock %}
+
+{% block content %}
+<style>
+  .prose h1,
+  .prose h2 {
+    @apply font-semibold;
+  }
+</style>
+<article class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-16 prose prose-slate">
+  <h1>Data Deletion Policy</h1>
+  <p><em>Last updated: April 14, 2026</em></p>
+
+  <p><strong>Gobii Inc.</strong><br>
+  455 Market St, Ste 1940<br>
+  PMB 790239<br>
+  San Francisco, California 94105, USA</p>
+
+  <h2>1. Overview</h2>
+  <p>Under the EU General Data Protection Regulation (GDPR), the California Consumer Privacy Rights Act (CPRA), and other applicable privacy laws, you have the right to request deletion of your personal data. This page explains how to exercise that right with Gobii.</p>
+  <p>For full details on the data we collect and how we use it, please see our <a href="{% url 'proprietary:privacy' %}">Privacy Policy</a>.</p>
+
+  <h2>2. What Data We Store</h2>
+  <p>When you use Gobii, we may store the following categories of personal data:</p>
+  <ul>
+    <li><strong>Account Data</strong> — name, email address, password hash, billing address, payment-method tokens.</li>
+    <li><strong>Content &amp; Instructions</strong> — scripts, prompts, URLs, or other material you submit to the Service.</li>
+    <li><strong>Usage &amp; Log Data</strong> — IP address, timestamps, API call parameters, error traces.</li>
+    <li><strong>Device / Analytics Data</strong> — cookies, page views, referrers, click-streams.</li>
+    <li><strong>Support Data</strong> — messages and attachments from support interactions.</li>
+  </ul>
+
+  <h2>3. How to Request Deletion</h2>
+  <p>To request deletion of your personal data, email us at:</p>
+  <p><a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}"><strong>{{ settings.PUBLIC_SUPPORT_EMAIL }}</strong></a></p>
+  <p>Please include the email address associated with your Gobii account so we can locate your data. We may need to verify your identity before processing your request.</p>
+
+  <h2>4. What Happens After You Request Deletion</h2>
+  <ul>
+    <li>We will acknowledge your request within <strong>5 business days</strong>.</li>
+    <li>Your data will be deleted within <strong>30 days</strong> of verification, as required by the GDPR.</li>
+    <li>Once deletion is complete, we will send you a confirmation email.</li>
+  </ul>
+
+  <h2>5. What Gets Deleted vs. Retained</h2>
+  <p>Upon a valid deletion request, we will delete your account data, content, usage logs, and support data. However, we may retain certain information where required by law:</p>
+  <ul>
+    <li><strong>Billing &amp; tax records</strong> — retained for up to 7 years to comply with financial and tax regulations.</li>
+    <li><strong>Legal holds</strong> — data subject to active legal proceedings or government requests will be preserved until the matter is resolved.</li>
+  </ul>
+  <p>Retained data is kept in a restricted state and is not used for any other purpose.</p>
+
+  <h2>6. Contact Us</h2>
+  <p>If you have questions about this policy or your data rights, contact us at:</p>
+  <p><strong>Gobii Inc.</strong><br>
+  455 Market St, Ste 1940, PMB 790239<br>
+  San Francisco, California 94105, USA<br>
+  Email: <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}">{{ settings.PUBLIC_SUPPORT_EMAIL }}</a></p>
+</article>
+{% endblock %}
