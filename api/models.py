@@ -1536,6 +1536,9 @@ class DailyCreditConfig(models.Model):
         validators=[MinValueValidator(Decimal("0.01"))],
         help_text="Increment applied to the soft target slider/input.",
     )
+    default_daily_credit_target = models.PositiveIntegerField(
+        help_text="Base soft daily credit target applied to new agents before intelligence-tier scaling.",
+    )
     burn_rate_threshold_per_hour = models.DecimalField(
         max_digits=12,
         decimal_places=3,

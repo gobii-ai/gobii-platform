@@ -1031,11 +1031,8 @@ DJSTRIPE_FOREIGN_KEY_TO_FIELD = "id"
 DJSTRIPE_USE_NATIVE_JSONFIELD = True
 
 # Credits configuration
-# These environment defaults seed the DB-backed configuration.
 # Keep as Decimal to support fractional credits (e.g., 0.1).
 CREDITS_PER_TASK = Decimal(env("CREDITS_PER_TASK", default="0.4"))
-DEFAULT_AGENT_DAILY_CREDIT_TARGET = env.int("DEFAULT_AGENT_DAILY_CREDIT_TARGET", default=5)
-PAID_AGENT_DAILY_CREDIT_TARGET = env.int("PAID_AGENT_DAILY_CREDIT_TARGET", default=10)
 
 # Optional per-tool credit overrides (case-insensitive keys).
 # Example: {"search_web": Decimal("0.10"), "http_request": Decimal("0.05")}.
