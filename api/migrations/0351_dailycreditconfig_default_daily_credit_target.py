@@ -29,7 +29,7 @@ def populate_default_daily_credit_targets(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0348_promptconfig_internal_reasoning_history_limit"),
+        ("api", "0350_systemskillprofile_systemskillprofilesecret_and_more"),
     ]
 
     operations = [
