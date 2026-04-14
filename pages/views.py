@@ -1692,6 +1692,12 @@ class PrivacyPolicyView(TemplateView):
     template_name = "privacy.html"
 
 
+class DataDeletionPolicyView(TemplateView):
+    """Static Data Deletion Policy page."""
+
+    template_name = "data-deletion.html"
+
+
 class AboutView(TemplateView):
     """Simple static About page."""
 
