@@ -10,7 +10,7 @@ import type {
 } from '../types/agentChat'
 import type { SignupPreviewState } from '../types/agentRoster'
 import type { InsightsResponse } from '../types/insight'
-import { jsonFetch } from './http'
+import { jsonFetch, jsonRequest } from './http'
 
 export type TimelineDirection = 'initial' | 'older' | 'newer'
 export type SuggestionCategory = 'capabilities' | 'deliverables' | 'integrations' | 'planning'
@@ -501,14 +501,14 @@ async function postPendingActionMutation(
   url: string,
   payload: unknown,
 ): Promise<PendingActionMutationResult> {
-  const response = await jsonFetch<{
+  const response = await jsonRequest<{
     message?: string
     pending_human_input_requests?: unknown[]
     pending_action_requests?: unknown[]
   }>(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    includeCsrf: true,
+    json: payload,
   })
   return {
     message: asNonEmptyString(response.message) ?? undefined,
