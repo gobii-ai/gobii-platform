@@ -2454,7 +2454,7 @@ class AuthLinkTests(TestCase):
         buttons = soup.select("a[data-social-provider]")
         provider_ids = [button["data-social-provider"] for button in buttons]
 
-        self.assertEqual(provider_ids, ["linkedin", "microsoft", "google", "facebook"])
+        self.assertEqual(provider_ids, ["google", "facebook", "microsoft", "linkedin"])
         for button in buttons:
             provider_id = button["data-social-provider"]
             self.assertTrue(button.has_attr("data-social-auth-link"))

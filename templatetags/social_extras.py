@@ -6,16 +6,6 @@ register = template.Library()
 
 SOCIAL_AUTH_PROVIDER_METADATA = (
     {
-        "id": "linkedin",
-        "label": "LinkedIn",
-        "analytics_label": "linkedin",
-    },
-    {
-        "id": "microsoft",
-        "label": "Microsoft",
-        "analytics_label": "microsoft",
-    },
-    {
         "id": "google",
         "label": "Google",
         "analytics_label": "google",
@@ -24,6 +14,16 @@ SOCIAL_AUTH_PROVIDER_METADATA = (
         "id": "facebook",
         "label": "Facebook",
         "analytics_label": "facebook",
+    },
+    {
+        "id": "microsoft",
+        "label": "Microsoft",
+        "analytics_label": "microsoft",
+    },
+    {
+        "id": "linkedin",
+        "label": "LinkedIn",
+        "analytics_label": "linkedin",
     },
 )
 
