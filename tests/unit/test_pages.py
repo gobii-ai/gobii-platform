@@ -4,8 +4,10 @@ from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 from bs4 import BeautifulSoup
+from allauth.socialaccount.models import SocialApp
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
+from django.contrib.sites.models import Site
 from django.core import signing
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, modify_settings, override_settings, tag
@@ -2507,6 +2509,29 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
 @tag("batch_pages")
 class AuthLinkTests(TestCase):
+    @staticmethod
+    def _create_social_app(provider: str) -> SocialApp:
+        app_kwargs = {
+            "provider": provider,
+            "name": f"{provider}-oauth",
+            "client_id": "dummy-client",
+            "secret": "dummy-secret",
+        }
+        if provider == "linkedin":
+            app_kwargs.update(
+                {
+                    "provider": "openid_connect",
+                    "provider_id": "linkedin",
+                    "name": "LinkedIn",
+                    "settings": {"server_url": "https://www.linkedin.com/oauth"},
+                }
+            )
+        app = SocialApp.objects.create(
+            **app_kwargs,
+        )
+        app.sites.add(Site.objects.get_current())
+        return app
+
     @tag("batch_pages")
     def test_auth_url_with_utms_preserves_existing_query_and_fragment(self):
         request = SimpleNamespace(
@@ -2610,6 +2635,79 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, "gobii_signup_fpjs_visitor_id")
         self.assertContains(response, "gobii_signup_fpjs_request_id")
         self.assertContains(response, "gobii_signup_ga_client_id")
+
+    @tag("batch_pages")
+    def test_login_page_renders_configured_social_providers_in_fixed_order_with_tracking_attrs(self):
+        for provider in ("facebook", "google", "linkedin", "microsoft"):
+            self._create_social_app(provider)
+
+        response = self.client.get(reverse("account_login"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-analytics-cta-tracking-enabled="true"')
+
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        buttons = soup.select("a[data-social-provider]")
+        provider_ids = [button["data-social-provider"] for button in buttons]
+
+        self.assertEqual(provider_ids, ["google", "facebook", "microsoft", "linkedin"])
+        for button in buttons:
+            provider_id = button["data-social-provider"]
+            self.assertTrue(button.has_attr("data-social-auth-link"))
+            self.assertEqual(button["data-social-surface"], "login")
+            self.assertEqual(button["data-analytics-intent"], "social_auth")
+            self.assertEqual(button["data-analytics-auth-provider"], provider_id)
+            self.assertEqual(button["data-analytics-auth-surface"], "login")
+
+    @tag("batch_pages")
+    def test_signup_page_omits_unconfigured_social_providers(self):
+        for provider in ("facebook", "google"):
+            self._create_social_app(provider)
+
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-analytics-cta-tracking-enabled="true"')
+
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        buttons = soup.select("a[data-social-provider]")
+        provider_ids = [button["data-social-provider"] for button in buttons]
+
+        self.assertEqual(provider_ids, ["google", "facebook"])
+        self.assertNotIn("linkedin", provider_ids)
+        self.assertNotIn("microsoft", provider_ids)
+        for button in buttons:
+            self.assertTrue(button.has_attr("data-social-signup-link"))
+            self.assertEqual(button["data-social-surface"], "signup")
+            self.assertEqual(button["data-analytics-auth-surface"], "signup")
+
+    @tag("batch_pages")
+    def test_social_signup_completion_page_uses_custom_template(self):
+        app = self._create_social_app("linkedin")
+        request = RequestFactory().get(reverse("openid_connect_login", kwargs={"provider_id": "linkedin"}))
+        provider = app.get_provider(request)
+        sociallogin = provider.sociallogin_from_response(
+            request,
+            {
+                "userinfo": {
+                    "sub": "linkedin-user-123",
+                    "given_name": "Pat",
+                    "family_name": "Lee",
+                },
+            },
+        )
+
+        session = self.client.session
+        session["socialaccount_sociallogin"] = sociallogin.serialize()
+        session.save()
+
+        response = self.client.get(reverse("socialaccount_signup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Complete sign up")
+        self.assertContains(response, "You started with LinkedIn. Finish creating your account below.")
+        self.assertContains(response, f'action="{reverse("socialaccount_signup")}"')
+        self.assertContains(response, "bg-white max-w-md")
 
 
 @tag("batch_pages")

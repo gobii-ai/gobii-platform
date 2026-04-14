@@ -18,9 +18,15 @@
     var value = data.registrationValue || 0;
     var currency = 'USD';
     var utmParams = getUtmParams();
+    var authMethod = data.authMethod || 'email';
+    var authProvider = data.authProvider || '';
 
     if (pixels.ga && typeof window.gtag === 'function') {
-      gtag('event', 'sign_up', Object.assign({ method: 'email', value: value, currency: currency }, utmParams));
+      var gaPayload = Object.assign({ method: authMethod, value: value, currency: currency }, utmParams);
+      if (authProvider) {
+        gaPayload.auth_provider = authProvider;
+      }
+      gtag('event', 'sign_up', gaPayload);
     }
 
     if (pixels.reddit && typeof window.rdt === 'function') {
@@ -62,6 +68,8 @@
       eventId: data.eventId,
       source: source,
       pixelsFired: Object.keys(pixels),
+      authMethod: authMethod,
+      authProvider: authProvider,
     });
   }
 

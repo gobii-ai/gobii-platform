@@ -1,9 +1,42 @@
 from django import template
-from django.conf import settings
 from django.contrib.sites.models import Site
-from allauth.socialaccount.models import SocialApp
+from allauth.socialaccount.adapter import get_adapter
 
 register = template.Library()
+
+SOCIAL_AUTH_PROVIDER_METADATA = (
+    {
+        "id": "google",
+        "label": "Google",
+        "analytics_label": "google",
+    },
+    {
+        "id": "facebook",
+        "label": "Facebook",
+        "analytics_label": "facebook",
+    },
+    {
+        "id": "microsoft",
+        "label": "Microsoft",
+        "analytics_label": "microsoft",
+    },
+    {
+        "id": "linkedin",
+        "label": "LinkedIn",
+        "analytics_label": "linkedin",
+    },
+)
+
+
+def _provider_app_exists(context, provider: str) -> bool:
+    """Return True when a provider has any configured app."""
+
+    request = context.get("request")
+    try:
+        Site.objects.get_current(request) if request is not None else Site.objects.get_current()
+    except Site.DoesNotExist:
+        return False
+    return bool(get_adapter().list_apps(request, provider=provider))
 
 
 @register.simple_tag(takes_context=True)
@@ -12,20 +45,15 @@ def provider_app_exists(context, provider: str) -> bool:
 
     Checks either settings-based APP config or a SocialApp bound to the current Site.
     """
-    # 1) settings-based configuration
-    prov_cfg = getattr(settings, "SOCIALACCOUNT_PROVIDERS", {}).get(provider, {})
-    app_cfg = prov_cfg.get("APP") if isinstance(prov_cfg, dict) else None
-    if isinstance(app_cfg, dict):
-        client_id = (app_cfg.get("client_id") or app_cfg.get("clientId") or "").strip()
-        secret = (app_cfg.get("secret") or app_cfg.get("clientSecret") or "").strip()
-        if client_id and secret:
-            return True
+    return _provider_app_exists(context, provider)
 
-    # 2) database-backed SocialApp for current site
-    request = context.get("request")
-    try:
-        site = Site.objects.get_current(request)
-    except Exception:
-        site = Site.objects.get_current()
-    return SocialApp.objects.filter(provider=provider, sites=site).exists()
 
+@register.simple_tag(takes_context=True)
+def configured_social_auth_providers(context) -> list[dict[str, str]]:
+    """Return configured social auth providers in the UI's fixed display order."""
+
+    providers: list[dict[str, str]] = []
+    for metadata in SOCIAL_AUTH_PROVIDER_METADATA:
+        if _provider_app_exists(context, metadata["id"]):
+            providers.append(dict(metadata))
+    return providers

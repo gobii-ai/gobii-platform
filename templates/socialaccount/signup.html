@@ -1,0 +1,65 @@
+{% extends "allauth/layouts/entrance.html" %}
+{% load i18n %}
+
+{% block title %}{% trans "Complete your account" %}{% endblock %}
+
+{% block body_inner %}
+<div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs mb-20">
+  <div class="p-8">
+    <div class="text-center">
+      <h1 class="text-center text-2xl font-bold text-gray-900">{% trans "Complete sign up" %}</h1>
+      <p class="mt-2 text-sm text-slate-600">
+        {% blocktrans with provider_name=account.get_provider.name %}You started with {{ provider_name }}. Finish creating your account below.{% endblocktrans %}
+      </p>
+    </div>
+
+    <form method="post" action="{% url 'socialaccount_signup' %}" class="mt-6 space-y-4">
+      {% csrf_token %}
+      {% for hidden_field in form.hidden_fields %}
+        {{ hidden_field }}
+      {% endfor %}
+      {{ redirect_field }}
+
+      {% if form.non_field_errors %}
+      <div class="my-3 p-3 bg-red-50 border border-red-200 rounded-md" role="alert">
+        <ul class="list-disc pl-5 space-y-1">
+          {% for error in form.non_field_errors %}
+            <li class="text-sm text-red-700">{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% for field in form.visible_fields %}
+      <div>
+        <label for="{{ field.id_for_label }}" class="block text-sm mb-1 font-medium text-gray-700">{{ field.label }}</label>
+        <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
+               value="{{ field.value|default_if_none:'' }}"
+               class="block w-full rounded-lg border border-gray-300 px-4 py-2.5 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm {% if field.errors %}border-red-500{% endif %}"
+               {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
+        {% if field.errors %}
+          <div class="mt-1">
+            {% for error in field.errors %}
+              <p class="text-sm text-red-600">{{ error }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+
+      <button type="submit"
+              class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white hover:bg-blue-700">
+        {% trans "Complete sign up" %}
+      </button>
+      {% if settings.GOBII_PROPRIETARY_MODE %}
+      <p class="mt-4 text-xs text-gray-500 text-center">
+        {% trans "By creating an account, you agree to our" %}
+        <a href="{% url 'proprietary:tos' %}" class="text-blue-600 hover:underline">{% trans "Terms of Service" %}</a>
+        {% trans "and" %}
+        <a href="{% url 'proprietary:privacy' %}" class="text-blue-600 hover:underline">{% trans "Privacy Policy" %}</a>.
+      </p>
+      {% endif %}
+    </form>
+  </div>
+</div>
+{% endblock %}

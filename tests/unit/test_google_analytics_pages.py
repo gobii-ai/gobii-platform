@@ -33,6 +33,8 @@ class ClearSignupTrackingViewTests(TestCase):
         session["signup_event_id"] = "evt-123"
         session["signup_user_id"] = str(self.user.id)
         session["signup_email_hash"] = "unused-when-authenticated"
+        session["signup_auth_method"] = "social"
+        session["signup_auth_provider"] = "linkedin"
         session.save()
 
         response = self.client.get(reverse("pages:clear_signup_tracking"))
@@ -50,6 +52,8 @@ class ClearSignupTrackingViewTests(TestCase):
             payload["idHash"],
             hashlib.sha256(str(self.user.id).encode("utf-8")).hexdigest(),
         )
+        self.assertEqual(payload["authMethod"], "social")
+        self.assertEqual(payload["authProvider"], "linkedin")
         self.assertEqual(payload["registrationValue"], 12.5)
         self.assertEqual(payload["pixels"]["ga"], "G-TEST123")
         self.assertEqual(payload["pixels"]["reddit"], "reddit-123")
@@ -62,6 +66,8 @@ class ClearSignupTrackingViewTests(TestCase):
         self.assertNotIn("signup_event_id", session)
         self.assertNotIn("signup_user_id", session)
         self.assertNotIn("signup_email_hash", session)
+        self.assertNotIn("signup_auth_method", session)
+        self.assertNotIn("signup_auth_provider", session)
 
     def test_returns_false_when_no_tracking_flag(self):
         response = self.client.get(reverse("pages:clear_signup_tracking"))
