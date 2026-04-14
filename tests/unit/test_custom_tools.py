@@ -26,6 +26,7 @@ from api.agent.tools.custom_tools import (
     get_create_custom_tool_tool,
     get_custom_tools_prompt_summary,
     normalize_custom_tool_name,
+    normalize_custom_tool_parameters_schema,
 )
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
@@ -161,6 +162,30 @@ class CustomToolsTests(TestCase):
         normalized = normalize_custom_tool_name("custom_weather_tool")
 
         self.assertEqual(normalized, ("custom_weather_tool", "custom_weather_tool"))
+
+    def test_normalize_custom_tool_parameters_schema_preserves_missing_required_fields(self):
+        schema = normalize_custom_tool_parameters_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "result_id": {"type": "string"},
+                    "file_path": {"type": "string"},
+                },
+                "required": ["result_id flocks", "file_path", "file_path"],
+            }
+        )
+
+        self.assertEqual(
+            schema,
+            {
+                "type": "object",
+                "properties": {
+                    "result_id": {"type": "string"},
+                    "file_path": {"type": "string"},
+                },
+                "required": ["result_id flocks", "file_path"],
+            },
+        )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
@@ -323,6 +348,59 @@ class CustomToolsTests(TestCase):
         definitions = get_enabled_tool_definitions(self.agent)
         tool_names = [definition["function"]["name"] for definition in definitions]
         self.assertIn("custom_greeter", tool_names)
+
+    @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_tool_manager_preserves_required_fields_and_synthesizes_missing_properties(
+        self,
+        mock_get_manager,
+        _mock_custom_available,
+    ):
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_manager.get_enabled_tools_definitions.return_value = []
+        mock_get_manager.return_value = mock_manager
+
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Transcript",
+            tool_name="custom_process_youtube_transcript",
+            description="Process a transcript.",
+            source_path="/tools/transcript.py",
+            parameters_schema={
+                "type": "object",
+                "properties": {
+                    "result_id": {"type": "string"},
+                    "file_path": {"type": "string"},
+                },
+                "required": ["result_id flocks", "file_path"],
+            },
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="custom_process_youtube_transcript",
+        )
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        tool_def = next(
+            definition
+            for definition in definitions
+            if definition["function"]["name"] == "custom_process_youtube_transcript"
+        )
+
+        self.assertEqual(
+            tool_def["function"]["parameters"]["required"],
+            ["result_id flocks", "file_path"],
+        )
+        self.assertEqual(
+            tool_def["function"]["parameters"]["properties"]["result_id flocks"],
+            {
+                "type": "string",
+                "description": (
+                    "Required parameter inferred from schema.required because no explicit property definition was provided."
+                ),
+            },
+        )
 
     def test_create_custom_tool_definition_mentions_direct_tool_and_sqlite_access(self):
         definition = get_create_custom_tool_tool()

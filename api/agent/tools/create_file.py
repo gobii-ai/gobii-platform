@@ -8,6 +8,7 @@ from api.agent.files.attachment_helpers import build_signed_filespace_download_u
 from api.agent.tools.attachment_guidance import build_attachment_result_message
 from api.agent.tools.file_export_helpers import resolve_export_target
 from api.agent.tools.agent_variables import set_agent_variable
+from api.agent.tools.sqlite_query_runner import run_sqlite_select
 from api.services.system_settings import get_max_file_size
 
 DISALLOWED_EXPORT_HINTS = {
@@ -48,23 +49,43 @@ def _blocked_export_hint(file_path: str, mime_type: str) -> str | None:
     return None
 
 
+def _coerce_query_scalar(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Query returned binary data that is not valid UTF-8 text.") from exc
+    return str(value)
+
+
 def get_create_file_tool() -> Dict[str, Any]:
     return {
         "type": "function",
         "function": {
             "name": "create_file",
             "description": (
-                "Create a file from raw content and store it in the agent filespace. "
-                "Useful for plain text, markup, json, etc. "
+                "Create a file from raw content or a SQLite query result and store it in the agent filespace. "
+                "Provide exactly one of content or query. "
+                "For raw exports, provide content. For query exports, provide a SQLite SELECT/WITH query that "
+                "returns exactly one row and one column; that single value becomes the file content. "
                 "Recommended path: /exports/your-file.extension "
                 "Provide a MIME type that matches the text content. "
-                "Use create_csv for CSV files and create_pdf for PDFs. "
+                "Use create_csv for CSV/tabular exports and create_pdf for PDFs. "
                 "Returns `file`, `inline`, `inline_html`, and `attach` with variable placeholders."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "Raw text content to write to the file."},
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "SQLite SELECT or WITH query to export instead of raw content. "
+                            "The query must return exactly one row and one column; that single value is written directly."
+                        ),
+                    },
                     "mime_type": {
                         "type": "string",
                         "description": "MIME type for the content (e.g. text/plain, application/json).",
@@ -82,7 +103,11 @@ def get_create_file_tool() -> Dict[str, Any]:
                         "description": "When true, overwrites the existing file at that path.",
                     },
                 },
-                "required": ["content", "file_path", "mime_type"],
+                "required": ["file_path", "mime_type"],
+                "oneOf": [
+                    {"required": ["content"]},
+                    {"required": ["query"]},
+                ],
             },
         },
     }
@@ -90,8 +115,7 @@ def get_create_file_tool() -> Dict[str, Any]:
 
 def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     content = params.get("content")
-    if not isinstance(content, str) or not content.strip():
-        return {"status": "error", "message": "Missing required parameter: content"}
+    query = params.get("query")
 
     mime_type_raw = _normalize_mime_type(params.get("mime_type"))
     if mime_type_raw is None:
@@ -106,7 +130,32 @@ def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
     if hint:
         return {"status": "error", "message": hint}
 
-    content_bytes = content.encode("utf-8")
+    has_content = isinstance(content, str) and bool(content.strip())
+    has_query = isinstance(query, str) and bool(query.strip())
+    if has_content and has_query:
+        return {"status": "error", "message": "Use content OR query, not both."}
+    if not has_content and not has_query:
+        return {"status": "error", "message": "Provide exactly one of content or query."}
+
+    if has_query:
+        rows, columns, err = run_sqlite_select(query)
+        if err:
+            return {"status": "error", "message": err}
+        if len(rows) != 1 or len(columns or []) != 1:
+            return {
+                "status": "error",
+                "message": (
+                    "Query must return exactly 1 row and 1 column for create_file query exports."
+                ),
+            }
+        try:
+            content_to_write = _coerce_query_scalar(rows[0].get(columns[0]))
+        except ValueError as exc:
+            return {"status": "error", "message": str(exc)}
+    else:
+        content_to_write = content
+
+    content_bytes = content_to_write.encode("utf-8")
     max_size = get_max_file_size()
     if max_size and len(content_bytes) > max_size:
         return {

@@ -42,7 +42,11 @@ from .create_video import (
     execute_create_video,
     is_video_generation_available_for_agent,
 )
-from .custom_tools import execute_custom_tool, is_custom_tools_available_for_agent
+from .custom_tools import (
+    execute_custom_tool,
+    is_custom_tools_available_for_agent,
+    normalize_custom_tool_parameters_schema,
+)
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .meta_ads import get_meta_ads_tool, execute_meta_ads
@@ -310,6 +314,29 @@ class ToolCatalogEntry:
     server_config_id: Optional[str] = None
 
 
+def _custom_tool_parameters_for_llm(parameters_schema: Any) -> Dict[str, Any]:
+    normalized = normalize_custom_tool_parameters_schema(parameters_schema)
+    if normalized is None:
+        return {"type": "object", "properties": {}, "required": []}
+
+    schema = dict(normalized)
+    properties = dict(schema.get("properties") or {})
+    changed = False
+    for required_name in schema.get("required") or []:
+        if required_name in properties:
+            continue
+        properties[required_name] = {
+            "type": "string",
+            "description": (
+                "Required parameter inferred from schema.required because no explicit property definition was provided."
+            ),
+        }
+        changed = True
+    if changed:
+        schema["properties"] = properties
+    return schema
+
+
 def get_available_custom_tool_entries(
     agent: Optional[PersistentAgent],
 ) -> Dict[str, ToolCatalogEntry]:
@@ -323,7 +350,7 @@ def get_available_custom_tool_entries(
             provider="custom",
             full_name=tool.tool_name,
             description=tool.description,
-            parameters=tool.parameters_schema or {"type": "object", "properties": {}},
+            parameters=_custom_tool_parameters_for_llm(tool.parameters_schema),
             tool_server="custom",
             tool_name=tool.tool_name,
             server_config_id=None,
@@ -902,7 +929,7 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
                     "function": {
                         "name": tool.tool_name,
                         "description": tool.description,
-                        "parameters": tool.parameters_schema or {"type": "object", "properties": {}},
+                        "parameters": _custom_tool_parameters_for_llm(tool.parameters_schema),
                     },
                 }
             )
