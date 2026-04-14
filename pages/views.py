@@ -120,6 +120,14 @@ from marketing_events.value_utils import (
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+SIGNUP_TRACKING_SESSION_KEYS = (
+    'signup_event_id',
+    'signup_user_id',
+    'signup_email_hash',
+    'signup_auth_method',
+    'signup_auth_provider',
+)
 PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
 HOMEPAGE_INLINE_INTEGRATION_SLUGS = (
     "linkedin",
@@ -2357,13 +2365,7 @@ class ClearSignupTrackingView(View):
 
         # Clear the session flag and related data
         del request.session['show_signup_tracking']
-        for key in (
-            'signup_event_id',
-            'signup_user_id',
-            'signup_email_hash',
-            'signup_auth_method',
-            'signup_auth_provider',
-        ):
+        for key in SIGNUP_TRACKING_SESSION_KEYS:
             if key in request.session:
                 del request.session[key]
 
