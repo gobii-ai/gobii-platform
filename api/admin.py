@@ -25,7 +25,13 @@ from api.services.daily_credit_limits import (
     get_tier_credit_multiplier,
     scale_daily_credit_limit_for_tier_change,
 )
-from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.daily_credit_default_updates import (
+    apply_default_daily_credit_target_to_matching_agents,
+)
+from api.services.daily_credit_settings import (
+    get_daily_credit_settings_for_owner,
+    serialize_daily_credit_configs,
+)
 from api.services.schedule_enforcement import (
     agents_for_plan,
     enforce_minimum_for_agents,
@@ -971,10 +977,26 @@ class PlanVersionEntitlementAdmin(admin.ModelAdmin):
         return ""
 
 
+class DailyCreditConfigAdminForm(forms.ModelForm):
+    apply_default_daily_credit_target_to_matching_agents = forms.BooleanField(
+        required=False,
+        help_text=(
+            "Update agents that still match the previous default daily credit limit "
+            "for this plan to the newly configured default."
+        ),
+    )
+
+    class Meta:
+        model = DailyCreditConfig
+        fields = "__all__"
+
+
 @admin.register(DailyCreditConfig)
 class DailyCreditConfigAdmin(admin.ModelAdmin):
+    form = DailyCreditConfigAdminForm
     list_display = (
         "plan_name",
+        "default_daily_credit_target",
         "slider_min",
         "slider_max",
         "slider_step",
@@ -987,7 +1009,19 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
     list_filter = ("plan_name",)
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("plan_name", "slider_min", "slider_max", "slider_step")}),
+        (
+            None,
+            {
+                "fields": (
+                    "plan_name",
+                    "default_daily_credit_target",
+                    "apply_default_daily_credit_target_to_matching_agents",
+                    "slider_min",
+                    "slider_max",
+                    "slider_step",
+                )
+            },
+        ),
         (
             "Burn rate guidance",
             {
@@ -1007,6 +1041,47 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover
         return False
+
+    def save_model(self, request, obj, form, change):
+        previous_config = None
+        previous_settings_map = None
+        apply_existing_defaults = bool(
+            form.cleaned_data.get("apply_default_daily_credit_target_to_matching_agents")
+        )
+        if change and obj.pk:
+            previous_config = DailyCreditConfig.objects.select_related("plan_version__plan").get(pk=obj.pk)
+            if apply_existing_defaults:
+                previous_settings_map = serialize_daily_credit_configs(
+                    DailyCreditConfig.objects.select_related("plan_version__plan").all()
+                )
+
+        super().save_model(request, obj, form, change)
+
+        if (
+            not change
+            or not apply_existing_defaults
+            or "default_daily_credit_target" not in form.changed_data
+            or previous_config is None
+            or previous_settings_map is None
+        ):
+            return
+
+        updated_count = apply_default_daily_credit_target_to_matching_agents(
+            previous_config,
+            previous_settings_map,
+        )
+        if updated_count:
+            self.message_user(
+                request,
+                f"Updated {updated_count} agent(s) that still matched the previous default daily credit limit.",
+                level=messages.SUCCESS,
+            )
+        else:
+            self.message_user(
+                request,
+                "No agents matched the previous default daily credit limit for this configuration.",
+                level=messages.INFO,
+            )
 
 
 @admin.register(BrowserConfig)
