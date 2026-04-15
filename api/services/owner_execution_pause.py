@@ -1,10 +1,13 @@
 import logging
+from datetime import datetime, timezone as dt_timezone
+from numbers import Number
 from typing import Any
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 from api.models import ExecutionPauseReasonChoices
@@ -18,12 +21,13 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 logger = logging.getLogger(__name__)
 
 
-EXECUTION_PAUSE_MESSAGE = "Account execution is paused until billing is resolved."
+EXECUTION_PAUSE_MESSAGE = "Account execution is paused."
 EXECUTION_PAUSE_NOTE = "owner_execution_paused"
 
 EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY = ExecutionPauseReasonChoices.BILLING_DELINQUENCY
 EXECUTION_PAUSE_REASON_TRIAL_CONVERSION_FAILED = ExecutionPauseReasonChoices.TRIAL_CONVERSION_FAILED
 EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL = ExecutionPauseReasonChoices.TRIAL_ENDED_NON_RENEWAL
+EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE = ExecutionPauseReasonChoices.CUSTOMER_ACCOUNT_PAUSE
 
 
 def resolve_agent_owner(agent) -> Any:
@@ -86,17 +90,40 @@ def get_owner_execution_pause_state(owner) -> dict[str, Any]:
             "paused": False,
             "reason": "",
             "paused_at": None,
+            "resume_at": None,
         }
 
     return {
         "paused": bool(getattr(billing, "execution_paused", False)),
         "reason": str(getattr(billing, "execution_pause_reason", "") or ""),
         "paused_at": getattr(billing, "execution_paused_at", None),
+        "resume_at": getattr(billing, "execution_pause_resume_at", None),
     }
 
 
 def is_owner_execution_paused(owner) -> bool:
     return bool(get_owner_execution_pause_state(owner)["paused"])
+
+
+def is_customer_account_pause_reason(reason: str) -> bool:
+    return str(reason or "").strip() == EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE
+
+
+def is_billing_recovery_resumable_pause_reason(reason: str) -> bool:
+    return is_billing_execution_pause_reason(str(reason or "").strip())
+
+
+def is_owner_customer_account_paused(owner) -> bool:
+    state = get_owner_execution_pause_state(owner)
+    return bool(state["paused"] and is_customer_account_pause_reason(state["reason"]))
+
+
+def get_owner_account_pause_state(owner) -> dict[str, Any]:
+    state = get_owner_execution_pause_state(owner)
+    return {
+        **state,
+        "customer_paused": bool(state["paused"] and is_customer_account_pause_reason(state["reason"])),
+    }
 
 
 def pause_owner_execution(
@@ -105,6 +132,7 @@ def pause_owner_execution(
     *,
     source: str = "unknown",
     paused_at=None,
+    resume_at=None,
     trigger_agent_cleanup: bool = True,
     analytics_source: AnalyticsSource = AnalyticsSource.NA,
 ) -> bool:
@@ -122,17 +150,20 @@ def pause_owner_execution(
         not was_paused
         or getattr(billing, "execution_pause_reason", "") != normalized_reason
         or getattr(billing, "execution_paused_at", None) is None
+        or getattr(billing, "execution_pause_resume_at", None) != resume_at
     )
 
     if state_changed:
         billing.execution_paused = True
         billing.execution_pause_reason = normalized_reason
         billing.execution_paused_at = effective_paused_at
+        billing.execution_pause_resume_at = resume_at
         billing.save(
             update_fields=[
                 "execution_paused",
                 "execution_pause_reason",
                 "execution_paused_at",
+                "execution_pause_resume_at",
             ]
         )
 
@@ -216,11 +247,13 @@ def resume_owner_execution(
     billing.execution_paused = False
     billing.execution_pause_reason = ""
     billing.execution_paused_at = None
+    billing.execution_pause_resume_at = None
     billing.save(
         update_fields=[
             "execution_paused",
             "execution_pause_reason",
             "execution_paused_at",
+            "execution_pause_resume_at",
         ]
     )
 
@@ -259,6 +292,59 @@ def resume_owner_execution_by_ref(
         source=source,
         enqueue_agent_resume=enqueue_agent_resume,
     )
+
+
+def get_customer_account_pause_from_subscription(subscription_payload: Any) -> dict[str, Any]:
+    pause_collection = _stripe_object_field(subscription_payload, "pause_collection")
+    if not pause_collection:
+        return {
+            "paused": False,
+            "resume_at": None,
+        }
+
+    return {
+        "paused": True,
+        "resume_at": _coerce_datetime(_stripe_object_field(pause_collection, "resumes_at")),
+    }
+
+
+def sync_owner_customer_account_pause(
+    owner,
+    *,
+    subscription_payload: Any,
+    source: str = "unknown",
+) -> bool:
+    if owner is None:
+        return False
+
+    pause_state = get_customer_account_pause_from_subscription(subscription_payload)
+    current_state = get_owner_execution_pause_state(owner)
+    current_reason = current_state["reason"]
+
+    if pause_state["paused"]:
+        if current_reason and not (
+            is_customer_account_pause_reason(current_reason)
+            or is_billing_recovery_resumable_pause_reason(current_reason)
+        ):
+            return False
+
+        paused_at = (
+            current_state["paused_at"]
+            if is_customer_account_pause_reason(current_reason) and current_state["paused_at"] is not None
+            else None
+        )
+        return pause_owner_execution(
+            owner,
+            EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+            source=source,
+            paused_at=paused_at,
+            resume_at=pause_state["resume_at"],
+        )
+
+    if is_customer_account_pause_reason(current_reason):
+        return resume_owner_execution(owner, source=source)
+
+    return False
 
 
 def _owner_type_label(owner) -> str:
@@ -401,3 +487,42 @@ def _enqueue_agent_resumes(agent_ids) -> None:
 
     for agent_id in agent_ids:
         process_agent_events_task.delay(str(agent_id))
+
+
+def _stripe_object_field(value: Any, field: str) -> Any:
+    if isinstance(value, dict):
+        return value.get(field)
+    return getattr(value, field, None)
+
+
+def _coerce_datetime(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+
+    candidate: datetime | None = None
+
+    if isinstance(value, datetime):
+        candidate = value
+    elif isinstance(value, Number):
+        try:
+            candidate = datetime.fromtimestamp(float(value), tz=dt_timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            candidate = None
+    elif isinstance(value, str):
+        stripped = value.strip()
+        parsed = parse_datetime(stripped) if stripped else None
+        if parsed is not None:
+            candidate = parsed
+        else:
+            try:
+                candidate = datetime.fromtimestamp(float(stripped), tz=dt_timezone.utc)
+            except (OverflowError, OSError, ValueError):
+                candidate = None
+
+    if candidate is None:
+        return None
+
+    if timezone.is_naive(candidate):
+        candidate = timezone.make_aware(candidate, timezone=dt_timezone.utc)
+
+    return candidate

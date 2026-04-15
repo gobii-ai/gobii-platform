@@ -91,6 +91,10 @@ from api.services.daily_credit_limits import (
     scale_daily_credit_limit_for_tier_change,
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.owner_execution_pause import (
+    get_owner_account_pause_state,
+    sync_owner_customer_account_pause,
+)
 from api.services.persistent_agent_secrets import (
     ensure_global_secret_capacity_for_agent,
     move_agent_secret_to_global,
@@ -149,6 +153,7 @@ from pages.account_info_cache import invalidate_account_info_cache
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 
 from .agent_context import resolve_context_override_for_agent
+from .agent_addons import build_account_pause_payload
 from .context_helpers import build_console_context
 from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
@@ -1618,6 +1623,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     "contextType": "organization",
                     "organization": {"id": str(organization.id), "name": organization.name},
                     "canManageBilling": can_manage_billing,
+                    "accountPause": build_account_pause_payload(organization),
                     "plan": overview.get("plan") or {},
                     "trial": {
                         "isTrialing": False,
@@ -1783,6 +1789,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
         billing_props = {
             "contextType": "personal",
             "canManageBilling": True,
+            "accountPause": build_account_pause_payload(request.user),
             "paidSubscriber": bool(paid_subscriber),
             "plan": subscription_plan,
             "trial": {
@@ -2345,7 +2352,23 @@ def sync_billing_subscription_state(request):
             status=403,
         )
 
+    active_subscription = get_active_subscription(request.user, sync_with_stripe=True)
+    active_subscription_id = getattr(active_subscription, "id", None)
+    if not active_subscription_id or str(active_subscription_id) != subscription_id:
+        return JsonResponse(
+            {
+                'success': False,
+                'error': 'Subscription is not the current active billing subscription for this account.',
+            },
+            status=403,
+        )
+
     _sync_subscription_after_direct_update(updated_subscription)
+    sync_owner_customer_account_pause(
+        request.user,
+        subscription_payload=updated_subscription,
+        source="console.billing.sync_subscription_state",
+    )
     return JsonResponse({'success': True})
 
 
@@ -2353,7 +2376,7 @@ def sync_billing_subscription_state(request):
 @require_POST
 @tracer.start_as_current_span("BILLING Resume Subscription")
 def resume_subscription(request):
-    """Undo a scheduled cancellation (cancel_at_period_end=False)."""
+    """Resume billing immediately by clearing cancellation and/or pause_collection."""
     if not stripe_status().enabled:
         return JsonResponse(
             {
@@ -2375,15 +2398,29 @@ def resume_subscription(request):
 
     try:
         _assign_stripe_api_key()
-        updated_subscription = stripe.Subscription.modify(sub.id, cancel_at_period_end=False)
+        account_pause_state = get_owner_account_pause_state(request.user)
+        update_type = "subscription_resume"
+        modify_kwargs: dict[str, Any] = {
+            "cancel_at_period_end": False,
+        }
+        if account_pause_state.get("customer_paused"):
+            modify_kwargs["pause_collection"] = ""
+            update_type = "subscription_pause_resume"
+
+        updated_subscription = stripe.Subscription.modify(sub.id, **modify_kwargs)
         _sync_subscription_after_direct_update(updated_subscription)
+        sync_owner_customer_account_pause(
+            request.user,
+            subscription_payload=updated_subscription,
+            source="console.billing.resume_subscription",
+        )
 
         Analytics.track_event(
             user_id=request.user.id,
             event=AnalyticsEvent.BILLING_UPDATED,
             source=AnalyticsSource.WEB,
             properties={
-                "update_type": "subscription_resume",
+                "update_type": update_type,
             },
         )
         return JsonResponse({'success': True})

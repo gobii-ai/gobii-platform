@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import timedelta
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.test import Client, TestCase, override_settings, tag
@@ -484,6 +485,32 @@ class AgentChatAccessTests(TestCase):
         self.assertFalse(billing_status.get("delinquent"))
         self.assertFalse(billing_status.get("actionable"))
         self.assertIsNone(billing_status.get("reason"))
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
+    def test_roster_includes_customer_account_pause_state(self):
+        resume_at = timezone.now() + timedelta(days=10)
+        billing = self.user.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = "customer_account_pause"
+        billing.execution_paused_at = timezone.now()
+        billing.execution_pause_resume_at = resume_at
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+
+        response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        account_pause = payload.get("accountPause", {})
+        self.assertTrue(account_pause.get("paused"))
+        self.assertEqual(account_pause.get("reason"), "customer_account_pause")
+        self.assertEqual(account_pause.get("resumeAt"), resume_at.isoformat())
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
     def test_resolve_agent_allows_active_signup_preview_agent_without_plan(self):

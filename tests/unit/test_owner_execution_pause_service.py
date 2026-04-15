@@ -8,10 +8,13 @@ from django.utils import timezone
 from api.models import BrowserUseAgent, CommsChannel, Organization, PersistentAgent, PersistentAgentCommsEndpoint, UserPhoneNumber
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
+    EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
     EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
+    get_owner_account_pause_state,
     pause_owner_execution,
     pause_owner_execution_by_ref,
     resume_owner_execution,
+    sync_owner_customer_account_pause,
 )
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
@@ -178,6 +181,58 @@ class OwnerExecutionPauseAnalyticsTests(TestCase):
 
         self.assertTrue(changed)
         mock_track_event.assert_not_called()
+
+    def test_customer_pause_records_resume_timestamp(self):
+        resume_at = (timezone.now() + timedelta(days=14)).replace(microsecond=0)
+
+        with patch("api.services.owner_execution_pause.Analytics.track_event"):
+            changed = pause_owner_execution(
+                self.user,
+                EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+                source="billing.sync_subscription_state",
+                resume_at=resume_at,
+                trigger_agent_cleanup=False,
+            )
+
+        self.assertTrue(changed)
+        state = get_owner_account_pause_state(self.user)
+        self.assertTrue(state["paused"])
+        self.assertTrue(state["customer_paused"])
+        self.assertEqual(state["reason"], EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE)
+        self.assertEqual(state["resume_at"], resume_at)
+
+    def test_sync_customer_pause_from_subscription_pauses_and_resumes_owner(self):
+        resume_at = (timezone.now() + timedelta(days=7)).replace(microsecond=0)
+
+        with patch("api.services.owner_execution_pause.Analytics.track_event"):
+            changed = sync_owner_customer_account_pause(
+                self.user,
+                subscription_payload={
+                    "pause_collection": {
+                        "behavior": "mark_uncollectible",
+                        "resumes_at": int(resume_at.timestamp()),
+                    }
+                },
+                source="stripe.customer.subscription.updated.pause_collection",
+            )
+
+            self.assertTrue(changed)
+            state = get_owner_account_pause_state(self.user)
+            self.assertTrue(state["customer_paused"])
+            self.assertEqual(state["resume_at"], resume_at)
+
+            changed = sync_owner_customer_account_pause(
+                self.user,
+                subscription_payload={"pause_collection": None},
+                source="stripe.customer.subscription.updated.pause_collection",
+            )
+
+        self.assertTrue(changed)
+        state = get_owner_account_pause_state(self.user)
+        self.assertFalse(state["paused"])
+        self.assertFalse(state["customer_paused"])
+        self.assertEqual(state["reason"], "")
+        self.assertIsNone(state["resume_at"])
 
     @patch("api.agent.comms.outbound_delivery.deliver_agent_sms")
     @patch("api.agent.comms.outbound_delivery.deliver_agent_email")
