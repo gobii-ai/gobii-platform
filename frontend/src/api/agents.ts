@@ -13,6 +13,7 @@ type CreateAgentPayload = {
   preferred_llm_tier?: string
   charter_override?: string
   selected_pipedream_app_slugs?: string[]
+  preferred_contact_method?: 'email' | 'web'
 }
 
 export type CreateAgentResponse = {
@@ -112,6 +113,7 @@ export async function createAgent(
   preferredLlmTier?: string,
   charterOverride?: string | null,
   selectedPipedreamAppSlugs?: string[],
+  preferredContactMethod?: 'email' | 'web',
 ): Promise<CreateAgentResponse> {
   const payload: CreateAgentPayload = { message, preferred_llm_tier: preferredLlmTier }
   if (charterOverride) {
@@ -119,6 +121,9 @@ export async function createAgent(
   }
   if (selectedPipedreamAppSlugs && selectedPipedreamAppSlugs.length > 0) {
     payload.selected_pipedream_app_slugs = selectedPipedreamAppSlugs
+  }
+  if (preferredContactMethod) {
+    payload.preferred_contact_method = preferredContactMethod
   }
   return jsonFetch<CreateAgentResponse>('/console/api/agents/create/', {
     method: 'POST',
