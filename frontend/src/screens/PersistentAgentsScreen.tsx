@@ -295,6 +295,8 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
   const smsValue = agent.primarySms
   const emailValue = agent.primaryEmail
   const chatValue = agent.chatUrl
+  const nameHref = isSignupPreviewAgent ? chatValue : agent.detailUrl
+  const nameUsesImmersiveLink = Boolean(chatValue) && nameHref === chatValue
   const hasTags = agent.displayTags.length > 0
   const showSmsAction = Boolean(smsValue) && !isSignupPreviewAgent
   const showEmailAction = Boolean(emailValue) && !isSignupPreviewAgent
@@ -358,7 +360,8 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
 
         <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>
           <a
-            href={agent.detailUrl}
+            href={nameHref}
+            data-immersive-link={nameUsesImmersiveLink ? true : undefined}
             className="transition duration-200 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.45)] focus-visible:underline focus-visible:outline-none"
           >
             {agent.name}
