@@ -178,6 +178,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
         self.assertEqual(seeded_message.conversation.address, expected_sender)
 
+    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
     @tag("batch_agent_chat")
     def test_quick_create_allows_email_preference_override(self):
         message_text = "Build me an agent from a stored CTA intent"
@@ -248,6 +249,53 @@ class AgentChatAPITests(TestCase):
         self.assertIsNotNone(seeded_message)
         self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.WEB)
         self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
+
+    @tag("batch_agent_chat")
+    def test_quick_create_email_preference_without_account_email_falls_back_to_web(self):
+        user_model = get_user_model()
+        no_email_user = user_model.objects.create_user(
+            username="quick-create-email-fallback",
+            email="",
+            password="password123",
+        )
+        client = Client()
+        client.force_login(no_email_user)
+
+        message_text = "Create an agent even without an account email"
+        response = client.post(
+            "/console/api/agents/create/",
+            data=json.dumps(
+                {
+                    "message": message_text,
+                    "preferred_llm_tier": "standard",
+                    "preferred_contact_method": "email",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertIsNotNone(created_agent.preferred_contact_endpoint)
+        self.assertEqual(created_agent.preferred_contact_endpoint.channel, CommsChannel.WEB)
+
+        expected_sender = build_web_user_address(no_email_user.id, created_agent.id)
+        expected_recipient = build_web_agent_address(created_agent.id)
+        self.assertEqual(created_agent.preferred_contact_endpoint.address, expected_sender)
+
+        seeded_message = (
+            PersistentAgentMessage.objects.filter(owner_agent=created_agent, body=message_text)
+            .order_by("-timestamp")
+            .first()
+        )
+        self.assertIsNotNone(seeded_message)
+        self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(seeded_message.from_endpoint.address, expected_sender)
+        self.assertIsNotNone(seeded_message.to_endpoint)
+        self.assertEqual(seeded_message.to_endpoint.address, expected_recipient)
+        self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(seeded_message.conversation.address, expected_sender)
 
     @tag("batch_agent_chat")
     def test_quick_create_rejects_invalid_preferred_contact_method(self):
