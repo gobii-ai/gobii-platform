@@ -79,7 +79,12 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
 )
-from api.services.owner_execution_pause import resume_owner_execution
+from api.services.owner_execution_pause import (
+    get_owner_execution_pause_state,
+    is_billing_recovery_resumable_pause_reason,
+    resume_owner_execution,
+    sync_owner_customer_account_pause,
+)
 from api.services.referral_service import ReferralService
 from api.services.signup_preview import resume_signup_preview_agents_for_user_if_eligible
 from api.services.trial_abuse import (
@@ -3538,14 +3543,48 @@ def handle_subscription_event(event, **kwargs):
 
         # Proceed when the subscription is active or trialing and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))
+        active_subscription = None
         if sub.status in ("active", "trialing") and licensed_item is not None:
+            active_subscription = get_active_subscription(owner)
+            active_subscription_id = getattr(active_subscription, "id", None)
+            if active_subscription_id and str(active_subscription_id) != str(subscription_id):
+                span.add_event(
+                    "subscription.update_ignored_active_subscription",
+                    {
+                        "subscription.id": subscription_id or "",
+                        "active_subscription.id": str(active_subscription_id),
+                    },
+                )
+                logger.info(
+                    "Skipping active subscription update for owner %s: subscription %s is not active subscription %s.",
+                    getattr(owner, "id", None) or owner,
+                    subscription_id,
+                    active_subscription_id,
+                )
+                return
+
             try:
-                resume_owner_execution(owner, source=f"stripe.{event_type}")
+                sync_owner_customer_account_pause(
+                    owner,
+                    subscription_payload=source_data,
+                    source=f"stripe.{event_type}.pause_collection",
+                )
             except Exception:
                 logger.exception(
-                    "Failed to resume owner execution for active subscription owner %s",
+                    "Failed to reconcile customer account pause for owner %s from subscription %s",
                     getattr(owner, "id", None) or owner,
+                    getattr(sub, "id", None),
                 )
+
+            current_pause_state = get_owner_execution_pause_state(owner)
+            if is_billing_recovery_resumable_pause_reason(current_pause_state["reason"]):
+                try:
+                    resume_owner_execution(owner, source=f"stripe.{event_type}")
+                except Exception:
+                    logger.exception(
+                        "Failed to resume owner execution for active subscription owner %s",
+                        getattr(owner, "id", None) or owner,
+                    )
 
             price_info = licensed_item.get("price") or {}
             if not isinstance(price_info, Mapping):

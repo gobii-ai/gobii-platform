@@ -121,6 +121,7 @@ from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
 from api.agent.tasks import process_agent_events_task
 from api.services.system_settings import get_max_file_size
+from api.services.owner_execution_pause import get_owner_account_pause_state
 from api.services.signup_preview import (
     resume_signup_preview_agent_if_eligible,
 )
@@ -185,6 +186,7 @@ from console.system_status import build_system_status_payload
 from console.views import build_llm_intelligence_props
 from console.agent_addons import (
     _build_billing_status_payload,
+    build_account_pause_payload,
     build_agent_addons_payload,
     update_contact_pack_quantities,
     update_task_pack_quantities,
@@ -270,6 +272,35 @@ from console.role_constants import BILLING_MANAGE_ROLES
 
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_request_context_owner(request: HttpRequest):
+    try:
+        override = get_context_override(request)
+        context_info = resolve_console_context(
+            request.user,
+            request.session,
+            override=override,
+        )
+    except PermissionDenied:
+        return None
+
+    if context_info.current_context.type == "organization":
+        return Organization.objects.filter(id=context_info.current_context.id).first()
+    return request.user
+
+
+def _customer_account_pause_block_message(owner) -> str:
+    state = get_owner_account_pause_state(owner)
+    resume_at = state.get("resume_at")
+    if resume_at is not None:
+        local_resume_at = timezone.localtime(resume_at)
+        return (
+            "Your account is paused until "
+            f"{local_resume_at.strftime('%b %d, %Y at %I:%M %p %Z')}. "
+            "New messages and agent creation are disabled until billing resumes."
+        )
+    return "Your account is paused. New messages and agent creation are disabled until billing resumes."
 User = get_user_model()
 
 GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
@@ -2431,6 +2462,10 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             can_open_billing=can_open_billing,
             manage_billing_url=manage_billing_url,
         )
+        account_pause = build_account_pause_payload(
+            owner,
+            manage_billing_url=manage_billing_url,
+        )
         org_ids = set(org_memberships.values_list("org_id", flat=True))
         admin_org_ids = set(
             org_memberships.filter(
@@ -2502,6 +2537,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "favorite_agent_ids": favorite_agent_ids,
                 "insights_panel_expanded": insights_panel_expanded,
                 "billingStatus": billing_status,
+                "accountPause": account_pause,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,
             }
@@ -2538,6 +2574,10 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             )
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
+
+        owner = _resolve_request_context_owner(request)
+        if owner is not None and bool(get_owner_account_pause_state(owner).get("customer_paused")):
+            return JsonResponse({"error": _customer_account_pause_block_message(owner)}, status=403)
 
         contact_email = (request.user.email or "").strip()
         if preferred_contact_method == "email" and not contact_email:
@@ -3478,6 +3518,9 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             allow_shared=True,
             allow_delinquent_personal_chat=True,
         )
+        owner = agent.organization or agent.user
+        if owner is not None and bool(get_owner_account_pause_state(owner).get("customer_paused")):
+            return JsonResponse({"error": _customer_account_pause_block_message(owner)}, status=403)
         attachments: list[Any] = []
         message_text = ""
         if request.content_type and request.content_type.startswith("multipart/form-data"):

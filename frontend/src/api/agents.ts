@@ -1,7 +1,7 @@
 import { jsonFetch, jsonRequest } from './http'
 import type { ConsoleContext } from './context'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { BillingStatusInfo } from '../types/agentAddons'
+import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
 export type UpdateAgentPayload = {
@@ -30,6 +30,7 @@ type AgentRosterPayload = {
   favorite_agent_ids?: string[]
   insights_panel_expanded?: boolean | null
   billingStatus?: BillingStatusInfo | null
+  accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
   agents: {
     id: string
@@ -64,6 +65,7 @@ export async function fetchAgentRoster(
   insightsPanelExpanded: boolean | null
   requestedAgentStatus?: 'deleted' | 'missing' | null
   billingStatus?: BillingStatusInfo | null
+  accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
 }> {
   const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
@@ -99,6 +101,7 @@ export async function fetchAgentRoster(
     insightsPanelExpanded: payload.insights_panel_expanded ?? null,
     requestedAgentStatus: payload.requested_agent_status ?? null,
     billingStatus: payload.billingStatus ?? null,
+    accountPause: payload.accountPause ?? null,
     llmIntelligence: payload.llmIntelligence,
   }
 }

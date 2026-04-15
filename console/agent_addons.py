@@ -8,6 +8,7 @@ from django.utils import timezone
 
 from billing.addons import AddonEntitlementService
 from billing.services import BillingService
+from api.services.owner_execution_pause import get_owner_account_pause_state
 from constants.plans import PlanNamesChoices
 from util.integrations import IntegrationDisabledError, stripe_status
 from util.subscription_helper import (
@@ -143,6 +144,19 @@ def _build_billing_status_payload(owner, owner_type: str, *, can_open_billing: b
         "latestInvoiceStatus": latest_invoice_status,
         "paymentIntentStatus": payment_intent_status,
         "manageBillingUrl": manage_billing_url if actionable else None,
+    }
+
+
+def build_account_pause_payload(owner, *, manage_billing_url: str | None = None) -> dict:
+    state = get_owner_account_pause_state(owner)
+    customer_paused = bool(state.get("customer_paused"))
+    actionable = bool(manage_billing_url)
+    resume_at = state.get("resume_at") if customer_paused else None
+    return {
+        "paused": customer_paused,
+        "reason": state.get("reason") if customer_paused else None,
+        "resumeAt": resume_at.isoformat() if resume_at else None,
+        "manageBillingUrl": manage_billing_url if customer_paused and actionable else None,
     }
 
 
@@ -425,6 +439,10 @@ def build_agent_addons_payload(
         can_open_billing=can_open_billing,
         manage_billing_url=manage_billing_url,
     )
+    account_pause_payload = build_account_pause_payload(
+        owner,
+        manage_billing_url=manage_billing_url,
+    )
 
     contact_cap_payload, contact_cap_reached = _build_contact_cap_payload(agent)
     contact_pack_options = (
@@ -453,6 +471,7 @@ def build_agent_addons_payload(
                 "limitReached": contact_cap_reached,
             },
             "billing": billing_status_payload,
+            "accountPause": account_pause_payload,
         },
         "contactPacks": {
             "options": contact_pack_options,
