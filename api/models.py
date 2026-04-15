@@ -4139,6 +4139,7 @@ class ExecutionPauseReasonChoices(models.TextChoices):
     BILLING_DELINQUENCY = "billing_delinquency", "Billing delinquency"
     TRIAL_CONVERSION_FAILED = "trial_conversion_failed", "Trial conversion failed"
     TRIAL_ENDED_NON_RENEWAL = "trial_ended_non_renewal", "Trial ended without renewal"
+    CUSTOMER_ACCOUNT_PAUSE = "customer_account_pause", "Customer account pause"
     ADMIN_MANUAL_PAUSE = "admin_manual_pause", "Admin manual pause"
 
 
@@ -4209,6 +4210,11 @@ class UserBilling(models.Model):
         null=True,
         blank=True,
         help_text="Timestamp when execution was paused for this owner.",
+    )
+    execution_pause_resume_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When a customer-requested account pause is expected to resume, if known.",
     )
 
     def __str__(self):
@@ -4989,6 +4995,11 @@ class OrganizationBilling(models.Model):
         null=True,
         blank=True,
         help_text="Timestamp when execution was paused for this owner.",
+    )
+    execution_pause_resume_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When a customer-requested account pause is expected to resume, if known.",
     )
     purchased_seats = models.PositiveIntegerField(
         default=0,

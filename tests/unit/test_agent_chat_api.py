@@ -402,6 +402,31 @@ class AgentChatAPITests(TestCase):
         )
         self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
+    @tag("batch_agent_chat")
+    def test_quick_create_rejects_customer_account_pause(self):
+        billing = self.user.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = "customer_account_pause"
+        billing.execution_paused_at = timezone.now()
+        billing.execution_pause_resume_at = timezone.now() + timedelta(days=3)
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": "Create while paused"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("account is paused", response.json().get("error", "").lower())
+
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True,
@@ -2243,6 +2268,33 @@ class AgentChatAPITests(TestCase):
         )
         self.assertIsNotNone(stored)
         self.assertEqual(stored.from_endpoint.address, self.user_address)
+
+    @tag("batch_agent_chat")
+    def test_message_post_rejects_customer_account_pause(self):
+        billing = self.user.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = "customer_account_pause"
+        billing.execution_paused_at = timezone.now()
+        billing.execution_pause_resume_at = timezone.now() + timedelta(days=2)
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+        before_count = PersistentAgentMessage.objects.filter(owner_agent=self.agent).count()
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/",
+            data={"body": "Run while paused"},
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("account is paused", response.json().get("error", "").lower())
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), before_count)
 
     @override_settings(MAX_FILE_SIZE=20)
     @tag("batch_agent_chat")

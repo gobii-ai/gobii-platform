@@ -1,7 +1,7 @@
 import { jsonFetch, jsonRequest } from './http'
 import type { ConsoleContext } from './context'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { BillingStatusInfo } from '../types/agentAddons'
+import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
 export type UpdateAgentPayload = {
@@ -31,6 +31,7 @@ type AgentRosterPayload = {
   insights_panel_expanded?: boolean | null
   agent_chat_notifications_enabled?: boolean
   billingStatus?: BillingStatusInfo | null
+  accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
   agents: {
     id: string
@@ -76,6 +77,7 @@ export async function fetchAgentRoster(
   agentChatNotificationsEnabled: boolean
   requestedAgentStatus?: 'deleted' | 'missing' | null
   billingStatus?: BillingStatusInfo | null
+  accountPause?: AccountPauseInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
 }> {
   const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
@@ -122,6 +124,7 @@ export async function fetchAgentRoster(
     agentChatNotificationsEnabled: payload.agent_chat_notifications_enabled !== false,
     requestedAgentStatus: payload.requested_agent_status ?? null,
     billingStatus: payload.billingStatus ?? null,
+    accountPause: payload.accountPause ?? null,
     llmIntelligence: payload.llmIntelligence,
   }
 }
