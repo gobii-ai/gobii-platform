@@ -18,8 +18,9 @@ from requests.exceptions import RequestException
 
 from django.conf import settings
 
-from ...models import PersistentAgent, PersistentAgentSecret
+from ...models import GlobalSecret, PersistentAgent, PersistentAgentSecret
 from ...proxy_selection import select_proxy_for_persistent_agent
+from ...services.persistent_agent_secrets import global_secrets_queryset_for_agent
 from ..files.attachment_helpers import build_signed_filespace_download_url
 from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir
 from api.services.system_settings import get_max_file_size
@@ -118,6 +119,29 @@ def _normalize_headers(raw_headers: Any) -> dict[str, str]:
             return header_map
     logger.warning("HTTP request headers should be a mapping; got %s.", type(raw_headers).__name__)
     return {}
+
+
+def _resolved_credential_secret_map(agent: PersistentAgent) -> dict[str, str]:
+    """Merge global and agent credential secrets for placeholder substitution."""
+    secret_map: dict[str, str] = {}
+
+    for secret in global_secrets_queryset_for_agent(agent).filter(
+        secret_type=GlobalSecret.SecretType.CREDENTIAL,
+    ).only("key", "encrypted_value"):
+        key = str(secret.key or "").strip()
+        if key:
+            secret_map[key] = secret.get_value()
+
+    for secret in PersistentAgentSecret.objects.filter(
+        agent=agent,
+        requested=False,
+        secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
+    ).only("key", "encrypted_value"):
+        key = str(secret.key or "").strip()
+        if key:
+            secret_map[key] = secret.get_value()
+
+    return secret_map
 
 
 def _decode_filename_star(value: str) -> str:
@@ -345,15 +369,9 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     body = params.get("body")  # Optional – may be None
 
     # ---------------- Secret placeholder substitution ---------------- #
-    # Build a mapping of secret_key -> decrypted value for this agent (exclude requested secrets)
-    secret_map = {
-        s.key: s.get_value()
-        for s in PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=False,
-            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
-        )
-    }
+    # Global credentials are available to all of an owner's agents; fulfilled
+    # agent credentials override them on matching placeholder keys.
+    secret_map = _resolved_credential_secret_map(agent)
 
     UNIQUE_PATTERN_RE = re.compile(r"<<<\s*([A-Za-z0-9_]+)\s*>>>")
     

@@ -1107,6 +1107,65 @@ class SecretContextIntegrationTests(TestCase):
             name="TestAgent"
         )
 
+    def _create_agent_credential_secret(
+        self,
+        *,
+        key,
+        value=None,
+        requested=False,
+        name=None,
+        domain_pattern="https://api.com",
+    ):
+        secret = PersistentAgentSecret.objects.create(
+            agent=self.agent,
+            domain_pattern=domain_pattern,
+            name=name or key.replace("_", " ").title(),
+            key=key,
+            requested=requested,
+            encrypted_value=b"",
+        )
+        if not requested:
+            secret.set_value(value)
+            secret.save()
+        return secret
+
+    def _create_global_credential_secret(
+        self,
+        *,
+        key,
+        value,
+        name=None,
+        domain_pattern="https://api.com",
+    ):
+        secret = GlobalSecret(
+            user=self.user,
+            domain_pattern=domain_pattern,
+            name=name or key.replace("_", " ").title(),
+            key=key,
+            secret_type=GlobalSecret.SecretType.CREDENTIAL,
+        )
+        secret.set_value(value)
+        secret.save()
+        return secret
+
+    def _execute_http_request(self, params):
+        from api.agent.tools.http_request import execute_http_request
+
+        with patch("api.agent.tools.http_request.select_proxy_for_persistent_agent") as mock_proxy:
+            with patch("api.agent.tools.http_request.requests.request") as mock_request:
+                mock_proxy.return_value = Mock(proxy_url="http://proxy:8080")
+                mock_request.return_value = Mock(
+                    status_code=200,
+                    headers={"Content-Type": "text/plain"},
+                    iter_content=lambda chunk_size: [b"ok"],
+                    close=lambda: None,
+                )
+
+                result = execute_http_request(self.agent, params)
+
+                mock_request.assert_called_once()
+                return result, mock_request.call_args.args, mock_request.call_args.kwargs
+
     def test_full_request_fulfill_context_flow(self):
         """Test the complete flow from request to fulfillment to context inclusion."""
         # Step 1: Agent requests credentials
@@ -1153,59 +1212,110 @@ class SecretContextIntegrationTests(TestCase):
 
     def test_http_request_only_uses_fulfilled_secrets(self):
         """Test that http_request tool only has access to fulfilled secrets."""
-        from api.agent.tools.http_request import execute_http_request
-
         # Create one fulfilled and one requested secret
-        fulfilled = PersistentAgentSecret.objects.create(
-            agent=self.agent,
-            domain_pattern="https://api.com",
-            name="Fulfilled Key",
+        self._create_agent_credential_secret(
             key="fulfilled_key",
-            requested=False,
-            encrypted_value=b""  # Would normally be encrypted
+            value="fulfilled_value",
+            name="Fulfilled Key",
         )
-        fulfilled.set_value("fulfilled_value")
-        fulfilled.save()
 
-        requested = PersistentAgentSecret.objects.create(
-            agent=self.agent,
-            domain_pattern="https://api.com",
-            name="Requested Key",
+        self._create_agent_credential_secret(
             key="requested_key",
             requested=True,
-            encrypted_value=b""
+            name="Requested Key",
         )
 
-        # Mock the proxy and request
-        with patch('api.agent.tools.http_request.select_proxy_for_persistent_agent') as mock_proxy:
-            with patch('requests.request') as mock_request:
-                mock_proxy.return_value = Mock(proxy_url='http://proxy:8080')
-                mock_request.return_value = Mock(
-                    status_code=200,
-                    headers={'Content-Type': 'text/plain'},
-                    iter_content=lambda chunk_size: [b'ok'],
-                    close=lambda: None
-                )
+        result, _, request_kwargs = self._execute_http_request(
+            {
+                "method": "GET",
+                "url": "https://api.com/test",
+                "headers": {
+                    "X-Fulfilled": "<<<fulfilled_key>>>",
+                    "X-Requested": "<<<requested_key>>>",
+                },
+            }
+        )
 
-                # Make request with placeholders for both secrets
-                params = {
-                    "method": "GET",
-                    "url": "https://api.com/test",
-                    "headers": {
-                        "X-Fulfilled": "<<<fulfilled_key>>>",
-                        "X-Requested": "<<<requested_key>>>"
-                    }
-                }
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(request_kwargs["headers"]["X-Fulfilled"], "fulfilled_value")
+        self.assertEqual(request_kwargs["headers"]["X-Requested"], "<<<requested_key>>>")
 
-                result = execute_http_request(self.agent, params)
+    def test_http_request_uses_global_credential_placeholders(self):
+        self._create_global_credential_secret(
+            key="hubspot_api_key",
+            value="global-hubspot-token",
+            name="HubSpot API Key",
+        )
 
-                # Check that the actual request was made with correct substitution
-                mock_request.assert_called_once()
-                call_args = mock_request.call_args
-                headers = call_args[1]["headers"]
+        result, request_args, request_kwargs = self._execute_http_request(
+            {
+                "method": "POST",
+                "url": "https://api.com/<<<hubspot_api_key>>>",
+                "headers": {
+                    "Authorization": "Bearer <<<hubspot_api_key>>>",
+                },
+                "body": {
+                    "token": "<<<hubspot_api_key>>>",
+                },
+            }
+        )
 
-                # Fulfilled secret should be substituted
-                self.assertEqual(headers["X-Fulfilled"], "fulfilled_value")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(request_args[1], "https://api.com/global-hubspot-token")
+        self.assertEqual(
+            request_kwargs["headers"]["Authorization"],
+            "Bearer global-hubspot-token",
+        )
+        self.assertEqual(request_kwargs["data"], '{"token": "global-hubspot-token"}')
 
-                # Requested secret should remain as placeholder
-                self.assertEqual(headers["X-Requested"], "<<<requested_key>>>")
+    def test_http_request_agent_secret_overrides_global_secret_with_same_key(self):
+        self._create_global_credential_secret(
+            key="hubspot_api_key",
+            value="global-hubspot-token",
+            name="Global HubSpot API Key",
+        )
+        self._create_agent_credential_secret(
+            key="hubspot_api_key",
+            value="agent-hubspot-token",
+            name="Agent HubSpot API Key",
+        )
+
+        result, _, request_kwargs = self._execute_http_request(
+            {
+                "method": "GET",
+                "url": "https://api.com/test",
+                "headers": {
+                    "X-API-Key": "<<<hubspot_api_key>>>",
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(request_kwargs["headers"]["X-API-Key"], "agent-hubspot-token")
+
+    def test_http_request_requested_agent_secret_does_not_block_global_secret(self):
+        self._create_global_credential_secret(
+            key="hubspot_api_key",
+            value="global-hubspot-token",
+            name="Global HubSpot API Key",
+        )
+        self._create_agent_credential_secret(
+            key="hubspot_api_key",
+            requested=True,
+            name="Requested HubSpot API Key",
+        )
+
+        result, _, request_kwargs = self._execute_http_request(
+            {
+                "method": "GET",
+                "url": "https://api.com/test",
+                "headers": {
+                    "X-API-Key": "<<<hubspot_api_key>>>",
+                    "X-Missing": "<<<missing_key>>>",
+                },
+            }
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(request_kwargs["headers"]["X-API-Key"], "global-hubspot-token")
+        self.assertEqual(request_kwargs["headers"]["X-Missing"], "<<<missing_key>>>")
