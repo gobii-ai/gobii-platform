@@ -52,6 +52,8 @@ from api.agent.tasks.process_events import process_agent_cron_trigger_task, _rem
 from api.models import (
     CommsChannel,
     BrowserUseAgent,
+    BrowserUseAgentTask,
+    BrowserUseAgentTaskStep,
     MCPServerConfig,
     Organization,
     OrganizationMembership,
@@ -252,6 +254,33 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
+
+    def test_unified_history_message_headers_omit_recent_age_suffix(self):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body="Age suffix check",
+            seq=f"AGESFX{int(timezone.now().timestamp() * 1_000_000):019d}"[:26],
+        )
+        target_time = timezone.now() - timedelta(minutes=5)
+        PersistentAgentMessage.objects.filter(pk=message.pk).update(timestamp=target_time)
+        message.refresh_from_db()
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn(
+            f"[{message.timestamp.isoformat()}] On email, you received a message from {self.external_endpoint.address}:",
+            content,
+        )
+        self.assertNotRegex(content, re.compile(r"\]\s+\d+[smh] ago,"))
 
     def test_prompt_discourages_messages_freshness_polling(self):
         PersistentAgentMessage.objects.create(
@@ -1082,6 +1111,93 @@ class PromptContextBuilderTests(TestCase):
         content = user_message['content']
         self.assertIn("_tool_call>", content)
         self.assertIn("<cost>1.234 credits</cost>", content)
+
+    def test_completed_browser_tasks_share_tool_history_limit(self):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.standard_tool_call_history_limit = 2
+        config.premium_tool_call_history_limit = 2
+        config.max_tool_call_history_limit = 2
+        config.ultra_tool_call_history_limit = 2
+        config.ultra_max_tool_call_history_limit = 2
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        base_time = timezone.now()
+
+        older_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: older_lookup",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=older_step,
+            tool_name="older_lookup",
+            tool_params={"query": "older"},
+            result=json.dumps({"status": "older"}),
+        )
+        PersistentAgentStep.objects.filter(pk=older_step.pk).update(
+            created_at=base_time - timedelta(minutes=4)
+        )
+
+        older_task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Older completed task",
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        )
+        BrowserUseAgentTaskStep.objects.create(
+            task=older_task,
+            step_number=1,
+            description="Older task result",
+            is_result=True,
+            result_value={"task": "older"},
+        )
+        BrowserUseAgentTask.objects.filter(pk=older_task.pk).update(
+            updated_at=base_time - timedelta(minutes=3)
+        )
+
+        newer_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: newer_lookup",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=newer_step,
+            tool_name="newer_lookup",
+            tool_params={"query": "newer"},
+            result=json.dumps({"status": "newer"}),
+        )
+        PersistentAgentStep.objects.filter(pk=newer_step.pk).update(
+            created_at=base_time - timedelta(minutes=2)
+        )
+
+        newest_task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="Newest completed task",
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        )
+        BrowserUseAgentTaskStep.objects.create(
+            task=newest_task,
+            step_number=1,
+            description="Newest task result",
+            is_result=True,
+            result_value={"task": "newest"},
+        )
+        BrowserUseAgentTask.objects.filter(pk=newest_task.pk).update(
+            updated_at=base_time - timedelta(minutes=1)
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn("Tool newer_lookup called.", content)
+        self.assertIn("Newest completed task", content)
+        self.assertNotIn("Tool older_lookup called.", content)
+        self.assertNotIn("Older completed task", content)
 
     def test_prompt_context_limits_internal_reasoning_steps(self):
         """Unified history should keep only the newest configured reasoning steps."""
@@ -2956,17 +3072,6 @@ class PromptConfigFunctionTests(TestCase):
             self.assertEqual(message_history_limit(self.agent), config.max_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.max_tool_call_history_limit)
 
-
-    def test_browser_task_unified_history_limit_setting(self):
-        from api.agent.core.prompt_context import browser_task_unified_history_limit
-
-        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
-        config.browser_task_unified_history_limit = 12
-        config.save()
-        invalidate_prompt_settings_cache()
-
-        self.assertEqual(browser_task_unified_history_limit(), 12)
-
     def test_internal_reasoning_history_limit_setting(self):
         invalidate_prompt_settings_cache()
         self.assertEqual(get_prompt_settings().internal_reasoning_history_limit, 3)
@@ -2986,19 +3091,19 @@ class PromptConfigFunctionTests(TestCase):
 
         self.assertFalse(get_tool_settings_for_plan(PlanNamesChoices.FREE).tool_search_auto_enable_apps)
 
-    def test_prompt_config_admin_exposes_browser_task_unified_history_limit(self):
+    def test_prompt_config_admin_omits_browser_task_unified_history_limit(self):
         admin_view = PromptConfigAdmin(PromptConfig, django_admin.site)
 
-        self.assertIn("browser_task_unified_history_limit", admin_view.list_display)
         self.assertIn("internal_reasoning_history_limit", admin_view.list_display)
+        self.assertNotIn("browser_task_unified_history_limit", admin_view.list_display)
 
         unified_fields = next(
             fields["fields"]
             for title, fields in admin_view.fieldsets
             if title == "Unified history limits"
         )
-        self.assertIn("browser_task_unified_history_limit", unified_fields)
         self.assertIn("internal_reasoning_history_limit", unified_fields)
+        self.assertNotIn("browser_task_unified_history_limit", unified_fields)
 
     def test_tool_config_admin_exposes_tool_search_auto_enable_apps(self):
         admin_view = ToolConfigAdmin(ToolConfig, django_admin.site)
