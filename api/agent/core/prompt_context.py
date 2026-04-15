@@ -215,12 +215,6 @@ def message_history_limit(agent: PersistentAgent) -> int:
     return limit_map.get(tier, settings.standard_message_history_limit)
 
 
-def browser_task_unified_history_limit() -> int:
-    """Return max completed browser tasks included in unified history."""
-
-    return get_prompt_settings().browser_task_unified_history_limit
-
-
 def _get_recent_prompt_history_steps(
     *,
     agent: PersistentAgent,
@@ -261,6 +255,41 @@ def _get_recent_prompt_history_steps(
         key=lambda step: (step.created_at, str(step.id)),
         reverse=True,
     )[:visible_limit]
+
+
+def _get_recent_completed_browser_tasks(
+    *,
+    agent: PersistentAgent,
+    visible_limit: int,
+) -> List[BrowserUseAgentTask]:
+    """Return recent completed browser tasks eligible for unified history."""
+
+    if visible_limit <= 0:
+        return []
+
+    browser_agent_id = getattr(agent, "browser_use_agent_id", None)
+    if not browser_agent_id:
+        return []
+
+    completed_tasks_qs = (
+        BrowserUseAgentTask.objects.filter(
+            agent_id=browser_agent_id,
+            status__in=[
+                BrowserUseAgentTask.StatusChoices.COMPLETED,
+                BrowserUseAgentTask.StatusChoices.FAILED,
+                BrowserUseAgentTask.StatusChoices.CANCELLED,
+            ],
+        )
+        .order_by("-updated_at")
+        .prefetch_related(
+            Prefetch(
+                "steps",
+                queryset=BrowserUseAgentTaskStep.objects.filter(is_result=True).order_by("id"),
+                to_attr="result_steps_prefetched",
+            )
+        )
+    )
+    return list(completed_tasks_qs[:visible_limit])
 
 
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
@@ -4894,38 +4923,6 @@ URLs must be accurate and complete—never fabricated.
              """)
     return ""
 
-def _format_recent_minutes_suffix(timestamp: datetime) -> str:
-    """Return a short 'Xs/m/h ago,' suffix for recent timestamps."""
-    if timestamp is None:
-        return ""
-
-    ts = timestamp
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-
-    now = dj_timezone.now()
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-
-    delta = now - ts
-    if delta.total_seconds() < 0:
-        return ""
-
-    seconds = int(delta.total_seconds())
-    max_age_seconds = getattr(
-        settings,
-        "AGENT_RECENT_MINUTES_SUFFIX_MAX_AGE_SECONDS",
-        1800,
-    )
-    if seconds >= max_age_seconds:
-        return ""
-    if seconds < 60:
-        return f" {seconds}s ago,"
-    if seconds < 3600:
-        return f" {seconds // 60}m ago,"
-    return f" {seconds // 3600}h ago,"
-
-
 def _redact_signed_filespace_urls(text: str, agent: PersistentAgent) -> str:
     """Replace signed filespace download URLs with $[/path] placeholders."""
     if not text:
@@ -5290,6 +5287,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         visible_limit=limit_tool_history,
         reasoning_limit=get_prompt_settings().internal_reasoning_history_limit,
     )
+    completed_tasks = _get_recent_completed_browser_tasks(
+        agent=agent,
+        visible_limit=limit_tool_history,
+    )
     messages = list(
         PersistentAgentMessage.objects.filter(
             owner_agent=agent, timestamp__gt=comms_cutoff
@@ -5302,30 +5303,45 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     # Collect structured events with their components grouped together
     structured_events: List[Tuple[datetime, str, dict]] = []  # (timestamp, event_type, components)
 
-    completed_tasks: Sequence[BrowserUseAgentTask]
-    browser_agent_id = getattr(agent, "browser_use_agent_id", None)
-    if browser_agent_id:
-        completed_tasks_qs = (
-            BrowserUseAgentTask.objects.filter(
-                agent_id=browser_agent_id,
-                status__in=[
-                    BrowserUseAgentTask.StatusChoices.COMPLETED,
-                    BrowserUseAgentTask.StatusChoices.FAILED,
-                    BrowserUseAgentTask.StatusChoices.CANCELLED,
-                ],
-            )
-            .order_by("-updated_at")
-            .prefetch_related(
-                Prefetch(
-                    "steps",
-                    queryset=BrowserUseAgentTaskStep.objects.filter(is_result=True).order_by("id"),
-                    to_attr="result_steps_prefetched",
-                )
-            )
-        )
-        completed_tasks = list(completed_tasks_qs[:browser_task_unified_history_limit()])
-    else:
-        completed_tasks = []
+    step_candidates: List[PersistentAgentStep] = []
+    for step in steps:
+        system_step = getattr(step, "system_step", None)
+        if (
+            system_step is not None
+            and system_step.code == PersistentAgentSystemStep.Code.PROCESS_EVENTS
+        ):
+            continue
+        step_candidates.append(step)
+
+    history_candidates: List[Tuple[datetime, str, str, Any]] = [
+        (step.created_at, "step", str(step.id), step)
+        for step in step_candidates
+    ]
+    history_candidates.extend(
+        (task.updated_at, "browser_task", str(task.id), task)
+        for task in completed_tasks
+    )
+    # Completed browser tasks now share the same recent-history budget as steps/tool calls.
+    selected_candidates = sorted(
+        history_candidates,
+        key=lambda item: (item[0], item[1], item[2]),
+        reverse=True,
+    )[:configured_tool_limit]
+
+    selected_step_ids = {
+        candidate_id
+        for _, candidate_type, candidate_id, _ in selected_candidates
+        if candidate_type == "step"
+    }
+    steps = [step for step in step_candidates if str(step.id) in selected_step_ids]
+    selected_task_ids = {
+        candidate_id
+        for _, candidate_type, candidate_id, _ in selected_candidates
+        if candidate_type == "browser_task"
+    }
+    completed_tasks = [
+        task for task in completed_tasks if str(task.id) in selected_task_ids
+    ]
 
     tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
     tool_call_records: List[ToolCallResultRecord] = []
@@ -5456,7 +5472,6 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         if not m.from_endpoint:
             # Skip malformed records defensively
             continue
-        recent_minutes_suffix = _format_recent_minutes_suffix(m.timestamp)
 
         channel = m.from_endpoint.channel
         body = _redact_signed_filespace_urls(m.body or "", agent)
@@ -5489,12 +5504,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             peer_name = getattr(m.peer_agent, "name", "linked agent")
             if m.is_outbound:
                 header = (
-                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} Peer DM sent to {peer_name}"
+                    f"[{m.timestamp.isoformat()}] Peer DM sent to {peer_name}"
                     f"{attachment_status_suffix}:"
                 )
             else:
                 header = (
-                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} Peer DM received from {peer_name}:"
+                    f"[{m.timestamp.isoformat()}] Peer DM received from {peer_name}:"
                 )
             event_type = f"{event_prefix}_peer_dm"
             content = body if body else "(no content)"
@@ -5517,15 +5532,15 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 if channel == CommsChannel.WEB and m.to_endpoint_id:
                     to_addr = _format_web_party(to_addr, m.to_endpoint_id)
                 header = (
-                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, "
+                    f"[{m.timestamp.isoformat()}] On {channel}, "
                     f"you sent a message to {to_addr}{attachment_status_suffix}:"
                 )
             else:
                 if is_webhook:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
-                    header = f'[{m.timestamp.isoformat()}]{recent_minutes_suffix} Inbound webhook "{label}" triggered:'
+                    header = f'[{m.timestamp.isoformat()}] Inbound webhook "{label}" triggered:'
                 else:
-                    header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you received a message from {from_addr}:"
+                    header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {from_addr}:"
 
             if is_webhook:
                 event_type = f"{event_prefix}_webhook"
