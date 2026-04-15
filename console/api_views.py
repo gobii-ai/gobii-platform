@@ -2538,6 +2538,8 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": str(exc)}, status=400)
 
         contact_email = (request.user.email or "").strip()
+        if preferred_contact_method == "email" and not contact_email:
+            preferred_contact_method = "web"
 
         try:
             result = create_persistent_agent_from_charter(
