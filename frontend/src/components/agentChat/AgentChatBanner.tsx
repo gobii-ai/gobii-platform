@@ -9,10 +9,12 @@ import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
+import type { SignupPreviewState } from '../../types/agentRoster'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
 type AgentChatBannerProps = {
+  agentId?: string | null
   agentName: string
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
@@ -38,6 +40,7 @@ type AgentChatBannerProps = {
   shareDisabledReason?: string | null
   onBlockedShareClick?: (location: 'banner_desktop' | 'banner_mobile') => void
   sidebarCollapsed?: boolean
+  signupPreviewState?: SignupPreviewState
   children?: ReactNode
 }
 
@@ -55,6 +58,7 @@ function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; labe
 }
 
 export const AgentChatBanner = memo(function AgentChatBanner({
+  agentId,
   agentName,
   agentAvatarUrl,
   agentColorHex,
@@ -79,6 +83,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   shareDisabledReason = null,
   onBlockedShareClick,
   sidebarCollapsed = true,
+  signupPreviewState = 'none',
   children,
 }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
@@ -183,6 +188,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const resolvedSettingsLabel = settingsDisabledReason || settingsLabel
   const trackableShareDisabled = shareDisabled && Boolean(onBlockedShareClick)
   const trackableSettingsDisabled = settingsDisabled && Boolean(onBlockedSettingsClick)
+  const previewAnalyticsEnabled = signupPreviewState !== 'none'
 
   const handleShareClick = useCallback((location: 'banner_desktop' | 'banner_mobile') => {
     if (shareDisabled && onBlockedShareClick) {
@@ -199,6 +205,29 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     }
     onSettingsOpen?.()
   }, [onBlockedSettingsClick, onSettingsOpen, settingsDisabled])
+
+  const handlePreviewContactClick = useCallback((channel: 'email' | 'sms') => {
+    if (!previewAnalyticsEnabled) {
+      return
+    }
+    track(AnalyticsEvent.SIGNUP_PREVIEW_CONTACT_CLICKED, {
+      agentId: agentId ?? undefined,
+      signupPreviewState,
+      channel,
+      source: 'banner_contact_link',
+    })
+  }, [agentId, previewAnalyticsEnabled, signupPreviewState])
+
+  const handleCloseClick = useCallback(() => {
+    if (previewAnalyticsEnabled) {
+      track(AnalyticsEvent.SIGNUP_PREVIEW_CLOSED, {
+        agentId: agentId ?? undefined,
+        signupPreviewState,
+        source: 'banner_close',
+      })
+    }
+    onClose?.()
+  }, [agentId, onClose, previewAnalyticsEnabled, signupPreviewState])
 
   const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
 
@@ -227,6 +256,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                       href={`mailto:${agentEmail}`}
                       className="banner-contact-link"
                       title={agentEmail}
+                      onClick={() => handlePreviewContactClick('email')}
                     >
                       <Mail size={12} strokeWidth={2} />
                       <span className="banner-contact-text">{agentEmail}</span>
@@ -237,6 +267,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                       href={`sms:${agentSms}`}
                       className="banner-contact-link"
                       title={agentSms}
+                      onClick={() => handlePreviewContactClick('sms')}
                     >
                       <MessageSquare size={12} strokeWidth={2} />
                       <span className="banner-contact-text">{agentSms}</span>
@@ -423,7 +454,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             <button
               type="button"
               className="banner-close"
-              onClick={onClose}
+              onClick={handleCloseClick}
               aria-label="Close"
             >
               <X size={16} strokeWidth={1.75} />

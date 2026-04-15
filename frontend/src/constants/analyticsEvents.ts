@@ -60,6 +60,10 @@ export const AnalyticsEvent = {
   SIGNUP_PREVIEW_PAUSED_AFTER_FIRST_REPLY: 'Signup Preview Paused After First Reply',
   SIGNUP_PREVIEW_RESUMED_AFTER_PLAN: 'Signup Preview Resumed After Plan',
   SIGNUP_PREVIEW_ACTION_BLOCKED: 'Signup Preview Action Blocked',
+  SIGNUP_PREVIEW_CLOSED: 'Signup Preview Closed',
+  SIGNUP_PREVIEW_COMPARISON_CLICKED: 'Signup Preview Comparison Clicked',
+  SIGNUP_PREVIEW_FEATURES_TOGGLED: 'Signup Preview Features Toggled',
+  SIGNUP_PREVIEW_CONTACT_CLICKED: 'Signup Preview Contact Clicked',
 
   // ============================================
   // Subscription Upgrade Flow
