@@ -5,6 +5,7 @@ import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 
 type AgentSignupPreviewPanelProps = {
   status: SignupPreviewState
+  agentId?: string | null
   agentName?: string | null
   currentPlan: PlanTier | null
   onUpgrade?: (plan: PlanTier, source?: string) => void
@@ -12,6 +13,7 @@ type AgentSignupPreviewPanelProps = {
 
 export function AgentSignupPreviewPanel({
   status,
+  agentId,
   agentName,
   currentPlan,
   onUpgrade,
@@ -46,6 +48,8 @@ export function AgentSignupPreviewPanel({
               source="signup_preview_panel"
               collapseFeaturesByDefault
               trialCopyVariant={ctaUnlockAgentCopy ? 'unlock_agent' : 'default'}
+              signupPreviewAgentId={agentId}
+              signupPreviewState={status}
             />
           </div>
         </div>

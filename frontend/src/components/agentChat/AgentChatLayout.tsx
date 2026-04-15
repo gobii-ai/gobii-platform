@@ -855,6 +855,7 @@ export function AgentChatLayout({
       />
 	      {showBanner && (
 	        <AgentChatBanner
+	          agentId={agentId}
 	          agentName={agentName || 'Agent'}
 	          agentAvatarUrl={agentAvatarUrl}
 	          agentColorHex={agentColorHex}
@@ -879,6 +880,7 @@ export function AgentChatLayout({
           shareDisabled={previewActionsDisabled}
           shareDisabledReason={previewActionsDisabledReason}
           onBlockedShareClick={onBlockedCollaborate}
+          signupPreviewState={signupPreviewState}
 	          sidebarCollapsed={sidebarCollapsed}
 	        >
             {showHighPriorityBanner && highPriorityBanner ? (
@@ -1108,6 +1110,7 @@ export function AgentChatLayout({
           ) : showSignupPreviewPanel ? (
             <AgentSignupPreviewPanel
               status={signupPreviewState}
+              agentId={agentId}
               agentName={agentName}
               currentPlan={subscriptionPlan}
               onUpgrade={onUpgrade}

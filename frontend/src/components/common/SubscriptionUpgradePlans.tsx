@@ -7,6 +7,7 @@ import {
   type PlanTaskCreditsByPlan,
   type PlanTier,
 } from '../../stores/subscriptionStore'
+import type { SignupPreviewState } from '../../types/agentRoster'
 import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -78,6 +79,8 @@ type SubscriptionUpgradePlansProps = {
   allowDowngrade?: boolean
   collapseFeaturesByDefault?: boolean
   trialCopyVariant?: 'default' | 'unlock_agent'
+  signupPreviewAgentId?: string | null
+  signupPreviewState?: SignupPreviewState | null
 }
 
 export function SubscriptionUpgradePlans({
@@ -89,6 +92,8 @@ export function SubscriptionUpgradePlans({
   allowDowngrade = false,
   collapseFeaturesByDefault = false,
   trialCopyVariant = 'default',
+  signupPreviewAgentId = null,
+  signupPreviewState = null,
 }: SubscriptionUpgradePlansProps) {
   const {
     trialDaysByPlan,
@@ -120,16 +125,26 @@ export function SubscriptionUpgradePlans({
     onUpgrade(planId)
   }, [currentPlan, onUpgrade, source])
 
+  const isSignupPreviewTracking = source === 'signup_preview_panel' && signupPreviewState && signupPreviewState !== 'none'
+
   const viewComparisonClick = useCallback(() => {
+    if (isSignupPreviewTracking) {
+      track(AnalyticsEvent.SIGNUP_PREVIEW_COMPARISON_CLICKED, {
+        agentId: signupPreviewAgentId ?? undefined,
+        signupPreviewState,
+        source,
+        variant,
+        destination: '/pricing/',
+      })
+    }
     if (typeof window === 'undefined') {
       return
     }
     window.gobiiTrackCta?.({
       cta_id: 'pricing_modal_view_comparison',
       destination: '/pricing/',
-      
     })
-  }, [])
+  }, [isSignupPreviewTracking, signupPreviewAgentId, signupPreviewState, source, variant])
 
   const pricingUrl = appendReturnTo('/pricing/')
   const isExpandedModal = variant === 'modal' && pricingModalAlmostFullScreen
@@ -169,8 +184,18 @@ export function SubscriptionUpgradePlans({
   }, [allFeaturesExpanded, collapseFeaturesByDefault])
 
   const toggleFeatureList = useCallback(() => {
-    setAllFeaturesExpanded((current) => !current)
-  }, [])
+    const nextExpanded = !allFeaturesExpanded
+    if (isSignupPreviewTracking) {
+      track(AnalyticsEvent.SIGNUP_PREVIEW_FEATURES_TOGGLED, {
+        agentId: signupPreviewAgentId ?? undefined,
+        signupPreviewState,
+        expanded: nextExpanded,
+        source,
+        variant,
+      })
+    }
+    setAllFeaturesExpanded(nextExpanded)
+  }, [allFeaturesExpanded, isSignupPreviewTracking, signupPreviewAgentId, signupPreviewState, source, variant])
 
   return (
     <div className={rootClass}>
