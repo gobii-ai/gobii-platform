@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.contrib.admin.sites import AdminSite
 from django.core.exceptions import ValidationError
-from django.test import RequestFactory, TestCase, tag
+from django.test import RequestFactory, TestCase, override_settings, tag
 from unittest.mock import patch
 
 from api.admin import DailyCreditConfigAdmin
@@ -139,7 +139,7 @@ class DailyCreditSettingsTests(TestCase):
             PlanNames.STARTUP,
             default_daily_credit_target=10,
         )
-        with patch("config.settings.GOBII_PROPRIETARY_MODE", True):
+        with override_settings(GOBII_PROPRIETARY_MODE=True):
             self.user.billing.subscription = PlanNames.STARTUP
             self.user.billing.save(update_fields=["subscription"])
 

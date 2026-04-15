@@ -3,12 +3,12 @@ import os
 from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
-from config import settings
 from api.models import (
     AgentEmailAccount,
     AgentEmailOAuthCredential,
@@ -22,6 +22,7 @@ from console.email_settings.views import _format_email_connection_error, _normal
 from api.services.persistent_agents import ensure_default_agent_email_endpoint
 
 
+@override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 @tag("batch_console_email_oauth")
 class AgentEmailOAuthApiTests(TestCase):
     @classmethod
@@ -256,7 +257,7 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertIn("isInboundAliasActive", payload["defaultEndpoint"])
 
     def test_email_settings_api_get_includes_default_endpoint_payload(self):
-        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+        with override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True):
             default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
             self.assertIsNotNone(default_endpoint)
 
@@ -433,7 +434,7 @@ class AgentEmailOAuthApiTests(TestCase):
             is_primary=True,
         )
 
-        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+        with override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True):
             default_endpoint = ensure_default_agent_email_endpoint(custom_only_agent, is_primary=False)
             self.assertIsNotNone(default_endpoint)
             self.assertTrue(default_endpoint.address.endswith(f"@{settings.DEFAULT_AGENT_EMAIL_DOMAIN}".lower()))
@@ -443,7 +444,7 @@ class AgentEmailOAuthApiTests(TestCase):
             self.assertEqual(second_call_endpoint.id, default_endpoint.id)
 
     def test_email_settings_reset_to_default_restores_default_alias_and_removes_custom_config(self):
-        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+        with override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True):
             default_endpoint = ensure_default_agent_email_endpoint(self.agent, is_primary=False)
             self.assertIsNotNone(default_endpoint)
 
@@ -461,7 +462,7 @@ class AgentEmailOAuthApiTests(TestCase):
         )
 
         save_url = reverse("console_agent_email_settings", args=[self.agent.pk])
-        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", True):
+        with override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True):
             response = self.client.post(
                 save_url,
                 data=json.dumps({"action": "reset_to_default"}),
@@ -486,7 +487,7 @@ class AgentEmailOAuthApiTests(TestCase):
 
     def test_email_settings_reset_to_default_requires_default_alias_feature(self):
         save_url = reverse("console_agent_email_settings", args=[self.agent.pk])
-        with patch("config.settings.ENABLE_DEFAULT_AGENT_EMAIL", False):
+        with override_settings(ENABLE_DEFAULT_AGENT_EMAIL=False):
             response = self.client.post(
                 save_url,
                 data=json.dumps({"action": "reset_to_default"}),
