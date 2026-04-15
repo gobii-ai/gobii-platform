@@ -2525,6 +2525,9 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": "Message is required"}, status=400)
         preferred_llm_tier_key = (body.get("preferred_llm_tier") or "").strip() or None
         charter_override = (body.get("charter_override") or "").strip() or None
+        preferred_contact_method = (body.get("preferred_contact_method") or "web").strip().lower()
+        if preferred_contact_method not in {"email", "web"}:
+            return JsonResponse({"error": "Preferred contact method must be 'email' or 'web'."}, status=400)
         try:
             selected_pipedream_app_slugs = normalize_app_slugs(
                 body.get("selected_pipedream_app_slugs"),
@@ -2535,6 +2538,8 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": str(exc)}, status=400)
 
         contact_email = (request.user.email or "").strip()
+        if preferred_contact_method == "email" and not contact_email:
+            preferred_contact_method = "web"
 
         try:
             result = create_persistent_agent_from_charter(
@@ -2543,8 +2548,8 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
                 contact_email=contact_email,
                 email_enabled=bool(contact_email),
                 sms_enabled=False,
-                preferred_contact_method="web",
-                web_enabled=True,
+                preferred_contact_method=preferred_contact_method,
+                web_enabled=preferred_contact_method == "web",
                 preferred_llm_tier_key=preferred_llm_tier_key,
                 charter_override=charter_override,
                 selected_pipedream_app_slugs=selected_pipedream_app_slugs,

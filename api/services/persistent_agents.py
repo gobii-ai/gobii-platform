@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from typing import Optional
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils.crypto import get_random_string
@@ -32,7 +33,6 @@ from api.services.daily_credit_limits import (
     get_tier_credit_multiplier,
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from config import settings
 
 
 logger = logging.getLogger(__name__)
@@ -264,7 +264,7 @@ def generate_unique_agent_email(agent_name: str, max_attempts: int = 100) -> str
     if not base_username:
         base_username = "agent"
 
-    domain = getattr(settings, "DEFAULT_AGENT_EMAIL_DOMAIN", "agents.localhost")
+    domain = settings.DEFAULT_AGENT_EMAIL_DOMAIN
     email_address = f"{base_username}@{domain}"
     if not PersistentAgentCommsEndpoint.objects.filter(
         channel=CommsChannel.EMAIL,
