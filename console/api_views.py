@@ -2776,7 +2776,9 @@ class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
         from allauth.account.models import EmailAddress
-        from allauth.account.utils import send_email_confirmation
+        from allauth.account.internal.flows.email_verification import (
+            send_verification_email_to_address,
+        )
 
         email_address = EmailAddress.objects.filter(user=request.user, primary=True).first()
         if not email_address:
@@ -2786,7 +2788,7 @@ class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"verified": True, "message": "Email already verified."})
 
         try:
-            send_email_confirmation(request, request.user, email=email_address.email)
+            send_verification_email_to_address(request, email_address)
         except Exception as exc:
             logger.exception("Failed to send email verification for user %s", request.user.id)
             return JsonResponse({"error": f"Failed to send verification email: {exc}"}, status=500)

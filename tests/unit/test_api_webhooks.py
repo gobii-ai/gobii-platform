@@ -2,6 +2,7 @@ import json
 from unittest.mock import patch, MagicMock
 
 from allauth.account.models import EmailAddress
+from django.core.cache import cache
 from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 from django.http import HttpResponse
@@ -24,6 +25,7 @@ User = get_user_model()
 @tag("batch_email")
 class PostmarkEmailWebhookTest(TestCase):
     def setUp(self):
+        cache.clear()
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="testowner", email="owner@example.com", password="password"
@@ -180,10 +182,52 @@ class PostmarkEmailWebhookTest(TestCase):
         parsed = mock_ingest.call_args[0][1]
         self.assertEqual(parsed.recipient, custom_endpoint.address)
 
+    @tag("batch_email")
+    @patch("allauth.account.internal.flows.email_verification.send_verification_email_to_address")
+    @patch("api.webhooks.ingest_inbound_message")
+    def test_unverified_owner_reply_triggers_verification_email(self, mock_ingest, mock_send_confirmation):
+        EmailAddress.objects.filter(user=self.owner).delete()
+
+        request = self._create_postmark_request(
+            from_email=self.owner.email,
+            to_email=self.agent_endpoint.address,
+        )
+        response: HttpResponse = email_webhook_postmark(request)
+
+        self.assertEqual(response.status_code, 200)
+        mock_ingest.assert_not_called()
+        mock_send_confirmation.assert_called_once()
+        self.assertEqual(mock_send_confirmation.call_args[0][0], request)
+        self.assertEqual(mock_send_confirmation.call_args[0][1].email, self.owner.email)
+
+        email_address = EmailAddress.objects.get(user=self.owner, email=self.owner.email)
+        self.assertFalse(email_address.verified)
+        self.assertTrue(email_address.primary)
+
+    @tag("batch_email")
+    @patch("allauth.account.internal.flows.email_verification.send_verification_email_to_address")
+    @patch("api.webhooks.ingest_inbound_message")
+    def test_unverified_owner_reply_rate_limits_verification_email(self, mock_ingest, mock_send_confirmation):
+        EmailAddress.objects.filter(user=self.owner).update(verified=False)
+
+        request = self._create_postmark_request(
+            from_email=self.owner.email,
+            to_email=self.agent_endpoint.address,
+        )
+
+        first_response: HttpResponse = email_webhook_postmark(request)
+        second_response: HttpResponse = email_webhook_postmark(request)
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        mock_ingest.assert_not_called()
+        mock_send_confirmation.assert_called_once()
+
 
 @tag("batch_email")
 class MailgunEmailWebhookTest(TestCase):
     def setUp(self):
+        cache.clear()
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="mgowner", email="owner@example.com", password="password"

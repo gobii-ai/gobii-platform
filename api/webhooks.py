@@ -29,7 +29,7 @@ import re
 from config import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from api.services.email_verification import has_verified_email
+from api.services.email_verification import has_verified_email, maybe_send_inbound_email_verification
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -558,9 +558,19 @@ def _handle_inbound_email(
             span.set_attribute("endpoint_address", endpoint.address)
 
             if not has_verified_email(agent.user):
+                verification_sent = maybe_send_inbound_email_verification(
+                    request,
+                    agent.user,
+                    sender_email=from_email,
+                )
                 logger.info(
                     f"Discarding inbound email to endpoint {endpoint.address} - owner email not verified."
                 )
+                if verification_sent:
+                    logger.info(
+                        "Sent verification email after blocked inbound owner reply for user %s",
+                        agent.user_id,
+                    )
                 span.add_event('Email - Owner Email Not Verified', {
                     'agent_id': str(agent.id),
                     'agent_name': agent.name,

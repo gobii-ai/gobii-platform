@@ -1190,6 +1190,10 @@ IMAP_IDLE_LEASE_TTL_SEC = env.int("IMAP_IDLE_LEASE_TTL_SEC", default=60)
 # parameter on that one
 POSTMARK_INCOMING_WEBHOOK_TOKEN = env("POSTMARK_INCOMING_WEBHOOK_TOKEN", default="dummy-postmark-incoming-token")
 MAILGUN_INCOMING_WEBHOOK_TOKEN = env("MAILGUN_INCOMING_WEBHOOK_TOKEN", default="dummy-mailgun-incoming-token")
+INBOUND_EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS = env.int(
+    "INBOUND_EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS",
+    default=60 * 60,
+)
 
 EXA_SEARCH_API_KEY = env("EXA_SEARCH_API_KEY", default="dummy-exa-search-api-key")
 CAPSOLVER_API_KEY = env("CAPSOLVER_API_KEY", default="")
