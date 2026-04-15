@@ -2641,11 +2641,13 @@ export function AgentChatPage({
       setCreateAgentError(null)
       setCreateAgentTrialOnboarding(null)
       try {
+        const preferredContactMethod = spawnFlow ? 'email' : 'web'
         const result = await createAgent(
           body,
           tier,
           charterOverride,
           selectedPipedreamAppSlugs,
+          preferredContactMethod,
         )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
@@ -2710,6 +2712,7 @@ export function AgentChatPage({
       personalSignupPreviewAvailable,
       queryClient,
       setPendingAgentEmails,
+      spawnFlow,
       trackPendingAvatarRefresh,
     ],
   )

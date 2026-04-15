@@ -179,6 +179,41 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(seeded_message.conversation.address, expected_sender)
 
     @tag("batch_agent_chat")
+    def test_quick_create_allows_email_preference_override(self):
+        message_text = "Build me an agent from a stored CTA intent"
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps(
+                {
+                    "message": message_text,
+                    "preferred_llm_tier": "standard",
+                    "preferred_contact_method": "email",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertIsNotNone(created_agent.preferred_contact_endpoint)
+        self.assertEqual(created_agent.preferred_contact_endpoint.channel, CommsChannel.EMAIL)
+        self.assertEqual(created_agent.preferred_contact_endpoint.address, self.user.email)
+
+        seeded_message = (
+            PersistentAgentMessage.objects.filter(owner_agent=created_agent, body=message_text)
+            .order_by("-timestamp")
+            .first()
+        )
+        self.assertIsNotNone(seeded_message)
+        self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.EMAIL)
+        self.assertEqual(seeded_message.from_endpoint.address, self.user.email)
+        self.assertIsNotNone(seeded_message.to_endpoint)
+        self.assertEqual(seeded_message.to_endpoint.channel, CommsChannel.EMAIL)
+        self.assertEqual(seeded_message.conversation.channel, CommsChannel.EMAIL)
+        self.assertEqual(seeded_message.conversation.address, self.user.email)
+
+    @tag("batch_agent_chat")
     def test_quick_create_without_account_email(self):
         user_model = get_user_model()
         no_email_user = user_model.objects.create_user(
@@ -213,6 +248,24 @@ class AgentChatAPITests(TestCase):
         self.assertIsNotNone(seeded_message)
         self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.WEB)
         self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
+
+    @tag("batch_agent_chat")
+    def test_quick_create_rejects_invalid_preferred_contact_method(self):
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps(
+                {
+                    "message": "Create from immersive app",
+                    "preferred_contact_method": "sms",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json().get("error"),
+            "Preferred contact method must be 'email' or 'web'.",
+        )
 
     @tag("batch_agent_chat")
     def test_quick_create_invalid_org_override_returns_context_error(self):
