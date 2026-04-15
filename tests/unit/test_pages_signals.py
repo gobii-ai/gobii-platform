@@ -51,7 +51,11 @@ from pages.signals import (
 )
 from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
-from api.services.owner_execution_pause import resume_owner_execution as real_resume_owner_execution
+from api.services.owner_execution_pause import (
+    EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
+    EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+    resume_owner_execution as real_resume_owner_execution,
+)
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
@@ -1742,6 +1746,182 @@ class SubscriptionSignalTests(TestCase):
         self.assertFalse(self.billing.execution_paused)
         self.assertEqual(self.billing.execution_pause_reason, "")
         self.assertIsNone(self.billing.execution_paused_at)
+
+    @tag("batch_pages")
+    def test_active_subscription_update_with_pause_collection_keeps_owner_customer_paused(self):
+        resume_at = (timezone.now() + timedelta(days=21)).replace(microsecond=0)
+        payload = _build_event_payload(status="active", billing_reason="subscription_update")
+        payload["pause_collection"] = {
+            "behavior": "mark_uncollectible",
+            "resumes_at": int(resume_at.timestamp()),
+        }
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            previous_attributes={"pause_collection": None},
+            event_id="evt_customer_pause_started",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "active"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.resume_owner_execution", wraps=real_resume_owner_execution) as mock_resume_owner:
+
+            handle_subscription_event(event)
+
+        mock_resume_owner.assert_not_called()
+        self.billing.refresh_from_db()
+        self.assertTrue(self.billing.execution_paused)
+        self.assertEqual(self.billing.execution_pause_reason, EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE)
+        self.assertIsNotNone(self.billing.execution_paused_at)
+        self.assertEqual(self.billing.execution_pause_resume_at, resume_at)
+
+    @tag("batch_pages")
+    def test_active_subscription_update_clears_customer_pause_when_pause_collection_removed(self):
+        resume_at = (timezone.now() + timedelta(days=7)).replace(microsecond=0)
+        self.billing.execution_paused = True
+        self.billing.execution_pause_reason = EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE
+        self.billing.execution_paused_at = timezone.now()
+        self.billing.execution_pause_resume_at = resume_at
+        self.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+
+        payload = _build_event_payload(status="active", billing_reason="subscription_update")
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            previous_attributes={
+                "pause_collection": {
+                    "behavior": "mark_uncollectible",
+                    "resumes_at": int(resume_at.timestamp()),
+                }
+            },
+            event_id="evt_customer_pause_ended",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "active"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.billing.refresh_from_db()
+        self.assertFalse(self.billing.execution_paused)
+        self.assertEqual(self.billing.execution_pause_reason, "")
+        self.assertIsNone(self.billing.execution_paused_at)
+        self.assertIsNone(self.billing.execution_pause_resume_at)
+
+    @tag("batch_pages")
+    def test_secondary_active_subscription_update_does_not_clear_customer_pause(self):
+        resume_at = (timezone.now() + timedelta(days=7)).replace(microsecond=0)
+        self.billing.execution_paused = True
+        self.billing.execution_pause_reason = EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE
+        self.billing.execution_paused_at = timezone.now()
+        self.billing.execution_pause_resume_at = resume_at
+        self.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+
+        payload = _build_event_payload(status="active", billing_reason="subscription_update")
+        payload["id"] = "sub_secondary"
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            previous_attributes={"pause_collection": {"behavior": "mark_uncollectible"}},
+            event_id="evt_secondary_active_update",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.id = "sub_secondary"
+        sub.status = "active"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_active_subscription", return_value=SimpleNamespace(id="sub_primary")), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.billing.refresh_from_db()
+        self.assertTrue(self.billing.execution_paused)
+        self.assertEqual(self.billing.execution_pause_reason, EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE)
+        self.assertEqual(self.billing.execution_pause_resume_at, resume_at)
+
+    @tag("batch_pages")
+    def test_secondary_active_subscription_update_does_not_resume_billing_pause(self):
+        self.billing.execution_paused = True
+        self.billing.execution_pause_reason = EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY
+        self.billing.execution_paused_at = timezone.now()
+        self.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+
+        payload = _build_event_payload(status="active", billing_reason="subscription_update")
+        payload["id"] = "sub_secondary"
+        event = _build_djstripe_event(
+            payload,
+            event_type="customer.subscription.updated",
+            event_id="evt_secondary_active_billing_pause",
+        )
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.id = "sub_secondary"
+        sub.status = "active"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_active_subscription", return_value=SimpleNamespace(id="sub_primary")), \
+            patch("pages.signals.resume_owner_execution") as mock_resume_owner_execution, \
+            patch("pages.signals.mark_user_billing_with_plan") as mock_mark_user_billing_with_plan, \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant_subscription_credits, \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.billing.refresh_from_db()
+        self.assertTrue(self.billing.execution_paused)
+        self.assertEqual(self.billing.execution_pause_reason, EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY)
+        mock_resume_owner_execution.assert_not_called()
+        mock_mark_user_billing_with_plan.assert_not_called()
+        mock_grant_subscription_credits.assert_not_called()
 
     @tag("batch_pages")
     def test_trial_ended_non_renewal_emits_lifecycle_event(self):

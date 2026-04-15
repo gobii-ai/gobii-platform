@@ -198,6 +198,35 @@ function resolveCreateAgentDisabledMessage(reason?: string | null, actionable = 
   return prefix
 }
 
+function formatAccountPauseResumeLabel(resumeAt?: string | null): string | null {
+  if (!resumeAt) return null
+  const resumeDate = new Date(resumeAt)
+  if (Number.isNaN(resumeDate.getTime())) return null
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(resumeDate)
+}
+
+function resolveAccountPauseMessage(resumeAt?: string | null): string {
+  const resumeLabel = formatAccountPauseResumeLabel(resumeAt)
+  if (resumeLabel) {
+    return `Your account is paused until ${resumeLabel}.`
+  }
+  return 'Your account is paused.'
+}
+
+function resolveCreateAgentPausedMessage(resumeAt?: string | null): string {
+  return `${resolveAccountPauseMessage(resumeAt)} New agent creation is disabled until billing resumes.`
+}
+
+function resolveSendMessagePausedMessage(resumeAt?: string | null): string {
+  return `${resolveAccountPauseMessage(resumeAt)} Sending new messages is disabled until billing resumes.`
+}
+
 function resolveSendMessageDisabledMessage(): string {
   return 'Resolve billing before sending more messages.'
 }
@@ -2504,12 +2533,20 @@ export function AgentChatPage({
   }, [initialLoading, switchingAgentId])
 
   const selectedAgentBillingStatus = addonsPayload?.status?.billing ?? null
+  const selectedAgentAccountPause = addonsPayload?.status?.accountPause ?? null
   const currentContextBillingStatus = rosterQuery.data?.billingStatus ?? null
-  const sendMessageDisabledReason = !isNewAgent && selectedAgentBillingStatus?.delinquent
-    ? resolveSendMessageDisabledMessage()
-    : null
-  const previewCreateAgentBlocked = !currentContextBillingStatus?.delinquent && personalSignupPreviewAvailable
-  const createAgentDisabledReason = currentContextBillingStatus?.delinquent
+  const currentContextAccountPause = rosterQuery.data?.accountPause ?? null
+  const sendMessageDisabledReason = !isNewAgent && selectedAgentAccountPause?.paused
+    ? resolveSendMessagePausedMessage(selectedAgentAccountPause.resumeAt)
+    : (!isNewAgent && selectedAgentBillingStatus?.delinquent
+      ? resolveSendMessageDisabledMessage()
+      : null)
+  const previewCreateAgentBlocked = !currentContextBillingStatus?.delinquent
+    && !currentContextAccountPause?.paused
+    && personalSignupPreviewAvailable
+  const createAgentDisabledReason = currentContextAccountPause?.paused
+    ? resolveCreateAgentPausedMessage(currentContextAccountPause.resumeAt)
+    : currentContextBillingStatus?.delinquent
     ? resolveCreateAgentDisabledMessage(
       currentContextBillingStatus.reason,
       currentContextBillingStatus.actionable,
@@ -2998,8 +3035,27 @@ export function AgentChatPage({
     return '/console/billing/'
   }, [effectiveContext])
   const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
-  const billingManageUrl = bannerBillingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
+  const bannerAccountPause = selectedAgentAccountPause?.paused
+    ? selectedAgentAccountPause
+    : currentContextAccountPause?.paused
+      ? currentContextAccountPause
+      : null
+  const billingManageUrl = bannerAccountPause?.manageBillingUrl
+    || bannerBillingStatus?.manageBillingUrl
+    || contactPackManageUrl
+    || billingUrl
   const highPriorityBanner = useMemo(() => {
+    if (bannerAccountPause?.paused) {
+      return {
+        id: 'account-paused',
+        title: 'Account paused',
+        message: resolveCreateAgentPausedMessage(bannerAccountPause.resumeAt),
+        actionLabel: 'Open billing',
+        actionHref: billingManageUrl,
+        dismissible: false,
+        tone: 'warning' as const,
+      }
+    }
     if (!bannerBillingStatus?.delinquent || !bannerBillingStatus?.actionable || !billingManageUrl) {
       return null
     }
@@ -3013,6 +3069,8 @@ export function AgentChatPage({
       tone: 'critical' as const,
     }
   }, [
+    bannerAccountPause?.paused,
+    bannerAccountPause?.resumeAt,
     bannerBillingStatus?.actionable,
     bannerBillingStatus?.delinquent,
     bannerBillingStatus?.reason,

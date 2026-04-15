@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { AccountPauseInfo } from '../../types/agentAddons'
 
 export type BillingAddonKindKey = 'taskPack' | 'contactPack' | 'browserTaskPack' | 'advancedCaptcha'
 
@@ -85,6 +86,7 @@ export type BillingExtraTasksSettings = {
 export type BillingPersonalData = {
   contextType: 'personal'
   canManageBilling: boolean
+  accountPause?: AccountPauseInfo | null
   paidSubscriber: boolean
   plan: BillingPlan
   trial: BillingTrial
@@ -104,6 +106,7 @@ export type BillingOrgData = {
   contextType: 'organization'
   organization: { id: string; name: string }
   canManageBilling: boolean
+  accountPause?: AccountPauseInfo | null
   plan: BillingPlan
   trial: BillingTrial
   extraTasks: BillingExtraTasksSettings

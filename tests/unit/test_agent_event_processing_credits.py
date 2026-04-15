@@ -228,7 +228,7 @@ class PersistentAgentCreditGateTests(TestCase):
         self.assertEqual(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
-                description="Skipped processing because account execution is paused until billing is resolved.",
+                description="Skipped processing because account execution is paused.",
             ).count(),
             1,
         )
