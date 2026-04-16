@@ -923,15 +923,11 @@ export function AgentChatPage({
   const preservePrependViewportRef = useRef(false)
   const olderPageRequestInFlightRef = useRef(false)
   const autoScrollPinnedRef = useRef(autoScrollPinned)
-  // Sync refs during render so scroll observers always see the current state.
-  autoScrollPinnedRef.current = autoScrollPinned
   const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
-  autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
   const lastProgrammaticScrollAtRef = useRef(0)
   const forceScrollOnNextUpdateRef = useRef(false)
   const didInitialScrollRef = useRef(false)
   const isNearBottomRef = useRef(isNearBottom)
-  isNearBottomRef.current = isNearBottom
   const autoRepinTimeoutRef = useRef<number | null>(null)
   const composerFocusNudgeTimeoutRef = useRef<number | null>(null)
   const userTouchActiveRef = useRef(false)
@@ -943,6 +939,23 @@ export function AgentChatPage({
 
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
+
+  useLayoutEffect(() => {
+    autoScrollPinnedRef.current = autoScrollPinned
+    autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
+    isNearBottomRef.current = isNearBottom
+  }, [autoScrollPinned, autoScrollPinSuppressedUntil, isNearBottom])
+
+  const syncNearBottomState = useCallback((container: HTMLElement | null): number | null => {
+    if (!container) {
+      return null
+    }
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+    const nearBottom = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
+    isNearBottomRef.current = nearBottom
+    setIsNearBottom((previous) => (previous === nearBottom ? previous : nearBottom))
+    return distanceFromBottom
+  }, [])
 
   const freezeTimelineViewport = useCallback(() => {
     const wasPinned = autoScrollPinnedRef.current
@@ -1038,10 +1051,7 @@ export function AgentChatPage({
           container.scrollTop += delta
         }
         syncTimelineScrollability(container)
-        const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-        const nearBottom = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
-        isNearBottomRef.current = nearBottom
-        setIsNearBottom((previous) => (previous === nearBottom ? previous : nearBottom))
+        syncNearBottomState(container)
       }
     }
 
@@ -1052,7 +1062,13 @@ export function AgentChatPage({
     preservePrependViewportRef.current = false
     prevPageCountRef.current = pageCount
     prevScrollHeightRef.current = timelineRef.current?.scrollHeight ?? 0
-  }, [activeAgentId, syncTimelineScrollability, timelineQuery.data?.pages?.length, timelineQuery.isFetchingPreviousPage])
+  }, [
+    activeAgentId,
+    syncNearBottomState,
+    syncTimelineScrollability,
+    timelineQuery.data?.pages?.length,
+    timelineQuery.isFetchingPreviousPage,
+  ])
 
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
   const [pendingAvatarTracking, setPendingAvatarTracking] = useState<PendingAvatarTracking>({})
@@ -1412,17 +1428,6 @@ export function AgentChatPage({
     return autoScrollPinnedRef.current && isNearBottomRef.current && !userTouchActiveRef.current
   }, [])
 
-  const syncNearBottomState = useCallback((container: HTMLElement | null): number | null => {
-    if (!container) {
-      return null
-    }
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-    const nearBottom = distanceFromBottom <= NEAR_BOTTOM_THRESHOLD_PX
-    isNearBottomRef.current = nearBottom
-    setIsNearBottom((previous) => (previous === nearBottom ? previous : nearBottom))
-    return distanceFromBottom
-  }, [])
-
   const repinAutoScrollIfAtBottom = useCallback((container: HTMLElement | null) => {
     if (!container || autoScrollPinnedRef.current) {
       return
@@ -1654,7 +1659,7 @@ export function AgentChatPage({
   const prevStreamingRef = useRef(timelineStreaming)
 
   if (timelineEvents !== prevEventsRef.current || timelineStreaming !== prevStreamingRef.current) {
-    shouldScrollOnNextUpdateRef.current = autoScrollPinned && isNearBottomRef.current
+    shouldScrollOnNextUpdateRef.current = autoScrollPinned && isNearBottom
     prevEventsRef.current = timelineEvents
     prevStreamingRef.current = timelineStreaming
   }
