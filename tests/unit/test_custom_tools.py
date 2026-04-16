@@ -12,6 +12,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -187,6 +188,121 @@ class CustomToolsTests(TestCase):
             },
         )
 
+    def test_normalize_custom_tool_parameters_schema_canonicalizes_nested_schema_types(self):
+        schema = normalize_custom_tool_parameters_schema(
+            {
+                "type": "OBJECT",
+                "properties": {
+                    "keywords": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                    },
+                    "metadata": {
+                        "type": "OBJECT",
+                        "additionalProperties": {"type": "INTEGER"},
+                        "default": {"type": "ARRAY"},
+                    },
+                    "selector": {
+                        "oneOf": [{"type": "NUMBER"}, {"type": "NULL"}],
+                        "anyOf": [{"type": "BOOLEAN"}],
+                        "allOf": [
+                            {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "count": {"type": "INTEGER"},
+                                },
+                            }
+                        ],
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            schema,
+            {
+                "type": "object",
+                "properties": {
+                    "keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "additionalProperties": {"type": "integer"},
+                        "default": {"type": "ARRAY"},
+                    },
+                    "selector": {
+                        "oneOf": [{"type": "number"}, {"type": "null"}],
+                        "anyOf": [{"type": "boolean"}],
+                        "allOf": [
+                            {
+                                "type": "object",
+                                "properties": {
+                                    "count": {"type": "integer"},
+                                },
+                            }
+                        ],
+                    },
+                },
+                "required": [],
+            },
+        )
+
+    def test_persistent_agent_custom_tool_model_clean_canonicalizes_nested_schema_types(self):
+        tool = PersistentAgentCustomTool(
+            agent=self.agent,
+            name="Pohl Searcher",
+            tool_name="pohl_searcher",
+            description="Search for keywords.",
+            source_path=" tools/pohl_searcher.py ",
+            parameters_schema={
+                "type": "OBJECT",
+                "required": ["keywords"],
+                "properties": {
+                    "keywords": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                    },
+                },
+            },
+            timeout_seconds=300,
+        )
+
+        tool.full_clean()
+
+        self.assertEqual(tool.tool_name, "custom_pohl_searcher")
+        self.assertEqual(tool.source_path, "/tools/pohl_searcher.py")
+        self.assertEqual(tool.entrypoint, "run")
+        self.assertEqual(
+            tool.parameters_schema,
+            {
+                "type": "object",
+                "required": ["keywords"],
+                "properties": {
+                    "keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+            },
+        )
+
+    def test_persistent_agent_custom_tool_model_clean_rejects_invalid_entrypoint(self):
+        tool = PersistentAgentCustomTool(
+            agent=self.agent,
+            name="Pohl Searcher",
+            tool_name="pohl_searcher",
+            description="Search for keywords.",
+            source_path="/tools/pohl_searcher.py",
+            parameters_schema={"type": "object", "properties": {}},
+            entrypoint="other",
+            timeout_seconds=300,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "entrypoint must be `run`."):
+            tool.full_clean()
+
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
     def test_create_custom_tool_writes_source_and_enables_tool(self, mock_enable_tools, _mock_sandbox):
@@ -229,6 +345,57 @@ class CustomToolsTests(TestCase):
         node = AgentFsNode.objects.get(path="/tools/greeter.py")
         with node.content.open("rb") as handle:
             self.assertIn(b"def run", handle.read())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.tool_manager.enable_tools")
+    def test_create_custom_tool_stores_canonicalized_nested_schema_types(self, mock_enable_tools, _mock_sandbox):
+        mock_enable_tools.return_value = {
+            "status": "success",
+            "enabled": ["custom_pohl_searcher"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Pohl Searcher",
+                "description": "Search for keywords.",
+                "source_path": "/tools/pohl_searcher.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    return {'keywords': params['keywords']}\n"
+                ),
+                "parameters_schema": {
+                    "type": "OBJECT",
+                    "required": ["keywords"],
+                    "properties": {
+                        "keywords": {
+                            "type": "ARRAY",
+                            "items": {"type": "STRING"},
+                        },
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+
+        tool = PersistentAgentCustomTool.objects.get(agent=self.agent, tool_name="custom_pohl_searcher")
+        self.assertEqual(
+            tool.parameters_schema,
+            {
+                "type": "object",
+                "required": ["keywords"],
+                "properties": {
+                    "keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
+            },
+        )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools.SandboxComputeService")
@@ -399,6 +566,58 @@ class CustomToolsTests(TestCase):
                 "description": (
                     "Required parameter inferred from schema.required because no explicit property definition was provided."
                 ),
+            },
+        )
+
+    @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_tool_manager_normalizes_legacy_nested_schema_types_for_llm(
+        self,
+        mock_get_manager,
+        _mock_custom_available,
+    ):
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_manager.get_enabled_tools_definitions.return_value = []
+        mock_get_manager.return_value = mock_manager
+
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Pohl Searcher",
+            tool_name="custom_pohl_searcher",
+            description="Search keywords.",
+            source_path="/tools/pohl_searcher.py",
+            parameters_schema={
+                "type": "object",
+                "required": ["keywords"],
+                "properties": {
+                    "keywords": {
+                        "type": "ARRAY",
+                        "items": {"type": "STRING"},
+                    },
+                },
+            },
+        )
+        PersistentAgentEnabledTool.objects.create(agent=self.agent, tool_full_name="custom_pohl_searcher")
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        tool_def = next(
+            definition
+            for definition in definitions
+            if definition["function"]["name"] == "custom_pohl_searcher"
+        )
+
+        self.assertEqual(
+            tool_def["function"]["parameters"],
+            {
+                "type": "object",
+                "required": ["keywords"],
+                "properties": {
+                    "keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                },
             },
         )
 
