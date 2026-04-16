@@ -1972,16 +1972,8 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
-        self.assertEqual(kwargs["billing_address_collection"], "required")
-        self.assertEqual(
-            kwargs["name_collection"],
-            {
-                "individual": {
-                    "enabled": True,
-                    "optional": False,
-                }
-            },
-        )
+        self.assertNotIn("billing_address_collection", kwargs)
+        self.assertNotIn("name_collection", kwargs)
         self.assertEqual(
             kwargs["custom_text"],
             {
@@ -2234,6 +2226,7 @@ class CheckoutRedirectTests(TestCase):
         mock_price_get,
         mock_session_create,
         _mock_customer_modify,
+        _mock_record_checkout_context,
         mock_existing_subs,
         mock_ensure,
         _mock_trial_eligible,
@@ -2263,16 +2256,8 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
 
         kwargs = mock_session_create.call_args.kwargs
-        self.assertEqual(kwargs["billing_address_collection"], "required")
-        self.assertEqual(
-            kwargs["name_collection"],
-            {
-                "individual": {
-                    "enabled": True,
-                    "optional": False,
-                }
-            },
-        )
+        self.assertNotIn("billing_address_collection", kwargs)
+        self.assertNotIn("name_collection", kwargs)
         self.assertEqual(
             kwargs["custom_text"],
             {
@@ -2287,6 +2272,7 @@ class CheckoutRedirectTests(TestCase):
     @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.record_checkout_context")
     @patch("pages.views.stripe.Customer.modify")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
