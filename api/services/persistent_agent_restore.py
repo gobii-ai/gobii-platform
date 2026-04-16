@@ -49,6 +49,11 @@ class RestoredAgentRepairResult:
 class PersistentAgentRestoreRepairService:
     """Restore comms resources released by persistent-agent soft delete."""
 
+    @staticmethod
+    def snapshot_has_restore_payload(snapshot: dict | None) -> bool:
+        snapshot = snapshot or {}
+        return bool(snapshot.get("owned_endpoints") or snapshot.get("peer_links"))
+
     @classmethod
     def build_soft_delete_snapshot(cls, agent: PersistentAgent) -> dict:
         owned_endpoints = []
@@ -93,7 +98,7 @@ class PersistentAgentRestoreRepairService:
                     "window_hours": int(link.window_hours),
                     "is_enabled": bool(link.is_enabled),
                     "feature_flag": link.feature_flag or "",
-                    "created_by_id": int(link.created_by_id) if link.created_by_id else None,
+                    "created_by_id": link.created_by_id if link.created_by_id else None,
                 }
             )
 
