@@ -449,7 +449,7 @@ class ConsoleViewsTest(TestCase):
 
     @tag("batch_console_agents")
     def test_admin_action_can_undelete_soft_deleted_agent(self):
-        from api.models import BrowserUseAgent, PersistentAgent
+        from api.models import BrowserUseAgent, CommsChannel, PersistentAgent, PersistentAgentCommsEndpoint
 
         User = get_user_model()
         admin_user = User.objects.create_superuser(
@@ -467,12 +467,15 @@ class ConsoleViewsTest(TestCase):
             name="Undelete Agent",
             charter="Admin undelete test",
             browser_use_agent=browser_agent,
-            is_deleted=True,
-            deleted_at=timezone.now(),
-            is_active=False,
-            life_state=PersistentAgent.LifeState.EXPIRED,
-            schedule=None,
         )
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=persistent_agent,
+            channel=CommsChannel.EMAIL,
+            address=f"undelete-{persistent_agent.id}@example.com",
+            is_primary=True,
+        )
+
+        persistent_agent.soft_delete()
 
         self.client.force_login(admin_user)
         response = self.client.post(
@@ -486,8 +489,11 @@ class ConsoleViewsTest(TestCase):
 
         self.assertEqual(response.status_code, 200)
         persistent_agent.refresh_from_db()
+        agent_endpoint.refresh_from_db()
         self.assertFalse(persistent_agent.is_deleted)
         self.assertIsNone(persistent_agent.deleted_at)
+        self.assertEqual(agent_endpoint.owner_agent_id, persistent_agent.id)
+        self.assertTrue(agent_endpoint.is_primary)
 
     @tag("batch_console_agents")
     def test_admin_action_undelete_skips_agent_with_name_conflict(self):

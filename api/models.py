@@ -5984,6 +5984,11 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="Snapshot of cron schedule for restoration."
     )
+    soft_delete_restore_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Snapshot of endpoint and peer-link ownership released during soft delete.",
+    )
     is_deleted = models.BooleanField(default=False, db_index=True)
     deleted_at = models.DateTimeField(null=True, blank=True)
     last_expired_at = models.DateTimeField(null=True, blank=True)
@@ -6244,13 +6249,21 @@ class PersistentAgent(models.Model):
         if not self.pk:
             return False
 
+        from api.services.persistent_agent_restore import PersistentAgentRestoreRepairService
+
+        snapshot = PersistentAgentRestoreRepairService.build_soft_delete_snapshot(self)
+        snapshot_changed = snapshot != (self.soft_delete_restore_snapshot or {})
+        if snapshot_changed:
+            type(self).objects.filter(pk=self.pk).update(soft_delete_restore_snapshot=snapshot)
+            self.soft_delete_restore_snapshot = snapshot
+
         peer_links_removed = AgentPeerLink.remove_for_agent(self)
         # Release endpoint ownership so deleted agents do not reserve globally unique addresses.
         released_count = self.comms_endpoints.filter(owner_agent_id=self.pk).update(
             owner_agent=None,
             is_primary=False,
         )
-        return peer_links_removed or released_count > 0
+        return snapshot_changed or peer_links_removed or released_count > 0
 
     def restore(self, *, save: bool = True) -> bool:
         if self.is_deleted:
@@ -6275,6 +6288,14 @@ class PersistentAgent(models.Model):
                         )
                     }
                 ) from exc
+            from api.services.persistent_agent_restore import PersistentAgentRestoreRepairService
+
+            repair_result = PersistentAgentRestoreRepairService.repair(
+                self,
+                apply=True,
+                provision_email_fallback=True,
+            )
+            return bool(update_fields) or repair_result.has_actions
         return bool(update_fields)
 
     def get_daily_credit_soft_target(self) -> Decimal | None:
