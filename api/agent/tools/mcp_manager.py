@@ -337,6 +337,7 @@ class MCPToolManager:
     
     def __init__(self):
         self._clients: Dict[str, Client] = {}
+        self._stdio_proxy_clients: Dict[str, Client] = {}
         self._server_cache: Dict[str, MCPServerRuntime] = {}
         self._tools_cache: Dict[str, List[MCPToolInfo]] = {}
         self._tool_cache_fingerprints: Dict[str, str] = {}
@@ -384,6 +385,63 @@ class MCPToolManager:
             self._run_coroutine_isolated(client.close())
         except Exception:
             logger.debug("Failed to close MCP client for %s", context, exc_info=True)
+
+    def _discard_scoped_stdio_proxy_clients(self, prefix: str) -> None:
+        for cache_key in [key for key in self._stdio_proxy_clients if key.startswith(prefix)]:
+            client = self._stdio_proxy_clients.pop(cache_key, None)
+            if client:
+                self._close_client_sync(client, context=cache_key)
+
+    def _normalize_stdio_proxy_url(self, proxy_url: Optional[str]) -> Optional[str]:
+        raw_proxy_url = str(proxy_url or "").strip()
+        if not raw_proxy_url:
+            return None
+
+        parsed = urlparse(raw_proxy_url)
+        netloc = parsed.netloc or parsed.path
+        if not netloc:
+            return None
+        return f"http://{netloc}"
+
+    def _build_stdio_proxy_env(self, proxy_url: Optional[str]) -> Dict[str, str]:
+        normalized_proxy_url = self._normalize_stdio_proxy_url(proxy_url)
+        if not normalized_proxy_url:
+            return {}
+
+        proxy_env_keys = (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        )
+        return {key: normalized_proxy_url for key in proxy_env_keys}
+
+    def _get_scoped_stdio_proxy_client(
+        self,
+        runtime: MCPServerRuntime,
+        *,
+        scope_key: str,
+        proxy_url: str,
+    ) -> Client:
+        normalized_proxy_url = self._normalize_stdio_proxy_url(proxy_url)
+        if not normalized_proxy_url:
+            raise ValueError("A proxy URL is required for scoped stdio clients.")
+
+        cache_prefix = f"{runtime.config_id}:{scope_key}:"
+        cache_key = f"{cache_prefix}{normalized_proxy_url}"
+        cached_client = self._stdio_proxy_clients.get(cache_key)
+        if cached_client:
+            return cached_client
+
+        self._discard_scoped_stdio_proxy_clients(cache_prefix)
+        client = self._build_client_for_runtime(
+            runtime,
+            env_overrides=self._build_stdio_proxy_env(proxy_url),
+        )
+        self._stdio_proxy_clients[cache_key] = client
+        return client
     
     def _is_tool_blacklisted(self, tool_name: str) -> bool:
         """Check if a tool name matches any blacklist pattern."""
@@ -530,6 +588,7 @@ class MCPToolManager:
         client = self._clients.pop(config_id, None)
         if client:
             self._close_client_sync(client, context=config_id)
+        self._discard_scoped_stdio_proxy_clients(f"{config_id}:")
         self._tools_cache.pop(config_id, None)
         self._tool_cache_fingerprints.pop(config_id, None)
         prefix = f"{config_id}:"
@@ -994,6 +1053,7 @@ class MCPToolManager:
         server: MCPServerRuntime,
         *,
         pipedream_context: Optional[PipedreamToolCacheContext] = None,
+        env_overrides: Optional[Dict[str, str]] = None,
     ) -> Client:
         if server.name == self.PIPEDREAM_RUNTIME_NAME:
             raise ValueError("Pipedream clients require agent-scoped initialization")
@@ -1011,10 +1071,13 @@ class MCPToolManager:
                 httpx_client_factory=self._httpx_client_factory,
             )
         elif server.command:
+            env = dict(server.env or {})
+            if env_overrides:
+                env.update(env_overrides)
             transport = GobiiStdioTransport(
                 command=server.command,
                 args=server.args or [],
-                env=server.env or {},
+                env=env,
             )
         else:
             raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
@@ -1022,12 +1085,12 @@ class MCPToolManager:
         return Client(transport)
 
     def _select_discovery_proxy_url(self, server: MCPServerRuntime) -> Optional[str]:
-        if not server.url:
+        if not settings.ENABLE_PROXY_ROUTING:
             return None
-        proxy_required = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+        proxy_required = settings.GOBII_PROPRIETARY_MODE
         try:
             proxy = select_proxy(
-                allow_no_proxy_in_debug=getattr(settings, "DEBUG", False) and not proxy_required,
+                allow_no_proxy_in_debug=settings.DEBUG and not proxy_required,
                 context_id=f"mcp_discovery_{server.config_id}",
             )
         except RuntimeError as exc:
@@ -1056,11 +1119,11 @@ class MCPToolManager:
         return proxy.proxy_url if proxy else None
 
     def _select_agent_proxy_url(self, agent: PersistentAgent) -> Tuple[Optional[str], Optional[str]]:
-        if not getattr(settings, "ENABLE_PROXY_ROUTING", True):
+        if not settings.ENABLE_PROXY_ROUTING:
             # Allow environments to opt out entirely (mainly for tests)
             return None, None
 
-        proxy_required = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+        proxy_required = settings.GOBII_PROPRIETARY_MODE
         try:
             proxy = select_proxy_for_persistent_agent(agent)
         except RuntimeError as exc:
@@ -1253,7 +1316,10 @@ class MCPToolManager:
         self._tools_cache[slot_key] = cached_tools
         self._tool_cache_fingerprints[slot_key] = cache_fingerprint
         if sandbox_mode:
-            self._clients.pop(server.config_id, None)
+            client = self._clients.pop(server.config_id, None)
+            if client:
+                self._close_client_sync(client, context=server.config_id)
+            self._discard_scoped_stdio_proxy_clients(f"{server.config_id}:")
 
         logger.info(
             "Loaded %d MCP tools for '%s' (%s) from cache%s",
@@ -1330,6 +1396,13 @@ class MCPToolManager:
                  logger.warning("Skipping BrightData MCP registration: API_TOKEN/BRIGHTDATA_API_KEY missing.")
                  return
 
+        discovery_proxy_url = self._select_discovery_proxy_url(server)
+        stdio_env_overrides = (
+            self._build_stdio_proxy_env(discovery_proxy_url)
+            if self._is_stdio_runtime(server)
+            else None
+        )
+
         if server.url:
             from fastmcp.client.transports import StreamableHttpTransport
 
@@ -1362,7 +1435,7 @@ class MCPToolManager:
             transport = GobiiStdioTransport(
                 command=server.command,
                 args=server.args or [],
-                env=server.env or {},
+                env={**(server.env or {}), **(stdio_env_overrides or {})},
             )
         else:
             raise ValueError(f"Server '{server.name}' must have either 'url' or 'command'")
@@ -1379,8 +1452,8 @@ class MCPToolManager:
             return
 
         loop = self._ensure_event_loop()
-        proxy_url = self._select_discovery_proxy_url(server)
-        with _use_mcp_proxy(proxy_url):
+        http_proxy_url = discovery_proxy_url if server.url else None
+        with _use_mcp_proxy(http_proxy_url):
             tools = loop.run_until_complete(
                 self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
             )
@@ -1696,17 +1769,24 @@ class MCPToolManager:
         if not self._ensure_runtime_registered(runtime, force_local=True, require_client=True):
             return {"status": "error", "message": f"MCP server '{runtime.name}' is not available"}
 
-        client = self._clients.get(info.config_id)
-        if not client:
-            return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
-
         try:
             proxy_url = None
-            if runtime.url:
+            if runtime.url or self._is_stdio_runtime(runtime):
                 try:
                     proxy_url = self._select_discovery_proxy_url(runtime)
                 except Exception as exc:
                     return {"status": "error", "message": str(exc)}
+
+            if self._is_stdio_runtime(runtime) and proxy_url:
+                client = self._get_scoped_stdio_proxy_client(
+                    runtime,
+                    scope_key="platform",
+                    proxy_url=proxy_url,
+                )
+            else:
+                client = self._clients.get(info.config_id)
+            if not client:
+                return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
 
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             loop = self._ensure_event_loop()
@@ -1869,7 +1949,7 @@ class MCPToolManager:
 
         proxy_url = None
         proxy_error: Optional[str] = None
-        if runtime and runtime.url:
+        if runtime and (runtime.url or self._is_stdio_runtime(runtime)):
             proxy_url, proxy_error = self._select_agent_proxy_url(agent)
             if proxy_error:
                 return {"status": "error", "message": proxy_error}
@@ -1881,7 +1961,15 @@ class MCPToolManager:
             except RuntimeError as exc:
                 return {"status": "error", "message": str(exc)}
         else:
-            client = self._clients.get(info.config_id)
+            client = None
+            if runtime and self._is_stdio_runtime(runtime) and proxy_url:
+                client = self._get_scoped_stdio_proxy_client(
+                    runtime,
+                    scope_key=f"agent:{agent.id}",
+                    proxy_url=proxy_url,
+                )
+            else:
+                client = self._clients.get(info.config_id)
             if not client:
                 return {
                     "status": "error",
@@ -2116,13 +2204,18 @@ class MCPToolManager:
             return param_error
 
         proxy_url = None
-        if runtime.url:
+        if runtime.url or self._is_stdio_runtime(runtime):
             proxy_url, proxy_error = self._select_agent_proxy_url(agent)
             if proxy_error:
                 return {"status": "error", "message": proxy_error}
 
         try:
-            client = self._build_client_for_runtime(runtime)
+            client = self._build_client_for_runtime(
+                runtime,
+                env_overrides=self._build_stdio_proxy_env(proxy_url)
+                if self._is_stdio_runtime(runtime)
+                else None,
+            )
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             with _use_mcp_proxy(proxy_url):
                 result = self._run_coroutine_isolated(
@@ -2193,6 +2286,7 @@ class MCPToolManager:
             except Exception:
                 pass
         self._pd_agent_clients.clear()
+        self._discard_scoped_stdio_proxy_clients("")
         self._server_cache.clear()
         self._clients.clear()
         self._tools_cache.clear()

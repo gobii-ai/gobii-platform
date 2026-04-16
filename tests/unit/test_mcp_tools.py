@@ -304,6 +304,84 @@ class MCPToolManagerTests(TestCase):
 
         return agent
 
+    def _setup_stdio_tool(self) -> tuple[PersistentAgent, MCPServerRuntime, MCPToolInfo]:
+        """Register a simple stdio MCP server and enable it for a new agent."""
+        User = get_user_model()
+        user = User.objects.create_user(username=f"stdio-{uuid.uuid4().hex[:8]}@example.com")
+        browser_agent = create_test_browser_agent(user)
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name=f"stdio-agent-{uuid.uuid4().hex[:6]}",
+            charter="STDIO",
+            browser_use_agent=browser_agent,
+        )
+
+        stdio_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name=f"stdio-server-{uuid.uuid4().hex[:8]}",
+            display_name="STDIO Server",
+            description="",
+            command="npx",
+            command_args=["-y", "@dummy/server"],
+        )
+        runtime = MCPServerRuntime(
+            config_id=str(stdio_config.id),
+            name=stdio_config.name,
+            display_name=stdio_config.display_name,
+            description=stdio_config.description,
+            command=stdio_config.command,
+            args=list(stdio_config.command_args or []),
+            url=None,
+            auth_method=stdio_config.auth_method,
+            env=stdio_config.environment or {},
+            headers=stdio_config.headers or {},
+            prefetch_apps=[],
+            scope=stdio_config.scope,
+            organization_id=None,
+            user_id=None,
+            updated_at=stdio_config.updated_at,
+        )
+        tool = MCPToolInfo(
+            runtime.config_id,
+            "stdio_tool",
+            runtime.name,
+            "stdio_tool",
+            "STDIO tool",
+            {},
+        )
+
+        self.manager._initialized = True
+        self.manager._server_cache = {runtime.config_id: runtime}
+        self.manager._clients = {runtime.config_id: MagicMock(name="shared-stdio-client")}
+        self.manager._tools_cache = {runtime.config_id: [tool]}
+
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="stdio_tool",
+            tool_server=runtime.name,
+            tool_name=tool.tool_name,
+            server_config=stdio_config,
+        )
+
+        return agent, runtime, tool
+
+    def test_build_stdio_proxy_env_rewrites_socks5_to_http_vars(self):
+        proxy_env = self.manager._build_stdio_proxy_env("socks5://user:pass@proxy.internal:1080")
+
+        expected_proxy_url = "http://user:pass@proxy.internal:1080"
+        self.assertEqual(
+            proxy_env,
+            {
+                "HTTP_PROXY": expected_proxy_url,
+                "HTTPS_PROXY": expected_proxy_url,
+                "ALL_PROXY": expected_proxy_url,
+                "http_proxy": expected_proxy_url,
+                "https_proxy": expected_proxy_url,
+                "all_proxy": expected_proxy_url,
+            },
+        )
+
+    @override_settings(ENABLE_PROXY_ROUTING=True)
     def test_select_agent_proxy_url_uses_browser_preference(self):
         """Agents with dedicated IPs should expose them to the MCP proxy selector."""
         User = get_user_model()
@@ -339,6 +417,7 @@ class MCPToolManagerTests(TestCase):
         self.assertEqual(proxy_url, proxy.proxy_url)
         self.assertIsNone(error)
 
+    @override_settings(ENABLE_PROXY_ROUTING=True)
     def test_select_agent_proxy_url_supports_socks5_proxy(self):
         user = get_user_model().objects.create_user(username="socks-agent@example.com")
         browser_agent = create_test_browser_agent(user)
@@ -374,6 +453,44 @@ class MCPToolManagerTests(TestCase):
                 factory()
 
         self.assertEqual(mock_async_client.call_args.kwargs["proxy"], "socks5://proxy.internal:1080")
+
+    def test_register_stdio_server_injects_proxy_env(self):
+        runtime = MCPServerRuntime(
+            config_id=str(uuid.uuid4()),
+            name="stdio-discovery",
+            display_name="STDIO Discovery",
+            description="",
+            command="npx",
+            args=["-y", "@dummy/server"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={"API_TOKEN": "token-123"},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=datetime.now(UTC),
+        )
+        manager = MCPToolManager()
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        async def _fake_fetch(*args, **kwargs):
+            return []
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), patch.object(
+            manager,
+            "_select_discovery_proxy_url",
+            return_value="socks5://user:pass@proxy.internal:1080",
+        ), patch.object(manager, "_fetch_server_tools", new=_fake_fetch):
+            manager._register_server(runtime, force_local=True)
+
+        transport = manager._clients[runtime.config_id].transport
+        self.assertEqual(transport.env["API_TOKEN"], "token-123")
+        self.assertEqual(transport.env["HTTP_PROXY"], "http://user:pass@proxy.internal:1080")
+        self.assertEqual(transport.env["HTTPS_PROXY"], "http://user:pass@proxy.internal:1080")
+        self.assertEqual(transport.env["ALL_PROXY"], "http://user:pass@proxy.internal:1080")
 
     def test_register_http_server_includes_oauth_header(self):
         runtime = MCPServerRuntime(
@@ -649,6 +766,10 @@ class MCPToolManagerTests(TestCase):
             self.manager,
             "_ensure_runtime_registered",
             side_effect=AssertionError("local registration should not run before sandbox dispatch"),
+        ), patch.object(
+            self.manager,
+            "_get_scoped_stdio_proxy_client",
+            side_effect=AssertionError("stdio proxy client should not be created for sandbox-routed executions"),
         ):
             result = self.manager.execute_mcp_tool(agent, tool.full_name, {})
 
@@ -800,6 +921,10 @@ class MCPToolManagerTests(TestCase):
             self.manager,
             "_ensure_event_loop",
             return_value=loop,
+        ), patch.object(
+            self.manager,
+            "_select_agent_proxy_url",
+            return_value=(None, None),
         ), patch.object(
             self.manager,
             "_execute_async",
@@ -1112,8 +1237,9 @@ class MCPToolManagerTests(TestCase):
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = mock_result
         mock_ensure_loop.return_value = mock_loop
-        
-        result = self.manager.execute_mcp_tool(agent, "mcp_test_tool1", {"param": "value"})
+
+        with patch.object(self.manager, "_select_agent_proxy_url", return_value=(None, None)):
+            result = self.manager.execute_mcp_tool(agent, "mcp_test_tool1", {"param": "value"})
         
         self.assertEqual(result["status"], "success")
 
@@ -1152,7 +1278,7 @@ class MCPToolManagerTests(TestCase):
         row = PersistentAgentEnabledTool.objects.get(agent=agent, tool_full_name="http_tool")
         self.assertIsNotNone(row.last_used_at)
 
-    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @override_settings(GOBII_PROPRIETARY_MODE=False, ENABLE_PROXY_ROUTING=True)
     @patch('api.agent.tools.mcp_manager.select_proxy_for_persistent_agent')
     def test_execute_http_tool_without_proxy_logs_warning(self, mock_select_proxy):
         """Ensure HTTP tools continue without proxy when none available."""
@@ -1179,7 +1305,7 @@ class MCPToolManagerTests(TestCase):
         )
         mock_select_proxy.assert_called_once()
 
-    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @override_settings(GOBII_PROPRIETARY_MODE=True, ENABLE_PROXY_ROUTING=True)
     @patch('api.agent.tools.mcp_manager.select_proxy_for_persistent_agent')
     def test_execute_http_tool_errors_when_proxy_required(self, mock_select_proxy):
         """Ensure HTTP tools fail gracefully when proxy required but unavailable."""
@@ -1206,6 +1332,114 @@ class MCPToolManagerTests(TestCase):
             f"Expected error log about proxy requirement, got: {log_capture.output}",
         )
 
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_execute_stdio_tool_uses_scoped_proxy_client_cache_and_rebuilds_on_proxy_change(self):
+        agent, runtime, _tool = self._setup_stdio_tool()
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        fake_result = SimpleNamespace(is_error=False, data={"ok": True}, content=[])
+        executed_clients: list[Any] = []
+
+        async def fake_execute_async(client, _tool_name, _params, timeout_seconds):
+            executed_clients.append(client)
+            return fake_result
+
+        proxied_client_one = MagicMock(name="proxied-client-one")
+        proxied_client_two = MagicMock(name="proxied-client-two")
+
+        with patch.object(
+            self.manager,
+            "_select_agent_proxy_url",
+            side_effect=[
+                ("socks5://proxy-one.internal:1080", None),
+                ("socks5://proxy-one.internal:1080", None),
+                ("http://proxy-two.internal:8080", None),
+            ],
+        ), patch.object(
+            self.manager,
+            "_build_client_for_runtime",
+            side_effect=[proxied_client_one, proxied_client_two],
+        ) as mock_build_client, patch.object(
+            self.manager,
+            "_ensure_event_loop",
+            return_value=loop,
+        ), patch.object(
+            self.manager,
+            "_execute_async",
+            side_effect=fake_execute_async,
+        ), patch.object(
+            self.manager,
+            "_close_client_sync",
+        ), patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            side_effect=lambda _server, _tool_name, result: result,
+        ):
+            first = self.manager.execute_mcp_tool(agent, "stdio_tool", {"foo": "bar"})
+            second = self.manager.execute_mcp_tool(agent, "stdio_tool", {"foo": "bar"})
+            third = self.manager.execute_mcp_tool(agent, "stdio_tool", {"foo": "bar"})
+
+        self.assertEqual(first["status"], "success")
+        self.assertEqual(second["status"], "success")
+        self.assertEqual(third["status"], "success")
+        self.assertEqual(executed_clients, [proxied_client_one, proxied_client_one, proxied_client_two])
+        self.assertEqual(mock_build_client.call_count, 2)
+        self.assertEqual(
+            mock_build_client.call_args_list[0].kwargs["env_overrides"]["HTTP_PROXY"],
+            "http://proxy-one.internal:1080",
+        )
+        self.assertEqual(
+            mock_build_client.call_args_list[1].kwargs["env_overrides"]["HTTP_PROXY"],
+            "http://proxy-two.internal:8080",
+        )
+        self.assertEqual(
+            list(self.manager._stdio_proxy_clients.keys()),
+            [f"{runtime.config_id}:agent:{agent.id}:http://proxy-two.internal:8080"],
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_execute_stdio_tool_without_proxy_uses_shared_client(self):
+        agent, runtime, _tool = self._setup_stdio_tool()
+        shared_client = self.manager._clients[runtime.config_id]
+        loop = asyncio.new_event_loop()
+        self.addCleanup(loop.close)
+
+        fake_result = SimpleNamespace(is_error=False, data="shared", content=[])
+        executed_clients: list[Any] = []
+
+        async def fake_execute_async(client, _tool_name, _params, timeout_seconds):
+            executed_clients.append(client)
+            return fake_result
+
+        with patch.object(
+            self.manager,
+            "_select_agent_proxy_url",
+            return_value=(None, None),
+        ), patch.object(
+            self.manager,
+            "_ensure_event_loop",
+            return_value=loop,
+        ), patch.object(
+            self.manager,
+            "_execute_async",
+            side_effect=fake_execute_async,
+        ), patch.object(
+            self.manager,
+            "_build_client_for_runtime",
+        ) as mock_build_client, patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            side_effect=lambda _server, _tool_name, result: result,
+        ):
+            result = self.manager.execute_mcp_tool(agent, "stdio_tool", {"foo": "bar"})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["result"], "shared")
+        self.assertEqual(executed_clients, [shared_client])
+        self.assertFalse(self.manager._stdio_proxy_clients)
+        mock_build_client.assert_not_called()
+
     def test_execute_mcp_tool_not_enabled(self):
         """Test executing a tool that's not enabled."""
         User = get_user_model()
@@ -1226,6 +1460,7 @@ class MCPToolManagerTests(TestCase):
     def test_cleanup(self):
         """Test cleanup releases resources."""
         self.manager._clients = {"test": MagicMock()}
+        self.manager._stdio_proxy_clients = {"test:agent:1:http://proxy.internal:8080": MagicMock()}
         self.manager._tools_cache = {"test": []}
         mock_loop = MagicMock()
         mock_loop.is_closed.return_value = False
@@ -1235,6 +1470,7 @@ class MCPToolManagerTests(TestCase):
         self.manager.cleanup()
         
         self.assertEqual(len(self.manager._clients), 0)
+        self.assertEqual(len(self.manager._stdio_proxy_clients), 0)
         self.assertEqual(len(self.manager._tools_cache), 0)
         mock_loop.close.assert_called_once()
         self.assertFalse(self.manager._initialized)
@@ -3543,7 +3779,7 @@ class MCPIsolatedExecutionTests(TestCase):
         self.assertEqual(result["result"], {"ok": True})
         self.assertIs(self.manager._clients[self.config_id], shared_client)
         self.assertIs(self.manager._loop, shared_loop)
-        mock_build.assert_called_once_with(self.runtime)
+        mock_build.assert_called_once_with(self.runtime, env_overrides=None)
         mock_run.assert_called_once()
         isolated_client.close.assert_not_called()
 
@@ -3592,3 +3828,52 @@ class MCPIsolatedExecutionTests(TestCase):
             self.agent.user,
         )
         self.assertEqual(mock_execute_async.call_count, 1)
+
+    def test_execute_mcp_tool_isolated_injects_stdio_proxy_env(self):
+        self.runtime.command = "npx"
+        self.runtime.args = ["-y", "@dummy/server"]
+        self.runtime.url = None
+        self.runtime.env = {"API_TOKEN": "token-123"}
+        self.manager._server_cache[self.config_id] = self.runtime
+
+        fake_result = SimpleNamespace(is_error=False, data={"ok": True}, content=None)
+
+        async def fake_execute_async(_client, _tool_name, params, timeout_seconds):
+            return fake_result
+
+        with patch.object(
+            self.manager,
+            "_select_agent_proxy_url",
+            return_value=("socks5://user:pass@proxy.internal:1080", None),
+        ), patch.object(
+            self.manager,
+            "_build_client_for_runtime",
+            return_value=MagicMock(name="isolated-client"),
+        ) as mock_build, patch.object(
+            self.manager,
+            "_execute_async",
+            side_effect=fake_execute_async,
+        ), patch.object(
+            self.manager,
+            "_run_coroutine_isolated",
+            side_effect=asyncio.run,
+        ), patch.object(
+            self.manager,
+            "_adapt_tool_result",
+            side_effect=lambda _server, _tool, result: result,
+        ):
+            result = self.manager.execute_mcp_tool_isolated(
+                self.agent,
+                self.tool_info.full_name,
+                {"query": "openai"},
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(
+            mock_build.call_args.kwargs["env_overrides"]["HTTP_PROXY"],
+            "http://user:pass@proxy.internal:1080",
+        )
+        self.assertEqual(
+            mock_build.call_args.kwargs["env_overrides"]["ALL_PROXY"],
+            "http://user:pass@proxy.internal:1080",
+        )

@@ -169,6 +169,7 @@ def _community_default(section: str, key: str, *, fallback: str = "") -> str:
 
 # ────────── Core ──────────
 DEBUG = env.bool("DEBUG", default=False)
+ENABLE_PROXY_ROUTING = env.bool("ENABLE_PROXY_ROUTING", default=True)
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 ALLOWED_HOSTS = ["*"]  # tighten in prod
 
