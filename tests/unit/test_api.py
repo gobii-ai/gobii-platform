@@ -467,8 +467,9 @@ class OrganizationApiKeyTests(APITestCase):
         else:
             self.assertIn('Organization API keys cannot create browser agents.', str(message))
 
-@tag("batch_api_tasks")
-class BrowserUseAgentTaskViewSetTests(APITestCase):
+class BrowserUseAgentTaskTestMixin:
+    """Shared setUp for BrowserUseAgentTask test classes."""
+
     def setUp(self):
         self.user1 = User.objects.create_user(username='user1tasks@example.com', email='user1tasks@example.com', password='password123')
         UserQuota.objects.get_or_create(user=self.user1, defaults={'agent_limit': 5})
@@ -485,11 +486,11 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
 
         self.agent1_user1 = BrowserUseAgent.objects.create(user=self.user1, name='Task Agent 1 User 1')
         self.agent2_user1 = BrowserUseAgent.objects.create(user=self.user1, name='Task Agent 2 User 1')
-        
+
         self.task1_agent1_user1 = BrowserUseAgentTask.objects.create(agent=self.agent1_user1, user=self.user1, prompt={'detail': 'Task 1 for Agent 1'})
         self.task2_agent1_user1 = BrowserUseAgentTask.objects.create(agent=self.agent1_user1, user=self.user1, prompt={'detail': 'Task 2 for Agent 1'})
         self.task1_agent2_user1 = BrowserUseAgentTask.objects.create(agent=self.agent2_user1, user=self.user1, prompt={'detail': 'Task 1 for Agent 2'})
-        
+
         BrowserUseAgentTaskStep.objects.create(
             task=self.task1_agent1_user1, step_number=1, description='Result step', is_result=True, result_value='Result for Task 1 Agent 1'
         )
@@ -506,7 +507,7 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
             plan=PlanNamesChoices.FREE,
             grant_type=GrantTypeChoices.PROMO
         )
-        
+
         self.agent1_user2 = BrowserUseAgent.objects.create(user=self.user2, name='Task Agent 1 User 2')
         self.task1_agent1_user2 = BrowserUseAgentTask.objects.create(agent=self.agent1_user2, user=self.user2, prompt={'detail': 'Task 1 for Agent 1 User 2'})
 
@@ -522,6 +523,10 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         )
 
         self.client.credentials(HTTP_X_API_KEY=self.raw_api_key1)
+
+
+@tag("batch_api_tasks")
+class BrowserUseAgentTaskViewSetTests(BrowserUseAgentTaskTestMixin, APITestCase):
 
     def test_list_tasks_for_specific_agent_owned_by_user(self):
         url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user1.id})
@@ -738,6 +743,11 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         url = reverse('api:agent-tasks-detail', kwargs={'agentId': self.agent1_user2.id, 'id': self.task1_agent1_user2.id})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+
+@tag("batch_api_tasks_mutations")
+class BrowserUseAgentTaskMutationTests(BrowserUseAgentTaskTestMixin, APITestCase):
+    """Tests for cancel, update, delete, soft-delete, and vision mutations."""
 
     # Tests for Cancel Task Functionality
     def test_cancel_task_pending_success(self):
