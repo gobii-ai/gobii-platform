@@ -196,13 +196,6 @@ def _apply_trial_checkout_fields(
     if not include_trial or trial_days <= 0:
         return
 
-    checkout_kwargs["billing_address_collection"] = "required"
-    checkout_kwargs["name_collection"] = {
-        "individual": {
-            "enabled": True,
-            "optional": False,
-        }
-    }
     checkout_kwargs["custom_text"] = {
         "after_submit": {
             "message": "Prepaid cards are not eligible for a free trial. Subscriptions are automatically charged at the end of the trial period if not canceled."
