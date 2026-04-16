@@ -892,6 +892,84 @@ class PersistentAgentAdminTests(TestCase):
         self.assertFalse(conversation.is_peer_dm)
         self.assertTrue(PersistentAgentMessage.objects.filter(id=message.id).exists())
 
+    def test_save_model_restore_reclaims_resources_when_change_form_undeletes(self):
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.persistent_agent,
+            channel="email",
+            address=f"admin-restore-{self.persistent_agent.id}@example.com",
+            is_primary=True,
+        )
+        own_peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.persistent_agent,
+            channel="other",
+            address=f"peer://agent/{self.persistent_agent.id}",
+            is_primary=False,
+        )
+        peer_agent = self._create_agent(name="Admin Restore Peer")
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer_agent,
+            channel="other",
+            address=f"peer://agent/{peer_agent.id}",
+            is_primary=False,
+        )
+        peer_link = AgentPeerLink.objects.create(
+            agent_a=self.persistent_agent,
+            agent_b=peer_agent,
+            created_by=self.admin_user,
+            agent_a_endpoint=own_peer_endpoint,
+            agent_b_endpoint=peer_endpoint,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            channel="other",
+            address=f"peer://{peer_link.pair_key}",
+            is_peer_dm=True,
+            peer_link=peer_link,
+        )
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=peer_endpoint,
+            conversation=conversation,
+            body="Admin restore should preserve history",
+            owner_agent=self.persistent_agent,
+            peer_agent=peer_agent,
+        )
+
+        self.persistent_agent.soft_delete()
+        self.persistent_agent.refresh_from_db()
+        email_endpoint.refresh_from_db()
+        own_peer_endpoint.refresh_from_db()
+        conversation.refresh_from_db()
+
+        self.assertIsNone(email_endpoint.owner_agent_id)
+        self.assertFalse(email_endpoint.is_primary)
+        self.assertIsNone(own_peer_endpoint.owner_agent_id)
+        self.assertFalse(AgentPeerLink.objects.filter(id=peer_link.id).exists())
+        self.assertIsNone(conversation.peer_link_id)
+        self.assertFalse(conversation.is_peer_dm)
+
+        model_admin = PersistentAgentAdmin(PersistentAgent, admin.site)
+        request = self.request_factory.post("/")
+        request.user = self.admin_user
+        form = type("FormStub", (), {"changed_data": ["is_deleted"]})()
+
+        self.persistent_agent.is_deleted = False
+        model_admin.save_model(request, self.persistent_agent, form, change=True)
+
+        self.persistent_agent.refresh_from_db()
+        email_endpoint.refresh_from_db()
+        own_peer_endpoint.refresh_from_db()
+        conversation.refresh_from_db()
+        restored_link = AgentPeerLink.objects.get(pair_key=peer_link.pair_key)
+
+        self.assertFalse(self.persistent_agent.is_deleted)
+        self.assertIsNone(self.persistent_agent.deleted_at)
+        self.assertEqual(email_endpoint.owner_agent_id, self.persistent_agent.id)
+        self.assertTrue(email_endpoint.is_primary)
+        self.assertEqual(own_peer_endpoint.owner_agent_id, self.persistent_agent.id)
+        self.assertEqual(conversation.peer_link_id, restored_link.id)
+        self.assertTrue(conversation.is_peer_dm)
+        self.assertTrue(PersistentAgentMessage.objects.filter(id=message.id).exists())
+
     def test_system_message_get_renders_form(self):
         url = reverse("admin:api_persistentagent_system_message", args=[self.persistent_agent.pk])
         response = self.client.get(url)

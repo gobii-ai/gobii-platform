@@ -3267,11 +3267,21 @@ class PersistentAgentAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         should_release_endpoints = False
+        should_restore_resources = False
+        was_deleted = False
+        if change and obj.pk:
+            was_deleted = bool(
+                PersistentAgent.objects.filter(pk=obj.pk).values_list("is_deleted", flat=True).first()
+            )
         if obj.is_deleted:
             obj.soft_delete(save=False)
             should_release_endpoints = bool(obj.pk)
         else:
-            obj.deleted_at = None
+            if was_deleted:
+                obj.restore(save=False)
+                should_restore_resources = True
+            else:
+                obj.deleted_at = None
 
         if change and obj.pk and 'preferred_llm_tier' in form.changed_data:
             previous = (
@@ -3305,6 +3315,14 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         super().save_model(request, obj, form, change)
         if should_release_endpoints:
             obj.apply_persisted_soft_delete_side_effects()
+        if should_restore_resources:
+            from api.services.persistent_agent_restore import PersistentAgentRestoreRepairService
+
+            PersistentAgentRestoreRepairService.repair(
+                obj,
+                apply=True,
+                provision_email_fallback=True,
+            )
 
     @admin.action(description="Soft-delete selected agents")
     def soft_delete_selected_agents(self, request, queryset):
