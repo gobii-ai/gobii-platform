@@ -7653,6 +7653,48 @@ class PersistentAgentCustomTool(models.Model):
         ]
         ordering = ["-updated_at", "tool_name"]
 
+    def clean(self):
+        super().clean()
+        from api.agent.tools.custom_tools import (
+            normalize_custom_tool_name,
+            normalize_custom_tool_entrypoint,
+            normalize_custom_tool_parameters_schema,
+            normalize_custom_tool_source_path,
+            normalize_custom_tool_timeout_seconds,
+        )
+
+        self.name = (self.name or "").strip()
+        self.description = (self.description or "").strip()
+
+        normalized_name = normalize_custom_tool_name(self.tool_name or self.name)
+        if normalized_name is None:
+            raise ValidationError({"tool_name": "tool_name must identify a valid custom tool."})
+        if not self.name:
+            self.name = normalized_name[0]
+        self.tool_name = normalized_name[1]
+
+        parameters_schema = normalize_custom_tool_parameters_schema(self.parameters_schema)
+        if parameters_schema is None:
+            raise ValidationError(
+                {"parameters_schema": "parameters_schema must be a JSON object schema with `type: object`."}
+            )
+        self.parameters_schema = parameters_schema
+
+        source_path = normalize_custom_tool_source_path(self.source_path)
+        if source_path is None:
+            raise ValidationError({"source_path": "source_path must be a valid workspace path ending in `.py`."})
+        self.source_path = source_path
+
+        entrypoint = normalize_custom_tool_entrypoint(self.entrypoint)
+        if entrypoint is None:
+            raise ValidationError({"entrypoint": "entrypoint must be `run`."})
+        self.entrypoint = entrypoint
+
+        timeout_seconds = normalize_custom_tool_timeout_seconds(self.timeout_seconds)
+        if timeout_seconds is None:
+            raise ValidationError({"timeout_seconds": "timeout_seconds must be between 1 and 900."})
+        self.timeout_seconds = timeout_seconds
+
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"CustomTool<{self.tool_name}> for {getattr(self.agent, 'name', 'agent')}"
 
