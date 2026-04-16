@@ -1,3 +1,4 @@
+import copy
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -128,6 +129,13 @@ class PersistentAgentModelTests(TestCase):
         self.assertFalse(conversation.is_peer_dm)
         self.assertTrue(agent.soft_delete_restore_snapshot.get("owned_endpoints"))
         self.assertTrue(agent.soft_delete_restore_snapshot.get("peer_links"))
+        snapshot_before_repeat_delete = copy.deepcopy(agent.soft_delete_restore_snapshot)
+
+        changed_again = agent.soft_delete()
+        agent.refresh_from_db()
+
+        self.assertFalse(changed_again)
+        self.assertEqual(agent.soft_delete_restore_snapshot, snapshot_before_repeat_delete)
 
         changed = agent.restore()
 

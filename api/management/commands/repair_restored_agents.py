@@ -33,8 +33,7 @@ class Command(BaseCommand):
                 raise CommandError(f"Invalid --agent-id value: {agent_id}") from exc
             queryset = queryset.filter(pk=agent_uuid)
 
-        agents = list(queryset)
-        if not agents:
+        if not queryset.exists():
             if agent_id:
                 raise CommandError(f"No active agent found for {agent_id}")
             self.stdout.write("No active agents to inspect.")
@@ -44,7 +43,7 @@ class Command(BaseCommand):
         inspected_count = 0
         changed_count = 0
 
-        for agent in agents:
+        for agent in queryset.iterator():
             inspected_count += 1
             result = PersistentAgentRestoreRepairService.repair(
                 agent,

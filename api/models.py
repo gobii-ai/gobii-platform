@@ -6251,11 +6251,16 @@ class PersistentAgent(models.Model):
 
         from api.services.persistent_agent_restore import PersistentAgentRestoreRepairService
 
+        existing_snapshot = self.soft_delete_restore_snapshot or {}
+        snapshot_changed = False
         snapshot = PersistentAgentRestoreRepairService.build_soft_delete_snapshot(self)
-        snapshot_changed = snapshot != (self.soft_delete_restore_snapshot or {})
-        if snapshot_changed:
+        if (
+            PersistentAgentRestoreRepairService.snapshot_has_restore_payload(snapshot)
+            and snapshot != existing_snapshot
+        ):
             type(self).objects.filter(pk=self.pk).update(soft_delete_restore_snapshot=snapshot)
             self.soft_delete_restore_snapshot = snapshot
+            snapshot_changed = True
 
         peer_links_removed = AgentPeerLink.remove_for_agent(self)
         # Release endpoint ownership so deleted agents do not reserve globally unique addresses.
