@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Set, Tuple
 
 from django.apps import apps
 from django.db import models as django_models
@@ -9,7 +9,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import OperationalError, ProgrammingError
 
-_TOOL_COST_CACHE_KEY = "task_credit_costs:v1"
+_TOOL_COST_CACHE_KEY = "task_credit_costs:v2"
 _TOOL_COST_CACHE_TTL_SECONDS = 300  # 5 minutes is enough for eventual consistency in workers
 
 _CHANNEL_TOOL_NAMES: Dict[str, str] = {
@@ -53,31 +53,35 @@ def _coerce_decimal(value: Any, fallback: Decimal) -> Decimal:
         return fallback
 
 
-def _fetch_tool_cost_configuration() -> Tuple[Decimal, Dict[str, Decimal]]:
+def _fetch_tool_cost_configuration() -> Tuple[Decimal, Dict[str, Decimal], Set[str]]:
     """
     Retrieve default and per-tool credit costs from the database.
 
     Falls back to settings values when tables are unavailable (e.g. during
     migrations or the very first deploy).
+
+    Returns a 3-tuple of (default_cost, overrides, tier_exempt_tools).
     """
 
     default_cost = getattr(settings, "CREDITS_PER_TASK")
     overrides: Dict[str, Decimal] = {}
+    tier_exempt_tools: Set[str] = set()
 
     TaskCreditConfig, ToolCreditCost = _get_models()
 
     if TaskCreditConfig is None or ToolCreditCost is None:
-        return default_cost, overrides
+        return default_cost, overrides, tier_exempt_tools
 
     try:
         config = TaskCreditConfig.objects.first()
         if config and config.default_task_cost is not None:
             default_cost = config.default_task_cost
 
-        overrides = {
-            _normalize_tool_name(entry.tool_name): entry.credit_cost
-            for entry in ToolCreditCost.objects.all()
-        }
+        for entry in ToolCreditCost.objects.all():
+            key = _normalize_tool_name(entry.tool_name)
+            overrides[key] = entry.credit_cost
+            if entry.tier_exempt:
+                tier_exempt_tools.add(key)
     except (OperationalError, ProgrammingError):
         # Database tables may not exist yet
         raw_mapping: dict[str, Any] = getattr(settings, "TOOL_CREDIT_COSTS", {}) or {}
@@ -86,10 +90,10 @@ def _fetch_tool_cost_configuration() -> Tuple[Decimal, Dict[str, Decimal]]:
             for name, value in raw_mapping.items()
         }
 
-    return default_cost, overrides
+    return default_cost, overrides, tier_exempt_tools
 
 
-def _get_tool_cost_config() -> Tuple[Decimal, Dict[str, Decimal]]:
+def _get_tool_cost_config() -> Tuple[Decimal, Dict[str, Decimal], Set[str]]:
     cached = cache.get(_TOOL_COST_CACHE_KEY)
     if cached is not None:
         return cached
@@ -105,18 +109,18 @@ def get_tool_cost_overview() -> Tuple[Decimal, Dict[str, Decimal]]:
 
     The mapping keys are normalized lowercase tool names.
     """
-    default_cost, overrides = _get_tool_cost_config()
+    default_cost, overrides, _exempt = _get_tool_cost_config()
     return default_cost, overrides.copy()
 
 
 def get_default_task_credit_cost() -> Decimal:
-    default_cost, _ = _get_tool_cost_config()
+    default_cost, _overrides, _exempt = _get_tool_cost_config()
     return default_cost
 
 
 def get_tool_credit_cost(tool_name: str | None) -> Decimal:
     """Return the credit cost for the given tool name."""
-    default_cost, overrides = _get_tool_cost_config()
+    default_cost, overrides, _exempt = _get_tool_cost_config()
 
     key = _normalize_tool_name(tool_name)
     if not key:
@@ -132,9 +136,16 @@ def get_tool_credit_cost(tool_name: str | None) -> Decimal:
     return default_cost
 
 
+def is_tool_tier_exempt(tool_name: str | None) -> bool:
+    """Return True if the tool is exempt from the tier credit multiplier."""
+    _default_cost, _overrides, tier_exempt_tools = _get_tool_cost_config()
+    key = _normalize_tool_name(tool_name)
+    return key in tier_exempt_tools
+
+
 def get_most_expensive_tool_cost() -> Decimal:
     """Return the largest configured tool credit cost, including the default."""
-    default_cost, overrides = _get_tool_cost_config()
+    default_cost, overrides, _exempt = _get_tool_cost_config()
 
     max_cost = default_cost
     for value in overrides.values():

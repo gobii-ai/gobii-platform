@@ -31,7 +31,7 @@ from config.plans import PLAN_CONFIG
 from tasks.services import TaskCreditService
 from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import get_owner_plan
-from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
+from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview, is_tool_tier_exempt
 
 from api.services import mcp_servers as mcp_server_service
 from api.services.dedicated_proxy_service import DedicatedProxyService
@@ -3524,7 +3524,7 @@ def add_budget_awareness_sections(
             max_entries = 5
             display_pairs = sorted_overrides[:max_entries]
             overrides_text = ", ".join(
-                f"{name}={_format_cost(apply_tier_credit_multiplier(agent, cost) if agent is not None else cost)}"
+                f"{name}={_format_cost(cost if is_tool_tier_exempt(name) else (apply_tier_credit_multiplier(agent, cost) if agent is not None else cost))}"
                 for name, cost in display_pairs
             )
             extra_count = len(sorted_overrides) - len(display_pairs)

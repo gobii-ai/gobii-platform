@@ -596,6 +596,52 @@ class PersistentAgentToolCreditTests(TestCase):
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=TASKS_UNLIMITED)
+    @patch("api.agent.core.event_processing.apply_tier_credit_multiplier")
+    @patch("api.agent.core.event_processing.is_tool_tier_exempt", return_value=True)
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.5"))
+    def test_tier_exempt_tool_skips_multiplier(
+        self,
+        mock_cost,
+        mock_exempt,
+        mock_multiplier,
+        _mock_available,
+        mock_consume,
+    ):
+        mock_consume.return_value = {"success": True, "credit": object()}
+        span = MagicMock()
+
+        result = _ensure_credit_for_tool(self.agent, "web_search", span=span)
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("cost"), Decimal("0.5"))
+        mock_multiplier.assert_not_called()
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=TASKS_UNLIMITED)
+    @patch("api.agent.core.event_processing.apply_tier_credit_multiplier", return_value=Decimal("1.0"))
+    @patch("api.agent.core.event_processing.is_tool_tier_exempt", return_value=False)
+    @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.5"))
+    def test_non_exempt_tool_applies_multiplier(
+        self,
+        mock_cost,
+        mock_exempt,
+        mock_multiplier,
+        _mock_available,
+        mock_consume,
+    ):
+        mock_consume.return_value = {"success": True, "credit": object()}
+        span = MagicMock()
+
+        result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("cost"), Decimal("1.0"))
+        mock_multiplier.assert_called_once()
+
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
     @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=Decimal("5"))
     @patch("api.agent.core.event_processing.get_tool_credit_cost", return_value=Decimal("0.5"))
     def test_mid_loop_daily_limit_blocks_tool(

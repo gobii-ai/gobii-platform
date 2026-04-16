@@ -1365,12 +1365,12 @@ class PromptConfigAdmin(admin.ModelAdmin):
 
 @admin.register(ToolCreditCost)
 class ToolCreditCostAdmin(admin.ModelAdmin):
-    list_display = ("tool_name", "credit_cost", "updated_at")
+    list_display = ("tool_name", "credit_cost", "tier_exempt", "updated_at")
     search_fields = ("tool_name",)
-    list_filter = ("updated_at",)
+    list_filter = ("tier_exempt", "updated_at")
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("tool_name", "credit_cost")}),
+        (None, {"fields": ("tool_name", "credit_cost", "tier_exempt")}),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )
 

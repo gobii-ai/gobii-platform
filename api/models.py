@@ -2028,6 +2028,10 @@ class ToolCreditCost(models.Model):
         validators=[MinValueValidator(Decimal("0"))],
         help_text="Credit cost charged when this tool is executed.",
     )
+    tier_exempt = models.BooleanField(
+        default=False,
+        help_text="When enabled, the tier multiplier is not applied; users are charged the base credit cost regardless of LLM tier.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

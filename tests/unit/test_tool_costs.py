@@ -8,6 +8,7 @@ from util.tool_costs import (
     get_tool_credit_cost,
     get_most_expensive_tool_cost,
     get_tool_credit_cost_for_channel,
+    is_tool_tier_exempt,
 )
 
 
@@ -104,3 +105,42 @@ class ToolCostTests(TestCase):
         clear_tool_credit_cost_cache()
 
         self.assertEqual(get_most_expensive_tool_cost(), Decimal("0.75"))
+
+    def test_is_tool_tier_exempt_returns_true_for_exempt_tool(self):
+        ToolCreditCost.objects.create(
+            tool_name="web_search", credit_cost=Decimal("0.10"), tier_exempt=True,
+        )
+        clear_tool_credit_cost_cache()
+
+        self.assertTrue(is_tool_tier_exempt("web_search"))
+
+    def test_is_tool_tier_exempt_returns_false_for_non_exempt_tool(self):
+        ToolCreditCost.objects.create(
+            tool_name="sqlite_query", credit_cost=Decimal("0.50"), tier_exempt=False,
+        )
+        clear_tool_credit_cost_cache()
+
+        self.assertFalse(is_tool_tier_exempt("sqlite_query"))
+
+    def test_is_tool_tier_exempt_returns_false_for_unknown_tool(self):
+        self.assertFalse(is_tool_tier_exempt("nonexistent_tool"))
+
+    def test_is_tool_tier_exempt_case_insensitive(self):
+        ToolCreditCost.objects.create(
+            tool_name="web_search", credit_cost=Decimal("0.10"), tier_exempt=True,
+        )
+        clear_tool_credit_cost_cache()
+
+        self.assertTrue(is_tool_tier_exempt("WEB_SEARCH"))
+
+    def test_tier_exempt_cache_refreshes_on_change(self):
+        tool = ToolCreditCost.objects.create(
+            tool_name="web_search", credit_cost=Decimal("0.10"), tier_exempt=False,
+        )
+        clear_tool_credit_cost_cache()
+        self.assertFalse(is_tool_tier_exempt("web_search"))
+
+        tool.tier_exempt = True
+        tool.save()
+
+        self.assertTrue(is_tool_tier_exempt("web_search"))

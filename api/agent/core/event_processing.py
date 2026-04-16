@@ -93,6 +93,7 @@ from tasks.services import TaskCreditService
 from util.tool_costs import (
     get_tool_credit_cost,
     get_default_task_credit_cost,
+    is_tool_tier_exempt,
 )
 from util.constants.task_constants import TASKS_UNLIMITED
 from .llm_config import (
@@ -3180,7 +3181,7 @@ def _ensure_credit_for_tool(
         # Fallback to default single-task cost when lookup fails
         cost = get_default_task_credit_cost()
 
-    if cost is not None:
+    if cost is not None and not is_tool_tier_exempt(tool_name):
         cost = apply_tier_credit_multiplier(agent, cost)
 
     if credit_snapshot is not None and "available" in credit_snapshot:
