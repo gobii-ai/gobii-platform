@@ -52,7 +52,10 @@ class StripeConfigHelperTests(TestCase):
         config.set_value("live_secret_key", "sk_live_db", is_secret=True)
         config.set_value("test_secret_key", "sk_test_db", is_secret=True)
 
-        with self.settings(STRIPE_LIVE_SECRET_KEY="sk_live_env", STRIPE_TEST_SECRET_KEY="sk_test_env"):
+        with self.settings(
+            STRIPE_LIVE_SECRET_KEY="sk_live_env",
+            STRIPE_TEST_SECRET_KEY="sk_test_env",
+        ):
             invalidate_stripe_settings_cache()
             stripe_settings = get_stripe_settings(force_reload=True)
 

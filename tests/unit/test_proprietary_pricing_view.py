@@ -66,6 +66,22 @@ class PricingPageCtaCopyTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_includes_stripe_js(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
     def test_unauthenticated_pricing_cta_uses_trial_copy(self, mock_get_stripe_settings):
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=7,

@@ -10,9 +10,9 @@ from django.contrib import sitemaps
 from django.http import HttpResponse, Http404, JsonResponse
 from django.template.loader import render_to_string
 from django.templatetags.static import static
+from django.urls import reverse
 from django.utils.html import strip_tags, escape
 from django.views.generic import TemplateView
-from django.urls import reverse
 from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
@@ -59,7 +59,6 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-
         authenticated = self.request.user.is_authenticated
 
         stripe_settings = get_stripe_settings()

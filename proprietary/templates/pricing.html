@@ -320,12 +320,17 @@
 
     document.querySelectorAll(".plan-cta").forEach(link => {
       link.addEventListener("click", (e) => {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
+          return;
+        }
         const targetPlan = (link.dataset.planCode || "").toLowerCase();
         const targetName = link.dataset.planName || "this plan";
-        if (!shouldConfirm(targetPlan)) return;
+        if (!shouldConfirm(targetPlan)) {
+          return;
+        }
 
         e.preventDefault();
-        pendingHref = link.getAttribute("href");
+	        pendingHref = link.getAttribute("href");
 
         if (titleEl) titleEl.textContent = `Switch to ${targetName}`;
         if (bodyEl) {
