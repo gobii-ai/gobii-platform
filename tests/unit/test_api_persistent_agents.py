@@ -13,7 +13,9 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentEmailEndpoint,
+    PersistentAgentMessage,
     PersistentAgentSystemStep,
     UserPhoneNumber,
     UserQuota,
@@ -54,6 +56,162 @@ class PersistentAgentModelTests(TestCase):
         self.assertEqual(PersistentAgent.objects.count(), 1)
         self.assertEqual(agent.name, "test-agent")
         self.assertEqual(agent.user, self.user)
+
+    def test_restore_reclaims_owned_endpoints_and_peer_links(self):
+        browser_agent = create_browser_agent_without_proxy(self.user, "restore-browser-agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="restore-agent",
+            charter="Restore deleted resources",
+            browser_use_agent=browser_agent,
+        )
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address=f"restore-agent-{agent.id}@example.com",
+            is_primary=True,
+        )
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer://agent/{agent.id}",
+            is_primary=False,
+        )
+
+        peer_browser = create_browser_agent_without_proxy(self.user, "restore-peer-browser-agent")
+        peer_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="restore-peer-agent",
+            charter="Keep collaborating",
+            browser_use_agent=peer_browser,
+        )
+        peer_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer_agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer://agent/{peer_agent.id}",
+            is_primary=False,
+        )
+        link = AgentPeerLink.objects.create(
+            agent_a=agent,
+            agent_b=peer_agent,
+            created_by=self.user,
+            agent_a_endpoint=peer_endpoint,
+            agent_b_endpoint=peer_agent_endpoint,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            channel=CommsChannel.OTHER,
+            address=f"peer://{link.pair_key}",
+            is_peer_dm=True,
+            peer_link=link,
+        )
+        peer_message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=peer_agent_endpoint,
+            conversation=conversation,
+            body="Peer history survives restore",
+            owner_agent=agent,
+            peer_agent=peer_agent,
+        )
+
+        agent.soft_delete()
+
+        agent.refresh_from_db()
+        email_endpoint.refresh_from_db()
+        peer_endpoint.refresh_from_db()
+        conversation.refresh_from_db()
+
+        self.assertEqual(email_endpoint.owner_agent_id, None)
+        self.assertFalse(email_endpoint.is_primary)
+        self.assertEqual(peer_endpoint.owner_agent_id, None)
+        self.assertFalse(AgentPeerLink.objects.filter(id=link.id).exists())
+        self.assertIsNone(conversation.peer_link_id)
+        self.assertFalse(conversation.is_peer_dm)
+        self.assertTrue(agent.soft_delete_restore_snapshot.get("owned_endpoints"))
+        self.assertTrue(agent.soft_delete_restore_snapshot.get("peer_links"))
+
+        changed = agent.restore()
+
+        self.assertTrue(changed)
+        email_endpoint.refresh_from_db()
+        peer_endpoint.refresh_from_db()
+        conversation.refresh_from_db()
+        restored_link = AgentPeerLink.objects.get(pair_key=link.pair_key)
+
+        self.assertEqual(email_endpoint.owner_agent_id, agent.id)
+        self.assertTrue(email_endpoint.is_primary)
+        self.assertEqual(peer_endpoint.owner_agent_id, agent.id)
+        self.assertEqual(conversation.peer_link_id, restored_link.id)
+        self.assertTrue(conversation.is_peer_dm)
+        self.assertTrue(PersistentAgentMessage.objects.filter(id=peer_message.id).exists())
+        self.assertSetEqual(
+            {restored_link.agent_a_endpoint_id, restored_link.agent_b_endpoint_id},
+            {peer_endpoint.id, peer_agent_endpoint.id},
+        )
+
+    def test_restore_skips_peer_links_for_deleted_counterparts(self):
+        browser_agent = create_browser_agent_without_proxy(self.user, "restore-skip-browser-agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="restore-skip-agent",
+            charter="Restore only my endpoints",
+            browser_use_agent=browser_agent,
+        )
+        email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address=f"restore-skip-{agent.id}@example.com",
+            is_primary=True,
+        )
+        peer_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer://agent/{agent.id}",
+            is_primary=False,
+        )
+
+        peer_browser = create_browser_agent_without_proxy(self.user, "restore-skip-peer-browser-agent")
+        peer_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="restore-skip-peer-agent",
+            charter="May disappear",
+            browser_use_agent=peer_browser,
+        )
+        peer_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=peer_agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer://agent/{peer_agent.id}",
+            is_primary=False,
+        )
+        link = AgentPeerLink.objects.create(
+            agent_a=agent,
+            agent_b=peer_agent,
+            created_by=self.user,
+            agent_a_endpoint=peer_endpoint,
+            agent_b_endpoint=peer_agent_endpoint,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            channel=CommsChannel.OTHER,
+            address=f"peer://{link.pair_key}",
+            is_peer_dm=True,
+            peer_link=link,
+        )
+
+        agent.soft_delete()
+        peer_agent.soft_delete()
+
+        changed = agent.restore()
+
+        self.assertTrue(changed)
+        email_endpoint.refresh_from_db()
+        peer_endpoint.refresh_from_db()
+        conversation.refresh_from_db()
+
+        self.assertEqual(email_endpoint.owner_agent_id, agent.id)
+        self.assertTrue(email_endpoint.is_primary)
+        self.assertEqual(peer_endpoint.owner_agent_id, agent.id)
+        self.assertFalse(AgentPeerLink.objects.filter(pair_key=link.pair_key).exists())
+        self.assertIsNone(conversation.peer_link_id)
+        self.assertFalse(conversation.is_peer_dm)
 
     def test_get_default_intelligence_tier_id_falls_back_when_is_default_column_missing(self):
         """Keep `_get_default_intelligence_tier_id` compatible with pre-0286 schemas (no `is_default`)."""
