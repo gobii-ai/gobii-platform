@@ -42,7 +42,7 @@ class _FakeRedis:
 
 
 @override_settings(GOBII_RELEASE_ENV="prod")
-@tag("batch_api_persistent_agents", "batch_api_tasks")
+@tag("batch_api_persistent_agents")
 class ProactiveActivationServiceTests(TestCase):
     def setUp(self):
         User = get_user_model()

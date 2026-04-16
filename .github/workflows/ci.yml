@@ -181,6 +181,8 @@ jobs:
             tag: batch_api_serializer
           - batch: api_tasks
             tag: batch_api_tasks
+          - batch: api_tasks_mutations
+            tag: batch_api_tasks_mutations
           - batch: periodic
             tag: batch_periodic
           - batch: celery_redbeat
