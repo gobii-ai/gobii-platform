@@ -44,6 +44,15 @@ CUSTOM_TOOL_RESULT_MARKER = "__GOBII_CUSTOM_TOOL_RESULT__="
 DEFAULT_CUSTOM_TOOL_TIMEOUT_SECONDS = 300
 MAX_CUSTOM_TOOL_TIMEOUT_SECONDS = 900
 MAX_CUSTOM_TOOL_SOURCE_BYTES = 64 * 1024
+_JSON_SCHEMA_TYPE_NAMES = frozenset({
+    "array",
+    "boolean",
+    "integer",
+    "null",
+    "number",
+    "object",
+    "string",
+})
 
 _PARAMS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_PARAMS_B64"
 _BRIDGE_URL_ENV_KEY = "SANDBOX_CUSTOM_TOOL_BRIDGE_URL"
@@ -264,6 +273,17 @@ def _resolve_source_path(value: Any) -> Optional[str]:
     return normalized
 
 
+def _normalize_custom_tool_source_path(value: Any) -> Optional[str]:
+    normalized = _resolve_source_path(value)
+    if not normalized or not normalized.endswith(".py"):
+        return None
+    return normalized
+
+
+def normalize_custom_tool_source_path(value: Any) -> Optional[str]:
+    return _normalize_custom_tool_source_path(value)
+
+
 def _normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
     if not isinstance(raw_name, str):
         return None
@@ -288,6 +308,72 @@ def normalize_custom_tool_name(raw_name: Any) -> Optional[tuple[str, str]]:
     return _normalize_custom_tool_name(raw_name)
 
 
+def _normalize_json_schema_type_value(value: Any) -> Any:
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in _JSON_SCHEMA_TYPE_NAMES:
+            return lowered
+        return value
+
+    if isinstance(value, list):
+        normalized: list[Any] = []
+        changed = False
+        for item in value:
+            normalized_item = _normalize_json_schema_type_value(item)
+            if normalized_item != item:
+                changed = True
+            normalized.append(normalized_item)
+        if changed:
+            return normalized
+    return value
+
+
+def _normalize_json_schema_node(value: Any) -> Any:
+    if isinstance(value, list):
+        normalized_items: list[Any] = []
+        changed = False
+        for item in value:
+            normalized_item = _normalize_json_schema_node(item)
+            if normalized_item != item:
+                changed = True
+            normalized_items.append(normalized_item)
+        if changed:
+            return normalized_items
+        return value
+
+    if not isinstance(value, dict):
+        return value
+
+    schema = dict(value)
+
+    if "type" in schema:
+        normalized_type = _normalize_json_schema_type_value(schema["type"])
+        if normalized_type != schema["type"]:
+            schema["type"] = normalized_type
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        schema["properties"] = {
+            key: _normalize_json_schema_node(property_schema)
+            for key, property_schema in properties.items()
+        }
+
+    items = schema.get("items")
+    if isinstance(items, (dict, list)):
+        schema["items"] = _normalize_json_schema_node(items)
+
+    additional_properties = schema.get("additionalProperties")
+    if isinstance(additional_properties, dict):
+        schema["additionalProperties"] = _normalize_json_schema_node(additional_properties)
+
+    for combinator in ("oneOf", "anyOf", "allOf"):
+        variants = schema.get(combinator)
+        if isinstance(variants, list):
+            schema[combinator] = [_normalize_json_schema_node(variant) for variant in variants]
+
+    return schema
+
+
 def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
     if isinstance(value, str):
         try:
@@ -296,7 +382,7 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
             return None
     if not isinstance(value, dict):
         return None
-    schema = dict(value)
+    schema = _normalize_json_schema_node(value)
     schema_type = schema.get("type")
     if schema_type in (None, ""):
         schema["type"] = "object"
@@ -326,6 +412,16 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
 
 def normalize_custom_tool_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
     return _normalize_parameters_schema(value)
+
+
+def _normalize_custom_tool_entrypoint(value: Any) -> Optional[str]:
+    if value in (None, "", "run"):
+        return "run"
+    return None
+
+
+def normalize_custom_tool_entrypoint(value: Any) -> Optional[str]:
+    return _normalize_custom_tool_entrypoint(value)
 
 
 def _normalize_timeout_seconds(value: Any) -> Optional[int]:
@@ -688,14 +784,12 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         return {"status": "error", "message": "description must be a non-empty string."}
     description = description.strip()
 
-    source_path = _resolve_source_path(params.get("source_path"))
+    source_path = _normalize_custom_tool_source_path(params.get("source_path"))
     if not source_path:
         return {"status": "error", "message": "source_path must be a valid workspace path like `/tools/my_tool.py`."}
-    if not source_path.endswith(".py"):
-        return {"status": "error", "message": "source_path must point to a `.py` file."}
 
-    entrypoint_param = params.get("entrypoint")
-    if entrypoint_param not in (None, "", "run"):
+    entrypoint = _normalize_custom_tool_entrypoint(params.get("entrypoint"))
+    if entrypoint is None:
         return {
             "status": "error",
             "message": "entrypoint is no longer configurable. Custom tools must use `def run(...):` and `main(run)`.",
@@ -769,7 +863,7 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
             "description": description,
             "source_path": source_path,
             "parameters_schema": parameters_schema,
-            "entrypoint": "run",
+            "entrypoint": entrypoint,
             "timeout_seconds": timeout_seconds,
         },
     )
