@@ -1,0 +1,164 @@
+{% load socialaccount social_extras %}
+{% load account %}
+{% configured_social_auth_providers as social_providers %}
+<div
+  data-account-auth-root
+  data-auth-mode="{% if auth_modal %}modal{% else %}page{% endif %}"
+  data-auth-tab="login"
+  data-auth-next="{{ redirect_field_value|default:'' }}"
+  data-ga-measurement-id="{{ settings.GA_MEASUREMENT_ID|default_if_none:'' }}"
+  data-fpjs-enabled="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}true{% else %}false{% endif %}"
+  data-fpjs-loader-url="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}{% endif %}"
+  data-fpjs-behavior-url="{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|default_if_none:'' }}"
+  data-popup-complete-url="{% if auth_modal %}{{ auth_popup_complete_url }}{% endif %}"
+>
+  {% if auth_modal %}
+    <div class="mb-4 flex items-center justify-between gap-4">
+      {% if auth_email_locked %}
+      <button
+        type="button"
+        data-auth-modal-link
+        data-auth-modal-url="{{ auth_modal_start_url }}"
+        class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
+      >
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back
+      </button>
+      {% else %}
+      <span></span>
+      {% endif %}
+      <button
+        type="button"
+        class="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-slate-500 transition hover:bg-blue-50 hover:text-slate-900"
+        data-cta-signup-modal-close
+        aria-label="Close sign in dialog"
+      >
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"></path>
+        </svg>
+      </button>
+    </div>
+    <div class="mb-6">
+      <h2 class="text-2xl font-bold text-gray-900">Welcome back</h2>
+      <p class="mt-2 text-sm text-slate-600">Sign in to continue.</p>
+    </div>
+  {% else %}
+    <h1 class="text-center text-2xl font-bold text-gray-900">Sign in</h1>
+    {% if account_allow_password_signup or account_allow_social_signup %}
+    <p class="mt-2 text-center text-sm text-gray-500">
+      Don't have an account yet?
+      {% with request.session.utm_querystring as utm_qs %}
+      {% if utm_qs or redirect_field_value %}
+      <a href="{% url 'account_signup' %}?{% if utm_qs %}{{ utm_qs }}{% endif %}{% if utm_qs and redirect_field_value %}&{% endif %}{% if redirect_field_value %}{{ redirect_field_name }}={{ redirect_field_value|urlencode }}{% endif %}" class="text-blue-600 hover:underline">Sign up here</a>
+      {% else %}
+      <a href="{% url 'account_signup' %}" class="text-blue-600 hover:underline">Sign up here</a>
+      {% endif %}
+      {% endwith %}
+    </p>
+    {% endif %}
+  {% endif %}
+
+  {% if not auth_modal %}
+    {% if account_allow_social_login or account_allow_social_signup %}
+      {% include "account/_social_auth_buttons.html" with providers=social_providers surface="login" action_text="Sign in" show_password_divider=account_allow_password_login divider_text="or" social_next_url=auth_popup_complete_url social_popup_mode=auth_modal %}
+    {% endif %}
+  {% endif %}
+
+  {% if account_allow_password_login %}
+  <form
+    method="post"
+    action="{% if auth_modal %}{{ auth_modal_login_url }}{% else %}{% url 'account_login' %}{% endif %}"
+    class="space-y-4"
+    data-login-form
+    {% if auth_modal %}data-auth-modal-form{% endif %}
+  >
+    {% csrf_token %}
+    {% if auth_modal and auth_email_locked %}
+      <input type="hidden" name="lock_email" value="1" />
+    {% endif %}
+    {% if redirect_field_value %}
+      <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}" />
+    {% endif %}
+
+    {% if form.non_field_errors %}
+    <div class="my-3 rounded-md border border-red-200 bg-red-50 p-3" role="alert">
+      <ul class="list-disc pl-5 space-y-1">
+        {% for error in form.non_field_errors %}
+          <li class="text-sm text-red-700">{{ error }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
+    <div>
+      <label for="id_login" class="block text-sm mb-1 font-medium text-gray-700">Email address</label>
+      <input id="id_login" name="login" type="email" required
+             value="{% if auth_modal and auth_email_locked %}{{ auth_prefilled_email }}{% else %}{{ form.login.value|default_if_none:'' }}{% endif %}"
+             autocomplete="username"
+             {% if auth_modal and auth_email_locked %}readonly{% endif %}
+             class="block w-full rounded-lg border border-gray-300 px-4 py-2.5 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm {% if form.login.errors %}border-red-500{% endif %}{% if auth_modal and auth_email_locked %} bg-blue-50 text-slate-900{% endif %}">
+      {% if form.login.errors %}
+        <div class="mt-1">
+          {% for error in form.login.errors %}
+            <p class="text-sm text-red-600">{{ error }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+
+    <div>
+      <div class="flex justify-between items-center">
+        <label for="id_password" class="block text-sm mb-1 font-medium text-gray-700">Password</label>
+        <a href="{% url 'account_reset_password' %}" class="text-sm text-blue-600 hover:underline">Forgot password?</a>
+      </div>
+      <input id="id_password" name="password" type="password" required
+             autocomplete="current-password"
+             class="block w-full rounded-lg border border-gray-300 px-4 py-2.5 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm {% if form.password.errors %}border-red-500{% endif %}">
+      {% if form.password.errors %}
+        <div class="mt-1">
+          {% for error in form.password.errors %}
+            <p class="text-sm text-red-600">{{ error }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+
+    {% if settings.TURNSTILE_ENABLED and form.turnstile %}
+      <div class="mt-4 flex flex-col items-center">
+        {{ form.turnstile }}
+        <p data-turnstile-status class="mt-2 hidden text-center text-sm text-red-600"></p>
+        {% if form.turnstile.errors %}
+          <div class="mt-2 text-center">
+            {% for error in form.turnstile.errors %}
+              <p class="text-sm text-red-600">{{ error }}</p>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <button
+      type="submit"
+      data-turnstile-submit
+      {% if settings.TURNSTILE_ENABLED and form.turnstile %}disabled aria-disabled="true"{% endif %}
+      class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+    >
+      Sign in
+    </button>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
+    <p class="mt-4 text-xs text-gray-500 text-center">
+      By signing in, you agree to our
+      <a href="{% url 'proprietary:tos' %}" class="text-blue-600 hover:underline">Terms of Service</a>
+      and
+      <a href="{% url 'proprietary:privacy' %}" class="text-blue-600 hover:underline">Privacy Policy</a>.
+    </p>
+    {% endif %}
+  </form>
+  {% else %}
+  <p class="mt-6 text-center text-sm text-gray-500">
+    Password sign-in is currently unavailable.
+  </p>
+  {% endif %}
+</div>

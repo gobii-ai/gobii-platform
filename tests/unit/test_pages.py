@@ -96,6 +96,39 @@ class HomePageTests(TestCase):
             '<meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
         )
 
+    @tag("batch_pages")
+    def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "gobii-cta-signup-modal-config")
+        self.assertNotContains(response, 'id="cta-signup-modal"')
+
+    @tag("batch_pages")
+    def test_home_page_renders_signup_modal_shell_when_flag_is_on_for_anonymous_users(self):
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "gobii-cta-signup-modal-config")
+        self.assertContains(response, 'id="cta-signup-modal"')
+
+    @tag("batch_pages")
+    @modify_settings(INSTALLED_APPS={"append": "turnstile"})
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        ACCOUNT_FORMS={
+            "signup": "turnstile_signup.SignupFormWithTurnstile",
+            "login": "turnstile_signup.LoginFormWithTurnstile",
+        },
+    )
+    def test_home_page_includes_turnstile_api_for_signup_modal_when_enabled(self):
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @tag("batch_pages")
     def test_home_page_uses_legacy_hero_illustration_when_fish_homepage_is_off(self):
@@ -666,6 +699,52 @@ class HomePageTests(TestCase):
         self.assertEqual(spawn_intent_payload.get("preferred_llm_tier"), "premium")
         self.assertEqual(spawn_intent_payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
         self.assertEqual(spawn_intent_payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
+
+    @tag("batch_pages")
+    def test_home_spawn_modal_prep_returns_modal_signup_url_and_preserves_state(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_source=newsletter"
+        session.save()
+
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.post(
+                reverse("pages:home_agent_spawn"),
+                {
+                    "charter": "Custom charter",
+                    "preferred_llm_tier": "premium",
+                    "selected_pipedream_app_slugs": ["slack", "trello", "slack"],
+                    "trial_onboarding": "1",
+                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                    "auth_modal": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_signup_modal"))
+        params = parse_qs(parsed.query)
+        next_url = params.get("next", [None])[0]
+        self.assertIsNotNone(next_url)
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        self.assertEqual(parse_qs(next_parts.query).get("spawn"), ["1"])
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), "Custom charter")
+        self.assertEqual(session.get("agent_charter_source"), "user")
+        self.assertEqual(session.get(page_views.PREFERRED_LLM_TIER_SESSION_KEY), "premium")
+        self.assertEqual(
+            session.get(page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "trello"],
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
 
     @tag("batch_pages")
     def test_home_spawn_trial_onboarding_sets_session_intent(self):
@@ -1364,6 +1443,40 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         )
         self.assertFalse(cookie_payload.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
 
+    @tag("batch_pages")
+    def test_hire_modal_prep_returns_modal_signup_url_and_preserves_state(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.post(
+                reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+                {
+                    "trial_onboarding": "1",
+                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                    "auth_modal": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_signup_modal"))
+        next_url = parse_qs(parsed.query).get("next", [None])[0]
+        self.assertIsNotNone(next_url)
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        self.assertEqual(parse_qs(next_parts.query).get("spawn"), ["1"])
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), template.charter)
+        self.assertEqual(
+            session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
+
 
 @tag("batch_pages")
 class SolutionCtaCopyTests(TestCase):
@@ -1542,6 +1655,44 @@ class SolutionCtaCopyTests(TestCase):
         sales_button = sales_form.find("button", {"type": "submit"})
         self.assertIsNotNone(sales_button)
         self.assertEqual(self._normalized_button_text(sales_button), "Spawn Agent")
+
+    @tag("batch_pages")
+    def test_generic_solution_uses_form_backed_spawn_cta(self):
+        response = self.client.get("/solutions/operations/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        form = soup.find("form", {"action": reverse("pages:home_agent_spawn")})
+
+        self.assertIsNotNone(form)
+        self.assertIsNotNone(form.find("input", {"name": "charter", "value": ""}))
+        self.assertIsNotNone(form.find("input", {"name": "source_page", "value": "solutions_generic_hero"}))
+
+    @tag("batch_pages")
+    def test_generic_solution_spawn_modal_prep_sets_default_agent_intent(self):
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.post(
+                reverse("pages:home_agent_spawn"),
+                {
+                    "charter": "",
+                    "source_page": "solutions_generic_hero",
+                    "trial_onboarding": "1",
+                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                    "auth_modal": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_signup_modal"))
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), "Hello")
+        self.assertEqual(
+            session.get("agent_charter_override"),
+            "Have a friendly conversation with the user to understand what they need help with, then adapt to assist them.",
+        )
 
 
 @tag("batch_pages")
@@ -2698,12 +2849,15 @@ class AuthLinkTests(TestCase):
         response = self.client.get(reverse("account_signup"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "js/account_identity_signals.js")
+        self.assertContains(response, "js/account_auth_forms.js")
+        self.assertContains(response, "data-account-auth-root")
         self.assertContains(response, "data-password-signup-form")
-        self.assertContains(response, "identitySignals.clearStagedFpjsCookies();")
-        self.assertContains(response, "const fpjsTimeoutMs = 3000;")
-        self.assertContains(response, "Promise.race([")
-        self.assertContains(response, "signupForm.addEventListener('submit'")
-        self.assertContains(response, "signupForm.submit()")
+        self.assertContains(response, 'data-fpjs-enabled="true"')
+        self.assertContains(response, 'data-fpjs-loader-url="https://fp.example/v3/loader.js?apiKey=fp_test_key"')
+        self.assertContains(response, 'data-auth-fpjs-visitor-field')
+        self.assertContains(response, 'data-auth-fpjs-request-field')
+        self.assertContains(response, 'data-auth-ga-client-field')
 
     @tag("batch_pages")
     @override_settings(
@@ -2717,12 +2871,11 @@ class AuthLinkTests(TestCase):
         response = self.client.get(reverse("account_login"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "identitySignals.clearStagedFpjsCookies();")
-        self.assertContains(response, "const fpjsTimeoutMs = 3000;")
-        self.assertContains(response, "Promise.race([")
-        self.assertContains(response, "gobii_signup_fpjs_visitor_id")
-        self.assertContains(response, "gobii_signup_fpjs_request_id")
-        self.assertContains(response, "gobii_signup_ga_client_id")
+        self.assertContains(response, "js/account_identity_signals.js")
+        self.assertContains(response, "js/account_auth_forms.js")
+        self.assertContains(response, 'data-account-auth-root')
+        self.assertContains(response, 'data-fpjs-enabled="true"')
+        self.assertContains(response, 'data-fpjs-loader-url="https://fp.example/v3/loader.js?apiKey=fp_test_key"')
 
     @tag("batch_pages")
     def test_login_page_renders_configured_social_providers_in_fixed_order_with_tracking_attrs(self):
@@ -2797,6 +2950,196 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, f'action="{reverse("socialaccount_signup")}"')
         self.assertContains(response, "bg-white max-w-md")
 
+    @tag("batch_pages")
+    def test_signup_modal_renders_email_start_and_popup_social_urls(self):
+        for provider in ("facebook", "google"):
+            self._create_social_app(provider)
+
+        next_url = "/app/agents/new?spawn=1"
+        response = self.client.get(reverse("account_signup_modal"), {"next": next_url})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-auth-mode="modal"')
+        self.assertContains(response, 'data-auth-email-start-form')
+        self.assertContains(response, f'action="{reverse("account_signup_modal")}?next=%2Fapp%2Fagents%2Fnew%3Fspawn%3D1"')
+        self.assertContains(response, "Log in or sign up")
+
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        buttons = soup.select("a[data-social-provider]")
+        self.assertEqual([button["data-social-provider"] for button in buttons], ["google", "facebook"])
+        for button in buttons:
+            self.assertEqual(button["data-auth-social-popup"], "true")
+            parsed = urlparse(button["href"])
+            params = parse_qs(parsed.query)
+            popup_next = params.get("next", [None])[0]
+            self.assertIsNotNone(popup_next)
+            self.assertEqual(urlparse(popup_next).path, reverse("account_auth_popup_complete"))
+
+    @tag("batch_pages")
+    def test_signup_modal_email_continue_routes_existing_account_to_login(self):
+        user = get_user_model().objects.create_user(
+            username="email-first@example.com",
+            email="email-first@example.com",
+            password="password123",
+        )
+        response = self.client.post(
+            reverse("account_signup_modal"),
+            {
+                "email_first": "1",
+                "email": user.email,
+                "next": "/pricing/",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_login_modal"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("email"), [user.email])
+        self.assertEqual(params.get("lock_email"), ["1"])
+        self.assertEqual(params.get("next"), ["/pricing/"])
+
+    @tag("batch_pages")
+    def test_signup_modal_email_continue_routes_new_email_to_signup_password_step(self):
+        response = self.client.post(
+            reverse("account_signup_modal"),
+            {
+                "email_first": "1",
+                "email": "new-user@example.com",
+                "next": "/pricing/",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_signup_modal"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("email"), ["new-user@example.com"])
+        self.assertEqual(params.get("lock_email"), ["1"])
+        self.assertEqual(params.get("step"), ["password"])
+        self.assertEqual(params.get("next"), ["/pricing/"])
+
+    @tag("batch_pages")
+    @modify_settings(INSTALLED_APPS={"append": "turnstile"})
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        ACCOUNT_FORMS={
+            "signup": "turnstile_signup.SignupFormWithTurnstile",
+            "login": "turnstile_signup.LoginFormWithTurnstile",
+        },
+    )
+    def test_modal_password_steps_render_turnstile_and_autocomplete_attrs(self):
+        login_response = self.client.get(
+            reverse("account_login_modal"),
+            {"email": "saved@example.com", "lock_email": "1", "next": "/pricing/"},
+        )
+        self.assertEqual(login_response.status_code, 200)
+        self.assertContains(login_response, "cf-turnstile")
+        self.assertNotContains(login_response, "turnstile/v0/api.js")
+        self.assertContains(login_response, 'autocomplete="username"')
+        self.assertContains(login_response, 'autocomplete="current-password"')
+        self.assertContains(
+            login_response,
+            f'data-auth-modal-url="{reverse("account_signup_modal")}?next=%2Fpricing%2F&amp;email=saved%40example.com"',
+        )
+
+        signup_response = self.client.get(
+            reverse("account_signup_modal"),
+            {"step": "password", "email": "saved@example.com", "lock_email": "1", "next": "/pricing/"},
+        )
+        self.assertEqual(signup_response.status_code, 200)
+        self.assertContains(signup_response, "cf-turnstile")
+        self.assertNotContains(signup_response, "turnstile/v0/api.js")
+        self.assertContains(signup_response, 'autocomplete="email"')
+        self.assertContains(signup_response, 'autocomplete="new-password"')
+        self.assertContains(
+            signup_response,
+            f'data-auth-modal-url="{reverse("account_signup_modal")}?next=%2Fpricing%2F&amp;email=saved%40example.com"',
+        )
+
+    @tag("batch_pages")
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_login_modal_invalid_post_preserves_tab_and_next(self, _mock_turnstile_validate):
+        next_url = "/pricing/"
+        response = self.client.post(
+            reverse("account_login_modal"),
+            {
+                "login": "missing@example.com",
+                "password": "wrong-password",
+                "cf-turnstile-response": "stub-token",
+                "next": next_url,
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertIn("html", payload)
+        self.assertIn('data-auth-mode="modal"', payload["html"])
+        self.assertIn(f'value="{next_url}"', payload["html"])
+        self.assertIn(reverse("account_login_modal"), payload["html"])
+
+    @tag("batch_pages")
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_login_modal_valid_post_returns_next_location(self, _mock_turnstile_validate):
+        user = get_user_model().objects.create_user(
+            username="modal-login@example.com",
+            email="modal-login@example.com",
+            password="password123",
+        )
+        checkout_url = reverse("proprietary:startup_checkout")
+
+        response = self.client.post(
+            reverse("account_login_modal"),
+            {
+                "login": user.email,
+                "password": "password123",
+                "cf-turnstile-response": "stub-token",
+                "next": checkout_url,
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("location"), checkout_url)
+
+    @tag("batch_pages")
+    @override_settings(ACCOUNT_EMAIL_VERIFICATION="none")
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_signup_modal_valid_post_returns_next_location(self, _mock_turnstile_validate):
+        checkout_url = reverse("proprietary:startup_checkout")
+        response = self.client.post(
+            reverse("account_signup_modal"),
+            {
+                "email": "modal-signup@example.com",
+                "password1": "password12345",
+                "password2": "password12345",
+                "cf-turnstile-response": "stub-token",
+                "next": checkout_url,
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("location"), checkout_url)
+
+    @tag("batch_pages")
+    def test_popup_complete_page_uses_auth_popup_template(self):
+        response = self.client.get(reverse("account_auth_popup_complete"), {"auth_popup_state": "test-state"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Completing sign in")
+        self.assertContains(response, "js/account_auth_popup_complete.js")
+
 
 @tag("batch_pages")
 class LoginTurnstilePageTests(TestCase):
@@ -2815,30 +3158,31 @@ class LoginTurnstilePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "data-turnstile-submit")
         self.assertContains(response, 'disabled aria-disabled="true"')
-        self.assertContains(response, "window.gobiiLoginTurnstileSuccess = () => {")
-        self.assertContains(response, "window.gobiiLoginTurnstileExpired = () => {")
-        self.assertContains(response, "window.gobiiLoginTurnstileError = () => {")
-        self.assertContains(response, "Verification expired. Please try again.")
-        self.assertContains(response, "Verification failed. Please try again.")
-        self.assertContains(response, "Completing verification...")
-        self.assertContains(response, "let submitPending = false;")
-        self.assertContains(response, "const submitWhenReady = () => {")
-        self.assertContains(response, "const submitButton = () => loginForm?.querySelector('[data-turnstile-submit]');")
-        self.assertContains(response, "const statusMessage = () => loginForm?.querySelector('[data-turnstile-status]');")
-        self.assertContains(response, "const widget = () => loginForm?.querySelector('.cf-turnstile');")
-        self.assertContains(response, "const button = submitButton();")
-        self.assertContains(response, "const messageNode = statusMessage();")
-        self.assertContains(response, "const turnstileWidget = widget();")
-        self.assertContains(response, "loginForm.requestSubmit(submitButton() || undefined);")
-        self.assertContains(response, "loginForm?.addEventListener('submit', (event) => {")
-        self.assertContains(response, "if (hasFreshToken()) {")
-        self.assertContains(response, "submitPending = true;")
-        self.assertContains(response, "event.preventDefault();")
-        self.assertContains(response, "window.turnstile.reset(turnstileWidget);")
+        self.assertContains(response, "data-turnstile-status")
+        self.assertContains(response, "js/account_auth_forms.js")
+        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+        self.assertEqual(response.content.decode("utf-8").count("turnstile/v0/api.js"), 1)
         self.assertContains(response, 'data-expired-callback="gobiiLoginTurnstileExpired"')
         self.assertContains(response, 'data-timeout-callback="gobiiLoginTurnstileExpired"')
         self.assertContains(response, 'data-error-callback="gobiiLoginTurnstileError"')
         self.assertContains(response, 'data-callback="gobiiLoginTurnstileSuccess"')
+
+    @tag("batch_pages")
+    @modify_settings(INSTALLED_APPS={"append": "turnstile"})
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        ACCOUNT_FORMS={
+            "signup": "turnstile_signup.SignupFormWithTurnstile",
+            "login": "turnstile_signup.LoginFormWithTurnstile",
+        },
+    )
+    def test_signup_page_uses_single_explicit_turnstile_api_script(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "cf-turnstile")
+        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+        self.assertEqual(response.content.decode("utf-8").count("turnstile/v0/api.js"), 1)
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):
     @tag("batch_pages")

@@ -8,6 +8,9 @@ from drf_spectacular.views import (
     SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 )
 from config.account_views import (
+    AccountAuthPopupCompleteView,
+    AccountLoginModalView,
+    AccountSignupModalView,
     PasswordResetBridgeConfirmView,
     PasswordResetBridgeContinueView,
     PasswordResetBridgeStartView,
@@ -647,6 +650,21 @@ urlpatterns = [
         "accounts/password/reset/link/<str:key>/",
         PasswordResetBridgeStartView.as_view(),
         name="account_reset_password_bridge_start",
+    ),
+    path(
+        "accounts/modal/signup/",
+        AccountSignupModalView.as_view(),
+        name="account_signup_modal",
+    ),
+    path(
+        "accounts/modal/login/",
+        AccountLoginModalView.as_view(),
+        name="account_login_modal",
+    ),
+    path(
+        "accounts/popup-complete/",
+        AccountAuthPopupCompleteView.as_view(),
+        name="account_auth_popup_complete",
     ),
     path("accounts/", include("allauth.urls")),
 

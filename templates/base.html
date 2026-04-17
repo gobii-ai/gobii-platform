@@ -452,6 +452,14 @@
   </script>
 
   <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  {% if settings.TURNSTILE_ENABLED %}
+    {% if cta_signup_modal_config.enabled or request.resolver_match.url_name == 'account_login' or request.resolver_match.url_name == 'account_signup' %}
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+    {% endif %}
+  {% endif %}
+  <script src="{% static 'js/account_identity_signals.js' %}"></script>
+  <script src="{% static 'js/account_auth_forms.js' %}"></script>
+  <script src="{% static 'js/cta_signup_modal.js' %}"></script>
   <script src="{% static 'js/cta_tracking.js' %}"></script>
   <script src="{% static 'js/signup_tracking.js' %}"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js"></script>
@@ -508,7 +516,7 @@
 
   {% htmx_script %}
 </head>
-<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-analytics-cta-event="{{ analytics.events.CTA_CLICKED }}" data-analytics-cta-tracking-enabled="{% if request.path == '/' or request.path|slice:':11' == '/solutions/' or request.path|slice:':10' == '/accounts/' %}true{% else %}false{% endif %}">
+<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-analytics-cta-event="{{ analytics.events.CTA_CLICKED }}" data-analytics-cta-tracking-enabled="{% if request.path == '/' or request.path|slice:':11' == '/solutions/' or request.path|slice:':10' == '/accounts/' or request.path == '/pricing/' %}true{% else %}false{% endif %}">
   {% if llm_bootstrap_required %}
     <div class="bg-amber-100 text-amber-900 border-b border-amber-300">
       <div class="max-w-7xl mx-auto px-4 py-3 text-sm">
@@ -551,7 +559,12 @@
     {% endif %}
     {% block content %}{% endblock %}
     <!-- HTMX injects modals here -->
-    <div id="modal-container"></div>
+    <div id="modal-container">
+      {% if cta_signup_modal_config.enabled %}
+        {{ cta_signup_modal_config|json_script:"gobii-cta-signup-modal-config" }}
+        {% include "partials/_cta_signup_modal.html" %}
+      {% endif %}
+    </div>
 
     {# Global footer #}
     {% include "includes/_footer.html" %}
