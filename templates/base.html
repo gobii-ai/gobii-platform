@@ -452,6 +452,9 @@
   </script>
 
   <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  {% if cta_signup_modal_config.enabled and settings.TURNSTILE_ENABLED %}
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+  {% endif %}
   <script src="{% static 'js/account_identity_signals.js' %}"></script>
   <script src="{% static 'js/account_auth_forms.js' %}"></script>
   <script src="{% static 'js/cta_signup_modal.js' %}"></script>

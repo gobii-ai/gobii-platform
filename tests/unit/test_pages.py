@@ -113,6 +113,22 @@ class HomePageTests(TestCase):
         self.assertContains(response, "gobii-cta-signup-modal-config")
         self.assertContains(response, 'id="cta-signup-modal"')
 
+    @tag("batch_pages")
+    @modify_settings(INSTALLED_APPS={"append": "turnstile"})
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        ACCOUNT_FORMS={
+            "signup": "turnstile_signup.SignupFormWithTurnstile",
+            "login": "turnstile_signup.LoginFormWithTurnstile",
+        },
+    )
+    def test_home_page_includes_turnstile_api_for_signup_modal_when_enabled(self):
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @tag("batch_pages")
     def test_home_page_uses_legacy_hero_illustration_when_fish_homepage_is_off(self):
@@ -3008,6 +3024,34 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("lock_email"), ["1"])
         self.assertEqual(params.get("step"), ["password"])
         self.assertEqual(params.get("next"), ["/pricing/"])
+
+    @tag("batch_pages")
+    @modify_settings(INSTALLED_APPS={"append": "turnstile"})
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        ACCOUNT_FORMS={
+            "signup": "turnstile_signup.SignupFormWithTurnstile",
+            "login": "turnstile_signup.LoginFormWithTurnstile",
+        },
+    )
+    def test_modal_password_steps_render_turnstile_and_autocomplete_attrs(self):
+        login_response = self.client.get(
+            reverse("account_login_modal"),
+            {"email": "saved@example.com", "lock_email": "1", "next": "/pricing/"},
+        )
+        self.assertEqual(login_response.status_code, 200)
+        self.assertContains(login_response, "cf-turnstile")
+        self.assertContains(login_response, 'autocomplete="username"')
+        self.assertContains(login_response, 'autocomplete="current-password"')
+
+        signup_response = self.client.get(
+            reverse("account_signup_modal"),
+            {"step": "password", "email": "saved@example.com", "lock_email": "1", "next": "/pricing/"},
+        )
+        self.assertEqual(signup_response.status_code, 200)
+        self.assertContains(signup_response, "cf-turnstile")
+        self.assertContains(signup_response, 'autocomplete="email"')
+        self.assertContains(signup_response, 'autocomplete="new-password"')
 
     @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)

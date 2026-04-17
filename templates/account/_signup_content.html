@@ -42,14 +42,6 @@
       <h2 class="text-2xl font-bold text-gray-900">{% trans "Create your account" %}</h2>
       <p class="mt-2 text-sm text-slate-600">{% trans "Create your account to continue." %}</p>
     </div>
-    {% if auth_email_locked and auth_prefilled_email %}
-    <div class="mb-6 rounded-lg bg-blue-50 px-4 py-3">
-      <div>
-        <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{% trans "Email" %}</p>
-        <p class="mt-1 text-sm font-medium text-slate-900">{{ auth_prefilled_email }}</p>
-      </div>
-    </div>
-    {% endif %}
   {% else %}
     <div class="text-center">
       <h1 class="text-center text-2xl font-bold text-gray-900">{% trans "Sign up" %}</h1>
@@ -85,7 +77,6 @@
     <input type="hidden" name="ufpr" value="" data-auth-fpjs-request-field />
     <input type="hidden" name="uga" value="" data-auth-ga-client-field />
     {% if auth_modal and auth_email_locked %}
-      <input type="hidden" name="email" value="{{ auth_prefilled_email }}">
       <input type="hidden" name="lock_email" value="1">
     {% endif %}
     {% if redirect_field_value %}
@@ -95,18 +86,19 @@
 
     {% for field in form.visible_fields %}
       {% if field.name != 'turnstile' %}
-        {% if not auth_modal or not auth_email_locked or field.name != 'email' %}
         <div>
           <label for="{{ field.id_for_label }}" class="block text-sm mb-1">{{ field.label }}</label>
           <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
-                 value="{{ field.value|default_if_none:'' }}"
+                 value="{% if auth_modal and auth_email_locked and field.name == 'email' %}{{ auth_prefilled_email }}{% else %}{{ field.value|default_if_none:'' }}{% endif %}"
+                 {% if field.name == 'email' %}autocomplete="email"{% endif %}
+                 {% if field.name == 'password1' or field.name == 'password2' %}autocomplete="new-password"{% endif %}
+                 {% if auth_modal and auth_email_locked and field.name == 'email' %}readonly{% endif %}
                  class="block w-full rounded-lg border border-gray-200 px-4 py-2.5 focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                  {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
           {% if field.errors %}
             <p class="mt-1 text-sm text-red-600" id="{{ field.id_for_label }}-error">{{ field.errors|striptags }}</p>
           {% endif %}
         </div>
-        {% endif %}
       {% endif %}
     {% endfor %}
 
