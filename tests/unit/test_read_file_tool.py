@@ -70,8 +70,13 @@ class ReadFileToolTests(TestCase):
         self.assertNotIn("markdown", result)
         mock_markitdown.assert_not_called()
 
+    @patch("api.agent.tools.read_file.get_file_handler_llm_config", return_value=None)
     @patch("api.agent.tools.read_file.MarkItDown")
-    def test_default_response_format_uses_markdown_for_pdf(self, mock_markitdown):
+    def test_default_response_format_uses_markdown_for_pdf_without_vision_llm(
+        self,
+        mock_markitdown,
+        mock_get_file_handler_llm_config,
+    ):
         self._write_file(path="/exports/report.pdf", content=b"%PDF-1.4 fake", mime_type="application/pdf")
         mock_markitdown.return_value.convert.return_value = SimpleNamespace(markdown="## Converted")
 
@@ -82,7 +87,7 @@ class ReadFileToolTests(TestCase):
         self.assertEqual(result.get("markdown"), "## Converted")
         self.assertNotIn("text", result)
         mock_markitdown.assert_called_once()
-        self.assertEqual(mock_markitdown.call_args.kwargs, {"llm_prompt": MARKITDOWN_OCR_PROMPT})
+        self.assertEqual(mock_markitdown.call_args.kwargs, {})
 
     @patch("api.agent.tools.read_file.get_file_handler_llm_config")
     @patch("api.agent.tools.read_file.MarkItDown")
