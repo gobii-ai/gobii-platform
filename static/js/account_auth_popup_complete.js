@@ -50,6 +50,45 @@ function hasOpener() {
   }
 }
 
+function focusOpener() {
+  if (!hasOpener()) {
+    return;
+  }
+  try {
+    window.opener.focus();
+  } catch (_error) {
+    // Ignore focus failures.
+  }
+}
+
+function navigateOpener(targetUrl) {
+  if (!targetUrl || !hasOpener()) {
+    return;
+  }
+  try {
+    window.opener.location.assign(targetUrl);
+  } catch (_error) {
+    // Ignore cross-window navigation failures; storage-event fallback still applies.
+  }
+}
+
+function attemptCloseWindow() {
+  try {
+    window.close();
+  } catch (_error) {
+    // Ignore close failures and try a second strategy below.
+  }
+
+  window.setTimeout(() => {
+    try {
+      window.open("", "_self");
+      window.close();
+    } catch (_error) {
+      // Ignore fallback close failures.
+    }
+  }, 100);
+}
+
 (function completeAuthPopup() {
   const params = new URLSearchParams(window.location.search);
   const popupState = params.get("auth_popup_state");
@@ -62,17 +101,18 @@ function hasOpener() {
 
   notifyCompletion(popupState);
   setStatus("Authentication complete. Returning to Gobii...");
+  focusOpener();
+  navigateOpener(sessionData.targetUrl);
+  attemptCloseWindow();
 
-  if (hasOpener()) {
-    window.setTimeout(() => {
-      window.close();
-    }, 600);
-    return;
-  }
+  window.setTimeout(() => {
+    if (hasOpener()) {
+      setStatus("Authentication complete. You can close this tab.");
+      return;
+    }
 
-  if (sessionData.targetUrl) {
-    window.setTimeout(() => {
-      window.location.assign(sessionData.targetUrl);
-    }, 600);
-  }
+    if (sessionData.targetUrl) {
+      window.location.replace(sessionData.targetUrl);
+    }
+  }, 900);
 })();
