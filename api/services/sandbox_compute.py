@@ -1376,11 +1376,33 @@ class SandboxComputeService:
         )
         return response
 
+    def _request_workspace_push(
+        self,
+        agent,
+        session: AgentComputeSession,
+        *,
+        since: Optional[timezone.datetime] = None,
+        internal_paths: Optional[Sequence[str]] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        if since is not None:
+            payload["since"] = since.isoformat()
+        if internal_paths:
+            payload["internal_paths"] = list(internal_paths)
+        return self._backend.sync_filespace(agent, session, direction="push", payload=payload)
+
     def _sync_workspace_push(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
         if isinstance(self._backend, LocalSandboxBackend):
             return None
-        since = session.last_filespace_sync_at.isoformat() if session.last_filespace_sync_at else None
-        response = self._backend.sync_filespace(agent, session, direction="push", payload={"since": since})
+        response = self._request_workspace_push(agent, session, since=session.last_filespace_sync_at)
+        return self._apply_workspace_push_response(agent, session, response)
+
+    def _apply_workspace_push_response(
+        self,
+        agent,
+        session: AgentComputeSession,
+        response: Dict[str, Any],
+    ) -> Dict[str, Any]:
         if response.get("status") != "ok":
             return response
 
@@ -1565,7 +1587,7 @@ class SandboxComputeService:
 
         return self._backend.sync_filespace(agent, session, direction="pull", payload={"files": [entry]})
 
-    def _sync_custom_tool_sqlite_push(
+    def _sync_custom_tool_workspace_push(
         self,
         agent,
         session: AgentComputeSession,
@@ -1574,8 +1596,12 @@ class SandboxComputeService:
         if isinstance(self._backend, LocalSandboxBackend):
             return {"status": "skipped", "message": "Local backend does not require SQLite sync."}
 
-        payload: Dict[str, Any] = {"internal_paths": [CUSTOM_TOOL_SQLITE_FILESPACE_PATH]}
-        response = self._backend.sync_filespace(agent, session, direction="push", payload=payload)
+        response = self._request_workspace_push(
+            agent,
+            session,
+            since=session.last_filespace_sync_at,
+            internal_paths=[CUSTOM_TOOL_SQLITE_FILESPACE_PATH],
+        )
         if not isinstance(response, dict):
             return {"status": "error", "message": "Sandbox SQLite sync returned an invalid response."}
         if response.get("status") != "ok":
@@ -1600,6 +1626,9 @@ class SandboxComputeService:
                 pass
             except OSError as exc:
                 return {"status": "error", "message": f"Failed to remove synced SQLite DB: {exc}"}
+            workspace_sync_result = self._apply_workspace_push_response(agent, session, response)
+            if workspace_sync_result.get("status") != "ok":
+                return workspace_sync_result
             return {"status": "ok", "sqlite_synced": True, "deleted": True}
 
         content = _decode_sync_change_content(sqlite_change)
@@ -1610,6 +1639,12 @@ class SandboxComputeService:
             _restore_sqlite_file_content(local_sqlite_db_path, content)
         except (OSError, sqlite3.Error) as exc:
             return {"status": "error", "message": f"Failed to write synced SQLite DB: {exc}"}
+
+        # Custom tools often emit regular exports alongside SQLite updates, so
+        # persist the non-internal workspace changes from the same push result.
+        workspace_sync_result = self._apply_workspace_push_response(agent, session, response)
+        if workspace_sync_result.get("status") != "ok":
+            return workspace_sync_result
 
         return {
             "status": "ok",
@@ -1674,7 +1709,7 @@ class SandboxComputeService:
             }
 
         if local_sqlite_db_path and not isinstance(self._backend, LocalSandboxBackend):
-            push_result = self._sync_custom_tool_sqlite_push(
+            push_result = self._sync_custom_tool_workspace_push(
                 agent,
                 session,
                 local_sqlite_db_path,

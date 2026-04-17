@@ -171,6 +171,41 @@ class SyncProxyEnvTests(unittest.TestCase):
         self.assertEqual(change["mime_type"], "application/vnd.sqlite3")
         self.assertEqual(change["checksum_sha256"], sha256(b"sqlite bytes").hexdigest())
 
+    def test_handle_sync_filespace_push_requested_internal_paths_bypass_since_filter(self):
+        payload = {
+            "agent_id": "agent-1",
+            "direction": "push",
+            "since": "3026-03-24T12:00:00+00:00",
+            "internal_paths": [CUSTOM_TOOL_SQLITE_FILESPACE_PATH],
+        }
+
+        with TemporaryDirectory() as tmp_dir:
+            agent_root = Path(tmp_dir).resolve()
+            with patch(
+                "sandbox_server.sync._agent_workspace",
+                return_value=agent_root,
+            ), patch(
+                "sandbox_server.sync._store_proxy_env",
+                return_value=False,
+            ), patch(
+                "sandbox_server.sync._proxy_env_from_manifest",
+                return_value=None,
+            ), patch(
+                "sandbox_server.sync._load_manifest",
+                return_value={"files": {}, "deleted": {}},
+            ), patch(
+                "sandbox_server.sync._save_manifest"
+            ):
+                sqlite_path = agent_root / ".gobii" / "internal" / "custom_tool_agent_state.sqlite3"
+                sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+                sqlite_path.write_bytes(b"sqlite bytes")
+
+                result = _handle_sync_filespace(payload)
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(len(result["changes"]), 1)
+        self.assertEqual(result["changes"][0]["path"], CUSTOM_TOOL_SQLITE_FILESPACE_PATH)
+
     def test_handle_sync_filespace_pull_clears_custom_tool_sqlite_sidecars_before_write(self):
         payload = {
             "agent_id": "agent-1",

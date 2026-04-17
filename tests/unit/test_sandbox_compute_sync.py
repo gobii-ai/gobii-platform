@@ -545,6 +545,7 @@ class SandboxComputeSyncTests(TestCase):
     def test_run_custom_tool_command_syncs_sqlite_for_remote_backend(self):
         backend = _DummyBackend()
         synced_bytes = self._sqlite_bytes(rows=[("bitcoin", "Bitcoin")])
+        export_bytes = b"mermaid export"
 
         def _sync_filespace(agent, session, *, direction, payload=None):
             backend.sync_calls.append(
@@ -567,6 +568,11 @@ class SandboxComputeSyncTests(TestCase):
                             "path": "/.gobii/internal/tool.log",
                             "content_b64": "aWdub3JlZCBieXRlcw==",
                             "mime_type": "text/plain",
+                        },
+                        {
+                            "path": "/exports/mermaid_98928a38.png",
+                            "content_b64": base64.b64encode(export_bytes).decode("ascii"),
+                            "mime_type": "image/png",
                         },
                     ],
                 }
@@ -615,6 +621,9 @@ class SandboxComputeSyncTests(TestCase):
             finally:
                 conn.close()
             self.assertEqual(rows, [("bitcoin", "Bitcoin")])
+            export_node = AgentFsNode.objects.get(path="/exports/mermaid_98928a38.png")
+            self.assertEqual(export_node.mime_type, "image/png")
+            self.assertEqual(export_node.size_bytes, len(export_bytes))
 
         internal_pull = next(
             call
@@ -635,6 +644,8 @@ class SandboxComputeSyncTests(TestCase):
         push_call = next(call for call in backend.sync_calls if call["direction"] == "push")
         self.assertEqual(push_call["payload"]["internal_paths"], [CUSTOM_TOOL_SQLITE_FILESPACE_PATH])
         self.assertNotIn("since", push_call["payload"])
+        session = AgentComputeSession.objects.get(agent=self.agent)
+        self.assertIsNotNone(session.last_filespace_sync_at)
 
     def test_sync_custom_tool_sqlite_pull_snapshots_live_wal_database(self):
         backend = _DummyBackend()
@@ -677,10 +688,15 @@ class SandboxComputeSyncTests(TestCase):
 
         self.assertEqual(rows, [("test", "Test")])
 
-    def test_sync_custom_tool_sqlite_push_replaces_host_db_without_stale_wal_sidecars(self):
+    def test_sync_custom_tool_workspace_push_replaces_host_db_without_stale_wal_sidecars(self):
         backend = _DummyBackend()
         service = SandboxComputeService(backend=backend)
-        session = AgentComputeSession.objects.create(agent=self.agent, state=AgentComputeSession.State.RUNNING)
+        cursor = timezone.now() - timedelta(minutes=5)
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            last_filespace_sync_at=cursor,
+        )
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             db_path = f"{tmp_dir}/state.db"
@@ -705,8 +721,11 @@ class SandboxComputeSyncTests(TestCase):
                 with open(synced_db_path, "rb") as handle:
                     synced_bytes = handle.read()
 
+                push_payload = {}
+
                 def _sync_filespace(agent, session, *, direction, payload=None):
                     if direction == "push":
+                        push_payload.update(payload or {})
                         return {
                             "status": "ok",
                             "changes": [
@@ -721,7 +740,7 @@ class SandboxComputeSyncTests(TestCase):
 
                 backend.sync_filespace = _sync_filespace
 
-                result = service._sync_custom_tool_sqlite_push(self.agent, session, db_path)
+                result = service._sync_custom_tool_workspace_push(self.agent, session, db_path)
                 self.assertEqual(result.get("status"), "ok")
                 self.assertTrue(result.get("sqlite_synced"))
                 self.assertFalse(os.path.exists(f"{db_path}-wal"))
@@ -738,6 +757,56 @@ class SandboxComputeSyncTests(TestCase):
                 live_conn.close()
 
         self.assertEqual(rows, [("bitcoin", "Bitcoin"), ("ethereum", "Ethereum")])
+        self.assertEqual(push_payload["since"], cursor.isoformat())
+        self.assertEqual(push_payload["internal_paths"], [CUSTOM_TOOL_SQLITE_FILESPACE_PATH])
+        session.refresh_from_db()
+        self.assertGreater(session.last_filespace_sync_at, cursor)
+
+    def test_sync_custom_tool_workspace_push_applies_exports_when_sqlite_is_deleted(self):
+        backend = _DummyBackend()
+        service = SandboxComputeService(backend=backend)
+        cursor = timezone.now() - timedelta(minutes=5)
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            last_filespace_sync_at=cursor,
+        )
+
+        with tempfile.NamedTemporaryFile(delete=False) as handle:
+            db_path = handle.name
+        self.addCleanup(lambda: os.path.exists(db_path) and os.remove(db_path))
+        self._create_sqlite_db_file(db_path, rows=[("test", "Test")])
+        export_bytes = b"mermaid export"
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            if direction == "push":
+                return {
+                    "status": "ok",
+                    "changes": [
+                        {
+                            "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                            "is_deleted": True,
+                        },
+                        {
+                            "path": "/exports/mermaid_98928a38.png",
+                            "content_b64": base64.b64encode(export_bytes).decode("ascii"),
+                            "mime_type": "image/png",
+                        },
+                    ],
+                }
+            return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+        backend.sync_filespace = _sync_filespace
+
+        result = service._sync_custom_tool_workspace_push(self.agent, session, db_path)
+
+        self.assertEqual(result, {"status": "ok", "sqlite_synced": True, "deleted": True})
+        self.assertFalse(os.path.exists(db_path))
+        export_node = AgentFsNode.objects.get(path="/exports/mermaid_98928a38.png")
+        self.assertEqual(export_node.mime_type, "image/png")
+        self.assertEqual(export_node.size_bytes, len(export_bytes))
+        session.refresh_from_db()
+        self.assertGreater(session.last_filespace_sync_at, cursor)
 
     def test_run_custom_tool_command_requires_shared_sqlite_to_sync_back(self):
         backend = _DummyBackend()
