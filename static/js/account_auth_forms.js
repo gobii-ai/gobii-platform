@@ -258,6 +258,66 @@
     window.turnstile.reset(widget);
   }
 
+  function buildTurnstileOptions(widget) {
+    const options = {};
+    if (widget.dataset.sitekey) {
+      options.sitekey = widget.dataset.sitekey;
+    }
+    if (widget.dataset.theme) {
+      options.theme = widget.dataset.theme;
+    }
+    if (widget.dataset.size) {
+      options.size = widget.dataset.size;
+    }
+    if (widget.dataset.action) {
+      options.action = widget.dataset.action;
+    }
+    if (widget.dataset.cdata) {
+      options.cData = widget.dataset.cdata;
+    }
+    if (widget.dataset.tabindex) {
+      options.tabindex = Number(widget.dataset.tabindex);
+    }
+    if (widget.dataset.callback && typeof window[widget.dataset.callback] === "function") {
+      options.callback = window[widget.dataset.callback];
+    }
+    if (widget.dataset.expiredCallback && typeof window[widget.dataset.expiredCallback] === "function") {
+      options["expired-callback"] = window[widget.dataset.expiredCallback];
+    }
+    if (widget.dataset.timeoutCallback && typeof window[widget.dataset.timeoutCallback] === "function") {
+      options["timeout-callback"] = window[widget.dataset.timeoutCallback];
+    }
+    if (widget.dataset.errorCallback && typeof window[widget.dataset.errorCallback] === "function") {
+      options["error-callback"] = window[widget.dataset.errorCallback];
+    }
+    return options;
+  }
+
+  function initTurnstiles(root, attempt) {
+    const authRoot = root instanceof Element ? root : null;
+    if (!authRoot) {
+      return;
+    }
+    const widgets = authRoot.querySelectorAll(".cf-turnstile");
+    if (!widgets.length) {
+      return;
+    }
+    if (!window.turnstile || typeof window.turnstile.render !== "function") {
+      if ((attempt || 0) >= 10) {
+        return;
+      }
+      window.setTimeout(() => initTurnstiles(authRoot, (attempt || 0) + 1), 200);
+      return;
+    }
+    widgets.forEach((widget) => {
+      if (widget.dataset.gobiiTurnstileRendered === "true") {
+        return;
+      }
+      window.turnstile.render(widget, buildTurnstileOptions(widget));
+      widget.dataset.gobiiTurnstileRendered = "true";
+    });
+  }
+
   function replaceModalContent(html) {
     if (window.GobiiCtaSignupModal && typeof window.GobiiCtaSignupModal.replaceContent === "function") {
       window.GobiiCtaSignupModal.replaceContent(html);
@@ -396,7 +456,7 @@
       submitPending: false,
     };
 
-    if (config.mode === "page" && !hasTurnstileToken(form) && form.querySelector(".cf-turnstile")) {
+    if (!hasTurnstileToken(form) && form.querySelector(".cf-turnstile")) {
       setTurnstileSubmitEnabled(form, false);
     }
 
@@ -457,6 +517,7 @@
 
   function init(root) {
     getAuthRoots(root).forEach((authRoot) => {
+      initTurnstiles(authRoot, 0);
       initEmailStartForm(authRoot);
       initSignupForm(authRoot);
       initLoginForm(authRoot);
