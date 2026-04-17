@@ -1259,6 +1259,11 @@ class PromptConfigAdmin(admin.ModelAdmin):
         "max_tool_call_history_limit",
         "ultra_tool_call_history_limit",
         "ultra_max_tool_call_history_limit",
+        "standard_skill_prompt_limit",
+        "premium_skill_prompt_limit",
+        "max_skill_prompt_limit",
+        "ultra_skill_prompt_limit",
+        "ultra_max_skill_prompt_limit",
         "internal_reasoning_history_limit",
         "standard_enabled_tool_limit",
         "premium_enabled_tool_limit",
@@ -1312,6 +1317,18 @@ class PromptConfigAdmin(admin.ModelAdmin):
                     "max_tool_call_history_limit",
                     "ultra_tool_call_history_limit",
                     "ultra_max_tool_call_history_limit",
+                )
+            },
+        ),
+        (
+            "Skill prompt limits",
+            {
+                "fields": (
+                    "standard_skill_prompt_limit",
+                    "premium_skill_prompt_limit",
+                    "max_skill_prompt_limit",
+                    "ultra_skill_prompt_limit",
+                    "ultra_max_skill_prompt_limit",
                 )
             },
         ),
