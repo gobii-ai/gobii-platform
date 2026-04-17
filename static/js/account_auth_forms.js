@@ -345,7 +345,18 @@
           "Accept": "application/json",
         },
       });
-      const payload = await response.json();
+      const responseType = (response.headers.get("content-type") || "").toLowerCase();
+      const payload = responseType.includes("application/json")
+        ? await response.json()
+        : null;
+
+      if (!response.ok && !(payload && payload.html)) {
+        throw new Error((payload && payload.error) || "Authentication request failed.");
+      }
+      if (!payload) {
+        throw new Error("Unexpected authentication response.");
+      }
+
       if (payload.location) {
         window.location.assign(payload.location);
         return;
