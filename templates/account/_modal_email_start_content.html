@@ -1,0 +1,83 @@
+{% load i18n socialaccount social_extras %}
+{% configured_social_auth_providers as social_providers %}
+<div
+  data-account-auth-root
+  data-auth-mode="modal"
+  data-auth-tab="email-start"
+  data-auth-next="{{ redirect_field_value|default:'' }}"
+  data-ga-measurement-id="{{ settings.GA_MEASUREMENT_ID|default_if_none:'' }}"
+  data-fpjs-enabled="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}true{% else %}false{% endif %}"
+  data-fpjs-loader-url="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}{% endif %}"
+  data-fpjs-behavior-url="{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|default_if_none:'' }}"
+  data-popup-complete-url="{{ auth_popup_complete_url }}"
+>
+  <div class="mb-4 flex justify-end">
+    <button
+      type="button"
+      class="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-slate-500 transition hover:bg-blue-50 hover:text-slate-900"
+      data-cta-signup-modal-close
+      aria-label="{% trans 'Close authentication dialog' %}"
+    >
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"></path>
+      </svg>
+    </button>
+  </div>
+  <div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-900">{% trans "Log in or sign up" %}</h2>
+    <p class="mt-2 text-sm text-slate-600">{% trans "Enter your email to sign in or create an account." %}</p>
+  </div>
+
+  {% if social_providers %}
+    {% trans "Continue" as social_action_text %}
+    {% include "account/_social_auth_buttons.html" with providers=social_providers surface="signup" action_text=social_action_text show_password_divider=False social_next_url=auth_popup_complete_url social_popup_mode=True %}
+    <div class="my-6 flex items-center text-xs text-gray-400 uppercase before:flex-1 before:border-t before:border-gray-200 before:me-6 after:flex-1 after:border-t after:border-gray-200 after:ms-6">
+      {% trans "or" %}
+    </div>
+  {% endif %}
+
+  <form
+    method="post"
+    action="{{ auth_modal_signup_url }}"
+    class="space-y-4"
+    data-auth-email-start-form
+  >
+    {% csrf_token %}
+    <input type="hidden" name="email_first" value="1" />
+    {% if redirect_field_value %}
+      <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}" />
+    {% endif %}
+    {% if email_start_form.non_field_errors %}
+      <div class="rounded-md border border-red-200 bg-red-50 p-3" role="alert">
+        <ul class="list-disc pl-5 space-y-1">
+          {% for error in email_start_form.non_field_errors %}
+            <li class="text-sm text-red-700">{{ error }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+    <div>
+      <label for="{{ email_start_form.email.id_for_label }}" class="block text-sm mb-1 font-medium text-gray-700">
+        {% trans "Email address" %}
+      </label>
+      <input
+        id="{{ email_start_form.email.id_for_label }}"
+        name="email"
+        type="email"
+        required
+        value="{{ email_start_form.email.value|default_if_none:'' }}"
+        class="block w-full rounded-lg border border-gray-300 px-4 py-2.5 shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 sm:text-sm{% if email_start_form.email.errors %} border-red-500{% endif %}"
+        autocomplete="email"
+      >
+      {% for error in email_start_form.email.errors %}
+        <p class="mt-1 text-sm text-red-600">{{ error }}</p>
+      {% endfor %}
+    </div>
+    <button
+      type="submit"
+      class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+    >
+      {% trans "Continue" %}
+    </button>
+  </form>
+</div>

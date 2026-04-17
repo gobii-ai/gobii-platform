@@ -12,26 +12,44 @@
   data-popup-complete-url="{% if auth_modal %}{{ auth_popup_complete_url }}{% endif %}"
 >
   {% if auth_modal %}
-    <div class="mb-6 flex items-center rounded-lg bg-blue-50 p-1">
+    <div class="mb-4 flex items-center justify-between gap-4">
+      {% if auth_email_locked %}
       <a
-        href="{{ auth_modal_signup_url }}"
+        href="{{ auth_modal_start_url }}"
         data-auth-modal-link
-        class="flex-1 rounded-md bg-white px-3 py-2 text-center text-sm font-semibold text-slate-900 shadow-sm"
+        class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
       >
-        {% trans "Sign up" %}
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        {% trans "Back" %}
       </a>
-      <a
-        href="{{ auth_modal_login_url }}"
-        data-auth-modal-link
-        class="flex-1 rounded-md px-3 py-2 text-center text-sm font-medium text-slate-600 transition hover:text-slate-900"
+      {% else %}
+      <span></span>
+      {% endif %}
+      <button
+        type="button"
+        class="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-slate-500 transition hover:bg-blue-50 hover:text-slate-900"
+        data-cta-signup-modal-close
+        aria-label="{% trans 'Close sign up dialog' %}"
       >
-        {% trans "Sign in" %}
-      </a>
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"></path>
+        </svg>
+      </button>
     </div>
-    <div class="text-center">
+    <div class="mb-6">
       <h2 class="text-2xl font-bold text-gray-900">{% trans "Create your account" %}</h2>
       <p class="mt-2 text-sm text-slate-600">{% trans "Create your account to continue." %}</p>
     </div>
+    {% if auth_email_locked and auth_prefilled_email %}
+    <div class="mb-6 rounded-lg bg-blue-50 px-4 py-3">
+      <div>
+        <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">{% trans "Email" %}</p>
+        <p class="mt-1 text-sm font-medium text-slate-900">{{ auth_prefilled_email }}</p>
+      </div>
+    </div>
+    {% endif %}
   {% else %}
     <div class="text-center">
       <h1 class="text-center text-2xl font-bold text-gray-900">{% trans "Sign up" %}</h1>
@@ -48,7 +66,7 @@
     </div>
   {% endif %}
 
-  {% if account_allow_social_signup %}
+  {% if account_allow_social_signup and not auth_modal %}
     {% trans "Sign up" as social_action_text %}
     {% trans "or" as social_divider_text %}
     {% include "account/_social_auth_buttons.html" with providers=social_providers surface="signup" action_text=social_action_text show_password_divider=account_allow_password_signup divider_text=social_divider_text social_next_url=auth_popup_complete_url social_popup_mode=auth_modal %}
@@ -66,24 +84,30 @@
     <input type="hidden" name="ufp" value="" data-auth-fpjs-visitor-field />
     <input type="hidden" name="ufpr" value="" data-auth-fpjs-request-field />
     <input type="hidden" name="uga" value="" data-auth-ga-client-field />
+    {% if auth_modal and auth_email_locked %}
+      <input type="hidden" name="email" value="{{ auth_prefilled_email }}">
+      <input type="hidden" name="lock_email" value="1">
+    {% endif %}
     {% if redirect_field_value %}
       <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
     {% endif %}
     {{ form.non_field_errors }}
 
     {% for field in form.visible_fields %}
-    {% if field.name != 'turnstile' %}
-    <div>
-      <label for="{{ field.id_for_label }}" class="block text-sm mb-1">{{ field.label }}</label>
-      <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
-             value="{{ field.value|default_if_none:'' }}"
-             class="block w-full rounded-lg border border-gray-200 px-4 py-2.5 focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-             {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
-      {% if field.errors %}
-        <p class="mt-1 text-sm text-red-600" id="{{ field.id_for_label }}-error">{{ field.errors|striptags }}</p>
+      {% if field.name != 'turnstile' %}
+        {% if not auth_modal or not auth_email_locked or field.name != 'email' %}
+        <div>
+          <label for="{{ field.id_for_label }}" class="block text-sm mb-1">{{ field.label }}</label>
+          <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
+                 value="{{ field.value|default_if_none:'' }}"
+                 class="block w-full rounded-lg border border-gray-200 px-4 py-2.5 focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                 {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
+          {% if field.errors %}
+            <p class="mt-1 text-sm text-red-600" id="{{ field.id_for_label }}-error">{{ field.errors|striptags }}</p>
+          {% endif %}
+        </div>
+        {% endif %}
       {% endif %}
-    </div>
-    {% endif %}
     {% endfor %}
 
     {% if settings.TURNSTILE_ENABLED and form.turnstile %}

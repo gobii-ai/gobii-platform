@@ -13,26 +13,44 @@
   data-popup-complete-url="{% if auth_modal %}{{ auth_popup_complete_url }}{% endif %}"
 >
   {% if auth_modal %}
-    <div class="mb-6 flex items-center rounded-lg bg-blue-50 p-1">
+    <div class="mb-4 flex items-center justify-between gap-4">
+      {% if auth_email_locked %}
       <a
-        href="{{ auth_modal_signup_url }}"
+        href="{{ auth_modal_start_url }}"
         data-auth-modal-link
-        class="flex-1 rounded-md px-3 py-2 text-center text-sm font-medium text-slate-600 transition hover:text-slate-900"
+        class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
       >
-        Sign up
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back
       </a>
-      <a
-        href="{{ auth_modal_login_url }}"
-        data-auth-modal-link
-        class="flex-1 rounded-md bg-white px-3 py-2 text-center text-sm font-semibold text-slate-900 shadow-sm"
+      {% else %}
+      <span></span>
+      {% endif %}
+      <button
+        type="button"
+        class="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full text-slate-500 transition hover:bg-blue-50 hover:text-slate-900"
+        data-cta-signup-modal-close
+        aria-label="Close sign in dialog"
       >
-        Sign in
-      </a>
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"></path>
+        </svg>
+      </button>
     </div>
-    <div class="text-center">
+    <div class="mb-6">
       <h2 class="text-2xl font-bold text-gray-900">Welcome back</h2>
       <p class="mt-2 text-sm text-slate-600">Sign in to continue.</p>
     </div>
+    {% if auth_email_locked and auth_prefilled_email %}
+    <div class="mb-6 rounded-lg bg-blue-50 px-4 py-3">
+      <div>
+        <p class="text-xs font-medium uppercase tracking-[0.08em] text-slate-500">Email</p>
+        <p class="mt-1 text-sm font-medium text-slate-900">{{ auth_prefilled_email }}</p>
+      </div>
+    </div>
+    {% endif %}
   {% else %}
     <h1 class="text-center text-2xl font-bold text-gray-900">Sign in</h1>
     {% if account_allow_password_signup or account_allow_social_signup %}
@@ -49,8 +67,10 @@
     {% endif %}
   {% endif %}
 
-  {% if account_allow_social_login or account_allow_social_signup %}
-    {% include "account/_social_auth_buttons.html" with providers=social_providers surface="login" action_text="Sign in" show_password_divider=account_allow_password_login divider_text="or" social_next_url=auth_popup_complete_url social_popup_mode=auth_modal %}
+  {% if not auth_modal %}
+    {% if account_allow_social_login or account_allow_social_signup %}
+      {% include "account/_social_auth_buttons.html" with providers=social_providers surface="login" action_text="Sign in" show_password_divider=account_allow_password_login divider_text="or" social_next_url=auth_popup_complete_url social_popup_mode=auth_modal %}
+    {% endif %}
   {% endif %}
 
   {% if account_allow_password_login %}
@@ -62,6 +82,10 @@
     {% if auth_modal %}data-auth-modal-form{% endif %}
   >
     {% csrf_token %}
+    {% if auth_modal and auth_email_locked %}
+      <input type="hidden" name="login" value="{{ auth_prefilled_email }}" />
+      <input type="hidden" name="lock_email" value="1" />
+    {% endif %}
     {% if redirect_field_value %}
       <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}" />
     {% endif %}
@@ -76,6 +100,7 @@
     </div>
     {% endif %}
 
+    {% if not auth_modal or not auth_email_locked %}
     <div>
       <label for="id_login" class="block text-sm mb-1 font-medium text-gray-700">Email address</label>
       <input id="id_login" name="login" type="email" required
@@ -89,6 +114,7 @@
         </div>
       {% endif %}
     </div>
+    {% endif %}
 
     <div>
       <div class="flex justify-between items-center">

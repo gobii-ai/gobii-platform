@@ -2935,7 +2935,7 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, "bg-white max-w-md")
 
     @tag("batch_pages")
-    def test_signup_modal_renders_tabs_and_popup_social_urls(self):
+    def test_signup_modal_renders_email_start_and_popup_social_urls(self):
         for provider in ("facebook", "google"):
             self._create_social_app(provider)
 
@@ -2944,8 +2944,9 @@ class AuthLinkTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-auth-mode="modal"')
-        self.assertContains(response, f'href="{reverse("account_login_modal")}?next=%2Fapp%2Fagents%2Fnew%3Fspawn%3D1"')
+        self.assertContains(response, 'data-auth-email-start-form')
         self.assertContains(response, f'action="{reverse("account_signup_modal")}?next=%2Fapp%2Fagents%2Fnew%3Fspawn%3D1"')
+        self.assertContains(response, "Log in or sign up")
 
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
         buttons = soup.select("a[data-social-provider]")
@@ -2957,6 +2958,56 @@ class AuthLinkTests(TestCase):
             popup_next = params.get("next", [None])[0]
             self.assertIsNotNone(popup_next)
             self.assertEqual(urlparse(popup_next).path, reverse("account_auth_popup_complete"))
+
+    @tag("batch_pages")
+    def test_signup_modal_email_continue_routes_existing_account_to_login(self):
+        user = get_user_model().objects.create_user(
+            username="email-first@example.com",
+            email="email-first@example.com",
+            password="password123",
+        )
+        response = self.client.post(
+            reverse("account_signup_modal"),
+            {
+                "email_first": "1",
+                "email": user.email,
+                "next": "/pricing/",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_login_modal"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("email"), [user.email])
+        self.assertEqual(params.get("lock_email"), ["1"])
+        self.assertEqual(params.get("next"), ["/pricing/"])
+
+    @tag("batch_pages")
+    def test_signup_modal_email_continue_routes_new_email_to_signup_password_step(self):
+        response = self.client.post(
+            reverse("account_signup_modal"),
+            {
+                "email_first": "1",
+                "email": "new-user@example.com",
+                "next": "/pricing/",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            HTTP_ACCEPT="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_signup_modal"))
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("email"), ["new-user@example.com"])
+        self.assertEqual(params.get("lock_email"), ["1"])
+        self.assertEqual(params.get("step"), ["password"])
+        self.assertEqual(params.get("next"), ["/pricing/"])
 
     @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)
