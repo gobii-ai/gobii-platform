@@ -538,6 +538,22 @@
     });
   }
 
+  function bindModalCloseButtons(authRoot) {
+    authRoot.querySelectorAll("[data-cta-signup-modal-close]").forEach((button) => {
+      if (button.dataset.authModalCloseInitialized === "true") {
+        return;
+      }
+      button.dataset.authModalCloseInitialized = "true";
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (window.GobiiCtaSignupModal && typeof window.GobiiCtaSignupModal.close === "function") {
+          window.GobiiCtaSignupModal.close();
+        }
+      });
+    });
+  }
+
   function init(root) {
     getAuthRoots(root).forEach((authRoot) => {
       initTurnstiles(authRoot, 0);
@@ -546,6 +562,7 @@
       initLoginForm(authRoot);
       bindSocialLinks(authRoot);
       bindModalNavLinks(authRoot);
+      bindModalCloseButtons(authRoot);
     });
   }
 
