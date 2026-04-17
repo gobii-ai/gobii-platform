@@ -289,15 +289,26 @@
         window.location.assign(payload.location);
         return;
       }
+      if (payload.auth_url) {
+        if (window.GobiiCtaSignupModal && typeof window.GobiiCtaSignupModal.open === "function") {
+          window.GobiiCtaSignupModal.open(payload.auth_url);
+          return;
+        }
+        window.location.assign(payload.auth_url);
+        return;
+      }
       if (payload.html) {
         replaceModalContent(payload.html);
         return;
       }
       throw new Error("Unexpected authentication response.");
     } catch (error) {
-      const fallbackMessage = authRoot && authRoot.dataset.authTab === "signup"
-        ? "Unable to complete sign up right now."
-        : "Unable to complete sign in right now.";
+      let fallbackMessage = "Unable to continue right now.";
+      if (authRoot && authRoot.dataset.authTab === "signup") {
+        fallbackMessage = "Unable to complete sign up right now.";
+      } else if (authRoot && authRoot.dataset.authTab === "login") {
+        fallbackMessage = "Unable to complete sign in right now.";
+      }
       showModalError((error && error.message) || fallbackMessage);
     }
   }
@@ -346,6 +357,28 @@
       controller.readyPromise.finally(() => {
         form.dataset.submitting = "true";
         submitModalForm(form);
+      });
+    });
+  }
+
+  function initEmailStartForm(authRoot) {
+    const form = authRoot.querySelector("[data-auth-email-start-form]");
+    if (!form || form.dataset.authInitialized === "true") {
+      return;
+    }
+    form.dataset.authInitialized = "true";
+    const submitButtons = getSubmitButtons(form);
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (form.dataset.submitting === "true") {
+        return;
+      }
+      form.dataset.submitting = "true";
+      setButtonsDisabled(submitButtons, true);
+      submitModalForm(form).finally(() => {
+        form.dataset.submitting = "false";
+        setButtonsDisabled(submitButtons, false);
       });
     });
   }
@@ -424,6 +457,7 @@
 
   function init(root) {
     getAuthRoots(root).forEach((authRoot) => {
+      initEmailStartForm(authRoot);
       initSignupForm(authRoot);
       initLoginForm(authRoot);
       bindSocialLinks(authRoot);

@@ -6,22 +6,11 @@
 {% block modal_root_class %}fixed inset-0 z-[120] overflow-y-auto{% endblock %}
 {% block modal_size_class %}sm:max-w-lg{% endblock %}
 
-{% block modal_header %}
-  <button
-    type="button"
-    class="absolute right-4 top-4 inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-500 transition hover:bg-blue-50 hover:text-slate-900"
-    data-cta-signup-modal-close
-    @click="showModal = false"
-    aria-label="Close sign up dialog"
-  >
-    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"></path>
-    </svg>
-  </button>
-{% endblock %}
+{% block modal_header %}{% endblock %}
 
 {% block modal_icon_area %}{% endblock %}
-{% block modal_content_margin %}{% endblock %}
+{% block modal_body_title %}{% endblock %}
+{% block modal_content_margin %}mt-0{% endblock %}
 {% block modal_footer_bg %}hidden{% endblock %}
 {% block modal_footer %}{% endblock %}
 
