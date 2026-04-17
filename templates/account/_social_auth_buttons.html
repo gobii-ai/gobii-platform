@@ -3,7 +3,11 @@
   {% providers_media_js %}
   <div class="mt-6 space-y-3">
     {% for provider in providers %}
-      {% provider_login_url provider.id as social_login_url %}
+      {% if social_next_url %}
+        {% provider_login_url provider.id next=social_next_url as social_login_url %}
+      {% else %}
+        {% provider_login_url provider.id as social_login_url %}
+      {% endif %}
       <a href="{{ social_login_url }}"
          aria-label="{{ action_text }} with {{ provider.label }}"
          data-social-provider="{{ provider.id }}"
@@ -13,6 +17,8 @@
          data-analytics-intent="social_auth"
          data-analytics-auth-provider="{{ provider.id }}"
          data-analytics-auth-surface="{{ surface }}"
+         {% if social_popup_mode %}data-auth-social-popup="true"{% endif %}
+         {% if social_next_url %}data-auth-popup-complete-url="{{ social_next_url }}"{% endif %}
          {% if surface == "login" %}data-social-auth-link{% else %}data-social-signup-link{% endif %}
          class="w-full inline-flex justify-center items-center gap-x-2 rounded-lg border border-gray-200 bg-white text-gray-800 text-sm font-medium py-3 shadow-2xs hover:bg-gray-50">
         {% if provider.id == "linkedin" %}

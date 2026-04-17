@@ -15,9 +15,10 @@
     }"
   x-on:keydown.escape.window="showModal = false; actionUrl = '';"
   x-cloak
-  class="fixed inset-0 z-50 overflow-y-auto"
+  class="{% block modal_root_class %}fixed inset-0 z-50 overflow-y-auto{% endblock %}"
   aria-labelledby="modal-title"
   role="dialog"
+  x-bind:aria-hidden="showModal ? 'false' : 'true'"
   aria-modal="true"
 >
   <div class="flex min-h-full items-start sm:items-center justify-center p-4 pb-20 text-center sm:p-6 sm:pb-6 sm:text-left">

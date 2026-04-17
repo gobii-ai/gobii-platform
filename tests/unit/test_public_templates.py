@@ -268,6 +268,50 @@ class PublicTemplateViewsTests(TestCase):
             TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
 
+    @tag("batch_public_templates")
+    def test_public_template_hire_modal_prep_returns_modal_signup_url_and_preserves_state(self):
+        user = get_user_model().objects.create_user(username="owner4b", email="owner4b@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="harbor-signal-modal")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-signup-modal",
+            public_profile=profile,
+            slug="sales-desk-modal",
+            display_name="Sales Desk",
+            tagline="Qualify inbound leads",
+            description="Screens leads and drafts follow-ups.",
+            charter="Qualify leads and draft next steps.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Sales",
+        )
+
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.post(
+                reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+                data={
+                    "source_page": "public_template_detail",
+                    "trial_onboarding": "1",
+                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                    "auth_modal": "1",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        parsed = urlparse(payload["auth_url"])
+        self.assertEqual(parsed.path, reverse("account_signup_modal"))
+        next_url = parse_qs(parsed.query).get("next", [None])[0]
+        self.assertIsNotNone(next_url)
+        self.assertEqual(urlparse(next_url).path, "/app/agents/new")
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), template.charter)
+        self.assertEqual(
+            session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+
 
 class TemplateServiceDbTests(TestCase):
     @tag("batch_public_templates")

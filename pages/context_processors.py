@@ -6,10 +6,12 @@ from agents.services import AgentService
 from django.conf import settings as django_settings
 from django.core.cache import cache
 from django.http import HttpRequest
+from django.urls import reverse
 from django.utils import timezone
 from api.agent.core.llm_config import is_llm_bootstrap_required
 from config import settings
 from config.plans import AGENTS_UNLIMITED
+from constants.feature_flags import CTA_SIGNUP_MODAL
 from constants.plans import PlanNames
 from pages.account_info_cache import (
     account_info_cache_key,
@@ -31,6 +33,7 @@ from util.subscription_helper import (
 )
 from util.tool_costs import get_most_expensive_tool_cost
 from util.constants.task_constants import TASKS_UNLIMITED
+from util.waffle_flags import is_waffle_flag_active
 
 
 def _enum_to_dict(enum_cls):
@@ -251,4 +254,18 @@ def canonical_url(request: HttpRequest):
         canonical = request.build_absolute_uri(getattr(request, "path", "/"))
     return {
         'canonical_url': canonical,
+    }
+
+
+def cta_signup_modal(request: HttpRequest):
+    flag_active = is_waffle_flag_active(CTA_SIGNUP_MODAL, request, default=False)
+    enabled = flag_active and not request.user.is_authenticated
+    return {
+        "cta_signup_modal_config": {
+            "enabled": enabled,
+            "flag_active": flag_active,
+            "signup_url": reverse("account_signup_modal"),
+            "login_url": reverse("account_login_modal"),
+            "popup_complete_url": reverse("account_auth_popup_complete"),
+        }
     }

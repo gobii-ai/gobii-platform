@@ -24,15 +24,27 @@
                     </p>
                     <div class="mt-5 sm:mt-8 sm:flex sm:justify-center lg:justify-start">
                         <div class="rounded-md shadow">
-                            <a
-                                href="{% url 'pages:home_agent_spawn' %}"
-                                class="w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 md:py-4 md:text-lg md:px-10"
+                            <form
+                                method="post"
+                                action="{% url 'pages:home_agent_spawn' %}"
                                 data-analytics-cta-id="solutions_generic_hero_get_started"
                                 data-analytics-placement="hero"
                                 data-analytics-intent="spawn_agent"
                             >
-                                Get started
-                            </a>
+                                {% csrf_token %}
+                                <input type="hidden" name="charter" value="">
+                                <input type="hidden" name="source_page" value="solutions_generic_hero">
+                                {% if settings.GOBII_PROPRIETARY_MODE %}
+                                <input type="hidden" name="trial_onboarding" value="1">
+                                <input type="hidden" name="trial_onboarding_target" value="agent_ui">
+                                {% endif %}
+                                <button
+                                    type="submit"
+                                    class="w-full flex items-center justify-center px-8 py-3 border border-transparent text-base font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 md:py-4 md:text-lg md:px-10"
+                                >
+                                    Get started
+                                </button>
+                            </form>
                         </div>
                         {% if settings.GOBII_PROPRIETARY_MODE %}
                         <div class="mt-3 sm:mt-0 sm:ml-3">

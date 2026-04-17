@@ -15,6 +15,7 @@ from django.http import HttpResponseRedirect
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
 from django.db import DatabaseError
@@ -73,7 +74,7 @@ from util.trial_eligibility import (
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
-from constants.feature_flags import CTA_SIGNUP_FIRST
+from constants.feature_flags import CTA_SIGNUP_FIRST, CTA_SIGNUP_MODAL
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
@@ -277,6 +278,43 @@ def _cta_auth_url_with_utms(request) -> str:
     if is_waffle_flag_active(CTA_SIGNUP_FIRST, request, default=False):
         return _auth_url_with_utms(reverse("account_signup"), request)
     return _auth_url_with_utms(resolve_url(settings.LOGIN_URL), request)
+
+
+def _is_cta_signup_modal_enabled(request) -> bool:
+    return is_waffle_flag_active(CTA_SIGNUP_MODAL, request, default=False)
+
+
+def _is_cta_auth_modal_request(request) -> bool:
+    return (
+        not request.user.is_authenticated
+        and _is_cta_signup_modal_enabled(request)
+        and is_truthy_flag(request.POST.get("auth_modal"))
+    )
+
+
+def _build_cta_signup_modal_url(*, next_url: str) -> str:
+    return append_query_params(
+        reverse("account_signup_modal"),
+        {"next": next_url},
+    )
+
+
+def _build_cta_signup_modal_response(*, next_url: str) -> JsonResponse:
+    return JsonResponse(
+        {
+            "auth_url": _build_cta_signup_modal_url(next_url=next_url),
+            "default_tab": "signup",
+        }
+    )
+
+
+def _build_anonymous_cta_auth_response(request, *, next_url: str):
+    if _is_cta_auth_modal_request(request):
+        return _build_cta_signup_modal_response(next_url=next_url)
+    return redirect_to_login(
+        next=next_url,
+        login_url=_cta_auth_url_with_utms(request),
+    )
 
 
 def _track_web_event_for_request(
@@ -1000,7 +1038,6 @@ class HomeAgentSpawnView(TemplateView):
 
     def post(self, request, *args, **kwargs):
         from console.forms import PersistentAgentCharterForm
-        from django.contrib.auth.views import redirect_to_login
         
         form = PersistentAgentCharterForm(request.POST)
         selected_pipedream_app_slugs = normalize_app_slugs(
@@ -1086,9 +1123,9 @@ class HomeAgentSpawnView(TemplateView):
                 f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
                 app_redirect_params,
             )
-            response = redirect_to_login(
-                next=app_next_url,
-                login_url=_cta_auth_url_with_utms(request),
+            response = _build_anonymous_cta_auth_response(
+                request,
+                next_url=app_next_url,
             )
             charter_data = _build_oauth_charter_cookie_payload(
                 request,
@@ -1255,8 +1292,6 @@ class PretrainedWorkerHireView(View):
             properties=analytics_properties,
         )
 
-        from django.contrib.auth.views import redirect_to_login
-
         app_next_url = next_url
         if flow != "pro":
             if trial_onboarding_requested:
@@ -1273,9 +1308,9 @@ class PretrainedWorkerHireView(View):
                 app_params,
             )
 
-        response = redirect_to_login(
-            next=app_next_url,
-            login_url=_cta_auth_url_with_utms(request),
+        response = _build_anonymous_cta_auth_response(
+            request,
+            next_url=app_next_url,
         )
 
         # Also store charter in a signed cookie for OAuth flows where session
@@ -1426,8 +1461,6 @@ class PublicTemplateHireView(View):
             properties=analytics_properties,
         )
 
-        from django.contrib.auth.views import redirect_to_login
-
         app_next_url = next_url
         if flow != "pro":
             if trial_onboarding_requested:
@@ -1444,9 +1477,9 @@ class PublicTemplateHireView(View):
                 app_params,
             )
 
-        response = redirect_to_login(
-            next=app_next_url,
-            login_url=_cta_auth_url_with_utms(request),
+        response = _build_anonymous_cta_auth_response(
+            request,
+            next_url=app_next_url,
         )
 
         charter_data = _build_oauth_charter_cookie_payload(
