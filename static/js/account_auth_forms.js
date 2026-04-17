@@ -2,6 +2,7 @@
   const POPUP_STATE_PREFIX = "gobii:cta_auth_popup_state:";
   const POPUP_COMPLETE_KEY = "gobii:cta_auth_popup_complete";
   const FPJS_TIMEOUT_MS = 3000;
+  const TURNSTILE_RENDER_RETRY_LIMIT = 25;
   let activeLoginForm = null;
 
   function getAuthRoots(root) {
@@ -303,7 +304,7 @@
       return;
     }
     if (!window.turnstile || typeof window.turnstile.render !== "function") {
-      if ((attempt || 0) >= 10) {
+      if ((attempt || 0) >= TURNSTILE_RENDER_RETRY_LIMIT) {
         return;
       }
       window.setTimeout(() => initTurnstiles(authRoot, (attempt || 0) + 1), 200);
