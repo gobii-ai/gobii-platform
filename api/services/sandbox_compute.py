@@ -1626,6 +1626,9 @@ class SandboxComputeService:
                 pass
             except OSError as exc:
                 return {"status": "error", "message": f"Failed to remove synced SQLite DB: {exc}"}
+            workspace_sync_result = self._apply_workspace_push_response(agent, session, response)
+            if workspace_sync_result.get("status") != "ok":
+                return workspace_sync_result
             return {"status": "ok", "sqlite_synced": True, "deleted": True}
 
         content = _decode_sync_change_content(sqlite_change)
