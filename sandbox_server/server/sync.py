@@ -183,9 +183,10 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             if not path.is_file():
                 continue
-            mtime = stat.st_mtime
-            if since is not None and mtime <= since:
-                continue
+            # Requested internal paths are control-plane state, not ordinary
+            # workspace files, so include them even when `since` would filter
+            # out unchanged exports. Custom tool completion relies on this for
+            # the shared SQLite DB.
             try:
                 content = path.read_bytes()
             except OSError:
