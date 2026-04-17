@@ -40,6 +40,7 @@ from api.agent.core.prompt_context import (
     get_agent_tools,
     get_prompt_token_budget,
     message_history_limit,
+    skill_prompt_limit,
     tool_call_history_limit,
 )
 from api.admin import PersistentAgentPromptArchiveAdmin, PromptConfigAdmin, ToolConfigAdmin
@@ -65,6 +66,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentConversationParticipant,
     PersistentAgentMessage,
+    PersistentAgentSkill,
     PersistentAgentStep,
     PersistentAgentCronTrigger,
     PersistentAgentSecret,
@@ -135,6 +137,66 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(self._admin_storage_patch.stop)
         self.addCleanup(self._print_patch.stop)
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
+
+    def test_prompt_uses_configured_skill_prompt_limit(self):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.standard_skill_prompt_limit = 2
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        now = timezone.now()
+        for idx in range(4):
+            skill = PersistentAgentSkill.objects.create(
+                agent=self.agent,
+                name=f"prompt-skill-{idx}",
+                description=f"description-{idx}",
+                version=1,
+                tools=["sqlite_batch"],
+                instructions=f"instructions for skill {idx}",
+            )
+            PersistentAgentSkill.objects.filter(id=skill.id).update(updated_at=now + timedelta(minutes=idx))
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+             patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn("<agent_skills>", content)
+        self.assertIn("Skill: prompt-skill-3 (v1)", content)
+        self.assertIn("Skill: prompt-skill-2 (v1)", content)
+        self.assertNotIn("Skill: prompt-skill-1 (v1)", content)
+        self.assertNotIn("Skill: prompt-skill-0 (v1)", content)
+
+    def test_prompt_omits_skill_section_when_skill_prompt_limit_is_zero(self):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.standard_skill_prompt_limit = 0
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="hidden-skill",
+            description="Should not appear in prompt context.",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="This should stay out of the prompt.",
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+             patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertNotIn("<agent_skills>", content)
+        self.assertNotIn("Skill: hidden-skill (v1)", content)
 
     def _build_org_agent_web_interaction(self, *, org_slug: str, member_email: str, is_org_member: bool):
         org = Organization.objects.create(
@@ -3050,6 +3112,9 @@ class PromptConfigFunctionTests(TestCase):
         config.standard_tool_call_history_limit = 4
         config.premium_tool_call_history_limit = 8
         config.max_tool_call_history_limit = 10
+        config.standard_skill_prompt_limit = 2
+        config.premium_skill_prompt_limit = 4
+        config.max_skill_prompt_limit = 6
         config.save()
         invalidate_prompt_settings_cache()
         return config
@@ -3061,16 +3126,29 @@ class PromptConfigFunctionTests(TestCase):
             self.assertEqual(get_prompt_token_budget(self.agent), config.standard_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.standard_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.standard_tool_call_history_limit)
+            self.assertEqual(skill_prompt_limit(self.agent), config.standard_skill_prompt_limit)
 
         with patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.PREMIUM):
             self.assertEqual(get_prompt_token_budget(self.agent), config.premium_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.premium_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.premium_tool_call_history_limit)
+            self.assertEqual(skill_prompt_limit(self.agent), config.premium_skill_prompt_limit)
 
         with patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.MAX):
             self.assertEqual(get_prompt_token_budget(self.agent), config.max_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.max_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.max_tool_call_history_limit)
+            self.assertEqual(skill_prompt_limit(self.agent), config.max_skill_prompt_limit)
+
+    def test_skill_prompt_limit_defaults_to_three(self):
+        invalidate_prompt_settings_cache()
+        settings = get_prompt_settings()
+
+        self.assertEqual(settings.standard_skill_prompt_limit, 3)
+        self.assertEqual(settings.premium_skill_prompt_limit, 3)
+        self.assertEqual(settings.max_skill_prompt_limit, 3)
+        self.assertEqual(settings.ultra_skill_prompt_limit, 3)
+        self.assertEqual(settings.ultra_max_skill_prompt_limit, 3)
 
     def test_internal_reasoning_history_limit_setting(self):
         invalidate_prompt_settings_cache()
@@ -3095,6 +3173,7 @@ class PromptConfigFunctionTests(TestCase):
         admin_view = PromptConfigAdmin(PromptConfig, django_admin.site)
 
         self.assertIn("internal_reasoning_history_limit", admin_view.list_display)
+        self.assertIn("standard_skill_prompt_limit", admin_view.list_display)
         self.assertNotIn("browser_task_unified_history_limit", admin_view.list_display)
 
         unified_fields = next(
@@ -3104,6 +3183,14 @@ class PromptConfigFunctionTests(TestCase):
         )
         self.assertIn("internal_reasoning_history_limit", unified_fields)
         self.assertNotIn("browser_task_unified_history_limit", unified_fields)
+
+        skill_fields = next(
+            fields["fields"]
+            for title, fields in admin_view.fieldsets
+            if title == "Skill prompt limits"
+        )
+        self.assertIn("standard_skill_prompt_limit", skill_fields)
+        self.assertIn("ultra_max_skill_prompt_limit", skill_fields)
 
     def test_tool_config_admin_exposes_tool_search_auto_enable_apps(self):
         admin_view = ToolConfigAdmin(ToolConfig, django_admin.site)
