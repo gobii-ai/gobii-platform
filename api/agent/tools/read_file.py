@@ -24,6 +24,16 @@ ALLOWED_RESPONSE_FORMATS = {RESPONSE_FORMAT_MARKDOWN, RESPONSE_FORMAT_RAW_TEXT}
 TEMP_FILE_PREFIX = "agent_read_"
 BUFFER_SIZE = 64 * 1024
 DISALLOWED_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+MARKITDOWN_OCR_PROMPT = (
+    "Return exactly two labeled sections.\n\n"
+    "Description:\n"
+    "Write a detailed but concise description of the image's relevant visual content, layout, and notable "
+    "objects. Do not transcribe text in this section unless the text itself is the main subject of the image.\n\n"
+    "Visible text:\n"
+    "Extract all visible text verbatim, preserving reading order and line breaks as closely as possible. "
+    "Do not summarize, paraphrase, correct, or normalize the text. Use [illegible] for unreadable text. "
+    "If there is no readable text, write: none."
+)
 
 RAW_TEXT_HARD_BLOCKED_EXTENSIONS = {
     ".pdf",
@@ -312,7 +322,7 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
     markdown = ""
     try:
         llm_config = get_file_handler_llm_config()
-        md_kwargs: Dict[str, Any] = {}
+        md_kwargs: Dict[str, Any] = {"llm_prompt": MARKITDOWN_OCR_PROMPT}
         if llm_config and llm_config.supports_vision:
             md_kwargs["llm_client"] = MarkItDownLitellmClient(llm_config.model, llm_config.params)
             md_kwargs["llm_model"] = llm_config.model
