@@ -152,8 +152,12 @@
 
       const modalLink = target.closest("[data-auth-modal-link]");
       if (modalLink) {
+        const modalUrl = modalLink.dataset.authModalUrl || modalLink.getAttribute("href");
+        if (!modalUrl) {
+          return;
+        }
         event.preventDefault();
-        loadAuthFragment(modalLink.href);
+        loadAuthFragment(modalUrl);
         return;
       }
 

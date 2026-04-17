@@ -3043,6 +3043,10 @@ class AuthLinkTests(TestCase):
         self.assertContains(login_response, "cf-turnstile")
         self.assertContains(login_response, 'autocomplete="username"')
         self.assertContains(login_response, 'autocomplete="current-password"')
+        self.assertContains(
+            login_response,
+            f'data-auth-modal-url="{reverse("account_signup_modal")}?next=%2Fpricing%2F&amp;email=saved%40example.com"',
+        )
 
         signup_response = self.client.get(
             reverse("account_signup_modal"),
@@ -3052,6 +3056,10 @@ class AuthLinkTests(TestCase):
         self.assertContains(signup_response, "cf-turnstile")
         self.assertContains(signup_response, 'autocomplete="email"')
         self.assertContains(signup_response, 'autocomplete="new-password"')
+        self.assertContains(
+            signup_response,
+            f'data-auth-modal-url="{reverse("account_signup_modal")}?next=%2Fpricing%2F&amp;email=saved%40example.com"',
+        )
 
     @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)

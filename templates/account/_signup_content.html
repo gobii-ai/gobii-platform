@@ -14,16 +14,17 @@
   {% if auth_modal %}
     <div class="mb-4 flex items-center justify-between gap-4">
       {% if auth_email_locked %}
-      <a
-        href="{{ auth_modal_start_url }}"
+      <button
+        type="button"
         data-auth-modal-link
+        data-auth-modal-url="{{ auth_modal_start_url }}"
         class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
       >
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
         </svg>
         {% trans "Back" %}
-      </a>
+      </button>
       {% else %}
       <span></span>
       {% endif %}
