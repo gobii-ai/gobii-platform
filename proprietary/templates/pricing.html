@@ -121,6 +121,10 @@
               data-plan-code="{{ plan.code }}"
               data-plan-name="{{ plan.name }}"
               data-cta-signup-modal="pricing-plan"
+              data-analytics-cta-id="pricing_{{ plan.code|lower }}_plan"
+              data-analytics-placement="pricing_grid"
+              data-analytics-intent="select_plan"
+              data-analytics-label="{{ plan.cta }}"
               class="plan-cta inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg
               {% if plan.highlight or plan.name == 'Pro' %}
               bg-blue-600 text-white hover:bg-blue-700 shadow-md
