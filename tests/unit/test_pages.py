@@ -3041,6 +3041,7 @@ class AuthLinkTests(TestCase):
         )
         self.assertEqual(login_response.status_code, 200)
         self.assertContains(login_response, "cf-turnstile")
+        self.assertNotContains(login_response, "turnstile/v0/api.js")
         self.assertContains(login_response, 'autocomplete="username"')
         self.assertContains(login_response, 'autocomplete="current-password"')
         self.assertContains(
@@ -3054,6 +3055,7 @@ class AuthLinkTests(TestCase):
         )
         self.assertEqual(signup_response.status_code, 200)
         self.assertContains(signup_response, "cf-turnstile")
+        self.assertNotContains(signup_response, "turnstile/v0/api.js")
         self.assertContains(signup_response, 'autocomplete="email"')
         self.assertContains(signup_response, 'autocomplete="new-password"')
         self.assertContains(
@@ -3158,10 +3160,29 @@ class LoginTurnstilePageTests(TestCase):
         self.assertContains(response, 'disabled aria-disabled="true"')
         self.assertContains(response, "data-turnstile-status")
         self.assertContains(response, "js/account_auth_forms.js")
+        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+        self.assertEqual(response.content.decode("utf-8").count("turnstile/v0/api.js"), 1)
         self.assertContains(response, 'data-expired-callback="gobiiLoginTurnstileExpired"')
         self.assertContains(response, 'data-timeout-callback="gobiiLoginTurnstileExpired"')
         self.assertContains(response, 'data-error-callback="gobiiLoginTurnstileError"')
         self.assertContains(response, 'data-callback="gobiiLoginTurnstileSuccess"')
+
+    @tag("batch_pages")
+    @modify_settings(INSTALLED_APPS={"append": "turnstile"})
+    @override_settings(
+        TURNSTILE_ENABLED=True,
+        ACCOUNT_FORMS={
+            "signup": "turnstile_signup.SignupFormWithTurnstile",
+            "login": "turnstile_signup.LoginFormWithTurnstile",
+        },
+    )
+    def test_signup_page_uses_single_explicit_turnstile_api_script(self):
+        response = self.client.get(reverse("account_signup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "cf-turnstile")
+        self.assertContains(response, "turnstile/v0/api.js?render=explicit")
+        self.assertEqual(response.content.decode("utf-8").count("turnstile/v0/api.js"), 1)
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):
     @tag("batch_pages")
