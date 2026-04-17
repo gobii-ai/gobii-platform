@@ -5,7 +5,12 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
 from api.agent.files.filespace_service import write_bytes_to_dir
-from api.agent.tools.read_file import execute_read_file, get_read_file_tool
+from api.agent.tools.read_file import (
+    MARKITDOWN_OCR_PROMPT,
+    MarkItDownLitellmClient,
+    execute_read_file,
+    get_read_file_tool,
+)
 from api.models import BrowserUseAgent, PersistentAgent
 
 
@@ -45,6 +50,14 @@ class ReadFileToolTests(TestCase):
         self.assertIn("defaults to", properties["response_format"]["description"].lower())
         self.assertIn("pdf", tool["function"]["description"].lower())
 
+    def test_markitdown_prompt_requests_description_and_verbatim_text(self):
+        self.assertIn("return exactly two labeled sections", MARKITDOWN_OCR_PROMPT.lower())
+        self.assertIn("description:", MARKITDOWN_OCR_PROMPT.lower())
+        self.assertIn("visible text:", MARKITDOWN_OCR_PROMPT.lower())
+        self.assertIn("detailed but concise description", MARKITDOWN_OCR_PROMPT.lower())
+        self.assertIn("visible text verbatim", MARKITDOWN_OCR_PROMPT.lower())
+        self.assertIn("reading order", MARKITDOWN_OCR_PROMPT.lower())
+
     @patch("api.agent.tools.read_file.MarkItDown")
     def test_default_response_format_uses_raw_text_for_plain_text(self, mock_markitdown):
         self._write_file(path="/exports/note.txt", content=b"hello world\n", mime_type="text/plain")
@@ -57,8 +70,13 @@ class ReadFileToolTests(TestCase):
         self.assertNotIn("markdown", result)
         mock_markitdown.assert_not_called()
 
+    @patch("api.agent.tools.read_file.get_file_handler_llm_config", return_value=None)
     @patch("api.agent.tools.read_file.MarkItDown")
-    def test_default_response_format_uses_markdown_for_pdf(self, mock_markitdown):
+    def test_default_response_format_uses_markdown_for_pdf_without_vision_llm(
+        self,
+        mock_markitdown,
+        mock_get_file_handler_llm_config,
+    ):
         self._write_file(path="/exports/report.pdf", content=b"%PDF-1.4 fake", mime_type="application/pdf")
         mock_markitdown.return_value.convert.return_value = SimpleNamespace(markdown="## Converted")
 
@@ -69,6 +87,33 @@ class ReadFileToolTests(TestCase):
         self.assertEqual(result.get("markdown"), "## Converted")
         self.assertNotIn("text", result)
         mock_markitdown.assert_called_once()
+        self.assertEqual(mock_markitdown.call_args.kwargs, {})
+
+    @patch("api.agent.tools.read_file.get_file_handler_llm_config")
+    @patch("api.agent.tools.read_file.MarkItDown")
+    def test_markdown_conversion_passes_ocr_prompt_to_vision_llm(
+        self,
+        mock_markitdown,
+        mock_get_file_handler_llm_config,
+    ):
+        self._write_file(path="/exports/report.pdf", content=b"%PDF-1.4 fake", mime_type="application/pdf")
+        mock_get_file_handler_llm_config.return_value = SimpleNamespace(
+            model="openai/gpt-4.1-mini",
+            params={"api_key": "test-key"},
+            supports_vision=True,
+        )
+        mock_markitdown.return_value.convert.return_value = SimpleNamespace(markdown="## Converted")
+
+        result = execute_read_file(self.agent, {"path": "/exports/report.pdf"})
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("format"), "markdown")
+        self.assertEqual(result.get("markdown"), "## Converted")
+        mock_markitdown.assert_called_once()
+        kwargs = mock_markitdown.call_args.kwargs
+        self.assertEqual(kwargs["llm_prompt"], MARKITDOWN_OCR_PROMPT)
+        self.assertEqual(kwargs["llm_model"], "openai/gpt-4.1-mini")
+        self.assertIsInstance(kwargs["llm_client"], MarkItDownLitellmClient)
 
     @patch("api.agent.tools.read_file.MarkItDown")
     def test_raw_text_returns_plain_text_without_markdown_converter(self, mock_markitdown):
