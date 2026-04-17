@@ -322,8 +322,9 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
     markdown = ""
     try:
         llm_config = get_file_handler_llm_config()
-        md_kwargs: Dict[str, Any] = {"llm_prompt": MARKITDOWN_OCR_PROMPT}
+        md_kwargs: Dict[str, Any] = {}
         if llm_config and llm_config.supports_vision:
+            md_kwargs["llm_prompt"] = MARKITDOWN_OCR_PROMPT
             md_kwargs["llm_client"] = MarkItDownLitellmClient(llm_config.model, llm_config.params)
             md_kwargs["llm_model"] = llm_config.model
         converter = MarkItDown(**md_kwargs)
