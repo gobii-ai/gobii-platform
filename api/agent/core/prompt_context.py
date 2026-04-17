@@ -227,7 +227,7 @@ def skill_prompt_limit(agent: PersistentAgent) -> int:
         AgentLLMTier.MAX: settings.max_skill_prompt_limit,
         AgentLLMTier.PREMIUM: settings.premium_skill_prompt_limit,
     }
-    return max(int(limit_map.get(tier, settings.standard_skill_prompt_limit)), 0)
+    return limit_map.get(tier, settings.standard_skill_prompt_limit)
 
 
 def _get_recent_prompt_history_steps(
