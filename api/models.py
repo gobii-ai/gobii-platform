@@ -39,17 +39,22 @@ from api.services.prompt_settings import (
     DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
     DEFAULT_MAX_PROMPT_TOKEN_BUDGET,
     DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
+    DEFAULT_MAX_SKILL_PROMPT_LIMIT,
     DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT,
     DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET,
+    DEFAULT_ULTRA_MAX_SKILL_PROMPT_LIMIT,
     DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
     DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT,
     DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET,
+    DEFAULT_ULTRA_SKILL_PROMPT_LIMIT,
     DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT,
     DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
     DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
+    DEFAULT_PREMIUM_SKILL_PROMPT_LIMIT,
     DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
     DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
     DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
+    DEFAULT_STANDARD_SKILL_PROMPT_LIMIT,
     DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
     DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
     DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
@@ -1911,6 +1916,31 @@ class PromptConfig(models.Model):
         default=DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Number of recent tool calls included for ultra max tier agents.",
+    )
+    standard_skill_prompt_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_STANDARD_SKILL_PROMPT_LIMIT,
+        validators=[MinValueValidator(0)],
+        help_text="Number of saved skills included in prompt context for standard tier agents.",
+    )
+    premium_skill_prompt_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_PREMIUM_SKILL_PROMPT_LIMIT,
+        validators=[MinValueValidator(0)],
+        help_text="Number of saved skills included in prompt context for premium tier agents.",
+    )
+    max_skill_prompt_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_MAX_SKILL_PROMPT_LIMIT,
+        validators=[MinValueValidator(0)],
+        help_text="Number of saved skills included in prompt context for max tier agents.",
+    )
+    ultra_skill_prompt_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_SKILL_PROMPT_LIMIT,
+        validators=[MinValueValidator(0)],
+        help_text="Number of saved skills included in prompt context for ultra tier agents.",
+    )
+    ultra_max_skill_prompt_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_MAX_SKILL_PROMPT_LIMIT,
+        validators=[MinValueValidator(0)],
+        help_text="Number of saved skills included in prompt context for ultra max tier agents.",
     )
     internal_reasoning_history_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_INTERNAL_REASONING_HISTORY_LIMIT,

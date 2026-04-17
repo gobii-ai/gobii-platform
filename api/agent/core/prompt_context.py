@@ -171,6 +171,7 @@ class _InteractedWebUserInfo:
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
+    "skill_prompt_limit",
     "get_prompt_token_budget",
     "get_agent_daily_credit_state",
     "build_prompt_context",
@@ -213,6 +214,20 @@ def message_history_limit(agent: PersistentAgent) -> int:
         AgentLLMTier.PREMIUM: settings.premium_message_history_limit,
     }
     return limit_map.get(tier, settings.standard_message_history_limit)
+
+
+def skill_prompt_limit(agent: PersistentAgent) -> int:
+    """Return the configured saved-skill prompt limit for the agent's LLM tier."""
+
+    settings = get_prompt_settings()
+    tier = get_agent_llm_tier(agent)
+    limit_map = {
+        AgentLLMTier.ULTRA_MAX: settings.ultra_max_skill_prompt_limit,
+        AgentLLMTier.ULTRA: settings.ultra_skill_prompt_limit,
+        AgentLLMTier.MAX: settings.max_skill_prompt_limit,
+        AgentLLMTier.PREMIUM: settings.premium_skill_prompt_limit,
+    }
+    return max(int(limit_map.get(tier, settings.standard_skill_prompt_limit)), 0)
 
 
 def _get_recent_prompt_history_steps(
@@ -2281,7 +2296,7 @@ def build_prompt_context(
             non_shrinkable=True
         )
 
-    recent_skills_block = format_recent_skills_for_prompt(agent, limit=3)
+    recent_skills_block = format_recent_skills_for_prompt(agent, limit=skill_prompt_limit(agent))
     if recent_skills_block:
         important_group.section_text(
             "agent_skills",
