@@ -1,0 +1,112 @@
+{% load i18n form_extras socialaccount social_extras %}
+{% configured_social_auth_providers as social_providers %}
+<div
+  data-account-auth-root
+  data-auth-mode="{% if auth_modal %}modal{% else %}page{% endif %}"
+  data-auth-tab="signup"
+  data-auth-next="{{ redirect_field_value|default:'' }}"
+  data-ga-measurement-id="{{ settings.GA_MEASUREMENT_ID|default_if_none:'' }}"
+  data-fpjs-enabled="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}true{% else %}false{% endif %}"
+  data-fpjs-loader-url="{% if settings.GOBII_PROPRIETARY_MODE and settings.FINGERPRINT_JS_ENABLED and settings.FINGERPRINT_JS_URL and settings.FINGERPRINT_JS_API_KEY %}{{ settings.FINGERPRINT_JS_URL }}?apiKey={{ settings.FINGERPRINT_JS_API_KEY }}{% endif %}"
+  data-fpjs-behavior-url="{{ settings.FINGERPRINT_JS_BEHAVIOR_URL|default_if_none:'' }}"
+  data-popup-complete-url="{% if auth_modal %}{{ auth_popup_complete_url }}{% endif %}"
+>
+  {% if auth_modal %}
+    <div class="mb-6 flex items-center rounded-lg bg-blue-50 p-1">
+      <a
+        href="{{ auth_modal_signup_url }}"
+        data-auth-modal-link
+        class="flex-1 rounded-md bg-white px-3 py-2 text-center text-sm font-semibold text-slate-900 shadow-sm"
+      >
+        {% trans "Sign up" %}
+      </a>
+      <a
+        href="{{ auth_modal_login_url }}"
+        data-auth-modal-link
+        class="flex-1 rounded-md px-3 py-2 text-center text-sm font-medium text-slate-600 transition hover:text-slate-900"
+      >
+        {% trans "Sign in" %}
+      </a>
+    </div>
+    <div class="text-center">
+      <h2 class="text-2xl font-bold text-gray-900">{% trans "Create your account" %}</h2>
+      <p class="mt-2 text-sm text-slate-600">{% trans "Create your account to continue." %}</p>
+    </div>
+  {% else %}
+    <div class="text-center">
+      <h1 class="text-center text-2xl font-bold text-gray-900">{% trans "Sign up" %}</h1>
+      <p class="mt-2 text-sm text-slate-600">
+        {% trans "Already have an account?" %}
+        {% with request.session.utm_querystring as utm_qs %}
+        {% if utm_qs or redirect_field_value %}
+        <a href="{% url 'account_login' %}?{% if utm_qs %}{{ utm_qs }}{% endif %}{% if utm_qs and redirect_field_value %}&{% endif %}{% if redirect_field_value %}{{ redirect_field_name }}={{ redirect_field_value|urlencode }}{% endif %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
+        {% else %}
+        <a href="{% url 'account_login' %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
+        {% endif %}
+        {% endwith %}
+      </p>
+    </div>
+  {% endif %}
+
+  {% if account_allow_social_signup %}
+    {% trans "Sign up" as social_action_text %}
+    {% trans "or" as social_divider_text %}
+    {% include "account/_social_auth_buttons.html" with providers=social_providers surface="signup" action_text=social_action_text show_password_divider=account_allow_password_signup divider_text=social_divider_text social_next_url=auth_popup_complete_url social_popup_mode=auth_modal %}
+  {% endif %}
+
+  {% if account_allow_password_signup %}
+  <form
+    method="post"
+    action="{% if auth_modal %}{{ auth_modal_signup_url }}{% else %}{% url 'account_signup' %}{% endif %}"
+    class="space-y-4"
+    data-password-signup-form
+    {% if auth_modal %}data-auth-modal-form{% endif %}
+  >
+    {% csrf_token %}
+    <input type="hidden" name="ufp" value="" data-auth-fpjs-visitor-field />
+    <input type="hidden" name="ufpr" value="" data-auth-fpjs-request-field />
+    <input type="hidden" name="uga" value="" data-auth-ga-client-field />
+    {% if redirect_field_value %}
+      <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
+    {% endif %}
+    {{ form.non_field_errors }}
+
+    {% for field in form.visible_fields %}
+    {% if field.name != 'turnstile' %}
+    <div>
+      <label for="{{ field.id_for_label }}" class="block text-sm mb-1">{{ field.label }}</label>
+      <input id="{{ field.id_for_label }}" name="{{ field.name }}" type="{{ field.field.widget.input_type }}" required
+             value="{{ field.value|default_if_none:'' }}"
+             class="block w-full rounded-lg border border-gray-200 px-4 py-2.5 focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+             {% if field.field.widget.attrs.placeholder %}placeholder="{{ field.field.widget.attrs.placeholder }}"{% endif %}>
+      {% if field.errors %}
+        <p class="mt-1 text-sm text-red-600" id="{{ field.id_for_label }}-error">{{ field.errors|striptags }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    {% if settings.TURNSTILE_ENABLED and form.turnstile %}
+      <div class="mt-4 flex justify-center">
+        {{ form.turnstile }}
+      </div>
+    {% endif %}
+
+    <button type="submit" class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white hover:bg-blue-700">
+      {% trans "Create account" %}
+    </button>
+    {% if settings.GOBII_PROPRIETARY_MODE %}
+    <p class="mt-4 text-xs text-gray-500 text-center">
+      By creating an account, you agree to our
+      <a href="{% url 'proprietary:tos' %}" class="text-blue-600 hover:underline">Terms of Service</a>
+      and
+      <a href="{% url 'proprietary:privacy' %}" class="text-blue-600 hover:underline">Privacy Policy</a>.
+    </p>
+    {% endif %}
+  </form>
+  {% else %}
+  <p class="mt-6 text-center text-sm text-slate-600">
+    {% trans "Password signup is currently unavailable." %}
+  </p>
+  {% endif %}
+</div>

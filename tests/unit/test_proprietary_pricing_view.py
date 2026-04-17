@@ -102,6 +102,41 @@ class PricingPageCtaCopyTests(TestCase):
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_renders_signup_modal_config_when_flag_enabled_for_anonymous_users(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "gobii-cta-signup-modal-config")
+        self.assertContains(response, 'id="cta-signup-modal"')
+        self.assertContains(response, 'data-cta-signup-modal="pricing-plan"')
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_omits_signup_modal_config_when_flag_disabled(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "gobii-cta-signup-modal-config")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
     def test_pricing_page_uses_cta_registry_for_enterprise_request_call_text(self, mock_get_stripe_settings):
         mock_get_stripe_settings.return_value = SimpleNamespace(
             startup_trial_days=7,

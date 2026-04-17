@@ -452,6 +452,9 @@
   </script>
 
   <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  <script src="{% static 'js/account_identity_signals.js' %}"></script>
+  <script src="{% static 'js/account_auth_forms.js' %}"></script>
+  <script src="{% static 'js/cta_signup_modal.js' %}"></script>
   <script src="{% static 'js/cta_tracking.js' %}"></script>
   <script src="{% static 'js/signup_tracking.js' %}"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js"></script>
@@ -551,7 +554,12 @@
     {% endif %}
     {% block content %}{% endblock %}
     <!-- HTMX injects modals here -->
-    <div id="modal-container"></div>
+    <div id="modal-container">
+      {% if cta_signup_modal_config.enabled %}
+        {{ cta_signup_modal_config|json_script:"gobii-cta-signup-modal-config" }}
+        {% include "partials/_cta_signup_modal.html" %}
+      {% endif %}
+    </div>
 
     {# Global footer #}
     {% include "includes/_footer.html" %}

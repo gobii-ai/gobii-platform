@@ -41,6 +41,9 @@ CTA_NO_CHARGE_DURING_TRIAL = "cta_no_charge_during_trial"
 # Controls whether anonymous marketing CTA flows go to signup before continuing.
 CTA_SIGNUP_FIRST = "cta_signup_first"
 
+# Controls whether anonymous marketing CTA flows open signup/sign-in in a modal.
+CTA_SIGNUP_MODAL = "cta_signup_modal"
+
 # Controls whether personal no-plan users get a built-in starter charter when
 # entering immersive new-agent flow without saved draft state.
 PERSONAL_AGENT_SIGNUP_STARTER_CHARTER = "personal_agent_signup_starter_charter"
