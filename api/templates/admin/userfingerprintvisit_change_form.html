@@ -1,0 +1,16 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block object-tools %}
+  {{ block.super }}
+  {% if original and original.pk %}
+    <li>
+      <form method="post" action="{% url 'admin:api_userfingerprintvisit_fetch' original.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="button">
+          {% trans "Fetch" %}
+        </button>
+      </form>
+    </li>
+  {% endif %}
+{% endblock %}
