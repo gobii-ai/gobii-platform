@@ -354,7 +354,7 @@ uv run celery -A config worker -l info --pool=threads --concurrency=4
 
 ## Contributing
 
-- Open issues and PRs are welcome.
+- Open issues and PRs are welcome and encouraged.
 - Follow existing project style and test conventions.
 - Join the community on [Discord](https://discord.gg/yyDB8GwxtE).
 
