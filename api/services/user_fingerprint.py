@@ -173,6 +173,24 @@ def _enqueue_fingerprint_visit_refresh(visit_id: int) -> None:
     transaction.on_commit(lambda: fetch_user_fingerprint_visit_task.delay(visit_id))
 
 
+def enqueue_user_fingerprint_visit_refresh(visit: UserFingerprintVisit) -> bool:
+    if not visit.fingerprint_event_id:
+        raise FingerprintTerminalError("Fingerprint event id is missing.")
+    if not is_fingerprint_server_api_configured():
+        raise FingerprintConfigurationError("Fingerprint server API key is not configured.")
+    if visit.fetch_status == UserFingerprintVisitFetchStatusChoices.PROCESSING and not _is_processing_visit_stale(visit):
+        return False
+
+    UserFingerprintVisit.objects.filter(pk=visit.pk).update(
+        fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        error_message="",
+    )
+    visit.fetch_status = UserFingerprintVisitFetchStatusChoices.PENDING
+    visit.error_message = ""
+    _enqueue_fingerprint_visit_refresh(visit.pk)
+    return True
+
+
 def stage_user_fingerprint_visit(
     user,
     *,
