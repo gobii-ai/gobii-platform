@@ -14,6 +14,7 @@ from api.services.trial_abuse import (
 )
 from api.services.user_fingerprint import (
     enqueue_user_fingerprint_visit_refresh,
+    refresh_user_fingerprint_visit,
     stage_user_fingerprint_visit,
 )
 from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
@@ -239,12 +240,12 @@ class UserFingerprintVisitTests(TestCase):
         visit = UserFingerprintVisit.objects.create(
             user=user,
             source=SIGNAL_SOURCE_SIGNUP,
-            fingerprint_event_id="1775923616477.ugM7EF",
+            fingerprint_event_id="request-456",
             fingerprint_visitor_id="nGj7roCJ0YgwXCuABCRN",
             fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
         )
         payload = {
-            "event_id": "1775923616477.ugM7EF",
+            "event_id": "server-event-789",
             "timestamp": 1775923616488,
             "sdk": {"platform": "js", "version": "3.12.9"},
             "replayed": False,
@@ -306,6 +307,8 @@ class UserFingerprintVisitTests(TestCase):
         visit.refresh_from_db()
         self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.SUCCEEDED)
         self.assertEqual(visit.fetch_attempt_count, 1)
+        self.assertEqual(visit.fingerprint_event_id, "request-456")
+        self.assertEqual(visit.fingerprint_server_event_id, "server-event-789")
         self.assertEqual(visit.country_code, "VN")
         self.assertEqual(visit.country_name, "Vietnam")
         self.assertEqual(visit.city_name, "Ho Chi Minh City")
@@ -326,6 +329,45 @@ class UserFingerprintVisitTests(TestCase):
         self.assertEqual(visit.asn_name, "VNPT Corp")
         self.assertIsNotNone(visit.event_timestamp)
         self.assertEqual(visit.raw_payload["event_id"], payload["event_id"])
+
+    @override_settings(
+        FINGERPRINT_SERVER_API_KEY="fp_secret",
+        FINGERPRINT_SERVER_API_URL="https://api.fpjs.io",
+        FINGERPRINT_SERVER_API_TIMEOUT_SECONDS=5,
+    )
+    @patch("api.services.user_fingerprint.requests.get")
+    def test_refresh_user_fingerprint_visit_prefers_server_event_id(self, requests_get_mock):
+        user = self._create_user("fingerprint-followup-fetch@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_server_event_id="server-event-789",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        )
+        payload = {
+            "event_id": "server-event-789",
+            "timestamp": 1775923616488,
+            "identification": {
+                "visitor_id": "visitor-123",
+                "confidence": {"score": 0.97},
+                "visitor_found": False,
+                "first_seen_at": 1775923616488,
+            },
+        }
+        requests_get_mock.return_value = SimpleNamespace(
+            status_code=200,
+            text="",
+            json=lambda: payload,
+        )
+
+        refresh_user_fingerprint_visit(visit)
+
+        self.assertEqual(
+            requests_get_mock.call_args.args[0],
+            "https://api.fpjs.io/v4/events/server-event-789",
+        )
 
     @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
     @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")

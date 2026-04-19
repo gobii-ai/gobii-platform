@@ -4500,9 +4500,16 @@ class UserFingerprintVisit(models.Model):
         blank=True,
         default="",
         help_text=(
-            "Canonical Fingerprint event id. The current JS integration sends "
-            "the legacy requestId value here."
+            "Client-supplied Fingerprint request/event id used as the stable "
+            "dedupe key. The current JS integration sends the legacy requestId "
+            "value here."
         ),
+    )
+    fingerprint_server_event_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Canonical Fingerprint server event id returned by the server API.",
     )
     fingerprint_visitor_id = models.CharField(max_length=255, blank=True, default="")
     fetch_status = models.CharField(
@@ -4570,6 +4577,7 @@ class UserFingerprintVisit(models.Model):
         indexes = [
             models.Index(fields=("user", "fetch_status"), name="finger_visit_user_status_idx"),
             models.Index(fields=("fingerprint_event_id",), name="finger_visit_event_idx"),
+            models.Index(fields=("fingerprint_server_event_id",), name="finger_visit_srv_evt_idx"),
             models.Index(fields=("fingerprint_visitor_id",), name="finger_visit_visitor_idx"),
         ]
         verbose_name = "User fingerprint visit"

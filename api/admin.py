@@ -1935,6 +1935,7 @@ class UserFingerprintVisitAdmin(admin.ModelAdmin):
         "user__email",
         "user__id",
         "fingerprint_event_id",
+        "fingerprint_server_event_id",
         "fingerprint_visitor_id",
         "asn_name",
     )
@@ -1952,6 +1953,7 @@ class UserFingerprintVisitAdmin(admin.ModelAdmin):
         "user",
         "source",
         "fingerprint_event_id",
+        "fingerprint_server_event_id",
         "fingerprint_visitor_id",
         "fetch_status",
         "fetch_attempt_count",
