@@ -19,6 +19,9 @@ from api.models import (
 
 logger = logging.getLogger(__name__)
 
+FINGERPRINT_EVENT_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field("fingerprint_event_id").max_length
+FINGERPRINT_VISITOR_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field("fingerprint_visitor_id").max_length
+
 
 class FingerprintConfigurationError(RuntimeError):
     """Raised when the local Fingerprint server-side integration is unavailable."""
@@ -199,8 +202,10 @@ def stage_user_fingerprint_visit(
 ) -> UserFingerprintVisit | None:
     event_id = _clean_string(signal_values.get(UserIdentitySignalTypeChoices.FPJS_REQUEST_ID))
     visitor_id = _clean_string(signal_values.get(UserIdentitySignalTypeChoices.FPJS_VISITOR_ID))
-    if not event_id:
+    if not event_id or len(event_id) > FINGERPRINT_EVENT_ID_MAX_LENGTH:
         return None
+    if len(visitor_id) > FINGERPRINT_VISITOR_ID_MAX_LENGTH:
+        visitor_id = ""
 
     configured = is_fingerprint_server_api_configured()
     initial_status = (

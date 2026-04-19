@@ -11,6 +11,7 @@ from django.utils import timezone
 from api.models import (
     TaskCredit,
     UserAttribution,
+    UserFingerprintVisit,
     UserBilling,
     UserIdentitySignal,
     UserIdentitySignalTypeChoices,
@@ -47,6 +48,9 @@ SIGNUP_GA_CLIENT_COOKIE_NAME = "gobii_signup_ga_client_id"
 SIGNAL_SOURCE_SIGNUP = "signup"
 SIGNAL_SOURCE_LOGIN = "login"
 SIGNAL_SOURCE_CHECKOUT = "checkout"
+
+FPJS_REQUEST_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field("fingerprint_event_id").max_length
+FPJS_VISITOR_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field("fingerprint_visitor_id").max_length
 
 _STRIPE_ELIGIBILITY_ERRORS: tuple[type[BaseException], ...]
 if stripe is not None:
@@ -125,6 +129,17 @@ def _normalize_ga_client_id(raw: str | None) -> str:
     return value
 
 
+def _normalize_fpjs_identifier(raw: str | None, *, max_length: int) -> str:
+    value = _decode_value(raw)
+    if not value:
+        return ""
+    # Fingerprint IDs are opaque identifiers; dropping malformed values is safer
+    # than truncating into a different identifier that could collide.
+    if len(value) > max_length:
+        return ""
+    return value
+
+
 def _should_use_staged_fpjs_cookie_fallback(request) -> bool:
     if request is None:
         return False
@@ -170,11 +185,23 @@ def extract_request_identity_signal_values(request, *, include_fpjs: bool) -> di
         values[UserIdentitySignalTypeChoices.IP_PREFIX] = ip_prefix
 
     if include_fpjs:
-        fpjs_visitor_id = _decode_value(request.POST.get("ufp"))
-        fpjs_request_id = _decode_value(request.POST.get("ufpr"))
+        fpjs_visitor_id = _normalize_fpjs_identifier(
+            request.POST.get("ufp"),
+            max_length=FPJS_VISITOR_ID_MAX_LENGTH,
+        )
+        fpjs_request_id = _normalize_fpjs_identifier(
+            request.POST.get("ufpr"),
+            max_length=FPJS_REQUEST_ID_MAX_LENGTH,
+        )
         if _should_use_staged_fpjs_cookie_fallback(request):
-            fpjs_visitor_id = fpjs_visitor_id or _decode_value(request.COOKIES.get(SIGNUP_FPJS_VISITOR_COOKIE_NAME))
-            fpjs_request_id = fpjs_request_id or _decode_value(request.COOKIES.get(SIGNUP_FPJS_REQUEST_COOKIE_NAME))
+            fpjs_visitor_id = fpjs_visitor_id or _normalize_fpjs_identifier(
+                request.COOKIES.get(SIGNUP_FPJS_VISITOR_COOKIE_NAME),
+                max_length=FPJS_VISITOR_ID_MAX_LENGTH,
+            )
+            fpjs_request_id = fpjs_request_id or _normalize_fpjs_identifier(
+                request.COOKIES.get(SIGNUP_FPJS_REQUEST_COOKIE_NAME),
+                max_length=FPJS_REQUEST_ID_MAX_LENGTH,
+            )
         if fpjs_visitor_id:
             values[UserIdentitySignalTypeChoices.FPJS_VISITOR_ID] = fpjs_visitor_id
         if fpjs_request_id:
