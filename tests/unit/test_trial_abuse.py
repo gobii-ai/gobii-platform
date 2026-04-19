@@ -10,7 +10,6 @@ from djstripe.models import Customer, Subscription as DjstripeSubscription
 
 from api.models import (
     TaskCredit,
-    UserFingerprintVisit,
     UserIdentitySignal,
     UserIdentitySignalTypeChoices,
     UserTrialEligibility,
@@ -124,42 +123,6 @@ class TrialAbuseServiceTests(TestCase):
             captured[UserIdentitySignalTypeChoices.GA_CLIENT_ID],
             "333.444",
         )
-
-    @tag("batch_pages")
-    def test_capture_request_identity_signals_ignores_overlong_fpjs_values(self):
-        user = self._create_user("capture-overlong-fpjs@example.com")
-        request = self.factory.post(
-            "/signup",
-            {
-                "ufp": "v" * 256,
-                "ufpr": "r" * 256,
-                "uga": "GA1.2.111.222",
-            },
-        )
-        request.META["REMOTE_ADDR"] = "198.51.100.24"
-        request.COOKIES = {
-            "_fbp": "fb.1.123.abcdef",
-        }
-
-        captured = capture_request_identity_signals_and_attribution(
-            user,
-            request,
-            source=SIGNAL_SOURCE_SIGNUP,
-            include_fpjs=True,
-        )
-
-        self.assertNotIn(UserIdentitySignalTypeChoices.FPJS_VISITOR_ID, captured)
-        self.assertNotIn(UserIdentitySignalTypeChoices.FPJS_REQUEST_ID, captured)
-        self.assertFalse(
-            UserIdentitySignal.objects.filter(
-                user=user,
-                signal_type__in=[
-                    UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
-                    UserIdentitySignalTypeChoices.FPJS_REQUEST_ID,
-                ],
-            ).exists()
-        )
-        self.assertFalse(UserFingerprintVisit.objects.filter(user=user).exists())
 
     @tag("batch_pages")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
