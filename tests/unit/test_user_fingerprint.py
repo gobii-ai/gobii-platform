@@ -11,7 +11,10 @@ from api.services.trial_abuse import (
     SIGNAL_SOURCE_SIGNUP,
     capture_request_identity_signals_and_attribution,
 )
-from api.services.user_fingerprint import enqueue_user_fingerprint_visit_refresh
+from api.services.user_fingerprint import (
+    enqueue_user_fingerprint_visit_refresh,
+    stage_user_fingerprint_visit,
+)
 from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
 
 
@@ -116,6 +119,45 @@ class UserFingerprintVisitTests(TestCase):
 
         self.assertEqual(UserFingerprintVisit.objects.filter(user=user).count(), 1)
         delay_mock.assert_called_once()
+
+    @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")
+    def test_stage_user_fingerprint_visit_ignores_overlong_event_id(self, delay_mock):
+        user = self._create_user("fingerprint-overlong-event@example.com")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            visit = stage_user_fingerprint_visit(
+                user,
+                source=SIGNAL_SOURCE_SIGNUP,
+                signal_values={
+                    "fpjs_request_id": "r" * 256,
+                    "fpjs_visitor_id": "visitor-123",
+                },
+            )
+
+        self.assertIsNone(visit)
+        self.assertFalse(UserFingerprintVisit.objects.filter(user=user).exists())
+        delay_mock.assert_not_called()
+
+    @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")
+    def test_stage_user_fingerprint_visit_discards_overlong_visitor_id(self, delay_mock):
+        user = self._create_user("fingerprint-overlong-visitor@example.com")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            visit = stage_user_fingerprint_visit(
+                user,
+                source=SIGNAL_SOURCE_SIGNUP,
+                signal_values={
+                    "fpjs_request_id": "request-456",
+                    "fpjs_visitor_id": "v" * 256,
+                },
+            )
+
+        self.assertIsNotNone(visit)
+        stored_visit = UserFingerprintVisit.objects.get(user=user, fingerprint_event_id="request-456")
+        self.assertEqual(stored_visit.fingerprint_visitor_id, "")
+        delay_mock.assert_called_once_with(stored_visit.id)
 
     @override_settings(
         FINGERPRINT_SERVER_API_KEY="fp_secret",
