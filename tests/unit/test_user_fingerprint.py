@@ -11,6 +11,7 @@ from api.services.trial_abuse import (
     SIGNAL_SOURCE_SIGNUP,
     capture_request_identity_signals_and_attribution,
 )
+from api.services.user_fingerprint import enqueue_user_fingerprint_visit_refresh
 from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
 
 
@@ -251,6 +252,53 @@ class UserFingerprintVisitTests(TestCase):
         self.assertEqual(visit.asn_name, "VNPT Corp")
         self.assertIsNotNone(visit.event_timestamp)
         self.assertEqual(visit.raw_payload["event_id"], payload["event_id"])
+
+    @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")
+    def test_enqueue_user_fingerprint_visit_refresh_requeues_succeeded_visit(self, delay_mock):
+        user = self._create_user("fingerprint-manual-refresh@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            error_message="stale error",
+            raw_payload={"event_id": "request-456"},
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            queued = enqueue_user_fingerprint_visit_refresh(visit)
+
+        visit.refresh_from_db()
+        self.assertTrue(queued)
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
+        self.assertEqual(visit.error_message, "")
+        delay_mock.assert_called_once_with(visit.id)
+
+    @override_settings(
+        FINGERPRINT_SERVER_API_KEY="fp_secret",
+        FINGERPRINT_SERVER_PROCESSING_STALE_SECONDS=600,
+    )
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")
+    def test_enqueue_user_fingerprint_visit_refresh_skips_fresh_processing_visit(self, delay_mock):
+        user = self._create_user("fingerprint-already-processing@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PROCESSING,
+            last_fetch_attempt_at=timezone.now(),
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            queued = enqueue_user_fingerprint_visit_refresh(visit)
+
+        visit.refresh_from_db()
+        self.assertFalse(queued)
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PROCESSING)
+        delay_mock.assert_not_called()
 
     @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
     @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.retry")

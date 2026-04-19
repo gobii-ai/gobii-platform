@@ -20,6 +20,11 @@ from api.services.owner_execution_pause import (
     pause_owner_execution,
     resume_owner_execution,
 )
+from api.services.user_fingerprint import (
+    FingerprintConfigurationError,
+    FingerprintTerminalError,
+    enqueue_user_fingerprint_visit_refresh,
+)
 from api.services.daily_credit_limits import (
     calculate_daily_credit_slider_bounds,
     get_tier_credit_multiplier,
@@ -86,7 +91,7 @@ from django.utils import timezone
 from django.utils.text import get_valid_filename
 from django.http import HttpResponse, HttpResponseRedirect, FileResponse, StreamingHttpResponse
 from django.template.response import TemplateResponse
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.storage import default_storage
 from django.db.models import Sum
 from .agent.files.filespace_service import enqueue_import_after_commit
@@ -1909,10 +1914,12 @@ class UserIdentitySignalAdmin(admin.ModelAdmin):
 
 @admin.register(UserFingerprintVisit)
 class UserFingerprintVisitAdmin(admin.ModelAdmin):
+    change_form_template = "admin/userfingerprintvisit_change_form.html"
     list_display = (
         "user",
         "source",
         "fingerprint_event_id",
+        "fingerprint_visitor_id",
         "fetch_status",
         "country_code",
         "suspect_score",
@@ -1996,6 +2003,43 @@ class UserFingerprintVisitAdmin(admin.ModelAdmin):
         "updated_at",
     )
     fields = readonly_fields
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                "<path:object_id>/fetch/",
+                self.admin_site.admin_view(self.fetch_view),
+                name="api_userfingerprintvisit_fetch",
+            ),
+        ]
+        return custom_urls + urls
+
+    def fetch_view(self, request, object_id, *args, **kwargs):
+        visit = self.get_object(request, object_id)
+        if visit is None:
+            self.message_user(request, "Fingerprint visit not found.", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_userfingerprintvisit_changelist"))
+        if not self.has_change_permission(request, visit):
+            raise PermissionDenied
+        if request.method != "POST":
+            return HttpResponseRedirect(reverse("admin:api_userfingerprintvisit_change", args=[visit.pk]))
+
+        try:
+            queued = enqueue_user_fingerprint_visit_refresh(visit)
+        except (FingerprintConfigurationError, FingerprintTerminalError) as exc:
+            self.message_user(request, str(exc), level=messages.ERROR)
+        else:
+            if queued:
+                self.message_user(request, "Fingerprint fetch queued.", level=messages.SUCCESS)
+            else:
+                self.message_user(
+                    request,
+                    "Fingerprint fetch is already in progress.",
+                    level=messages.INFO,
+                )
+
+        return HttpResponseRedirect(reverse("admin:api_userfingerprintvisit_change", args=[visit.pk]))
 
     def has_add_permission(self, request):
         return False
