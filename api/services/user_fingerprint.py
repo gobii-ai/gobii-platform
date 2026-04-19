@@ -22,6 +22,9 @@ from api.models import (
 logger = logging.getLogger(__name__)
 
 FINGERPRINT_EVENT_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field("fingerprint_event_id").max_length
+FINGERPRINT_SERVER_EVENT_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field(
+    "fingerprint_server_event_id"
+).max_length
 FINGERPRINT_VISITOR_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field("fingerprint_visitor_id").max_length
 
 
@@ -47,6 +50,13 @@ def _clean_string(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def _clean_bounded_string(value: Any, *, max_length: int) -> str:
+    cleaned = _clean_string(value)
+    if len(cleaned) > max_length:
+        return ""
+    return cleaned
 
 
 def _coerce_bool(value: Any) -> bool | None:
@@ -313,7 +323,7 @@ def fetch_fingerprint_event_payload(event_id: str) -> dict[str, Any]:
 def build_user_fingerprint_visit_updates(
     payload: dict[str, Any],
     *,
-    fallback_event_id: str = "",
+    fallback_server_event_id: str = "",
     fallback_visitor_id: str = "",
 ) -> dict[str, Any]:
     identification = _mapping(payload.get("identification"))
@@ -329,8 +339,16 @@ def build_user_fingerprint_visit_updates(
         subdivision_name = _clean_string(_mapping(subdivisions[0]).get("name"))
 
     return {
-        "fingerprint_event_id": _clean_string(payload.get("event_id")) or fallback_event_id,
-        "fingerprint_visitor_id": _clean_string(identification.get("visitor_id")) or fallback_visitor_id,
+        "fingerprint_server_event_id": _clean_bounded_string(
+            payload.get("event_id"),
+            max_length=FINGERPRINT_SERVER_EVENT_ID_MAX_LENGTH,
+        )
+        or fallback_server_event_id,
+        "fingerprint_visitor_id": _clean_bounded_string(
+            identification.get("visitor_id"),
+            max_length=FINGERPRINT_VISITOR_ID_MAX_LENGTH,
+        )
+        or fallback_visitor_id,
         "event_timestamp": _timestamp_ms_to_datetime(payload.get("timestamp")),
         "visitor_first_seen_at": _timestamp_ms_to_datetime(identification.get("first_seen_at")),
         "replayed": _coerce_bool(payload.get("replayed")),
@@ -376,10 +394,11 @@ def build_user_fingerprint_visit_updates(
 
 
 def refresh_user_fingerprint_visit(visit: UserFingerprintVisit) -> dict[str, Any]:
-    payload = fetch_fingerprint_event_payload(visit.fingerprint_event_id)
+    lookup_event_id = visit.fingerprint_server_event_id or visit.fingerprint_event_id
+    payload = fetch_fingerprint_event_payload(lookup_event_id)
     updates = build_user_fingerprint_visit_updates(
         payload,
-        fallback_event_id=visit.fingerprint_event_id,
+        fallback_server_event_id=visit.fingerprint_server_event_id,
         fallback_visitor_id=visit.fingerprint_visitor_id,
     )
     updates["fetch_status"] = UserFingerprintVisitFetchStatusChoices.SUCCEEDED
