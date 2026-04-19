@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import RequestFactory, TestCase, override_settings, tag
 from django.utils import timezone
+from kombu.exceptions import OperationalError as KombuOperationalError
 
 from api.models import UserFingerprintVisit, UserFingerprintVisitFetchStatusChoices
 from api.services.trial_abuse import (
@@ -119,6 +120,37 @@ class UserFingerprintVisitTests(TestCase):
 
         self.assertEqual(UserFingerprintVisit.objects.filter(user=user).count(), 1)
         delay_mock.assert_called_once()
+
+    @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
+    @patch(
+        "api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay",
+        side_effect=KombuOperationalError("broker unavailable"),
+    )
+    def test_capture_request_identity_signals_tolerates_enqueue_failure(self, delay_mock):
+        user = self._create_user("fingerprint-enqueue-failure@example.com")
+        request = self.factory.post(
+            "/signup",
+            {
+                "ufp": "visitor-123",
+                "ufpr": "request-456",
+            },
+        )
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        request.COOKIES = {}
+
+        with self.captureOnCommitCallbacks(execute=True):
+            captured = capture_request_identity_signals_and_attribution(
+                user,
+                request,
+                source=SIGNAL_SOURCE_SIGNUP,
+                include_fpjs=True,
+            )
+
+        visit = UserFingerprintVisit.objects.get(user=user)
+        self.assertEqual(captured["fpjs_request_id"], "request-456")
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
+        self.assertIn("Failed to enqueue Fingerprint refresh", visit.error_message)
+        delay_mock.assert_called_once_with(visit.id)
 
     @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
     @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")

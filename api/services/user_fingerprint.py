@@ -5,9 +5,11 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
+from celery.exceptions import CeleryError
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from kombu.exceptions import OperationalError as KombuOperationalError
 from requests import RequestException
 
 from api.models import (
@@ -173,7 +175,20 @@ def _is_processing_visit_stale(visit: UserFingerprintVisit) -> bool:
 def _enqueue_fingerprint_visit_refresh(visit_id: int) -> None:
     from api.tasks.fingerprint_tasks import fetch_user_fingerprint_visit_task
 
-    transaction.on_commit(lambda: fetch_user_fingerprint_visit_task.delay(visit_id))
+    def enqueue() -> None:
+        try:
+            fetch_user_fingerprint_visit_task.delay(visit_id)
+        except (CeleryError, KombuOperationalError) as exc:
+            logger.warning(
+                "Fingerprint refresh task enqueue failed for visit %s",
+                visit_id,
+                exc_info=True,
+            )
+            UserFingerprintVisit.objects.filter(pk=visit_id).update(
+                error_message=f"Failed to enqueue Fingerprint refresh: {exc}",
+            )
+
+    transaction.on_commit(enqueue)
 
 
 def enqueue_user_fingerprint_visit_refresh(visit: UserFingerprintVisit) -> bool:
