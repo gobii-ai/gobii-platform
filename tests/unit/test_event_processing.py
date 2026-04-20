@@ -76,6 +76,7 @@ from api.models import (
     PersistentAgentSystemMessage,
     PersistentAgentToolCall,
     PromptConfig,
+    TaskCredit,
     UserBilling,
     ToolConfig,
 )
@@ -125,6 +126,28 @@ class PromptContextBuilderTests(TestCase):
             channel="email",
             address="user@example.com",
         )
+        now = timezone.now()
+        existing_credit = TaskCredit.objects.filter(
+            user=self.user,
+            plan=PlanNamesChoices.FREE,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+        ).order_by("-granted_date", "-pk").first()
+        credit_defaults = {
+            "credits": Decimal("50"),
+            "credits_used": Decimal("0"),
+            "granted_date": now,
+            "expiration_date": now + timedelta(days=30),
+            "plan": PlanNamesChoices.FREE,
+            "grant_type": GrantTypeChoices.PLAN,
+            "additional_task": False,
+            "voided": False,
+        }
+        if existing_credit is None:
+            TaskCredit.objects.create(user=self.user, **credit_defaults)
+        else:
+            TaskCredit.objects.filter(pk=existing_credit.pk).update(**credit_defaults)
         self._storage_dir = tempfile.mkdtemp()
         self._storage = FileSystemStorage(location=self._storage_dir)
         self._storage_patch = patch('api.agent.core.prompt_context.default_storage', self._storage)
@@ -137,6 +160,88 @@ class PromptContextBuilderTests(TestCase):
         self.addCleanup(self._admin_storage_patch.stop)
         self.addCleanup(self._print_patch.stop)
         self.addCleanup(lambda: shutil.rmtree(self._storage_dir, ignore_errors=True))
+
+    def _configure_unified_history_limits(
+        self,
+        *,
+        tool_limit: int,
+        unified_limit: int,
+        hysteresis: int,
+        reasoning_limit: int = 3,
+    ):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        for tier_prefix in ("standard", "premium", "max", "ultra", "ultra_max"):
+            setattr(config, f"{tier_prefix}_tool_call_history_limit", tool_limit)
+            setattr(config, f"{tier_prefix}_unified_history_limit", unified_limit)
+            setattr(config, f"{tier_prefix}_unified_history_hysteresis", hysteresis)
+        config.internal_reasoning_history_limit = reasoning_limit
+        config.save()
+        invalidate_prompt_settings_cache()
+        return config
+
+    def _build_user_prompt_content(self) -> str:
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        return user_message["content"]
+
+    def _create_history_step(
+        self,
+        *,
+        created_at,
+        description: str,
+        tool_name: str | None = None,
+        result: dict | None = None,
+    ) -> PersistentAgentStep:
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description=description,
+        )
+        if tool_name is not None:
+            PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name=tool_name,
+                tool_params={"query": tool_name},
+                result=json.dumps(result or {"status": tool_name}),
+            )
+        PersistentAgentStep.objects.filter(pk=step.pk).update(created_at=created_at)
+        step.refresh_from_db()
+        return step
+
+    def _create_completed_browser_task(self, *, prompt: str, updated_at) -> BrowserUseAgentTask:
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt=prompt,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        )
+        BrowserUseAgentTaskStep.objects.create(
+            task=task,
+            step_number=1,
+            description=f"Result for {prompt}",
+            is_result=True,
+            result_value={"task": prompt},
+        )
+        BrowserUseAgentTask.objects.filter(pk=task.pk).update(updated_at=updated_at)
+        task.refresh_from_db()
+        return task
+
+    def _create_inbound_email_message(self, *, body: str, timestamp) -> PersistentAgentMessage:
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body=body,
+            raw_payload={},
+            seq=f"UH{int(timestamp.timestamp() * 1_000_000):024d}"[:26],
+        )
+        PersistentAgentMessage.objects.filter(pk=message.pk).update(timestamp=timestamp)
+        message.refresh_from_db()
+        return message
 
     def test_prompt_uses_configured_skill_prompt_limit(self):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
@@ -1174,92 +1279,179 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("_tool_call>", content)
         self.assertIn("<cost>1.234 credits</cost>", content)
 
-    def test_completed_browser_tasks_share_tool_history_limit(self):
-        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
-        config.standard_tool_call_history_limit = 2
-        config.premium_tool_call_history_limit = 2
-        config.max_tool_call_history_limit = 2
-        config.ultra_tool_call_history_limit = 2
-        config.ultra_max_tool_call_history_limit = 2
-        config.save()
-        invalidate_prompt_settings_cache()
+    def test_completed_browser_tasks_use_unified_history_window_not_tool_history_limit(self):
+        self._configure_unified_history_limits(
+            tool_limit=2,
+            unified_limit=10,
+            hysteresis=2,
+        )
 
         base_time = timezone.now()
 
-        older_step = PersistentAgentStep.objects.create(
-            agent=self.agent,
+        self._create_history_step(
+            created_at=base_time - timedelta(minutes=4),
             description="Tool call: older_lookup",
-        )
-        PersistentAgentToolCall.objects.create(
-            step=older_step,
             tool_name="older_lookup",
-            tool_params={"query": "older"},
-            result=json.dumps({"status": "older"}),
         )
-        PersistentAgentStep.objects.filter(pk=older_step.pk).update(
-            created_at=base_time - timedelta(minutes=4)
-        )
-
-        older_task = BrowserUseAgentTask.objects.create(
-            agent=self.browser_agent,
-            user=self.user,
+        self._create_completed_browser_task(
             prompt="Older completed task",
-            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
-        )
-        BrowserUseAgentTaskStep.objects.create(
-            task=older_task,
-            step_number=1,
-            description="Older task result",
-            is_result=True,
-            result_value={"task": "older"},
-        )
-        BrowserUseAgentTask.objects.filter(pk=older_task.pk).update(
             updated_at=base_time - timedelta(minutes=3)
         )
-
-        newer_step = PersistentAgentStep.objects.create(
-            agent=self.agent,
+        self._create_history_step(
+            created_at=base_time - timedelta(minutes=2),
             description="Tool call: newer_lookup",
-        )
-        PersistentAgentToolCall.objects.create(
-            step=newer_step,
             tool_name="newer_lookup",
-            tool_params={"query": "newer"},
-            result=json.dumps({"status": "newer"}),
         )
-        PersistentAgentStep.objects.filter(pk=newer_step.pk).update(
-            created_at=base_time - timedelta(minutes=2)
-        )
-
-        newest_task = BrowserUseAgentTask.objects.create(
-            agent=self.browser_agent,
-            user=self.user,
+        self._create_completed_browser_task(
             prompt="Newest completed task",
-            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
-        )
-        BrowserUseAgentTaskStep.objects.create(
-            task=newest_task,
-            step_number=1,
-            description="Newest task result",
-            is_result=True,
-            result_value={"task": "newest"},
-        )
-        BrowserUseAgentTask.objects.filter(pk=newest_task.pk).update(
             updated_at=base_time - timedelta(minutes=1)
         )
 
-        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
-             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
-            context, _, _ = build_prompt_context(self.agent)
+        content = self._build_user_prompt_content()
 
-        user_message = next((m for m in context if m['role'] == 'user'), None)
-        self.assertIsNotNone(user_message)
-        content = user_message["content"]
-
+        self.assertIn("Tool older_lookup called.", content)
         self.assertIn("Tool newer_lookup called.", content)
+        self.assertIn("Older completed task", content)
         self.assertIn("Newest completed task", content)
-        self.assertNotIn("Tool older_lookup called.", content)
-        self.assertNotIn("Older completed task", content)
+
+    def test_completed_browser_tasks_remain_visible_below_unified_history_threshold(self):
+        self._configure_unified_history_limits(
+            tool_limit=30,
+            unified_limit=70,
+            hysteresis=20,
+            reasoning_limit=3,
+        )
+
+        base_time = timezone.now()
+        task_prompts = [
+            "Open https://example.com and report the page title only.",
+            "Regression browser task 2",
+            "Regression browser task 3",
+            "Regression browser task 4",
+        ]
+        for idx, prompt in enumerate(task_prompts):
+            self._create_completed_browser_task(
+                prompt=prompt,
+                updated_at=base_time - timedelta(minutes=10 - idx),
+            )
+
+        for idx in range(26):
+            self._create_history_step(
+                created_at=base_time - timedelta(seconds=120 - idx),
+                description=f"visible step {idx}",
+            )
+
+        content_before = self._build_user_prompt_content()
+        self.assertIn(task_prompts[0], content_before)
+
+        for idx in range(2):
+            self._create_history_step(
+                created_at=base_time + timedelta(seconds=idx + 1),
+                description=f"newest visible step {idx}",
+            )
+
+        content_after = self._build_user_prompt_content()
+        self.assertIn(task_prompts[0], content_after)
+        self.assertIn(task_prompts[3], content_after)
+
+    def test_unified_history_hysteresis_drops_oldest_events_from_merged_stream(self):
+        self._configure_unified_history_limits(
+            tool_limit=30,
+            unified_limit=5,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        base_time = timezone.now() - timedelta(minutes=20)
+        self._create_inbound_email_message(
+            body="merged message 1",
+            timestamp=base_time + timedelta(minutes=1),
+        )
+        self._create_history_step(
+            created_at=base_time + timedelta(minutes=2),
+            description="merged step 1",
+        )
+        self._create_completed_browser_task(
+            prompt="merged task 1",
+            updated_at=base_time + timedelta(minutes=3),
+        )
+        self._create_inbound_email_message(
+            body="merged message 2",
+            timestamp=base_time + timedelta(minutes=4),
+        )
+        self._create_history_step(
+            created_at=base_time + timedelta(minutes=5),
+            description="merged step 2",
+        )
+        self._create_completed_browser_task(
+            prompt="merged task 2",
+            updated_at=base_time + timedelta(minutes=6),
+        )
+        self._create_inbound_email_message(
+            body="merged message 3",
+            timestamp=base_time + timedelta(minutes=7),
+        )
+        self._create_history_step(
+            created_at=base_time + timedelta(minutes=8),
+            description="merged step 3",
+        )
+        self._create_completed_browser_task(
+            prompt="merged task 3",
+            updated_at=base_time + timedelta(minutes=9),
+        )
+
+        content = self._build_user_prompt_content()
+
+        self.assertNotIn("merged message 1", content)
+        self.assertNotIn("merged step 1", content)
+        self.assertNotIn("merged task 1", content)
+        self.assertNotIn("merged message 2", content)
+        self.assertIn("merged step 2", content)
+        self.assertIn("merged task 2", content)
+        self.assertIn("merged message 3", content)
+        self.assertIn("merged step 3", content)
+        self.assertIn("merged task 3", content)
+
+    def test_completed_browser_tasks_keep_recency_order_in_merged_history(self):
+        self._configure_unified_history_limits(
+            tool_limit=1,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        base_time = timezone.now()
+        older_prompt = "ordered browser task older"
+        newer_prompt = "ordered browser task newer"
+        newest_prompt = "ordered browser task newest"
+        self._create_completed_browser_task(
+            prompt=older_prompt,
+            updated_at=base_time - timedelta(minutes=5),
+        )
+        self._create_history_step(
+            created_at=base_time - timedelta(minutes=4),
+            description="ordered step between older and newer",
+        )
+        self._create_completed_browser_task(
+            prompt=newer_prompt,
+            updated_at=base_time - timedelta(minutes=3),
+        )
+        self._create_history_step(
+            created_at=base_time - timedelta(minutes=2),
+            description="ordered step between newer and newest",
+        )
+        self._create_completed_browser_task(
+            prompt=newest_prompt,
+            updated_at=base_time - timedelta(minutes=1),
+        )
+
+        content = self._build_user_prompt_content()
+
+        self.assertIn(older_prompt, content)
+        self.assertIn(newer_prompt, content)
+        self.assertIn(newest_prompt, content)
+        self.assertLess(content.index(older_prompt), content.index(newer_prompt))
+        self.assertLess(content.index(newer_prompt), content.index(newest_prompt))
 
     def test_prompt_context_limits_internal_reasoning_steps(self):
         """Unified history should keep only the newest configured reasoning steps."""
